@@ -319,7 +319,7 @@ char *checkHerculesPath(const char *pathname)
 	{
 		// slog_debug("[HERCULES][checkHerculesPath] pathname=%s, MOUNT_POINT=%s, Success", pathname, MOUNT_POINT);
 		// new_path = calloc(strlen("Success"), sizeof(char));
-		new_path = calloc(strlen("imss://"), sizeof(char));
+		new_path = calloc(strlen("imss://"), sizeof(char) + 1);
 		// strcpy(new_path, "Success");
 		strcat(new_path, "imss://");
 	}
@@ -551,7 +551,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_debug(" -- LOWER_BOUND_SERVERS: %d", LOWER_BOUND_SERVERS);
 	slog_debug(" -- REPL_FACTOR: %d", REPL_FACTOR);
 	slog_debug(" -- POLICY: %s", POLICY);
-	slog_debug(" -- RELEASE: %d", 1);
+	slog_debug(" -- RELEASE: %d", release);
 
 	// Metadata server
 	// if (release == 1)
@@ -564,11 +564,12 @@ __attribute__((constructor)) void imss_posix_init(void)
 	}
 
 	// if (DEPLOYMENT == 2 && release == 1)
+	int num_active_storages = 0;
 	if (DEPLOYMENT == 2)
 	{
 		// fprintf(stderr,"Constructor has been called\n");
-		ret = open_imss(IMSS_ROOT);
-		if (ret < 0)
+		num_active_storages = open_imss(IMSS_ROOT);
+		if (num_active_storages < 0)
 		{
 			release = 0;
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
@@ -621,12 +622,13 @@ __attribute__((constructor)) void imss_posix_init(void)
 	useconds = end.tv_usec - start.tv_usec;
 	elapsed = seconds + useconds / 1e6;
 	// double end = (tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
-	
+
 	// sleep(10);
 
 	// fprintf(stderr, "CLIENT_CONSTRUCTOR_TIME %.6f seconds\n", elapsed);
 	// fprintf(stderr, "Client started\n");
 	init = 1;
+	fprintf(stderr, "Active servers %d\n", num_active_storages);
 }
 
 int getConfiguration()
@@ -3590,8 +3592,6 @@ size_t fread(void *buf, size_t size, size_t count, FILE *fp)
 
 int unlink(const char *name)
 {
-	// fprintf(stderr, "Starting unlink, name=%s\n", name);
-
 	if (!real_unlink)
 		real_unlink = dlsym(RTLD_NEXT, "unlink");
 
@@ -5406,7 +5406,7 @@ int fprintf(FILE *restrict stream, const char *restrict format, ...)
 	if (!real_fprintf)
 	{
 		// vfprintf always expect a 'va_list' type as last argument.
-		// The behaviour of both calls are similar, so we can oversuscribe 
+		// The behaviour of both calls are similar, so we can oversuscribe
 		// 'real_fprintf' by 'vfprintf'.
 		real_fprintf = dlsym(RTLD_NEXT, "vfprintf");
 	}
@@ -5419,7 +5419,7 @@ int fprintf(FILE *restrict stream, const char *restrict format, ...)
 	{
 		// printf("Calling Hercules fprintf, fd=%d\n", stream->_fileno);
 		slog_debug("Calling Hercules fprintf, fd=%d\n", stream->_fileno);
-		
+
 		va_list args;
 		va_start(args, format);
 		// Get the size to be copy into the buffer. +1 to '\n'.

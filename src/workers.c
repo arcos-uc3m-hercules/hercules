@@ -1369,17 +1369,26 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	/*struct timeval start, end;
 	  long delta_us;*/
 
-	int operation = 0;
+	int operation = 0; // server id.
 	char mode[MODE_SIZE];
+	int32_t req_size = 0;
+	char raw_msg[req_size + 1];
+	char number[16];
+	// char *uri_;
+	char uri_[URI_];
+	int extra_info = 0;
+	int num_characters_read = 0;
+	int num_input_read = 0;
 
 	// slog_debug("[STAT WORKER] Waiting for new request.");
 	// Save the request to be served.
 	// recv_data(arguments->ucp_worker, arguments->server_ep, req);
-	// slog_info("[STAT WORKER] Request - '%s'", req);
-	sscanf(req, "%" PRIu32 " %s", &operation, mode);
+	slog_info("[STAT WORKER] Request - '%s'", req);
+	// 	sscanf(req, "%" PRIu32 " %s", &operation, mode);
+	num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
 
-	char *req_content = strstr(req, mode);
-	req_content += 4;
+	// char *req_content = strstr(req, mode);
+	// req_content += 4;
 
 	if (!strcmp(mode, "GET"))
 		more = GET_OP;
@@ -1387,28 +1396,27 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		more = SET_OP;
 
 	// Expeted incomming message format: "SIZE_IN_KB KEY"
-	int32_t req_size = strlen(req_content);
+	// int32_t req_size = strlen(req_content);
 
-	char raw_msg[req_size + 1];
-	memcpy((void *)raw_msg, req_content, req_size);
-	raw_msg[req_size] = '\0';
+	// memcpy((void *)raw_msg, req_content, req_size);
+	// raw_msg[req_size] = '\0';
 
 	// printf("*********worker_metadata raw_msg %s",raw_msg);
 	slog_info("[workers][stat_worker_helper] request received=%s", req);
 
 	// Reference to the client request.
-	char number[16];
-	sscanf(raw_msg, "%s", number);
-	int32_t number_length = (int32_t)strlen(number);
+	// sscanf(raw_msg, "%s", number);
+	// int32_t number_length = (int32_t)strlen(number);
 	// Elements conforming the request.
-	char *uri_ = raw_msg + number_length + 1;
+	// char *uri_ = raw_msg + number_length + 1;
 	// raw_msg += number_length + 1;
 	// memcpy(uri, raw_msg, number_length + 1);
 	uint64_t block_size_recv = (uint64_t)atoi(number);
 
 	// req_content += req_size;
 
-	slog_info("[workers][stat_worker_helper] operation=%d, number=%s, number_length=%d, uri=%s, block_size_recv=%ld", operation, number, number_length, uri_, block_size_recv);
+	// slog_info("[workers][stat_worker_helper] operation=%d, number=%s, number_length=%d, uri=%s, block_size_recv=%ld", operation, number, number_length, uri_, block_size_recv);
+	slog_info("[workers][stat_worker_helper] operation=%d, number=%s, uri=%s, block_size_recv=%ld", operation, number, uri_, block_size_recv);
 
 	// Create an std::string in order to be managed by the map structure.
 	std::string key;
@@ -1900,9 +1908,30 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 			default:
 			{
+				int new_server_status = 0;
+				switch (num_input_read)
+				{
+				case 4: // we expect to get 4 values in a normal case.
+					// we look for extra information.
+					if (req[num_characters_read] != '\0')
+					{
+						slog_live("Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
+						// get the server status to be set.
+						sscanf(&req[num_characters_read], "%d", &new_server_status);
+					}
+					else
+					{
+						slog_live("No extra characters found.\n");
+					}
+					break;
+				default:
+					break;
+				}
+
 				unsigned long num_active_storages = atol(number);
 				int delete_dataserver_indx = operation;
 				slog_debug("[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
+				// fprintf(stderr, "[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
 
 				char *address_aux = (char *)address_;
 
@@ -1924,9 +1953,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 				// int current_num_storages = imss_info_->num_storages;
 				// slog_debug("[STAT_WORKER] prev. num data servers=%d", imss_info_->num_storages);
-				slog_debug("[STAT_WORKER] stopping %d with status=%d", delete_dataserver_indx, imss_info_->status[delete_dataserver_indx]);
+				slog_debug("[STAT_WORKER] changing data server %d with status=%d to a new status=%d", delete_dataserver_indx, imss_info_->status[delete_dataserver_indx], new_server_status);
 				// free(imss_info_->ips[delete_dataserver_indx]);
-				imss_info_->status[delete_dataserver_indx] = 0;
+				imss_info_->status[delete_dataserver_indx] = new_server_status;
 				slog_debug("[STAT_WORKER] new num data servers=%d, new status=%d", imss_info_->num_active_storages, imss_info_->status[delete_dataserver_indx]);
 				// address_ += sizeof(imss_info);
 				// address_ += imss_info_->num_storages * LINE_LENGTH;

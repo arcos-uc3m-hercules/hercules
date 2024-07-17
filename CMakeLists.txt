@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.5)
 
 SET(PROJECT_NAME_STR IMSS)
 SET(CMAKE_CXX_STANDARD 17)
@@ -24,7 +24,7 @@ LINK_DIRECTORIES(${GLIB_LIBRARY_DIRS})
 # set(WITH_JEMALLOC_DEFAULT   ${JEMALLOC_FOUND})
 
 # Set CMake to enable debug symbols and disable optimizations
-set(CMAKE_BUILD_TYPE Debug)
+# set(CMAKE_BUILD_TYPE Debug)
 
 
 FIND_PACKAGE(Threads REQUIRED)

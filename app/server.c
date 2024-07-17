@@ -90,7 +90,7 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 	char key_[REQUEST_SIZE];
 	int number_of_blocks_2_move = map->size();
 
-	fprintf(stderr, "Server %d, moving %d blocks, active storage servers=%lu, UCX_IB_RCACHE_MAX_REGIONS=%s\n", args.id, map->size(), number_active_storage_servers, getenv("UCX_IB_RCACHE_MAX_REGIONS"));
+	fprintf(stderr, "Server %d, has %d blocks, active storage servers=%lu, UCX_IB_RCACHE_MAX_REGIONS=%s\n", args.id, map->size(), number_active_storage_servers, getenv("UCX_IB_RCACHE_MAX_REGIONS"));
 	while ((curr_map_size = map->size()) > 0 && number_active_storage_servers > 0)
 	{
 		std::string key;
@@ -147,7 +147,7 @@ int stop_server()
 		perror("ERR_HERCULES_OPEN_NUM_ACTVIES_NODES");
 	}
 
-	int ret = read(fd, buf, sizeof(buf)-1);
+	int ret = read(fd, buf, sizeof(buf) - 1);
 	buf[ret] = '\0';
 
 	// fprintf(stderr, "* * * fd=%d, ret=%d, number_active_storage_servers=%s\n", fd, ret, buf);
@@ -157,7 +157,7 @@ int stop_server()
 		perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
 	}
 
-	fprintf(stderr,"The new number of active data nodes is %s\n", buf);
+	fprintf(stderr, "The new number of active data nodes is %s\n", buf);
 
 	number_active_storage_servers = atoi(buf);
 
@@ -166,7 +166,48 @@ int stop_server()
 	uint32_t id = CLOSE_EP;
 	// Send the created structure to the metadata server.
 	// sprintf(key_plus_size, "%d SET %lu %s", args.id, strlen(imss_uri), imss_uri);
-	sprintf(key_plus_size, "%d SET %lu %s", args.id, number_active_storage_servers, imss_uri);
+	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, imss_uri, 0);
+	// fprintf(stderr, "Request - %s\n", key_plus_size);
+	// status = ucp_ep_create(ucp_worker, &ep_params, &client_ep);
+	slog_debug("[main] Request - %s", key_plus_size);
+	if (send_req(ucp_worker, client_ep, req_addr, req_addr_len, key_plus_size) == 0)
+	{
+		perror("ERR_HERCULES_RLS_SERVER_SEND_REQ");
+		return -1;
+	}
+	return 1;
+}
+
+int wakeup_server()
+{
+	char buf[10];
+	int fd = open("./hercules_num_act_nodes", O_RDONLY);
+	if (fd == -1)
+	{
+		perror("ERR_HERCULES_OPEN_NUM_ACTVIES_NODES");
+	}
+
+	int ret = read(fd, buf, sizeof(buf) - 1);
+	buf[ret] = '\0';
+
+	// fprintf(stderr, "* * * fd=%d, ret=%d, number_active_storage_servers=%s\n", fd, ret, buf);
+	ret = close(fd);
+	if (fd == -1)
+	{
+		perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
+	}
+
+	fprintf(stderr, "The new number of active data nodes is %s\n", buf);
+
+	number_active_storage_servers = atoi(buf);
+
+	// tell metadata server to reduce number of servers.
+	char key_plus_size[REQUEST_SIZE];
+	uint32_t id = CLOSE_EP;
+	// Send the created structure to the metadata server.
+	// sprintf(key_plus_size, "%d SET %lu %s", args.id, strlen(imss_uri), imss_uri);
+	// last "1" is the server status to be set.
+	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, imss_uri, 1); 
 	// fprintf(stderr, "Request - %s\n", key_plus_size);
 	// status = ucp_ep_create(ucp_worker, &ep_params, &client_ep);
 	slog_debug("[main] Request - %s", key_plus_size);
@@ -185,12 +226,14 @@ void handle_signal_server(int signal)
 		fprintf(stderr, " ** Received SIGUSR2 in main thread\n");
 		if (args.type == TYPE_DATA_SERVER) // only data servers.
 		{
-			char tmp_file_path[100];
-			sprintf(tmp_file_path, "/tmp/%c-hercules-%d-down", args.type, args.id);
+			fprintf(stderr, "Waking up server %d\n", args.id);
+			wakeup_server();
+			// char tmp_file_path[100];
+			// sprintf(tmp_file_path, "/tmp/%c-hercules-%d-down", args.type, args.id);
 
-			stop_server();
-			move_blocks_2_server(args.stat_port, args.id, imss_uri, g_map);
-			ready(tmp_file_path, "OK");
+			// stop_server();
+			// move_blocks_2_server(args.stat_port, args.id, imss_uri, g_map);
+			// ready(tmp_file_path, "OK");
 			// sleep(10);
 		}
 		fprintf(stderr, " ** Ending SIGUSR2 in main thread\n");
@@ -206,6 +249,7 @@ int32_t main(int32_t argc, char **argv)
 	struct cfg_struct *cfg;
 	// clock_t t;
 	double time_taken;
+	int init_number_of_server = 1;
 
 	uint64_t bind_port;
 	char *stat_add;
@@ -250,7 +294,7 @@ int32_t main(int32_t argc, char **argv)
 
 	if (args.type != TYPE_METADATA_SERVER && args.type != TYPE_DATA_SERVER)
 	{
-		fprintf(stderr, "%c is not a valid server type \n usage: hercules_server <m|d> <server_id> <metadata_host>\n", args.type);
+		fprintf(stderr, "%c is not a valid server type \n usage: hercules_server <m|d> <server_id> <metadata_host> <0|1>\n", args.type);
 		return 0;
 	}
 
@@ -437,6 +481,19 @@ int32_t main(int32_t argc, char **argv)
 		slog_debug("imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB, errno=%d:%s", args.imss_uri, args.stat_host, args.stat_port, args.num_servers, args.deploy_hostfile, args.block_size, args.storage_size, errno, strerror(errno));
 		// bind port number.
 		bind_port = args.port;
+
+		init_number_of_server = atoi(argv[4]);
+		// init_server_status = atoi(argv[4]);
+		// switch (init_server_status)
+		// {
+		// case 0:
+		// 	break;
+		// case 1:
+		// 	break;
+		// default:
+		// 	fprintf(stderr, "%d is not a valid server initial status \n usage hercules_server <m|d> <server_id> <metadata_host> <initial_server_status> \n <initial_server_status> = 0|1\n", init_server_status);
+		// 	return 0;
+		// }
 	}
 	else
 	{
@@ -770,7 +827,7 @@ int32_t main(int32_t argc, char **argv)
 		my_imss.status = (int *)malloc(num_servers * sizeof(int));					// calloc(num_servers, sizeof(int32_t));
 		my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int)); // calloc(num_servers, sizeof(int32_t));
 		my_imss.num_storages = num_servers;
-		my_imss.num_active_storages = num_servers;
+		my_imss.num_active_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important
 		// FILE entity managing the IMSS deployfile.
@@ -786,6 +843,8 @@ int32_t main(int32_t argc, char **argv)
 
 		// Number of characters successfully read from the line.
 		int32_t n_chars;
+		int init_server_status = 1;
+		// int num_active_data_servers = 0;
 		for (int32_t i = 0; i < num_servers; i++)
 		{
 			// Allocate resources in the metadata structure so as to store the current IMSS's IP.
@@ -801,9 +860,27 @@ int32_t main(int32_t argc, char **argv)
 				((my_imss.ips)[i])[n_chars - 1] = '\0';
 			}
 
-			my_imss.status[i] = 1;
-			my_imss.arr_num_active_storages[i] = num_servers;
-
+			if (i < init_number_of_server)
+			{
+				fprintf(stderr, "Server %d is active\n", i);
+				init_server_status = 1;
+			}
+			else
+			{
+				fprintf(stderr, "Server %d is inactive\n", i);
+				init_server_status = 0;
+			}
+			// if (init_server_status)
+			// {
+			// 	fprintf(stderr, "Server %d is active\n", args.id);
+			// }
+			// else
+			// {
+			// 	fprintf(stderr, "Server %d is idle\n", args.id);
+			// }
+			my_imss.status[i] = init_server_status;
+			// my_imss.arr_num_active_storages[i] = num_servers;
+			my_imss.arr_num_active_storages[i] = init_number_of_server;
 			// fprintf(stderr,"status=%d\n", my_imss.status[i]);
 		}
 

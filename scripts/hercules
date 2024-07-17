@@ -1,12 +1,12 @@
 #!/bin/bash
-## Last modification: 18/12/2023
+## Last modification: 15/07/2024
 # set -x
 #######################################################
 #######################################################
 ## To stop all servers.
 StopServers() {
-    NAME=$1
-    hosts=$2
+    NAME=$1 # Server type ("meta" or "data").
+    hosts=$2 # List of hostnames.
     WAIT_SERVERS=$3
 
     awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data2stop_hostfile > data2stop_index
@@ -52,6 +52,24 @@ StopServers() {
     else
         echo "No waiting for data servers to be finished."
     fi
+}
+
+WakeUpServers() {
+    NAME=$1 # Server type ("meta" or "data").
+    hosts=$2 # List of hostnames.
+
+    # Wake up desired servers.
+    for node in "${hosts[@]}"
+    do
+        echo "ssh $node pkill hercules_server"
+        ( ssh $node "pkill -SIGUSR2 hercules_server" )
+    done
+    # WaitForServersDown "data" "d" "$i" ${reversed[@]}
+    #if [[ "$WAIT_SERVERS" -eq "1" ]]; then
+        # WaitForServers "data" "d" ${hosts[@]}
+    #else
+    #    echo "No waiting for data servers to be finished."
+    #fi
 }
 
 ## To wait until all the servers are down.
@@ -318,7 +336,7 @@ echo "Reading configuration from $FILE"
 export HERCULES_CONF="$FILE"
 
 
-## checks if a configuration file was set.
+## Checks if a configuration file was set.
 if [ -z "$FILE" ]; then
     ## get current directory has project path.
     HERCULES_PATH=$(dirname `pwd`)
@@ -353,19 +371,27 @@ echo "Hercules path - $HERCULES_PATH"
 
 
 ## Read configuration file.
-export HERCULES_MOUNT_POINT=$(cat $FILE | grep "MOUNT_POINT" | head -1 | awk '{print $3}')
-META_PORT=$(cat $FILE | grep "METADATA_PORT" | awk '{print $3}')
-DATA_PORT=$(cat $FILE | grep "DATA_PORT" | awk '{print $3}')
-MALLEABILITY=$(cat $FILE | grep "MALLEABILITY" | awk '{print $3}')
-HERCULES_NUM_METADATA=$(cat $FILE | grep "NUM_META_SERVERS" | awk '{print $3}')
-export HERCULES_NUM_DATA=$(cat $FILE | grep "NUM_DATA_SERVERS" | awk '{print $3}')
-NUM_NODES_FOR_CLIENTS=$(cat $FILE | grep "NUM_NODES_FOR_CLIENTS" | awk '{print $3}')
-NUM_CLIENTS_PER_NODE=$(cat $FILE | grep "NUM_CLIENTS_PER_NODE" | awk '{print $3}')
-ATTACHED=$(cat $FILE | grep "ATTACHED" | awk '{print $3}')
-HERCULES_BLOCK_SIZE=$(cat $FILE | grep "BLOCK_SIZE" | awk '{print $3}')
-STORAGE_SIZE=$(cat $FILE | grep "STORAGE_SIZE" | awk '{print $3}')
+export HERCULES_MOUNT_POINT=$(cat $FILE | grep "\<MOUNT_POINT\>" | head -1 | awk '{print $3}')
+META_PORT=$(cat $FILE | grep "\<METADATA_PORT\>" | awk '{print $3}')
+DATA_PORT=$(cat $FILE | grep "\<DATA_PORT\>" | awk '{print $3}')
+MALLEABILITY=$(cat $FILE | grep "\<MALLEABILITY\>" | awk '{print $3}')
+HERCULES_NUM_METADATA=$(cat $FILE | grep "\<NUM_META_SERVERS\>" | awk '{print $3}')
+export HERCULES_NUM_DATA=$(cat $FILE | grep "\<NUM_DATA_SERVERS\>" | awk '{print $3}')
+NUM_NODES_FOR_CLIENTS=$(cat $FILE | grep "\<NUM_NODES_FOR_CLIENTS\>" | awk '{print $3}')
+NUM_CLIENTS_PER_NODE=$(cat $FILE | grep "\<NUM_CLIENTS_PER_NODE\>" | awk '{print $3}')
+ATTACHED=$(cat $FILE | grep "\<ATTACHED\>" | awk '{print $3}')
+HERCULES_BLOCK_SIZE=$(cat $FILE | grep "\<BLOCK_SIZE\>" | awk '{print $3}')
+STORAGE_SIZE=$(cat $FILE | grep "\<STORAGE_SIZE\>" | awk '{print $3}')
 HERCULES_DATA_HOSTFILE=$(cat $FILE | grep "\<DATA_HOSTFILE\>" | awk '{print $3}')
-HERCULES_METADATA_HOSTFILE=$(cat $FILE | grep "METADATA_HOSTFILE" | awk '{print $3}')
+HERCULES_METADATA_HOSTFILE=$(cat $FILE | grep "\<METADATA_HOSTFILE\>" | awk '{print $3}')
+INIT_HERCULES_NUM_DATA=$(cat $FILE | grep "\<INIT_NUM_DATA_SERVERS\>" | awk '{print $3}')
+
+if [ -z "$INIT_HERCULES_NUM_DATA" ] || [ "$INIT_HERCULES_NUM_DATA" = "0" ] ; then
+    echo "INIT_HERCULES_NUM_DATA = $INIT_HERCULES_NUM_DATA"
+    INIT_HERCULES_NUM_DATA=$HERCULES_NUM_DATA
+fi
+
+echo "+ + + Initial number of data nodes is $INIT_HERCULES_NUM_DATA/$HERCULES_NUM_DATA"
 
 ## \< \> to match exact word.
 
@@ -403,11 +429,29 @@ then
 fi
 
 ## Checks if the user wants to add more servers.
-# if [[ $STATUS = "add" ]];
-# then
+if [[ $STATUS = "add" ]];
+then
+    ## Adds data and metadata servers.
+    echo "Starting comissioning state."
+    # Checks if a list of data servers was passed by the user.
+    # If the user does not pass any list, we exit the script.
+    if [ ! -z "$DATA_SERVER_FILE" ]; then
+        echo "Data server file - $DATA_SERVER_FILE"
+        if [ ! -f "$DATA_SERVER_FILE" ]; then
+            echo "Data server file " $DATA_SERVER_FILE " does not exists"
+            exit 0
+        fi
+        HERCULES_DATA_HOSTFILE=$DATA_SERVER_FILE
+    else 
+        echo "No data server file was provided to add more servers."
+        exit 0
+    fi
+    readarray -t hosts < $HERCULES_DATA_HOSTFILE
+    # echo "data hosts=$hosts"
+    WakeUpServers "data" $hosts
     
-
-# fi
+    exit 0
+fi
 
 ## If hostfiles was not set, then we create a hostfile containing the allocated nodes.
 # if [[ $SLURM -eq "1" ]]; then
@@ -418,10 +462,7 @@ if [[ $SERVERS_HOSTFILES_OPTION -eq "0" ]]; then
     # scontrol show hostnames "$SLURM_JOB_NODELIST"
 fi
 
-# exit 0
-
 echo HERCULES_MOUNT_POINT - "$HERCULES_MOUNT_POINT" - HERCULES_BLOCK_SIZE - "$HERCULES_BLOCK_SIZE"
-
 
 # If a client hostfile was not provided we set a default path.
 if [ -z "$HERCULES_MPI_HOSTFILE_NAME" ]; then
@@ -533,9 +574,15 @@ echo "[+] Hercules: Starting data servers on ${data_hosts[@]}"
 start=`date +%s.%N`
 for node in ${data_hosts[@]}
 do
+    # if [ "$i" -lt "$INIT_HERCULES_NUM_DATA" ]; then ## server is started and set as online.
+    #     server_init_status=1
+    # else ## server is started but set as offline.
+    #     server_init_status=0
+    # fi
+
     # echo "[+] Running data server $i in $node..."
     RM="rm /tmp/d-hercules-$i"
-    COMMAND="$HERCULES_BUILD_PATH/hercules_server d $i ${meta_hosts[0]}"
+    COMMAND="$HERCULES_BUILD_PATH/hercules_server d $i ${meta_hosts[0]} $INIT_HERCULES_NUM_DATA"
     if [[ "$SLURM" -eq "0" ]]; then
         # ssh $node "$RM; cd $HERCULES_BASH_PATH &&  $COMMAND &"
         echo "[ + ] Removing temporal files on $node"
