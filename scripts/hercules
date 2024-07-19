@@ -331,11 +331,8 @@ if [ ! -e "$HERCULES_PATH" ]; then
     echo "$HERCULES_PATH does not exist, please check the configuration file: $FILE"
 fi
 
-## The next line returns 1 if hercules has been loaded by using spack, 0 in other case.
-IS_SPACK=$([ -z $(whereis hercules | awk '{print $2}') ] && echo 0 || echo 1)
-#echo "IS_SPACK=$IS_SPACK"
 # Paths may vary between spack and git.
-if [[ "$IS_SPACK" -eq "1" ]]; then
+if [[ -f $HERCULES_PATH"/bin/hercules_server" ]]; then
     echo "Hercules has been loaded with Spack"
     # following line does not work for all spack versions.
     #HERCULES_PATH=$(spack find --paths --loaded hercules | grep hercules | awk '{print $2}') 
