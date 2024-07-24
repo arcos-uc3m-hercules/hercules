@@ -9,6 +9,57 @@ StopServers() {
     hosts=$2 # List of hostnames.
     WAIT_SERVERS=$3
 
+    #awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data2stop_hostfile > data2stop_index
+    #readarray -t data2stop_index_arr < data2stop_index
+
+    #length=${#hosts[@]}
+    #reversed=()
+    #for (( i=$length-1; i>=0; i-- )); do
+    #    reversed+=("${hosts[$i]}")
+    #done
+
+
+    # if [[ $NAME = "data" ]]; then
+    #     for index in "${data2stop_index_arr[@]}"
+    #     do
+    #         FILE="/tmp/d-hercules-$((index-1))-down"
+    #         if [ -f $FILE ]; then
+    #             echo "Temporal file $FILE has been deleted"
+    #             rm $FILE
+    #         else 
+    #             echo "Temporal file $FILE does not exist"
+    #         fi
+    #     done
+    # fi
+
+    echo "# Hercules: Stopping $NAME servers in $hosts"
+    #echo "# Hercules: Stopping $length $NAME servers in ${reversed[@]}"
+    # i=0
+    for node in "${hosts[@]}"
+    #for node in "${reversed[@]}"
+    do
+        echo "ssh $node pkill hercules_server"
+        # Move blocks from this server to another.
+        # ( ssh $node "pkill -SIGUSR2 hercules_server" ) 
+        # Kill threads and finish the server.
+        ##  ( ssh $node "export NUMBER_ACTIVE_STORAGE_SERVERS=5" )
+        ( ssh $node  "echo 1 > /tmp/hercules_pkill_operation" )
+        ( ssh $node "pkill -SIGUSR1 hercules_server" )
+        # i=$((i+1))
+    done
+    # WaitForServersDown "data" "d" "$i" ${reversed[@]}
+    if [[ "$WAIT_SERVERS" -eq "1" ]]; then
+        WaitForServersDown "data" "d" ${hosts[@]}
+    else
+        echo "No waiting for data servers to be finished."
+    fi
+}
+
+SleepServers() {
+    NAME=$1 # Server type ("meta" or "data").
+    hosts=$2 # List of hostnames.
+    WAIT_SERVERS=$3
+
     awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data2stop_hostfile > data2stop_index
     readarray -t data2stop_index_arr < data2stop_index
 
@@ -22,7 +73,7 @@ StopServers() {
     if [[ $NAME = "data" ]]; then
         for index in "${data2stop_index_arr[@]}"
         do
-            FILE="./tmp/d-hercules-$((index-1))-down"
+            FILE="/tmp/d-hercules-$((index-1))-down"
             if [ -f $FILE ]; then
                 echo "Temporal file $FILE has been deleted"
                 rm $FILE
@@ -64,6 +115,9 @@ WakeUpServers() {
         echo "ssh $node pkill hercules_server"
         ( ssh $node "pkill -SIGUSR2 hercules_server" )
     done
+
+    awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data2start_hostfile > data2start_index
+    WaitForServers "data" "d" "up" ${hosts[@]}
     # WaitForServersDown "data" "d" "$i" ${reversed[@]}
     #if [[ "$WAIT_SERVERS" -eq "1" ]]; then
         # WaitForServers "data" "d" ${hosts[@]}
@@ -115,7 +169,7 @@ WaitForServersDown() {
         # i=$((i+1))
         # SERVER_NUMBER=$SERVER_ID
         ACTION="down"
-        FILE="./tmp/$SERVER_TYPE-hercules-$((data2stop_index_arr[$SERVER_ID]-1))-$ACTION"
+        FILE="/tmp/$SERVER_TYPE-hercules-$((data2stop_index_arr[$SERVER_ID]-1))-$ACTION"
         ## Checks if the file exists.
         until [ -f $FILE ]; do
             # echo "Waiting for $FILE, attemp $i"
@@ -143,27 +197,40 @@ WaitForServersDown() {
 
 ## To wait until all the servers are up.
 WaitForServers() {
-    i=0
+
+    readarray -t data2start_index_arr < data2start_index
+
+    # i=0
+    SERVER_ID=0
+
     # get server name by arguments.
     SERVER_NAME=$1
     shift
     # get server type by arguments.
     SERVER_TYPE=$1
     shift
+    # get the action type.
+    ACTION=$1
+    shift
     hosts=("$@")
+    
     # echo "hostnames=${hosts[@]}"
+    ATTEMPS=1000
     for node in "${hosts[@]}"
     do
-        COMMAND="$HERCULES_BASH_PATH/check-servers.sh $SERVER_TYPE $i start"
-        echo "[+] Running comprobation $i in $node... $COMMAND"
+        # FILE="/tmp/$SERVER_TYPE-hercules-$((data2start_index_arr[$SERVER_ID]-1))-$ACTION"
+        SERVER_NUMBER=$((data2start_index_arr[$SERVER_ID]-1))
+        COMMAND="$HERCULES_BASH_PATH/check-servers.sh $SERVER_TYPE $SERVER_NUMBER $ACTION"
+        #COMMAND='test -f $FILE && echo "1" || echo "0"'
+        echo "[+] Running comprobation in $node... $COMMAND"
         # if slurm is not available.
         if [[ "$SLURM" -eq "0" ]]; then
             if [ -z "$(ssh-keygen -F $node)" ]; then
                 ssh-keyscan -H $node >> ~/.ssh/known_hosts
             fi
-            ssh $node "$COMMAND"
+            ret=$(ssh $node "$COMMAND")
         else # if slurm is available.
-            srun --exclusive --export=ALL -N 1 -n 1 -w $node $COMMAND
+            ret=$(srun --exclusive --export=ALL -N 1 -n 1 -w $node $COMMAND)
         fi
         ret=$?
         if [ "$ret" -gt 0 ]; then
@@ -171,8 +238,32 @@ WaitForServers() {
             StopServers $SERVER_NAME $hosts
             exit 1
         fi
+        ## Checks if the file exists.
+        ## until [ -f $FILE ]; do
+        # ret=0
+        # until [ "$ret" -gt 0 ]; do
+            
+        #     # echo "Waiting for $FILE, attemp $i"
+        #     i=$(($i + 1))
+        #     ## Waits "attemps" times, then an error is return.
+        #     if [ $i -gt $ATTEMPS ]; then
+        #         exit 1
+        #     fi
+        #     t=$(($i % 5))
+        #     if [ $t -eq 0 ]; then
+        #         echo "[+][$HOSTNAME] Waiting for server $((data2start_index_arr[$SERVER_ID]-1)), $FILE"
+        #     fi
+        #     sleep 1
+        # done
+
+        # ## Checks if the server was deploy correctly.
+        # STATUS=$(cat $FILE | grep "STATUS" | awk '{print $3}')
+        # if [ "$STATUS" != "OK" ]; then
+        #     # echo "[X] Error deploying server $SERVER_NUMBER."
+        #     exit 1
+        # fi
+        SERVER_ID=$((SERVER_ID+1))
         echo "[OK] $SERVER_NAME $i server running in $node"
-        i=$((i+1))
     done
 }
 
@@ -350,7 +441,7 @@ if [ ! -e "$HERCULES_PATH" ]; then
 fi
 
 ## The next line returns 1 if hercules has been loaded by using spack, 0 in other case.
-IS_SPACK=$([ -z $(whereis hercules | awk '{print $2}') ] && echo 0 || echo 1)
+IS_SPACK=$([ -z $(whereis '\<hercules\>' | awk '{print $2}') ] && echo 0 || echo 1)
 #echo "IS_SPACK=$IS_SPACK"
 # Paths may vary between spack and git.
 if [[ "$IS_SPACK" -eq "1" ]]; then
@@ -392,6 +483,7 @@ if [ -z "$INIT_HERCULES_NUM_DATA" ] || [ "$INIT_HERCULES_NUM_DATA" = "0" ] ; the
 fi
 
 echo "+ + + Initial number of data nodes is $INIT_HERCULES_NUM_DATA/$HERCULES_NUM_DATA"
+export HERCULES_INIT_NUM_DATA=$INIT_HERCULES_NUM_DATA
 
 ## \< \> to match exact word.
 
@@ -449,9 +541,36 @@ then
     readarray -t hosts < $HERCULES_DATA_HOSTFILE
     # echo "data hosts=$hosts"
     WakeUpServers "data" $hosts
-    
+    # sleep 10
     exit 0
 fi
+
+## Checks if the user wants to remove servers.
+## TO FIX!!
+if [[ $STATUS = "remove" ]];
+then
+    ## Adds data and metadata servers.
+    echo "Starting comissioning state."
+    # Checks if a list of data servers was passed by the user.
+    # If the user does not pass any list, we exit the script.
+    if [ ! -z "$DATA_SERVER_FILE" ]; then
+        echo "Data server file - $DATA_SERVER_FILE"
+        if [ ! -f "$DATA_SERVER_FILE" ]; then
+            echo "Data server file " $DATA_SERVER_FILE " does not exists"
+            exit 0
+        fi
+        HERCULES_DATA_HOSTFILE=$DATA_SERVER_FILE
+    else 
+        echo "No data server file was provided to add more servers."
+        exit 0
+    fi
+    readarray -t hosts < $HERCULES_DATA_HOSTFILE
+    # echo "data hosts=$hosts"
+    WakeUpServers "data" $hosts
+    # sleep 10
+    exit 0
+fi
+
 
 ## If hostfiles was not set, then we create a hostfile containing the allocated nodes.
 # if [[ $SLURM -eq "1" ]]; then
@@ -539,7 +658,8 @@ done
 
 
 ## Wait until all metadata servers are up.
-WaitForServers "metadata" "m" ${meta_hosts[@]}
+awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' meta_hostfile meta_hostfile > data2start_index
+WaitForServers "metadata" "m" "start" ${meta_hosts[@]}
 end=`date +%s.%N`
 runtime=$( echo "$end - $start" | bc -l )
 echo "[-] Metadata servers started in $runtime seconds"
@@ -601,7 +721,8 @@ do
 done
 
 ## Wait until all data servers are up.
-WaitForServers "data" "d" ${data_hosts[@]}
+awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data_hostfile > data2start_index
+WaitForServers "data" "d" "start" ${data_hosts[@]}
 end=`date +%s.%N`
 runtime=$( echo "$end - $start" | bc -l )
 echo "[-] Data servers started in $runtime seconds"

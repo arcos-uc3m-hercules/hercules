@@ -335,7 +335,6 @@ int imss_getattr(const char *path, struct stat *stbuf)
 	// }
 
 	int32_t ds;
-
 	int fd = -1;
 	struct stat stats;
 	char *aux = NULL;

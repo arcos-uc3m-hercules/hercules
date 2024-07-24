@@ -1761,16 +1761,22 @@ int fclose(FILE *fp)
 	{
 		slog_debug("[POSIX]. Calling Hercules 'fclose', pathname=%s, fd=%d", pathname, fd);
 		ret = imss_close(pathname, fd);
-		if (ret)
+		// Upon successful completion, fclose() shall return 0; 
+		// otherwise, it shall return EOF and set errno to indicate the error.
+		// To control this situations, we check the value of "ret" before we return it.
+		// greater than 0.
+		if (ret > 0)
 		{
-			// Upon successful completion, fclose() shall return 0; otherwise, it shall return EOF and set errno to indicate the error.
 			ret = 0;
 		}
+		// less than 0 (error).
+		if(ret < 0) {
+			ret = EOF;
+		}
+
 		slog_debug("[POSIX]. Ending Hercules 'fclose' pathname=%s, fd=%d\n", pathname, fd);
-		// fprintf(stderr, "Calling Hercules 'fclose', pathname=%s, fd=%d, ret=%d\n", pathname, fd, ret);
 		// Set offset to 0.
 		map_fd_update_value(map_fd, pathname, fd, 0);
-		// free(fp);
 	}
 	else
 	{ // don't call slog here!

@@ -69,23 +69,40 @@ extern int IMSS_THREAD_POOL;
 
 int ready(char *tmp_file_path, const char *msg)
 {
+	fprintf(stderr, "Trying to create the file %s with the message %s\n", tmp_file_path, msg);
 	char status[25];
-	FILE *tmp_file = tmpfile(); // make the file pointer as temporary file.
+	char err_msg[132];
+	FILE *tmp_file; // = tmpfile(); // make the file pointer as temporary file.
+
 	tmp_file = fopen(tmp_file_path, "w");
 	if (tmp_file == NULL)
 	{
-		// puts("Error in creating temporary file");
-		fprintf(stderr, "Error in creating temporary file %s", tmp_file_path);
+		sprintf(err_msg, "Error in creating the temporary file %s\n", tmp_file_path);
+		perror(err_msg);
 		return -1;
 	}
 
 	strcpy(status, "STATUS = ");
 	strcat(status, msg);
 
-	fwrite(status, strlen(status), 1, tmp_file);
+	size_t written = fwrite(status, strlen(status), 1, tmp_file);
+	if (written < 0)
+	{
+		sprintf(err_msg, "Error writting in temporary file %s\n", tmp_file_path);
+		perror(err_msg);
+		fclose(tmp_file);
+		return -1;
+	}
 
-	fclose(tmp_file);
+	if (fclose(tmp_file) == EOF)
+	{
+		sprintf(err_msg, "Error closing the temporary file %s\n", tmp_file_path);
+		perror(err_msg);
+		return -1;
+	}
 
+	// if there was an error in the initialization of the server,
+	// we kill the process.
 	if (!strncmp(msg, "ERROR", sizeof("ERROR")))
 	{
 		exit(1);
@@ -94,11 +111,11 @@ int ready(char *tmp_file_path, const char *msg)
 }
 
 // ucp_worker_h *global_ucp_worker;
-int finished = 0;
-int global_server_fd = -1;
+extern int global_finish_threads;
+extern int global_server_fd_thread;
 // if malleability_on = 1, new requests will be not handled and server will
 // respond with a "malleability" string.
-int malleability_on = 0;
+// int malleability_on = 0;
 #define MALLEABILITY_MESSAGE = "MALLEABILITY";
 
 void handle_signal(int signal)
@@ -106,11 +123,11 @@ void handle_signal(int signal)
 	if (signal == SIGUSR1)
 	{
 		fprintf(stderr, "*** Received SIGUSR1\n");
-		finished = 1;
-		malleability_on = 1;
+		global_finish_threads = 1;
+		// malleability_on = 1;
 
 		// To dispatcher thread.
-		if (shutdown(global_server_fd, SHUT_RD) == -1)
+		if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
 		{
 			fprintf(stderr, "Error closing server_fd\n");
 		}
@@ -165,6 +182,13 @@ void handle_signal(int signal)
 // Thread method attending client read-write data requests.
 void *srv_worker(void *th_argv)
 {
+
+	// Enable thread cancellation
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    
+    // Set the cancellation type to deferred
+    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
 	ucp_ep_params_t ep_params;
 
 	ucp_am_handler_param_t param;
@@ -203,7 +227,7 @@ void *srv_worker(void *th_argv)
 		t = clock();
 
 		// Register signal handler
-		signal(SIGUSR1, handle_signal);
+		//signal(SIGUSR1, handle_signal);
 
 		do
 		{
@@ -211,7 +235,7 @@ void *srv_worker(void *th_argv)
 			TIMING(ucp_worker_progress(arguments->ucp_worker), "[srv_worker]ucp_worker_progress", unsigned int);
 			/* Probing incoming events in non-block mode */
 			msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, tag_req, tag_mask, 1, &info_tag);
-			if (finished)
+			if (global_finish_threads == 1)
 			{
 				fprintf(stderr, "Ending data server thread.\n");
 				pthread_exit(NULL);
@@ -1206,6 +1230,13 @@ void *garbage_collector(void *th_argv)
 // Thread method attending client read-write metadata requests.
 void *stat_worker(void *th_argv)
 {
+
+	// Enable thread cancellation
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    
+    // Set the cancellation type to deferred
+    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
 	ucp_am_handler_param_t param;
 	ucs_status_t status;
 	int ret = 0;
@@ -1228,7 +1259,7 @@ void *stat_worker(void *th_argv)
 		ucp_request_param_t recv_param;
 
 		// Register signal handler
-		signal(SIGUSR1, handle_signal);
+		//signal(SIGUSR1, handle_signal);
 
 		ucs_status_t status;
 		/* Receive test string from server */
@@ -1238,7 +1269,7 @@ void *stat_worker(void *th_argv)
 			ucp_worker_progress(arguments->ucp_worker);
 			/* Probing incoming events in non-block mode */
 			msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, tag_req, tag_mask, 1, &info_tag);
-			if (finished == 1)
+			if (global_finish_threads == 1)
 			{
 				fprintf(stderr, "Ending metadata thread.\n");
 				pthread_exit(NULL);
@@ -1781,7 +1812,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		if (!map->get(key, &address_, &block_size_rtvd))
 		{
 			pthread_mutex_unlock(&mp);
-			slog_debug("[STAT WORKER] Adding new block %p", &address_);
+			// slog_debug("[STAT WORKER] Adding new block %p", &address_);
 
 			slog_debug("[STAT WORKER] Recv dynamic buffer size %ld", block_size_recv);
 			// Get the length of the message to be received.
@@ -1797,9 +1828,12 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			// Receive the block into the buffer.
 			void *buffer = malloc(block_size_recv);
 			ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
+
+			dataset_info *struct_ = (dataset_info *)buffer;
+
 			// ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
 			// length = recv_dynamic_stream_opt(arguments->ucp_worker, arguments->server_ep, &buffer, BUFFER, arguments->worker_uid, length);
-			slog_debug("[STAT WORKER] END Recv dynamic");
+			slog_debug("[STAT WORKER] END Recv dynamic, n_server_when_created=%d", struct_->n_servers_when_created);
 
 			if (ret < 0)
 			{
@@ -1834,8 +1868,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				return -1;
 			}
 
-			// copy the block into disk.
-
 			// Update the pointer.
 			arguments->pt += block_size_recv;
 			slog_debug("[STAT WORKER] Dataset %s has been created.", key.c_str());
@@ -1856,6 +1888,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				{
 					perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
 					slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
+					pthread_mutex_unlock(&mp);
 					// perror("ERRIMSS_METADATA_LOCAL_DATASET_UPDATE_INVALID_MSG_LENGTH");
 					return -1;
 				}
@@ -1869,6 +1902,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					perror("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP");
 					slog_error("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP");
 					free(data_ref);
+					pthread_mutex_unlock(&mp);
 					// perror("ERRIMSS_METADATA_LOCAL_DATASET_UPDATE_RECV_DATA");
 					return -1;
 				}
@@ -1899,6 +1933,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					perror("HERCULES_ERR_METADATA_WORKER_SEND_DATA_SET_OP");
 					// perror("ERRIMSS_WORKER_DATALOCATANSWER2");
 					free(data_ref);
+					pthread_mutex_unlock(&mp);
 					return -1;
 				}
 				free(data_ref);
@@ -2006,13 +2041,14 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				break;
 			}
 			}
+			pthread_mutex_unlock(&mp);
 		}
 		break;
 	}
 	default:
 		break;
 	}
-	pthread_mutex_unlock(&mp);
+	// pthread_mutex_unlock(&mp);
 
 	slog_debug("[srv_worker_thread] Terminated meta helper\n");
 
@@ -2048,7 +2084,7 @@ void *srv_attached_dispatcher(void *th_argv)
 	context.conn_request = StsQueue.create();
 
 	// Register signal handler
-	signal(SIGUSR1, handle_signal);
+	//signal(SIGUSR1, handle_signal);
 
 	for (;;)
 	{
@@ -2058,7 +2094,7 @@ void *srv_attached_dispatcher(void *th_argv)
 		while (StsQueue.size(context.conn_request) == 0)
 		{
 			ucp_worker_progress(arguments->ucp_worker);
-			if (finished == 1)
+			if (global_finish_threads == 1)
 			{
 				fprintf(stderr, "Ending srv_attached_dispatcher thread\n");
 				pthread_exit(NULL);
@@ -2180,6 +2216,11 @@ void *srv_attached_dispatcher(void *th_argv)
 // Metadata dispatcher thread method.
 void *dispatcher(void *th_argv)
 {
+	// Enable thread cancellation
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    
+    // Set the cancellation type to deferred
+    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 
 	// Cast from generic pointer type to p_argv struct type pointer.
 	p_argv *arguments = (p_argv *)th_argv;
@@ -2198,18 +2239,16 @@ void *dispatcher(void *th_argv)
 
 	// snprintf(service, sizeof(service), "%ld", arguments->port);
 	// Get a socket file descriptor.
-	global_server_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (global_server_fd < 0)
+	global_server_fd_thread = socket(AF_INET, SOCK_STREAM, 0);
+	if (global_server_fd_thread < 0)
 	{
 		perror("ERR_HERCULES_DISPATCHER_SOCKET");
 		ready(tmp_file_path, "ERROR");
 		pthread_exit(NULL);
 	}
 
-	// global_server_fd = &server_fd;
-
 	// To reuse the address and port.
-	ret = setsockopt(global_server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+	ret = setsockopt(global_server_fd_thread, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
 	if (ret < 0)
 	{
 		perror("ERR_HERCULES_DISPATCHER_SET_SOCKET_OPT");
@@ -2224,7 +2263,7 @@ void *dispatcher(void *th_argv)
 	server_addr.sin_port = htons(arguments->port);
 
 	// Asociamos el socket a la dirección del servidor
-	if (bind(global_server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+	if (bind(global_server_fd_thread, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
 	{
 		perror("ERR_HERCULES_DISPATCHER_BIND");
 		ready(tmp_file_path, "ERROR");
@@ -2232,7 +2271,7 @@ void *dispatcher(void *th_argv)
 	}
 
 	// Prepare to accept connections.
-	ret = listen(global_server_fd, 3);
+	ret = listen(global_server_fd_thread, 3);
 	if (ret < 0)
 	{
 		perror("ERR_HERCULES_DISPATCHER_LISTEN");
@@ -2250,9 +2289,9 @@ void *dispatcher(void *th_argv)
 
 		slog_debug("[DISPATCHER] Waiting for connection requests.");
 		// fprintf(stderr, "[DISPATCHER] Waiting for connection requests.\n");
-		new_socket = accept(global_server_fd, (struct sockaddr *)&server_addr, &addrlen);
+		new_socket = accept(global_server_fd_thread, (struct sockaddr *)&server_addr, &addrlen);
 
-		if (finished == 1)
+		if (global_finish_threads == 1)
 		{
 			fprintf(stderr, "Ending dispatcher thread.\n");
 			pthread_exit(NULL);
@@ -2307,7 +2346,7 @@ void *dispatcher(void *th_argv)
 		// MIRAR ucp_worker_release_address(ucp_worker_threads[client_id_ % IMSS_THREAD_POOL], local_addr);
 		close(new_socket);
 	}
-	close(global_server_fd);
+	close(global_server_fd_thread);
 
 	pthread_exit(NULL);
 }

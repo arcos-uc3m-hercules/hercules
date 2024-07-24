@@ -970,11 +970,11 @@ int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 			free(result);
 			return -1;
 		}
-		slog_info(" \t\t DATASET_INFO %lu", length);
 		dataset_info *struct_ = (dataset_info *)data_struct;
 
 		// Copy the actual structure into the one provided through reference.
 		memcpy(struct_, msg_data, sizeof(dataset_info));
+		slog_info(" \t\t DATASET_INFO %lu", length);
 
 		// If the size of the message received was bigger than sizeof(dataset_info), something more came with it.
 

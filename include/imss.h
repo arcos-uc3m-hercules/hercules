@@ -88,7 +88,7 @@ find_server(int32_t n_servers,
 // } send_type_t;
 
 // Structure storing all information related to a certain IMSS.
-// Note: if you add more elements to the imss_info struct, you should 
+// Note: if you add more elements to the imss_info struct, you should
 // modify the serialization in stat_worker_helper > SET_OP > else > default case,
 // send_dynamic_stream > IMSS_INFO case, and recv_dynamic_stream > IMSS_INFO. Also, it is important to
 // recalculate the msg_size in case you add a list of pointers.
@@ -172,6 +172,7 @@ typedef struct
 
 	int n_open;		  // how many process has the file open.
 	char status[128]; // delete the dataset when "dest" is set.
+	int32_t n_servers_when_created; // Number of active servers when this dataset is created.
 } dataset_info;
 
 //[SPLIT READV] Set of arguments passed to each server thread.
@@ -485,8 +486,7 @@ RETURNS:	 0 - The requested block was successfully stored.
 
 	int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
 
-	int32_t set_data_server(const char* data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server);
-	
+	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server);
 
 	/* Method retrieving the location of a specific data object.
 
