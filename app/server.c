@@ -62,8 +62,8 @@ unsigned long number_active_storage_servers = 0;
 pthread_t *threads;
 
 // global variables usted to finish threads.
-int global_finish_threads = 0;
-int global_server_fd_thread = -1;
+extern int global_finish_threads;
+extern int global_server_fd_thread;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 

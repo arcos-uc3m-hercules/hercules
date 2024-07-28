@@ -32,7 +32,7 @@ StopServers() {
     #     done
     # fi
 
-    echo "# Hercules: Stopping $NAME servers in $hosts"
+    echo "# Hercules: Stopping $NAME servers in ${hosts[@]}"
     #echo "# Hercules: Stopping $length $NAME servers in ${reversed[@]}"
     # i=0
     for node in "${hosts[@]}"
@@ -49,7 +49,9 @@ StopServers() {
     done
     # WaitForServersDown "data" "d" "$i" ${reversed[@]}
     if [[ "$WAIT_SERVERS" -eq "1" ]]; then
-        WaitForServersDown "data" "d" ${hosts[@]}
+        #WaitForServersDown "data" "d" ${hosts[@]}
+        awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data2stop_hostfile > data2down_index
+        WaitForServers "data" "d" "down" ${hosts[@]}
     else
         echo "No waiting for data servers to be finished."
     fi
@@ -116,7 +118,7 @@ WakeUpServers() {
         ( ssh $node "pkill -SIGUSR2 hercules_server" )
     done
 
-    awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data2start_hostfile > data2start_index
+    awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data2start_hostfile > data2up_index
     WaitForServers "data" "d" "up" ${hosts[@]}
     # WaitForServersDown "data" "d" "$i" ${reversed[@]}
     #if [[ "$WAIT_SERVERS" -eq "1" ]]; then
@@ -198,8 +200,6 @@ WaitForServersDown() {
 ## To wait until all the servers are up.
 WaitForServers() {
 
-    readarray -t data2start_index_arr < data2start_index
-
     # i=0
     SERVER_ID=0
 
@@ -213,13 +213,16 @@ WaitForServers() {
     ACTION=$1
     shift
     hosts=("$@")
+
+    file_name="data2${ACTION}_index"
+    readarray -t server_index_arr < $file_name #data2start_index
     
     # echo "hostnames=${hosts[@]}"
     ATTEMPS=1000
     for node in "${hosts[@]}"
     do
-        # FILE="/tmp/$SERVER_TYPE-hercules-$((data2start_index_arr[$SERVER_ID]-1))-$ACTION"
-        SERVER_NUMBER=$((data2start_index_arr[$SERVER_ID]-1))
+        # FILE="/tmp/$SERVER_TYPE-hercules-$((server_index_arr[$SERVER_ID]-1))-$ACTION"
+        SERVER_NUMBER=$((server_index_arr[$SERVER_ID]-1))
         COMMAND="$HERCULES_BASH_PATH/check-servers.sh $SERVER_TYPE $SERVER_NUMBER $ACTION"
         #COMMAND='test -f $FILE && echo "1" || echo "0"'
         echo "[+] Running comprobation in $node... $COMMAND"
@@ -251,7 +254,7 @@ WaitForServers() {
         #     fi
         #     t=$(($i % 5))
         #     if [ $t -eq 0 ]; then
-        #         echo "[+][$HOSTNAME] Waiting for server $((data2start_index_arr[$SERVER_ID]-1)), $FILE"
+        #         echo "[+][$HOSTNAME] Waiting for server $((server_index_arr[$SERVER_ID]-1)), $FILE"
         #     fi
         #     sleep 1
         # done
@@ -549,10 +552,9 @@ fi
 ## TO FIX!!
 if [[ $STATUS = "remove" ]];
 then
-    ## Adds data and metadata servers.
-    echo "Starting comissioning state."
+    ## Remove data and metadata servers.
+    echo "Starting decomissioning state."
     # Checks if a list of data servers was passed by the user.
-    # If the user does not pass any list, we exit the script.
     if [ ! -z "$DATA_SERVER_FILE" ]; then
         echo "Data server file - $DATA_SERVER_FILE"
         if [ ! -f "$DATA_SERVER_FILE" ]; then
@@ -560,14 +562,16 @@ then
             exit 0
         fi
         HERCULES_DATA_HOSTFILE=$DATA_SERVER_FILE
-    else 
-        echo "No data server file was provided to add more servers."
+    else
+        echo "Data server file is nedeed, -f <data_server_file_path>"
         exit 0
     fi
     readarray -t hosts < $HERCULES_DATA_HOSTFILE
-    # echo "data hosts=$hosts"
-    WakeUpServers "data" $hosts
-    # sleep 10
+    # Stops some servers synchronously.
+    StopServers "data" $hosts 1
+
+    # Metadata server is not stopped.
+   
     exit 0
 fi
 

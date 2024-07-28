@@ -819,7 +819,7 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 
 	case DATASET_INFO:
 	{
-		dataset_info *struct_ = (dataset_info *)data_struct;
+		dataset_info *struct_ = (dataset_info *)data_struct;	
 
 		// Calculate the total size of the buffer storing the structure.
 		msg_size = sizeof(dataset_info);

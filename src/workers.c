@@ -60,6 +60,8 @@ ucp_address_t **local_addr;
 size_t *local_addr_len;
 
 extern int IMSS_THREAD_POOL;
+ int global_finish_threads = 0;
+ int global_server_fd_thread = -1;
 
 // const char *TESTX = "imss://lorem_text.txt$1";
 // const char *TESTX = "imss://wfc1.dat$1";
@@ -111,8 +113,7 @@ int ready(char *tmp_file_path, const char *msg)
 }
 
 // ucp_worker_h *global_ucp_worker;
-extern int global_finish_threads;
-extern int global_server_fd_thread;
+
 // if malleability_on = 1, new requests will be not handled and server will
 // respond with a "malleability" string.
 // int malleability_on = 0;
