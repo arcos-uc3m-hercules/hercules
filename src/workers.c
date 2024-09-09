@@ -60,18 +60,14 @@ ucp_address_t **local_addr;
 size_t *local_addr_len;
 
 extern int IMSS_THREAD_POOL;
- int global_finish_threads = 0;
- int global_server_fd_thread = -1;
-
-// const char *TESTX = "imss://lorem_text.txt$1";
-// const char *TESTX = "imss://wfc1.dat$1";
-// const char *TESTX = "p4x2.save/wfc1.dat";
+int global_finish_threads = 0;
+int global_server_fd_thread = -1;
 
 #define GARBAGE_COLLECTOR_PERIOD 120
 
 int ready(char *tmp_file_path, const char *msg)
 {
-	fprintf(stderr, "Trying to create the file %s with the message %s\n", tmp_file_path, msg);
+	// fprintf(stderr, "Trying to create the file %s with the message %s\n", tmp_file_path, msg);
 	char status[25];
 	char err_msg[132];
 	FILE *tmp_file; // = tmpfile(); // make the file pointer as temporary file.
@@ -185,10 +181,10 @@ void *srv_worker(void *th_argv)
 {
 
 	// Enable thread cancellation
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    
-    // Set the cancellation type to deferred
-    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
+	// Set the cancellation type to deferred
+	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 
 	ucp_ep_params_t ep_params;
 
@@ -228,7 +224,7 @@ void *srv_worker(void *th_argv)
 		t = clock();
 
 		// Register signal handler
-		//signal(SIGUSR1, handle_signal);
+		// signal(SIGUSR1, handle_signal);
 
 		do
 		{
@@ -347,8 +343,6 @@ void *srv_worker(void *th_argv)
 
 int srv_worker_helper(p_argv *arguments, const char *req)
 {
-	// slog_init("workers", SLOG_INFO, 1, 0, 1, 1, 1);
-	// std::unique_lock<std::mutex> lock(*mut2);
 
 	ucs_status_t status;
 	int ret = -1;
@@ -1142,8 +1136,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					// slog_live("msg_length=%lu", msg_length);
 					if (msg_length == 0)
 					{
-						perror("ERRIMSS_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
-						slog_error("ERRIMSS_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
+						perror("ERR_HERCULES_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
+						slog_error("ERR_HERCULES_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
 						free(buffer);
 						return -1;
 					}
@@ -1233,10 +1227,10 @@ void *stat_worker(void *th_argv)
 {
 
 	// Enable thread cancellation
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    
-    // Set the cancellation type to deferred
-    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
+	// Set the cancellation type to deferred
+	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 
 	ucp_am_handler_param_t param;
 	ucs_status_t status;
@@ -1260,7 +1254,7 @@ void *stat_worker(void *th_argv)
 		ucp_request_param_t recv_param;
 
 		// Register signal handler
-		//signal(SIGUSR1, handle_signal);
+		// signal(SIGUSR1, handle_signal);
 
 		ucs_status_t status;
 		/* Receive test string from server */
@@ -1878,7 +1872,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		{
 			// Follow a certain behavior if the received block was already stored.
 			slog_debug("[STAT WORKER] LOCAL DATASET_UPDATE %ld", block_size_recv);
-			switch (1) // TO CKECK!S
+			switch (1) // TO CKECK!
 			{
 			// Update where the blocks of a LOCAL dataset have been stored.
 			case LOCAL_DATASET_UPDATE:
@@ -2085,7 +2079,7 @@ void *srv_attached_dispatcher(void *th_argv)
 	context.conn_request = StsQueue.create();
 
 	// Register signal handler
-	//signal(SIGUSR1, handle_signal);
+	// signal(SIGUSR1, handle_signal);
 
 	for (;;)
 	{
@@ -2218,10 +2212,10 @@ void *srv_attached_dispatcher(void *th_argv)
 void *dispatcher(void *th_argv)
 {
 	// Enable thread cancellation
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    
-    // Set the cancellation type to deferred
-    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
+	// Set the cancellation type to deferred
+	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 
 	// Cast from generic pointer type to p_argv struct type pointer.
 	p_argv *arguments = (p_argv *)th_argv;

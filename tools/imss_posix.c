@@ -444,7 +444,6 @@ char *convert_path(const char *name)
 			break;
 		}
 	}
-	// fprintf(stderr, "path=%s, desplacements=%ld\n", path, desplacements);
 	// deletes initial slashes "/" from the path.
 	if (desplacements > 0)
 	{
@@ -453,21 +452,11 @@ char *convert_path(const char *name)
 	// add the URL to the new path.
 	strcat(new_path, "imss://");
 
-	// fprintf(stderr, "updated path=%s, desplacements=%ld\n", path, desplacements);
-	// if (!strncmp(path, "/", strlen("/")))
-	// {
-	// 	strcat(new_path, "imss:/");
-	// }
-	// else
-	// {
-	// 	strcat(new_path, "imss://");
-	// }
 	// add the path to the new_path, which has the URL prefix.
 	if (desplacements < len)
 	{
 		strcat(new_path, path);
 	}
-	// fprintf(stderr, "updated path=%s, desplacements=%ld, new_path=%s\n", path, desplacements, new_path);
 
 	return new_path;
 }
@@ -475,15 +464,9 @@ char *convert_path(const char *name)
 __attribute__((constructor)) void imss_posix_init(void)
 {
 	errno = 0;
-	// double init_time = 0.0, finish_time = 0.0;
-	// double time_taken = 0.0;
-	// init_time = clock();
-	// time(&init_time);
 
 	struct timeval start, end;
 	gettimeofday(&start, NULL);
-
-	// double begin = (tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
 
 	map_fd = map_fd_create();
 
@@ -530,6 +513,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// 	fprintf(stderr, "LOG PATH= %s\n", log_path); // this line raise an exception running a python app with threads.
 	// }
 	slog_init(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, rank);
+	printf("Log path = %s\n", log_path);
 	slog_info(",Time(msec), Comment, RetCode");
 
 	slog_debug(" -- HERCULES_MOUNT_POINT: %s", MOUNT_POINT);
@@ -607,28 +591,15 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_debug("IMSS EXIST=%d\n", is_alive(IMSS_ROOT));
 	slog_debug("[CLIENT %d] ready!\n", rank);
 
-	// fprintf(stderr, "[CLIENT %d] ready!\n", rank);
-
-	// sleep(10);
-
-	// finish_time = clock();
-	// time(&finish_time);
-	// time_taken = ((double)(finish_time - init_time)) / (CLOCKS_PER_SEC);
-
 	gettimeofday(&end, NULL);
 	long seconds, useconds;
 	double elapsed;
 	seconds = end.tv_sec - start.tv_sec;
 	useconds = end.tv_usec - start.tv_usec;
 	elapsed = seconds + useconds / 1e6;
-	// double end = (tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
 
-	// sleep(10);
-
-	// fprintf(stderr, "CLIENT_CONSTRUCTOR_TIME %.6f seconds\n", elapsed);
-	// fprintf(stderr, "Client started\n");
 	init = 1;
-	fprintf(stderr, "Active servers %d\n", num_active_storages);
+	fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
 
 int getConfiguration()
@@ -834,8 +805,6 @@ int getConfiguration()
 		strcpy(MOUNT_POINT, getenv("IMSS_MOUNT_POINT"));
 	}
 
-	// strcpy(IMSS_ROOT, "imss://");
-
 	if (getenv("IMSS_HOSTFILE") != NULL)
 	{
 		strcpy(IMSS_HOSTFILE, getenv("IMSS_HOSTFILE"));
@@ -845,7 +814,6 @@ int getConfiguration()
 	{
 		N_SERVERS = atoi(getenv("IMSS_N_SERVERS"));
 	}
-	// fprintf(stderr,"N_SERVERS=%d\n", N_SERVERS);
 
 	if (getenv("IMSS_SRV_PORT") != NULL)
 	{
@@ -915,7 +883,8 @@ void __attribute__((destructor)) run_me_last()
 	errno = 0;
 	// fprintf(stderr, "Calling 'run_me_last', pid=%d, rank=%d, release=%d\n", g_pid, rank, release);
 	slog_debug("Calling 'run_me_last', pid=%d, rank=%d, release=%d", g_pid, rank, release);
-	if (release == 1)
+	release--;
+	if (release == 0)
 	{
 		// clock_t t_s;
 		// double time_taken;
@@ -931,6 +900,7 @@ void __attribute__((destructor)) run_me_last()
 		//  sleep(30);
 	}
 	// fprintf(stderr, "End 'run_me_last', pid=%d, release=%d\n", g_pid, release);
+	sleep(30);
 	slog_debug("End 'run_me_last', pid=%d, release=%d", g_pid, release);
 }
 
@@ -1228,6 +1198,7 @@ pid_t fork(void)
 	else // parent process.
 	{
 		slog_debug("[POSIX] Parent process, pid=%d", pid);
+		release += 1;
 		// release = 0;
 		// fprintf(stderr, "[POSIX]. Fork parent status, pid=%d, rank=%d, log_path=%s, old_log_path=%s\n", pid, rank, log_path, old_log_path);
 		// slog_info("[POSIX]. Calling fork, rank=%d, log_path=%s, old_log_path=%s", rank, log_path, old_log_path);
@@ -1761,7 +1732,7 @@ int fclose(FILE *fp)
 	{
 		slog_debug("[POSIX]. Calling Hercules 'fclose', pathname=%s, fd=%d", pathname, fd);
 		ret = imss_close(pathname, fd);
-		// Upon successful completion, fclose() shall return 0; 
+		// Upon successful completion, fclose() shall return 0;
 		// otherwise, it shall return EOF and set errno to indicate the error.
 		// To control this situations, we check the value of "ret" before we return it.
 		// greater than 0.
@@ -1770,7 +1741,8 @@ int fclose(FILE *fp)
 			ret = 0;
 		}
 		// less than 0 (error).
-		if(ret < 0) {
+		if (ret < 0)
+		{
 			ret = EOF;
 		}
 

@@ -195,17 +195,7 @@ size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t m
 	request = (struct ucx_context *)ucp_tag_send_nbx(ep, ctx.buffer, msg_len, from, &send_param);
 	// request = (struct ucx_context *)ucp_tag_send_sync_nbx(ep, ctx.buffer, msg_len, from, &send_param);
 	status = ucx_wait(ucp_worker, request, "send", "data"); // original.
-	// if (request == NULL)
-	// {
-	// 	status = UCS_OK;
-	// }
-	// else
-	// {
-	// 	while (((status = ucp_request_check_status(request)) == UCS_INPROGRESS) && ep_timeout != 1)
-	// 	{
-	// 		ucp_worker_progress(ucp_worker);
-	// 	}
-	// }
+	
 	t = clock() - t;
 	double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 	// fprintf(stderr,"********** send data %lu time = %lf\n", msg_len, time_taken);

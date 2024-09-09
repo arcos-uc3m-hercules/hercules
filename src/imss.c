@@ -1008,11 +1008,11 @@ int32_t open_imss(char *imss_uri)
 		return -1;
 	}
 	}
-	slog_debug("[IMSS][open_imss] new_imss.info.num_active_storages=%ld", new_imss.info.num_active_storages);
+	slog_debug("[IMSS][open_imss] new_imss.info.num_active_storages=%ld, num_storages=%ld", new_imss.info.num_active_storages, new_imss.info.num_storages);
 
-	new_imss.conns.peer_addr = (ucp_address_t **)malloc(new_imss.info.num_active_storages * sizeof(ucp_address_t *));
-	new_imss.conns.eps = (ucp_ep_h *)malloc(new_imss.info.num_active_storages * sizeof(ucp_ep_h));
-	new_imss.conns.id = (uint32_t *)malloc(new_imss.info.num_active_storages * sizeof(uint32_t));
+	new_imss.conns.peer_addr = (ucp_address_t **)malloc(new_imss.info.num_storages * sizeof(ucp_address_t *));
+	new_imss.conns.eps = (ucp_ep_h *)malloc(new_imss.info.num_storages * sizeof(ucp_ep_h));
+	new_imss.conns.id = (uint32_t *)malloc(new_imss.info.num_storages * sizeof(uint32_t));
 	new_imss.conns.matching_server = -1;
 
 	status = ucp_worker_get_address(ucp_worker_data, &local_addr_data, &local_addr_len_data);
@@ -1025,15 +1025,15 @@ int32_t open_imss(char *imss_uri)
 	// fprintf(stderr, "NUM_DATA_SERVERS=%d\n", NUM_DATA_SERVERS);
 	// Connect to the requested IMSS.
 	// for (int32_t i = 0; i < new_imss.info.num_storages; i++)
-	for (int32_t i = 0; i < new_imss.info.num_active_storages; i++)
+	for (int32_t i = 0; i < new_imss.info.num_storages; i++)
 	{
 		// fprintf(stderr, "node=%s, status=%d\n", new_imss.info.ips[i], new_imss.info.status[i]);
-		if (new_imss.info.status[i] == 0)
-		{
-			// fprintf(stderr, "Skipping - i=%d - %s:%d, status=%d, num active storages=%d, total storages=%d\n", i, new_imss.info.ips[i], new_imss.info.conn_port, new_imss.info.status[i], new_imss.info.num_active_storages, new_imss.info.num_storages);
-			// num_down_storages++;
-			continue;
-		}
+		// if (new_imss.info.status[i] == 0)
+		// {
+		// 	// fprintf(stderr, "Skipping - i=%d - %s:%d, status=%d, num active storages=%d, total storages=%d\n", i, new_imss.info.ips[i], new_imss.info.conn_port, new_imss.info.status[i], new_imss.info.num_active_storages, new_imss.info.num_storages);
+		// 	// num_down_storages++;
+		// 	continue;
+		// }
 
 		int oob_sock;
 		size_t addr_len;
@@ -2411,6 +2411,7 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 			if (it >= 10)
 			{
 				fprintf(stderr, "[ERROR] Not find server for data id %d after %d iterations, %s\n", data_id, it, curr_dataset.uri_);
+				slog_error("[ERROR] Not find server for data id %d after %d iterations, %s\n", data_id, it, curr_dataset.uri_);
 				break;
 			}
 		}
@@ -3288,6 +3289,7 @@ size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_r
 		// slog_info("[IMSS][get_data] Request - '%s'", key_);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 		slog_debug("[get_ndata] Sending request %s", key_);
+		// fprintf(stderr,"[get_ndata] Sending request %s to server %d\n", key_, repl_servers[i]);
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -3552,7 +3554,8 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 		// 	size = curr_dataset.data_entity_size;
 
 		sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
-		slog_info("[IMSS][set_data] BLOCK %d SENT TO %d SERVER with Request: %s (%d)", data_id, n_server_, key_, size);
+		slog_info("[IMSS][set_data] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)", data_id, n_server_, key_, size);
+		// fprintf(stderr, "[IMSS][set_data] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)\n", data_id, n_server_, key_, size);
 		ep = curr_imss.conns.eps[n_server_];
 		// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id)
 		// in a dataset (curr_dataset.uri).
