@@ -207,52 +207,6 @@ if [[ "$SLURM" -eq "-1" ]]; then
 #    echo "Inconsistency found, SLURM option (-s 1) and hostfiles (-m, -d, -c) could not be used together. Set "-s 0" or remove hostfile options."
 fi
 
-# If slurm is not use, we hope user set three hostfiles (for metadata, data and clients).
-SERVERS_HOSTFILES_OPTION=0
-if [[ "$SLURM" -eq "0" && ! $STATUS = "stop" ]]; then
-    if [ ! -z "$DATA_SERVER_FILE" ]; then
-        echo "Data server file - $DATA_SERVER_FILE"
-        if [ ! -f "$DATA_SERVER_FILE" ]; then
-            echo "Data server file " $DATA_SERVER_FILE " does not exists"
-            exit 0
-        fi
-        # HOSTFILES_OPTION=1
-        SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
-    fi
-    if [ ! -z "$META_SERVER_FILE" ]; then
-        echo "Meta server file - $META_SERVER_FILE"
-        if [ ! -f "$META_SERVER_FILE" ]; then
-            echo "Meta server file " $META_SERVER_FILE " does not exists"
-            exit 0
-        fi
-        # SERVERS_HOSTFILES_OPTION=1
-        SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
-    fi
-    # client hostfile is optional.
-    if [ ! -z "$HERCULES_MPI_HOSTFILE_NAME" ]; then
-        echo "Client file - $HERCULES_MPI_HOSTFILE_NAME"
-        if [ ! -f "$HERCULES_MPI_HOSTFILE_NAME" ]; then
-            echo "Client deployment file " $HERCULES_MPI_HOSTFILE_NAME " does not exists"
-            exit 0
-        fi
-        # SERVERS_HOSTFILES_OPTION=1
-        #SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
-    fi
-    # if a server hostfile is missing. 
-    if [  ! "$SERVERS_HOSTFILES_OPTION" -eq "2" ]; then
-        echo "One or more hostfiles missing for the servers, please specify them with: -m <metadata_hostfile> -d <data_hostfile>"
-        exit 0
-    fi
-fi
-
-# if [ ! "$SLURM" -eq "-1" ]; then
-#     echo "SLURM - $SLURM"
-# fi
-
-# if [ ! -z "$STATUS" ]; then
-#     echo "STATUS - $STATUS"
-# fi
-
 if [ ! -z "$FILE" ]; then ## Checks if a configuration file was provided by the user.
     if [ ! -f "$FILE" ]; then ## Verify if that configuration file exists.
         echo "Configuration file " $FILE " does not exists"
@@ -307,6 +261,45 @@ fi
 if [ ! -e "$HERCULES_PATH" ]; then
     echo "$HERCULES_PATH does not exist, please check the configuration file: $FILE"
 fi
+
+# If slurm is not use, we hope user set three hostfiles (for metadata, data and clients).
+SERVERS_HOSTFILES_OPTION=0
+if [[ "$SLURM" -eq "0" && ! $STATUS = "stop" ]]; then
+    if [ ! -z "$DATA_SERVER_FILE" ]; then
+        echo "Data server file - $DATA_SERVER_FILE"
+        if [ ! -f "$DATA_SERVER_FILE" ]; then
+            echo "Data server file " $DATA_SERVER_FILE " does not exists"
+            exit 0
+        fi
+        # HOSTFILES_OPTION=1
+        SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
+    fi
+    if [ ! -z "$META_SERVER_FILE" ]; then
+        echo "Meta server file - $META_SERVER_FILE"
+        if [ ! -f "$META_SERVER_FILE" ]; then
+            echo "Meta server file " $META_SERVER_FILE " does not exists"
+            exit 0
+        fi
+        # SERVERS_HOSTFILES_OPTION=1
+        SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
+    fi
+    # client hostfile is optional.
+    if [ ! -z "$HERCULES_MPI_HOSTFILE_NAME" ]; then
+        echo "Client file - $HERCULES_MPI_HOSTFILE_NAME"
+        if [ ! -f "$HERCULES_MPI_HOSTFILE_NAME" ]; then
+            echo "Client deployment file " $HERCULES_MPI_HOSTFILE_NAME " does not exists"
+            exit 0
+        fi
+        # SERVERS_HOSTFILES_OPTION=1
+        #SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
+    fi
+    # if a server hostfile is missing. 
+    #if [  ! "$SERVERS_HOSTFILES_OPTION" -eq "2" ]; then
+    #    echo "One or more hostfiles missing for the servers, please specify them with: -m <metadata_hostfile> -d <data_hostfile>"
+    #    exit 0
+    #fi
+fi
+
 
 ## The next line returns 1 if hercules has been loaded by using spack, 0 in other case.
 IS_SPACK=$([ -z $(whereis '\<hercules\>' | awk '{print $2}') ] && echo 0 || echo 1)
@@ -522,19 +515,26 @@ fi
 ## Checks if a metadata hostfile was not defined.
 if [[ -z $META_SERVER_FILE ]];
 then
-    ## Error if slurm is not being used and no metadata hostfile was defined.
+    ## If slurm is not being used and no metadata hostfile was defined
+    ## we checked the configuration file path.
     if [[ "$SLURM" -eq "0" ]]; then
-        echo "[Error] Metadata server file not specified, please set one using -m <filename> flag."
-        exit 1
+        ## If the path specified on the configuration file does not exist 
+        ## there is an error.
+        if [[ -z $HERCULES_METADATA_HOSTFILE ]];
+        then
+            echo "[Error] Metadata server file not specified, please set one using -m <filename> flag."
+            exit 1
+        fi
+    else
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[+] Metadata server file not specified, getting information from slurm."
+        fi
+        ## If a metadata file was not defined and we have slurm's nodes allocated,
+        ## then we create a file which contains the hostnames of the nodes that
+        ## will be used to deploy the determinate set of metadata servers.
+        #readarray -t meta_hosts < <(head -n $HERCULES_NUM_METADATA hostfile)
+        head -n "$HERCULES_NUM_METADATA" hostfile > "$HERCULES_METADATA_HOSTFILE"
     fi
-    if [[ "$VERBOSE" -eq "1" ]]; then
-        echo "[+] Metadata server file not specified, getting information from slurm."
-    fi
-    ## If a metadata file was not defined and we have slurm's nodes allocated,
-    ## then we create a file which contains the hostnames of the nodes that
-    ## will be used to deploy the determinate set of metadata servers.
-    #readarray -t meta_hosts < <(head -n $HERCULES_NUM_METADATA hostfile)
-    head -n "$HERCULES_NUM_METADATA" hostfile > "$HERCULES_METADATA_HOSTFILE"
     ## To create an array with the meta nodes.
     #printf "%s\n" ${meta_hosts[@]} > "$META_SERVER_FILE"
     readarray -t meta_hosts < "$HERCULES_METADATA_HOSTFILE"
@@ -593,19 +593,26 @@ fi
 ## To run the data servers.
 if [[ -z $DATA_SERVER_FILE ]];
 then
-    ## Error if slurm is not being used and no data hostfile was defined.
+    ## If slurm is not being used and no metadata hostfile was defined
+    ## we checked the configuration file path.
     if [[ "$SLURM" -eq "0" ]]; then
-        echo "[Error] Data server file not specified, please set one using -d <filename> flag."
-        exit 1
+        ## If the path specified on the configuration file does not exist 
+        ## there is an error.
+        if [[ -z $HERCULES_DATA_HOSTFILE ]];
+        then
+            echo "[Error] Data server file not specified, please set one using -d <filename> flag."
+            exit 1
+        fi
+    else
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[+] Data server file not specified, getting information from slurm."
+        fi
+        ## If a data file was not defined and we have slurm's nodes allocated,
+        ## then we create a file which contains the hostnames of the nodes that
+        ## will be used to deploy the determinate set of data servers.
+        # readarray -t data_hosts < <(tail -n +$((HERCULES_NUM_METADATA+1)) hostfile | head -n $HERCULES_NUM_DATA)
+        tail -n +$((HERCULES_NUM_METADATA+1)) hostfile | head -n "$HERCULES_NUM_DATA" > "$HERCULES_DATA_HOSTFILE"
     fi
-    if [[ "$VERBOSE" -eq "1" ]]; then
-        echo "[+] Data server file not specified, getting information from slurm."
-    fi
-    ## If a data file was not defined and we have slurm's nodes allocated,
-    ## then we create a file which contains the hostnames of the nodes that
-    ## will be used to deploy the determinate set of data servers.
-    # readarray -t data_hosts < <(tail -n +$((HERCULES_NUM_METADATA+1)) hostfile | head -n $HERCULES_NUM_DATA)
-    tail -n +$((HERCULES_NUM_METADATA+1)) hostfile | head -n "$HERCULES_NUM_DATA" > "$HERCULES_DATA_HOSTFILE"
     ## To create an array with the data nodes.
     # printf "%s\n" ${data_hosts[@]} > "$DATA_SERVER_FILE"
     readarray -t data_hosts < "$HERCULES_DATA_HOSTFILE"

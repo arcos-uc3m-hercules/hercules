@@ -6,6 +6,7 @@
 #include "flags.h"
 #include "resolvepath.h"
 #include "tempname.h"
+#include "shared_memory.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -315,9 +316,14 @@ char *checkHerculesPath(const char *pathname)
 
 	// if (!strncmp(pathname, MOUNT_POINT, strlen(MOUNT_POINT) - 1)) // error when  pathname=/mnt/hercules/data/unet3d and MOUNT_POINT=/mnt/hercules,
 	// if (!strncmp(pathname, MOUNT_POINT, strlen(pathname) - 1))
-	if (!strncmp(pathname, MOUNT_POINT, MAX(strlen(pathname), strlen(MOUNT_POINT)) - 1))
+	size_t pathname_len = strlen(pathname);
+	size_t max_lenght = MAX(pathname_len, strlen(MOUNT_POINT));
+	if(pathname[pathname_len-1] == '/') {
+		max_lenght--;
+	}
+	if (!strncmp(pathname, MOUNT_POINT, max_lenght))
 	{
-		// slog_debug("[HERCULES][checkHerculesPath] pathname=%s, MOUNT_POINT=%s, Success", pathname, MOUNT_POINT);
+		slog_debug("[HERCULES][checkHerculesPath] pathname=%s, MOUNT_POINT=%s, Success", pathname, MOUNT_POINT);
 		// new_path = calloc(strlen("Success"), sizeof(char));
 		new_path = calloc(strlen("imss://"), sizeof(char) + 1);
 		// strcpy(new_path, "Success");
@@ -541,6 +547,9 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_debug(" -- RELEASE: %d", release);
 
 	fprintf(stderr, " -- POLICY: %s\n", POLICY);
+
+	// createSM(1000);
+
 	// Metadata server
 	// if (release == 1)
 	if (stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank) == -1)
@@ -904,7 +913,6 @@ void __attribute__((destructor)) run_me_last()
 		//  sleep(30);
 	}
 	// fprintf(stderr, "End 'run_me_last', pid=%d, release=%d\n", g_pid, release);
-	sleep(30);
 	slog_debug("End 'run_me_last', pid=%d, release=%d", g_pid, release);
 }
 
