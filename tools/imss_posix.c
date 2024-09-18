@@ -61,7 +61,8 @@ uint64_t META_BUFFSIZE = 16;  // In GB
 uint64_t IMSS_BLKSIZE = 1024; // In KB
 uint64_t IMSS_BUFFSIZE = 2;	  // In GB
 uint64_t IMSS_DATA_BSIZE;	  // In Bytes.
-int32_t REPL_FACTOR = 1;	  // Default none
+int32_t REPL_FACTOR = NONE;	  // Default none
+int32_t REPL_TYPE = ASYNC;	  // Default async
 int32_t IMSS_DEBUG_FILE = 0;
 int32_t IMSS_DEBUG_SCREEN = 0;
 int IMSS_DEBUG_LEVEL = SLOG_FATAL;
@@ -543,6 +544,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_debug(" -- UPPER_BOUND_SERVERS: %d", UPPER_BOUND_SERVERS);
 	slog_debug(" -- LOWER_BOUND_SERVERS: %d", LOWER_BOUND_SERVERS);
 	slog_debug(" -- REPL_FACTOR: %d", REPL_FACTOR);
+	slog_debug(" -- REPL_TYPE: %d", REPL_TYPE);
 	slog_debug(" -- POLICY: %s", POLICY);
 	slog_debug(" -- RELEASE: %d", release);
 
@@ -742,6 +744,9 @@ int getConfiguration()
 
 	if (cfg_get(cfg, "REPL_FACTOR"))
 		REPL_FACTOR = atoi(cfg_get(cfg, "REPL_FACTOR"));
+
+	if (cfg_get(cfg, "REPL_TYPE"))
+		REPL_TYPE = atoi(cfg_get(cfg, "REPL_TYPE"));
 
 	if (cfg_get(cfg, "POLICY"))
 		POLICY = cfg_get(cfg, "POLICY");

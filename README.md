@@ -127,7 +127,7 @@ Here we briefly explain each field of the configuration file.
 > BLOCK_SIZE = 512
 
 ### Used mount point in the client side
-> MOUNT_POINT = /mnt/imss/
+> MOUNT_POINT = /mnt/hercules/
 
 ### Where the Hercules project is
 > HERCULES_PATH = /home/hercules
@@ -150,6 +150,9 @@ Here we briefly explain each field of the configuration file.
 ### Total number of clients per node
 > NUM_CLIENTS_PER_NODE = 1
 
+### 1: client process will share resources with data nodes
+> ATTACHED = 0
+
 ### 1: enables malleability functions
 > MALLEABILITY = 0      
 > UPPER_BOUND_MALLEABILITY = 0    
@@ -158,18 +161,26 @@ Here we briefly explain each field of the configuration file.
 ### File containing a list of nodes serving as data nodes
 > DATA_HOSTFILE = /home/hercules/bash/data_hostfile
 
-### File path of the persistence metadata
-> METADA_PERSISTENCE_FILE = /home/hercules/bash/metadata
-
 ### Number of threads attending data requests
 > THREAD_POOL = 1
 
-### Maximum size used by the data nodes
-> STORAGE_SIZE = 0 # No limit
+### Maximum size in GB used by the data nodes (0 = No limit)
+> STORAGE_SIZE = 1
 
 ### File containing a list of nodes serving as metadata nodes
 > METADATA_HOSTFILE = /home/hercules/bash/meta_hostfile
 
+### Replication factor (1, 2 or 3)
+> REPL_FACTOR = 1
+
+### Replication type
+- 0: SYNC (all replicas are written synchronously)
+- 1: ASYNC (first replica is written synchronously, the rest asynchronously)
+> REPL_TYPE = 1
+
 ### Debug mode (none or all)
 > DEBUG_LEVEL = all
+
+### Data distribution policy (RR, BUCKETS, HASH, CRC16, CRC64, or LOCAL)
+> POLICY = RR
 </details>

@@ -17,6 +17,10 @@
 #define DRM 2
 #define TRM 3
 
+// Replication type
+#define SYNC 0	// all replicas are written synchronously
+#define ASYNC 1	// first replica is written synchronously, the rest asynchronously
+
 // Type of IMSS instance to be deployed.
 #define DETACHED 0
 #define ATTACHED 1
@@ -148,6 +152,8 @@ typedef struct
 	int32_t data_entity_size;
 	// Number of replications performed along the corresponding IMSS.
 	int32_t repl_factor;
+	// Type of replication: sync or async.
+	int32_t repl_type;
 	// IMSS descriptor managing the dataset in the current client session.
 	int32_t imss_d;
 	// Connection to the IMSS server running in the same machine.
@@ -333,12 +339,13 @@ policy         - Data distribution policy assigned to the concerned dataset: RR,
 num_data_elem  - Number of data blocks conforming the concerned dataset.
 data_elem_size - Size in KILOBYTES of each data block conforming the dataset.
 repl_factor    - Replication factor assigned to the concerned dataset: NONE, DRM or TRM.
+repl_type      - Replication type assigned to the concerned dataset: SYNC or ASYNC.
 link           - It is a link.
 
 RETURNS:	> 0 - Number identifying the created dataset among the client's session.
 -1 - In case of error.
 	 */
-	int32_t create_dataset(char *dataset_uri, char *policy, int32_t num_data_elem, int32_t data_elem_size, int32_t repl_factor, int32_t n_servers, char *link, int opened);
+	int32_t create_dataset(char *dataset_uri, char *policy, int32_t num_data_elem, int32_t data_elem_size, int32_t repl_factor, int32_t repl_type, int32_t n_servers, char *link, int opened);
 
 	/* Method creating the required resources in order to READ and WRITE an existing dataset.
 

@@ -1412,6 +1412,7 @@ int32_t create_dataset(char *dataset_uri,
 					   int32_t num_data_elem,
 					   int32_t data_elem_size,
 					   int32_t repl_factor,
+					   int32_t repl_type,
 					   int32_t n_servers,
 					   char *link,
 					   int opened)
@@ -1432,6 +1433,11 @@ int32_t create_dataset(char *dataset_uri,
 	if ((repl_factor < NONE) || (repl_factor > TRM))
 	{
 		slog_fatal("HERCULES_ERR_CRTDATASET_BADREPLFACTOR");
+		return -EINVAL;
+	}
+	if ((repl_type < SYNC) || (repl_type > ASYNC))
+	{
+		slog_fatal("HERCULES_ERR_CRTDATASET_BADREPLTYPE");
 		return -EINVAL;
 	}
 
@@ -1525,6 +1531,7 @@ int32_t create_dataset(char *dataset_uri,
 	// }
 
 	new_dataset.repl_factor = (repl_factor < new_dataset.n_servers) ? (repl_factor) : (new_dataset.n_servers);
+	new_dataset.repl_type = repl_type;
 
 	// new_dataset.initial_node = 0;
 
@@ -3155,12 +3162,18 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 		slog_debug("[IMSS][get_data] Request - '%s' to server %ld", key_, repl_servers[i]);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			slog_error("HERCULES_ERR_RLSIMSS_SENDADDR");
-			perror("HERCULES_ERR_RLSIMSS_SENDADDR");
-			return -1;
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0) {
+			// try the next replica
+			if ( i != (curr_dataset.repl_factor - 1) ) {
+				continue;
+			}
+			// all previous replicas failed, and now the last one fails too
+			else {
+				pthread_mutex_unlock(&lock_network);
+				slog_error("HERCULES_ERR_RLSIMSS_SENDADDR");
+				perror("HERCULES_ERR_RLSIMSS_SENDADDR");
+				return -1;
+			}
 		}
 
 		// slog_debug("[IMSS] Request has been sent - '%s' to server %ld", key_, repl_servers[i]);
@@ -3291,14 +3304,21 @@ size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_r
 		// slog_info("[IMSS][get_data] Request - '%s'", key_);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 		slog_debug("[get_ndata] Sending request %s", key_);
-		// fprintf(stderr,"[get_ndata] Sending request %s to server %d\n", key_, repl_servers[i]);
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RLSIMSS_SENDADDR");
-			return -1;
-		}
 
+		// fprintf(stderr,"[get_ndata] Sending request %s to server %d\n", key_, repl_servers[i]);
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0) {
+			// try the next replica
+			if ( i != (curr_dataset.repl_factor - 1) ) {
+				continue;
+			}
+			// all previous replicas failed, and now the last one fails too
+			else {
+				pthread_mutex_unlock(&lock_network);
+				perror("ERRIMSS_RLSIMSS_SENDADDR");
+				return -1;
+			}
+		}
+		
 		size_t msg_length = 0;
 		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
 		slog_info("[IMSS][get_ndata] Receiving data, msg_length=%lu", msg_length);
@@ -3395,12 +3415,19 @@ size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t 
 		// sprintf(key_, "GET %lu %ld %s$%d %zd", 0l, offset, curr_dataset.original_name, data_id, to_read);
 		// slog_info("[IMSS][get_data] Request - '%s'", key_);
 		ep = curr_imss.conns.eps[repl_servers[i]];
+
 		slog_debug("[get_ndata] Sending request %s", key_);
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RLSIMSS_SENDADDR");
-			return 0;
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0) {
+			// try the next replica
+			if ( i != (curr_dataset.repl_factor - 1) ) {
+				continue;
+			}
+			// all previous replicas failed, and now the last one fails too
+			else {
+				pthread_mutex_unlock(&lock_network);
+				perror("ERRIMSS_RLSIMSS_SENDADDR");
+				return 0;
+			}
 		}
 
 		size_t msg_length = 0;
@@ -3456,6 +3483,7 @@ size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t 
  */
 int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset)
 {
+	int ret = 0;
 	int32_t n_server;
 
 	// stat_imss_info(curr_imss.info.uri_, &curr_imss.info);
@@ -3508,8 +3536,17 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 			exit(-1);
 		}
 
-		// send the data to the data server of the current dataset.
-		if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+		// the first copy will always be written synchronously
+		if (i == 0 || curr_dataset.repl_type == SYNC) {
+			// send the data to the data server of the current dataset.
+			ret = send_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		// the additional replicas can be written asynchronously
+		else {
+			ret = isend_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		
+		if (ret == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
@@ -3597,6 +3634,7 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 // Method storing a specific data element.
 int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages)
 {
+	int ret = 0;
 	int32_t n_server;
 	clock_t t;
 	// size_t (*const send_choose_stream)(ucp_worker_h ucp_worker, ucp_ep_h ep, const char *msg, size_t msg_length) = (IMSS_WRITE_ASYNC == 1) ? send_istream : send_data;
@@ -3650,7 +3688,17 @@ int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, s
 
 		// slog_debug("[IMSS][set_data] send_data(curr_imss.conns.id[%ld]:%ld, key_:%s, REQUEST_SIZE:%d)", n_server_, curr_imss.conns.id[n_server_], key_, REQUEST_SIZE);
 
-		if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+		// the first copy will always be written synchronously
+		if (i == 0 || curr_dataset.repl_type == SYNC) {
+			// send the data to the data server of the current dataset.
+			ret = send_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		// the additional replicas can be written asynchronously
+		else {
+			ret = isend_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		
+		if (ret == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("ERR_HERCULES_SET_DATA_MALL_SEND_DATA");
@@ -3679,6 +3727,7 @@ set_ndata(int32_t dataset_id,
 		  char *buffer,
 		  uint32_t size)
 {
+	int ret = 0;
 	int32_t n_server;
 	// Server containing the corresponding data to be written.
 	if ((n_server = get_data_location(dataset_id, data_id, SET)) == -1)
@@ -3710,8 +3759,17 @@ set_ndata(int32_t dataset_id,
 			return -1;
 		}
 
-		// Send read request message specifying the block data.
-		if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+		// the first copy will always be written synchronously
+		if (i == 0 || curr_dataset.repl_type == SYNC) {
+			// Send read request message specifying the block data.
+			ret = send_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		// the additional replicas can be written asynchronously
+		else {
+			ret = isend_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		
+		if (ret == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("ERR_HERCULES_SET_NDATA_SEND_DATA");
