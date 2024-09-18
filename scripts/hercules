@@ -1,117 +1,118 @@
 #!/bin/bash
-## Last modification: 18/12/2023
+## Last modification: 06/09/2024
+## Genaro Sanchez-Gallegos
 # set -x
 #######################################################
 #######################################################
-## To stop all servers.
+## To stop servers.
 StopServers() {
-    NAME=$1
-    hosts=$2
-    WAIT_SERVERS=$3
+    NAME=$1 # Server type ("metadata" or "data").
+    hosts=$2 # List of hostnames.
 
-    awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data2stop_hostfile > data2stop_index
-    readarray -t data2stop_index_arr < data2stop_index
+    # Operation to be apply to the server. 
+    # 0 indicates the server will be killed, and 
+    # 1 indicates the sever will be suspend 
+    # (e.g., Hercules shrink when malleability is enabled).
+    OPERATION=$3
 
-    length=${#hosts[@]}
-    reversed=()
-    for (( i=$length-1; i>=0; i-- )); do
-        reversed+=("${hosts[$i]}")
-    done
-
-
-    if [[ $NAME = "data" ]]; then
-        for index in "${data2stop_index_arr[@]}"
-        do
-            FILE="./tmp/d-hercules-$((index-1))-down"
-            if [ -f $FILE ]; then
-                echo "Temporal file $FILE has been deleted"
-                rm $FILE
-            else 
-                echo "Temporal file $FILE does not exist"
-            fi
-        done
+    echo "# Hercules: Stopping $NAME servers in ${hosts[@]}"
+    if [[ "$VERBOSE" -eq "1" ]]; then
+        echo "# Operation = $OPERATION"
     fi
-
-    # echo "# Hercules: Stopping $NAME servers in $hosts"
-    echo "# Hercules: Stopping $length $NAME servers in ${reversed[@]}"
-    # i=0
-    # for node in "${hosts[@]}"
-    for node in "${reversed[@]}"
+    for node in "${hosts[@]}"
     do
-        echo "ssh $node pkill hercules_server"
-        # Move blocks from this server to another.
-        # ( ssh $node "pkill -SIGUSR2 hercules_server" ) 
+        # Set the action to be doing by the servers when they received the pkill signal.
+        ( ssh $node  "echo $OPERATION > /tmp/hercules_pkill_operation" )
         # Kill threads and finish the server.
-        ##  ( ssh $node "export NUMBER_ACTIVE_STORAGE_SERVERS=5" )
         ( ssh $node "pkill -SIGUSR1 hercules_server" )
-        # i=$((i+1))
     done
-    # WaitForServersDown "data" "d" "$i" ${reversed[@]}
-    if [[ "$WAIT_SERVERS" -eq "1" ]]; then
-        WaitForServersDown "data" "d" ${reversed[@]}
-    else
-        echo "No waiting for data servers to be finished."
-    fi
 }
 
-## To wait until all the servers are down.
-WaitForServersDown() {
+WakeUpServers() {
+    NAME=$1 # Server type ("meta" or "data").
+    hosts=$2 # List of hostnames.
 
-    readarray -t data2stop_index_arr < data2stop_index
+    # Wake up desired servers.
+    for node in "${hosts[@]}"
+    do
+        ### echo "ssh $node pkill hercules_server"
+        ( ssh $node "pkill -SIGUSR2 hercules_server" )
+    done
 
+    awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data2start_hostfile > data2up_index
+    WaitForServers "data" "d" "up" ${hosts[@]}    
+}
+
+## To wait until all the servers are up.
+WaitForServers() {
+
+    # i=0
     SERVER_ID=0
+
     # get server name by arguments.
     SERVER_NAME=$1
     shift
     # get server type by arguments.
     SERVER_TYPE=$1
     shift
-    # get server id by arguments.
-    # SERVER_ID=$1
-    # shift
-    # get list of hostnames where to stop servers.
+    # get the action type.
+    ACTION=$1
+    shift
     hosts=("$@")
+
+    file_name="data2${ACTION}_index"
+    readarray -t server_index_arr < $file_name #data2start_index
+    
     # echo "hostnames=${hosts[@]}"
     ATTEMPS=1000
     for node in "${hosts[@]}"
     do
-        # SERVER_ID=$i
-        # COMMAND="$HERCULES_BASH_PATH/check-servers.sh $SERVER_TYPE $SERVER_ID down"
-        # echo "[+] Running comprobation $SERVER_ID in $node... $COMMAND"
-        # # if slurm is not available.
-        # if [[ "$SLURM" -eq "0" ]]; then
-        #     if [ -z "$(ssh-keygen -F $node)" ]; then
-        #         ssh-keyscan -H $node >> ~/.ssh/known_hosts
-        #     fi
-        #     ssh $node "$COMMAND"
-        # else # if slurm is available.
-        #     srun --exclusive --export=ALL -N 1 -n 1 -w $node $COMMAND
-        # fi
-        # # ret=$?
-        # # if [ "$ret" -gt 0 ]; then
-        # #     echo "[Error: $ret] It has not been possible to run a $SERVER_NAME server on $node, please verify the configuration file and logs."
-        # #     # StopServers $SERVER_NAME $hosts
-        # #     exit 1
-        # # fi
-        # echo "[OK] $SERVER_NAME $SERVER_ID server has been stopped in node $node"
-        # i=$((i+1))
-        # SERVER_NUMBER=$SERVER_ID
-        ACTION="down"
-        FILE="./tmp/$SERVER_TYPE-hercules-$((data2stop_index_arr[$SERVER_ID]-1))-$ACTION"
+        # FILE="/tmp/$SERVER_TYPE-hercules-$((server_index_arr[$SERVER_ID]-1))-$ACTION"
+        SERVER_NUMBER=$((server_index_arr[$SERVER_ID]-1))
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "# Hercules: $ACTION $SERVER_NAME server $SERVER_NUMBER on $node"
+        fi
+        COMMAND="$HERCULES_BASH_PATH/check-servers.sh $SERVER_TYPE $SERVER_NUMBER $ACTION"
+        
+        ### echo "[+] Running comprobation in $node... $COMMAND"
+        # if slurm is not available.
+        if [[ "$SLURM" -eq "0" ]]; then
+            if [ -z "$(ssh-keygen -F $node)" ]; then
+                ssh-keyscan -H $node >> ~/.ssh/known_hosts
+            fi
+            if [[ "$VERBOSE" -eq "1" ]]; then
+                echo "Running ssh $node $COMMAND"
+            fi
+            ret=$(ssh $node "$COMMAND")
+            if [[ "$VERBOSE" -eq "1" ]]; then
+                echo "Return code $ret"
+            fi
+        else # if slurm is available.
+            ret=$(srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node $COMMAND)
+        fi
+        ret=$?
+        if [ "$ret" -gt 0 ]; then
+            echo "[Error: $ret] It has not been possible to "${ACTION}" a $SERVER_NAME server on $node, please verify the configuration file and logs."
+            #StopServers $SERVER_NAME $hosts 1
+            exit 1
+        fi
         ## Checks if the file exists.
-        until [ -f $FILE ]; do
-            # echo "Waiting for $FILE, attemp $i"
-            i=$(($i + 1))
-            ## Waits "attemps" times, then an error is return.
-            if [ $i -gt $ATTEMPS ]; then
-                exit 1
-            fi
-            t=$(($i % 5))
-            if [ $t -eq 0 ]; then
-                echo "[+][$HOSTNAME] Waiting for server $((data2stop_index_arr[$SERVER_ID]-1)), $FILE"
-            fi
-            sleep 1
-        done
+        ## until [ -f $FILE ]; do
+        # ret=0
+        # until [ "$ret" -gt 0 ]; do
+            
+        #     # echo "Waiting for $FILE, attemp $i"
+        #     i=$(($i + 1))
+        #     ## Waits "attemps" times, then an error is return.
+        #     if [ $i -gt $ATTEMPS ]; then
+        #         exit 1
+        #     fi
+        #     t=$(($i % 5))
+        #     if [ $t -eq 0 ]; then
+        #         echo "[+][$HOSTNAME] Waiting for server $((server_index_arr[$SERVER_ID]-1)), $FILE"
+        #     fi
+        #     sleep 1
+        # done
 
         # ## Checks if the server was deploy correctly.
         # STATUS=$(cat $FILE | grep "STATUS" | awk '{print $3}')
@@ -120,41 +121,9 @@ WaitForServersDown() {
         #     exit 1
         # fi
         SERVER_ID=$((SERVER_ID+1))
-    done
-}
-
-## To wait until all the servers are up.
-WaitForServers() {
-    i=0
-    # get server name by arguments.
-    SERVER_NAME=$1
-    shift
-    # get server type by arguments.
-    SERVER_TYPE=$1
-    shift
-    hosts=("$@")
-    # echo "hostnames=${hosts[@]}"
-    for node in "${hosts[@]}"
-    do
-        COMMAND="$HERCULES_BASH_PATH/check-servers.sh $SERVER_TYPE $i start"
-        echo "[+] Running comprobation $i in $node... $COMMAND"
-        # if slurm is not available.
-        if [[ "$SLURM" -eq "0" ]]; then
-            if [ -z "$(ssh-keygen -F $node)" ]; then
-                ssh-keyscan -H $node >> ~/.ssh/known_hosts
-            fi
-            ssh $node "$COMMAND"
-        else # if slurm is available.
-            srun --exclusive --export=ALL -N 1 -n 1 -w $node $COMMAND
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[OK] $SERVER_NAME $i server running in $node"
         fi
-        ret=$?
-        if [ "$ret" -gt 0 ]; then
-            echo "[Error: $ret] It has not been possible to run a $SERVER_NAME server on $node, please verify the configuration file and logs."
-            StopServers $SERVER_NAME $hosts
-            exit 1
-        fi
-        echo "[OK] $SERVER_NAME $i server running in $node"
-        i=$((i+1))
     done
 }
 
@@ -165,8 +134,11 @@ if [[ $STATUS != "stop" && $STATUS != "start" && $STATUS != "remove" && $STATUS 
     exit 1
 fi
 
+WAIT_SERVERS=1
+VERBOSE=0
+
 ## Check if user pass arguments.
-while getopts :m:d:o:c:s:f:k:w: flag
+while getopts :m:d:o:c:s:f:k:w:V: flag
 do
     # echo "Entra en getopts"
     case "${flag}" in
@@ -180,9 +152,12 @@ do
         # 1 to indicate that the metadata server should not be stopped.
         k) KEEP_METADATA_ALIVE_OPTION=1;;
         w) WAIT_SERVERS=${OPTARG};;
+        V) VERBOSE=${OPTARG};;
     esac
 done
 
+echo "Wait servers = "$WAIT_SERVERS
+#exit 0
 
 SLURM=-1
 # If slurm option is set by the user (optional).
@@ -232,52 +207,6 @@ if [[ "$SLURM" -eq "-1" ]]; then
 #    echo "Inconsistency found, SLURM option (-s 1) and hostfiles (-m, -d, -c) could not be used together. Set "-s 0" or remove hostfile options."
 fi
 
-# If slurm is not use, we hope user set three hostfiles (for metadata, data and clients).
-SERVERS_HOSTFILES_OPTION=0
-if [[ "$SLURM" -eq "0" && ! $STATUS = "stop" ]]; then
-    if [ ! -z "$DATA_SERVER_FILE" ]; then
-        echo "Data server file - $DATA_SERVER_FILE"
-        if [ ! -f "$DATA_SERVER_FILE" ]; then
-            echo "Data server file " $DATA_SERVER_FILE " does not exists"
-            exit 0
-        fi
-        # HOSTFILES_OPTION=1
-        SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
-    fi
-    if [ ! -z "$META_SERVER_FILE" ]; then
-        echo "Meta server file - $META_SERVER_FILE"
-        if [ ! -f "$META_SERVER_FILE" ]; then
-            echo "Meta server file " $META_SERVER_FILE " does not exists"
-            exit 0
-        fi
-        # SERVERS_HOSTFILES_OPTION=1
-        SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
-    fi
-    # client hostfile is optional.
-    if [ ! -z "$HERCULES_MPI_HOSTFILE_NAME" ]; then
-        echo "Client file - $HERCULES_MPI_HOSTFILE_NAME"
-        if [ ! -f "$HERCULES_MPI_HOSTFILE_NAME" ]; then
-            echo "Client deployment file " $HERCULES_MPI_HOSTFILE_NAME " does not exists"
-            exit 0
-        fi
-        # SERVERS_HOSTFILES_OPTION=1
-        #SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
-    fi
-    # if a server hostfile is missing. 
-    if [  ! "$SERVERS_HOSTFILES_OPTION" -eq "2" ]; then
-        echo "One or more hostfiles missing for the servers, please specify them with: -m <metadata_hostfile> -d <data_hostfile>"
-        exit 0
-    fi
-fi
-
-if [ ! "$SLURM" -eq "-1" ]; then
-    echo "SLURM - $SLURM"
-fi
-
-if [ ! -z "$STATUS" ]; then
-    echo "STATUS - $STATUS"
-fi
-
 if [ ! -z "$FILE" ]; then ## Checks if a configuration file was provided by the user.
     if [ ! -f "$FILE" ]; then ## Verify if that configuration file exists.
         echo "Configuration file " $FILE " does not exists"
@@ -314,11 +243,13 @@ if [ -z "$FILE" ]; then
     exit 1
 fi
 
-echo "Reading configuration from $FILE"
+if [[ "$VERBOSE" -eq "1" ]]; then
+    echo "Reading configuration from $FILE"
+fi
 export HERCULES_CONF="$FILE"
 
 
-## checks if a configuration file was set.
+## Checks if a configuration file was set.
 if [ -z "$FILE" ]; then
     ## get current directory has project path.
     HERCULES_PATH=$(dirname `pwd`)
@@ -331,9 +262,53 @@ if [ ! -e "$HERCULES_PATH" ]; then
     echo "$HERCULES_PATH does not exist, please check the configuration file: $FILE"
 fi
 
+# If slurm is not use, we hope user set three hostfiles (for metadata, data and clients).
+SERVERS_HOSTFILES_OPTION=0
+if [[ "$SLURM" -eq "0" && ! $STATUS = "stop" ]]; then
+    if [ ! -z "$DATA_SERVER_FILE" ]; then
+        echo "Data server file - $DATA_SERVER_FILE"
+        if [ ! -f "$DATA_SERVER_FILE" ]; then
+            echo "Data server file " $DATA_SERVER_FILE " does not exists"
+            exit 0
+        fi
+        # HOSTFILES_OPTION=1
+        SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
+    fi
+    if [ ! -z "$META_SERVER_FILE" ]; then
+        echo "Meta server file - $META_SERVER_FILE"
+        if [ ! -f "$META_SERVER_FILE" ]; then
+            echo "Meta server file " $META_SERVER_FILE " does not exists"
+            exit 0
+        fi
+        # SERVERS_HOSTFILES_OPTION=1
+        SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
+    fi
+    # client hostfile is optional.
+    if [ ! -z "$HERCULES_MPI_HOSTFILE_NAME" ]; then
+        echo "Client file - $HERCULES_MPI_HOSTFILE_NAME"
+        if [ ! -f "$HERCULES_MPI_HOSTFILE_NAME" ]; then
+            echo "Client deployment file " $HERCULES_MPI_HOSTFILE_NAME " does not exists"
+            exit 0
+        fi
+        # SERVERS_HOSTFILES_OPTION=1
+        #SERVERS_HOSTFILES_OPTION=$(($SERVERS_HOSTFILES_OPTION + 1))
+    fi
+    # if a server hostfile is missing. 
+    #if [  ! "$SERVERS_HOSTFILES_OPTION" -eq "2" ]; then
+    #    echo "One or more hostfiles missing for the servers, please specify them with: -m <metadata_hostfile> -d <data_hostfile>"
+    #    exit 0
+    #fi
+fi
+
+
+## The next line returns 1 if hercules has been loaded by using spack, 0 in other case.
+IS_SPACK=$([ -z $(whereis '\<hercules\>' | awk '{print $2}') ] && echo 0 || echo 1)
+#echo "IS_SPACK=$IS_SPACK"
 # Paths may vary between spack and git.
-if [[ -f $HERCULES_PATH"/bin/hercules_server" ]]; then
-    echo "Hercules has been loaded with Spack"
+if [[ "$IS_SPACK" -eq "1" ]]; then
+    if [[ "$VERBOSE" -eq "1" ]]; then
+        echo "Hercules has been loaded with Spack"
+    fi
     # following line does not work for all spack versions.
     #HERCULES_PATH=$(spack find --paths --loaded hercules | grep hercules | awk '{print $2}') 
     HERCULES_BUILD_PATH=$HERCULES_PATH/bin
@@ -346,23 +321,34 @@ else
 fi
 
 export HERCULES_PATH=$HERCULES_PATH
-echo "Hercules path - $HERCULES_PATH"
+if [[ "$VERBOSE" -eq "1" ]]; then
+    echo "Hercules path - $HERCULES_PATH"
+fi
 
 
 ## Read configuration file.
-export HERCULES_MOUNT_POINT=$(cat $FILE | grep "MOUNT_POINT" | head -1 | awk '{print $3}')
-META_PORT=$(cat $FILE | grep "METADATA_PORT" | awk '{print $3}')
-DATA_PORT=$(cat $FILE | grep "DATA_PORT" | awk '{print $3}')
-MALLEABILITY=$(cat $FILE | grep "MALLEABILITY" | awk '{print $3}')
-HERCULES_NUM_METADATA=$(cat $FILE | grep "NUM_META_SERVERS" | awk '{print $3}')
-export HERCULES_NUM_DATA=$(cat $FILE | grep "NUM_DATA_SERVERS" | awk '{print $3}')
-NUM_NODES_FOR_CLIENTS=$(cat $FILE | grep "NUM_NODES_FOR_CLIENTS" | awk '{print $3}')
-NUM_CLIENTS_PER_NODE=$(cat $FILE | grep "NUM_CLIENTS_PER_NODE" | awk '{print $3}')
-ATTACHED=$(cat $FILE | grep "ATTACHED" | awk '{print $3}')
-HERCULES_BLOCK_SIZE=$(cat $FILE | grep "BLOCK_SIZE" | awk '{print $3}')
-STORAGE_SIZE=$(cat $FILE | grep "STORAGE_SIZE" | awk '{print $3}')
+export HERCULES_MOUNT_POINT=$(cat $FILE | grep "\<MOUNT_POINT\>" | head -1 | awk '{print $3}')
+META_PORT=$(cat $FILE | grep "\<METADATA_PORT\>" | awk '{print $3}')
+DATA_PORT=$(cat $FILE | grep "\<DATA_PORT\>" | awk '{print $3}')
+MALLEABILITY=$(cat $FILE | grep "\<MALLEABILITY\>" | awk '{print $3}')
+HERCULES_NUM_METADATA=$(cat $FILE | grep "\<NUM_META_SERVERS\>" | awk '{print $3}')
+export HERCULES_NUM_DATA=$(cat $FILE | grep "\<NUM_DATA_SERVERS\>" | awk '{print $3}')
+NUM_NODES_FOR_CLIENTS=$(cat $FILE | grep "\<NUM_NODES_FOR_CLIENTS\>" | awk '{print $3}')
+NUM_CLIENTS_PER_NODE=$(cat $FILE | grep "\<NUM_CLIENTS_PER_NODE\>" | awk '{print $3}')
+ATTACHED=$(cat $FILE | grep "\<ATTACHED\>" | awk '{print $3}')
+HERCULES_BLOCK_SIZE=$(cat $FILE | grep "\<BLOCK_SIZE\>" | awk '{print $3}')
+STORAGE_SIZE=$(cat $FILE | grep "\<STORAGE_SIZE\>" | awk '{print $3}')
 HERCULES_DATA_HOSTFILE=$(cat $FILE | grep "\<DATA_HOSTFILE\>" | awk '{print $3}')
-HERCULES_METADATA_HOSTFILE=$(cat $FILE | grep "METADATA_HOSTFILE" | awk '{print $3}')
+HERCULES_METADATA_HOSTFILE=$(cat $FILE | grep "\<METADATA_HOSTFILE\>" | awk '{print $3}')
+INIT_HERCULES_NUM_DATA=$(cat $FILE | grep "\<INIT_NUM_DATA_SERVERS\>" | awk '{print $3}')
+
+if [ -z "$INIT_HERCULES_NUM_DATA" ] || [ "$INIT_HERCULES_NUM_DATA" = "0" ] ; then
+    INIT_HERCULES_NUM_DATA=$HERCULES_NUM_DATA
+    echo "INIT_HERCULES_NUM_DATA = $INIT_HERCULES_NUM_DATA"
+fi
+
+# echo "+ + + Initial number of data nodes is $INIT_HERCULES_NUM_DATA/$HERCULES_NUM_DATA"
+export HERCULES_INIT_NUM_DATA=$INIT_HERCULES_NUM_DATA
 
 ## \< \> to match exact word.
 
@@ -370,21 +356,41 @@ HERCULES_METADATA_HOSTFILE=$(cat $FILE | grep "METADATA_HOSTFILE" | awk '{print 
 if [[ $STATUS = "stop" ]];
 then
     ## Stops data and metadata servers.
-
+ 
     # Checks if a list of data servers was passed by the user.
     # If the user does not pass any list, all dataservers will be 
     # stopped.
     if [ ! -z "$DATA_SERVER_FILE" ]; then
-        echo "Data server file - $DATA_SERVER_FILE"
+        # echo "Data server file - $DATA_SERVER_FILE"
         if [ ! -f "$DATA_SERVER_FILE" ]; then
             echo "Data server file " $DATA_SERVER_FILE " does not exists"
             exit 0
         fi
         HERCULES_DATA_HOSTFILE=$DATA_SERVER_FILE
     fi
+
+    ## Write the default file "data2stop_hostfile".
+    ## To avoid overwrite this file, user must to use 
+    ## the hercules "remove" option to stop only some
+    ## data servers. "stop" option will stop all running
+    ## data servers.
+    cat $HERCULES_DATA_HOSTFILE > data2stop_hostfile
+
+    ## Creates an array with the data servers hostnames.
     readarray -t hosts < $HERCULES_DATA_HOSTFILE
-    # echo "data hosts=$hosts"
-    StopServers "data" $hosts $WAIT_SERVERS
+    ## Stop the data servers.
+    StopServers "data" ${hosts[@]} 1
+    
+    ## Checks if user wants to wait until all servers are stopped.
+    # 1 indicates that this function should check if 
+    # all servers have stopped correctly (synchronous).
+    # 0 in other case (asynchronous).
+    if [[ "$WAIT_SERVERS" -eq "1" ]]; then
+        awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data_hostfile > "data2${STATUS}_index"
+        WaitForServers "data" "d" "${STATUS}" ${hosts[@]}
+    else
+        echo "No waiting for data servers to be stopped."
+    fi
     
     # Checks if user do not want to stop metadata server (KEEP_METADATA_ALIVE==1).
     ## echo "KEEP_METADATA_ALIVE=$KEEP_METADATA_ALIVE"
@@ -392,33 +398,98 @@ then
         exit 0
     fi
     # Stop metadata servers.
+    cat $HERCULES_METADATA_HOSTFILE > data2stop_hostfile
     readarray -t hosts < $HERCULES_METADATA_HOSTFILE
     # echo "meta hosts=$hosts"
-    StopServers "metadata" $hosts $WAIT_SERVERS
-    # fi
+    StopServers "metadata" ${hosts[@]} 1
+
+    ## Checks if user wants to wait until all servers are stopped.
+    # 1 indicates that this function should check if 
+    # all servers have stopped correctly (synchronous).
+    # 0 in other case (asynchronous).
+    if [[ "$WAIT_SERVERS" -eq "1" ]]; then
+        awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' meta_hostfile meta_hostfile > "data2${STATUS}_index"
+        WaitForServers "metadata" "m" "${STATUS}" ${hosts[@]}
+    else
+        echo "No waiting for data servers to be stopped."
+    fi
     exit 0
 fi
 
 ## Checks if the user wants to add more servers.
-# if [[ $STATUS = "add" ]];
-# then
-    
+if [[ $STATUS = "add" ]];
+then
+    ## Adds data and metadata servers.
+    if [[ "$VERBOSE" -eq "1" ]]; then
+        echo "Starting comissioning state."
+    fi
+    # Checks if a list of data servers was passed by the user.
+    # If the user does not pass any list, we exit the script.
+    if [ ! -z "$DATA_SERVER_FILE" ]; then
+        ## echo "Data server file - $DATA_SERVER_FILE"
+        if [ ! -f "$DATA_SERVER_FILE" ]; then
+            echo "Data server file " $DATA_SERVER_FILE " does not exists"
+            exit 0
+        fi
+        HERCULES_DATA_HOSTFILE=$DATA_SERVER_FILE
+    else 
+        echo "No data server file was provided to add more servers."
+        exit 0
+    fi
+    readarray -t hosts < $HERCULES_DATA_HOSTFILE
+    # echo "data hosts=$hosts"
+    WakeUpServers "data" $hosts
+    # sleep 10
+    exit 0
+fi
 
-# fi
+## Checks if the user wants to remove servers.
+## TO FIX!!
+if [[ $STATUS = "remove" ]];
+then
+    ## Remove data and metadata servers.
+    if [[ "$VERBOSE" -eq "1" ]]; then
+        echo "Starting decomissioning state."
+    fi
+    # Checks if a list of data servers was passed by the user.
+    if [ ! -z "$DATA_SERVER_FILE" ]; then
+        ## echo "Data server file - $DATA_SERVER_FILE"
+        if [ ! -f "$DATA_SERVER_FILE" ]; then
+            echo "Data server file " $DATA_SERVER_FILE " does not exists"
+            exit 0
+        fi
+        HERCULES_DATA_HOSTFILE=$DATA_SERVER_FILE
+    else
+        echo "Data server file is nedeed, -f <data_server_file_path>"
+        exit 0
+    fi
+    readarray -t hosts < $HERCULES_DATA_HOSTFILE
+    # 1 = Stops some servers synchronously.
+    # 0 = Do not kill the process.
+    StopServers "data" ${hosts[@]} 0
+
+    # For "remove" operations we awalys wait for selected 
+    # servers to be removed.
+    awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data_hostfile > "data2${STATUS}_index"
+    WaitForServers "data" "d" "${STATUS}" ${hosts[@]}
+
+    # Metadata server is not stopped.
+   
+    exit 0
+fi
+
 
 ## If hostfiles was not set, then we create a hostfile containing the allocated nodes.
-# if [[ $SLURM -eq "1" ]]; then
-echo "SERVERS_HOSTFILES_OPTION=$SERVERS_HOSTFILES_OPTION"
+if [[ "$VERBOSE" -eq "1" ]]; then
+    echo "SERVERS_HOSTFILES_OPTION=$SERVERS_HOSTFILES_OPTION"
+fi
 if [[ $SERVERS_HOSTFILES_OPTION -eq "0" ]]; then
     #srun -pernode hostname |sort > hostfile
     scontrol show hostnames "$SLURM_JOB_NODELIST" > hostfile
     # scontrol show hostnames "$SLURM_JOB_NODELIST"
 fi
 
-# exit 0
-
 echo HERCULES_MOUNT_POINT - "$HERCULES_MOUNT_POINT" - HERCULES_BLOCK_SIZE - "$HERCULES_BLOCK_SIZE"
-
 
 # If a client hostfile was not provided we set a default path.
 if [ -z "$HERCULES_MPI_HOSTFILE_NAME" ]; then
@@ -444,17 +515,26 @@ fi
 ## Checks if a metadata hostfile was not defined.
 if [[ -z $META_SERVER_FILE ]];
 then
-    ## Error if slurm is not being used and no metadata hostfile was defined.
+    ## If slurm is not being used and no metadata hostfile was defined
+    ## we checked the configuration file path.
     if [[ "$SLURM" -eq "0" ]]; then
-        echo "[Error] Metadata server file not specified, please set one using -m <filename> flag."
-        exit 1
+        ## If the path specified on the configuration file does not exist 
+        ## there is an error.
+        if [[ -z $HERCULES_METADATA_HOSTFILE ]];
+        then
+            echo "[Error] Metadata server file not specified, please set one using -m <filename> flag."
+            exit 1
+        fi
+    else
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[+] Metadata server file not specified, getting information from slurm."
+        fi
+        ## If a metadata file was not defined and we have slurm's nodes allocated,
+        ## then we create a file which contains the hostnames of the nodes that
+        ## will be used to deploy the determinate set of metadata servers.
+        #readarray -t meta_hosts < <(head -n $HERCULES_NUM_METADATA hostfile)
+        head -n "$HERCULES_NUM_METADATA" hostfile > "$HERCULES_METADATA_HOSTFILE"
     fi
-    echo "[+] Metadata server file not specified, getting information from slurm."
-    ## If a metadata file was not defined and we have slurm's nodes allocated,
-    ## then we create a file which contains the hostnames of the nodes that
-    ## will be used to deploy the determinate set of metadata servers.
-    #readarray -t meta_hosts < <(head -n $HERCULES_NUM_METADATA hostfile)
-    head -n "$HERCULES_NUM_METADATA" hostfile > "$HERCULES_METADATA_HOSTFILE"
     ## To create an array with the meta nodes.
     #printf "%s\n" ${meta_hosts[@]} > "$META_SERVER_FILE"
     readarray -t meta_hosts < "$HERCULES_METADATA_HOSTFILE"
@@ -478,42 +558,61 @@ do
     ## to the node via ssh.
     if [[ "$SLURM" -eq "0" ]]; then
         #{ ssh $node "$RM; cd $HERCULES_BASH_PATH && $COMMAND"; } &
-        echo "[ + ] Removing temporal files on $node"
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[ + ] Removing temporal files on $node"
+        fi
         ( ssh $node "$RM" )
-        echo "[ + ] Starting metadata server $i on $node..."
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[ + ] Starting metadata server $i on $node..."
+            echo "Running ssh $node cd $HERCULES_BASH_PATH && HERCULES_CONF=$FILE $COMMAND"
+        fi
         ( ssh $node "cd $HERCULES_BASH_PATH && HERCULES_CONF=$FILE $COMMAND" ) &
     else
         ## Deletes the file that we use to make sure that the server has started.
-        echo "[+] Removing temporal files on $node"
-        srun --exclusive --export=ALL -N 1 -n 1 -w $node $RM 2> /dev/null
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[+] Removing temporal files on $node"
+        fi
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node $RM 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         echo "[+] Starting metadata server $i on $node..."
-        srun --exclusive --export=ALL -N 1 -n 1 -w $node $COMMAND &
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=80G -w $node $COMMAND &
     fi
     i=$(($i+1))
 done
 
 
 ## Wait until all metadata servers are up.
-WaitForServers "metadata" "m" ${meta_hosts[@]}
+awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' meta_hostfile meta_hostfile > data2start_index
+WaitForServers "metadata" "m" "start" ${meta_hosts[@]}
 end=`date +%s.%N`
 runtime=$( echo "$end - $start" | bc -l )
-echo "[-] Metadata servers started in $runtime seconds"
+if [[ "$VERBOSE" -eq "1" ]]; then
+    echo "[-] Metadata servers started in $runtime seconds"
+fi 
 
 ## To run the data servers.
 if [[ -z $DATA_SERVER_FILE ]];
 then
-    ## Error if slurm is not being used and no data hostfile was defined.
+    ## If slurm is not being used and no metadata hostfile was defined
+    ## we checked the configuration file path.
     if [[ "$SLURM" -eq "0" ]]; then
-        echo "[Error] Data server file not specified, please set one using -d <filename> flag."
-        exit 1
+        ## If the path specified on the configuration file does not exist 
+        ## there is an error.
+        if [[ -z $HERCULES_DATA_HOSTFILE ]];
+        then
+            echo "[Error] Data server file not specified, please set one using -d <filename> flag."
+            exit 1
+        fi
+    else
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[+] Data server file not specified, getting information from slurm."
+        fi
+        ## If a data file was not defined and we have slurm's nodes allocated,
+        ## then we create a file which contains the hostnames of the nodes that
+        ## will be used to deploy the determinate set of data servers.
+        # readarray -t data_hosts < <(tail -n +$((HERCULES_NUM_METADATA+1)) hostfile | head -n $HERCULES_NUM_DATA)
+        tail -n +$((HERCULES_NUM_METADATA+1)) hostfile | head -n "$HERCULES_NUM_DATA" > "$HERCULES_DATA_HOSTFILE"
     fi
-    echo "[+] Data server file not specified, getting information from slurm."
-    ## If a data file was not defined and we have slurm's nodes allocated,
-    ## then we create a file which contains the hostnames of the nodes that
-    ## will be used to deploy the determinate set of data servers.
-    # readarray -t data_hosts < <(tail -n +$((HERCULES_NUM_METADATA+1)) hostfile | head -n $HERCULES_NUM_DATA)
-    tail -n +$((HERCULES_NUM_METADATA+1)) hostfile | head -n "$HERCULES_NUM_DATA" > "$HERCULES_DATA_HOSTFILE"
     ## To create an array with the data nodes.
     # printf "%s\n" ${data_hosts[@]} > "$DATA_SERVER_FILE"
     readarray -t data_hosts < "$HERCULES_DATA_HOSTFILE"
@@ -526,32 +625,50 @@ else
 fi
 
 i=0
-echo "[+] Hercules: Starting data servers on ${data_hosts[@]}"
+if [[ "$VERBOSE" -eq "1" ]]; then
+    echo "[+] Hercules: Starting data servers on ${data_hosts[@]}"
+fi
 start=`date +%s.%N`
 for node in ${data_hosts[@]}
 do
+    # if [ "$i" -lt "$INIT_HERCULES_NUM_DATA" ]; then ## server is started and set as online.
+    #     server_init_status=1
+    # else ## server is started but set as offline.
+    #     server_init_status=0
+    # fi
+
     # echo "[+] Running data server $i in $node..."
     RM="rm /tmp/d-hercules-$i"
-    COMMAND="$HERCULES_BUILD_PATH/hercules_server d $i ${meta_hosts[0]}"
+    COMMAND="$HERCULES_BUILD_PATH/hercules_server d $i ${meta_hosts[0]} $INIT_HERCULES_NUM_DATA"
     if [[ "$SLURM" -eq "0" ]]; then
         # ssh $node "$RM; cd $HERCULES_BASH_PATH &&  $COMMAND &"
-        echo "[ + ] Removing temporal files on $node"
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[ + ] Removing temporal files on $node"
+        fi
         ( ssh $node "$RM" )
-        echo "[ + ] Starting data server $i in $node..."
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[ + ] Starting data server $i in $node..."
+            echo "Running ssh $node cd $HERCULES_BASH_PATH && HERCULES_CONF=$FILE $COMMAND"
+        fi
         ( ssh $node "cd $HERCULES_BASH_PATH && HERCULES_CONF=$FILE $COMMAND" ) &
     else
         ## Deletes the file that we use to make sure that the server has started.
-        echo "[+] Removing temporal files on $node"
-        srun --exclusive --export=ALL -N 1 -n 1 -w $node $RM 2> /dev/null
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[+] Removing temporal files on $node"
+        fi
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node $RM 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
-        echo "[+] Starting data server $i on $node..."
-        srun --exclusive --export=ALL -N 1 -n 1 -w $node $COMMAND &
+        if [[ "$VERBOSE" -eq "1" ]]; then
+            echo "[+] Starting data server $i on $node..."
+        fi
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=80G -N 1 -n 1 -w $node $COMMAND &
     fi
     i=$(($i+1))
 done
 
 ## Wait until all data servers are up.
-WaitForServers "data" "d" ${data_hosts[@]}
+awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' data_hostfile data_hostfile > data2start_index
+WaitForServers "data" "d" "start" ${data_hosts[@]}
 end=`date +%s.%N`
 runtime=$( echo "$end - $start" | bc -l )
 echo "[-] Data servers started in $runtime seconds"

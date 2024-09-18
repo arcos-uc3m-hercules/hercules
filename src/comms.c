@@ -195,17 +195,54 @@ size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t m
 	request = (struct ucx_context *)ucp_tag_send_nbx(ep, ctx.buffer, msg_len, from, &send_param);
 	// request = (struct ucx_context *)ucp_tag_send_sync_nbx(ep, ctx.buffer, msg_len, from, &send_param);
 	status = ucx_wait(ucp_worker, request, "send", "data"); // original.
-	// if (request == NULL)
-	// {
-	// 	status = UCS_OK;
-	// }
-	// else
-	// {
-	// 	while (((status = ucp_request_check_status(request)) == UCS_INPROGRESS) && ep_timeout != 1)
-	// 	{
-	// 		ucp_worker_progress(ucp_worker);
-	// 	}
-	// }
+	
+	t = clock() - t;
+	double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
+	// fprintf(stderr,"********** send data %lu time = %lf\n", msg_len, time_taken);
+
+	if (UCS_PTR_IS_ERR(request))
+	{
+		// slog_fatal("[COMM] Error sending to endpoint.");
+		slog_fatal("HERCULES_ERR_SEND_DATA");
+		fprintf(stderr, "HERCULES_ERR_SEND_DATA\n");
+		perror("HERCULES_ERR_SEND_DATA");
+		return 0;
+	}
+
+	return msg_len;
+}
+
+/***
+ * @brief send data to the endpoint specified in "ep".
+ * @return number of bytes sent on success, on error, 0 is returned.
+ */
+size_t isend_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from)
+{
+	ucs_status_t status;
+	struct ucx_context *request;
+	ucp_request_param_t send_param;
+	send_req_t ctx;
+
+	// char req[2048];
+	ctx.buffer = (void *)msg;
+	// ctx.buffer = (char *)msg;
+	// ctx.buffer = (char *)malloc(msg_len);
+	ctx.complete = 0;
+	// memcpy (ctx.buffer, msg, msg_len);
+	// memcpy (send_buffer, msg, msg_len);
+	//	ctx.buffer= bb;
+
+	send_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+							  UCP_OP_ATTR_FIELD_USER_DATA;
+	send_param.cb.send = send_handler_data;
+	send_param.datatype = ucp_dt_make_contig(1);
+	send_param.memory_type = UCS_MEMORY_TYPE_HOST;
+	send_param.user_data = &ctx;
+
+	clock_t t;
+	t = clock();
+	request = (struct ucx_context *)ucp_tag_send_nbx(ep, ctx.buffer, msg_len, from, &send_param);
+
 	t = clock() - t;
 	double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 	// fprintf(stderr,"********** send data %lu time = %lf\n", msg_len, time_taken);
@@ -819,14 +856,14 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 
 	case DATASET_INFO:
 	{
-		dataset_info *struct_ = (dataset_info *)data_struct;
+		dataset_info *struct_ = (dataset_info *)data_struct;	
 
 		// Calculate the total size of the buffer storing the structure.
 		msg_size = sizeof(dataset_info);
 
 		// If the dataset is a LOCAL one, the list of position characters must be added.
-		if (!strcmp(struct_->policy, "LOCAL"))
-			msg_size += (struct_->num_data_elem * sizeof(uint16_t));
+		// if (!strcmp(struct_->policy, "LOCAL"))
+		// 	msg_size += (struct_->num_data_elem * sizeof(uint16_t));
 
 		// Reserve the corresponding amount of memory for the previous buffer.
 		info_buffer = (char *)malloc(msg_size * sizeof(char));
@@ -838,11 +875,11 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		memcpy(info_buffer, struct_, msg_size);
 
 		// Copy the remaining 'data_locations' field if the dataset is a LOCAL one.
-		if (!strcmp(struct_->policy, "LOCAL"))
-		{
-			offset_pt += sizeof(dataset_info);
-			memcpy(offset_pt, struct_->data_locations, (struct_->num_data_elem * sizeof(uint16_t)));
-		}
+		// if (!strcmp(struct_->policy,"LOCAL"))
+		// {
+		// 	offset_pt += sizeof(dataset_info);
+		// 	memcpy(offset_pt, struct_->data_locations, (struct_->num_data_elem * sizeof(uint16_t)));
+		// }
 		slog_debug("[COMM] Prepared DATASET_INFO for sending.");
 		break;
 	}
@@ -970,11 +1007,11 @@ int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 			free(result);
 			return -1;
 		}
-		slog_info(" \t\t DATASET_INFO %lu", length);
 		dataset_info *struct_ = (dataset_info *)data_struct;
 
 		// Copy the actual structure into the one provided through reference.
 		memcpy(struct_, msg_data, sizeof(dataset_info));
+		slog_info(" \t\t DATASET_INFO %lu", length);
 
 		// If the size of the message received was bigger than sizeof(dataset_info), something more came with it.
 
