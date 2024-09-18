@@ -38,6 +38,7 @@ gcc -Wall imss.c `pkg-config fuse --cflags --libs` -o imss
 int32_t error_print = 0; // Temporal solution maybe to change in the future.
 
 extern int32_t REPL_FACTOR;
+extern int32_t REPL_TYPE;
 
 extern int32_t N_SERVERS;
 extern int32_t N_BLKS;
@@ -335,7 +336,6 @@ int imss_getattr(const char *path, struct stat *stbuf)
 	// }
 
 	int32_t ds;
-
 	int fd = -1;
 	struct stat stats;
 	char *aux = NULL;
@@ -518,7 +518,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 			// if (!error)
 			{
 				char *last = refs[i] + strlen(refs[i]) - 1;
-				slog_info("last=%s", last);
+				// slog_info("last=%s", last);
 				if (last[0] == '/')
 				{
 					last[0] = '\0';
@@ -533,7 +533,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 				}
 
 				// filler(buf, refs[i] + offset + 1, &stbuf, 0); // original
-				slog_info("refs[i] + offset + 1=%s", refs[i] + offset + 1);
+				// slog_info("refs[i] + offset + 1=%s", refs[i] + offset + 1);
 				filler(buf, refs[i] + offset + 1, NULL, 0);
 				// filler(buf, refs[i], NULL, 0);
 			}
@@ -2131,18 +2131,14 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 	// TODO check mode
 	struct stat ds_stat;
 	// Check if already created!
-	// char *rpath = (char *)calloc(MAX_PATH, sizeof(char));
-	// get_iuri(path, rpath);
 	const char *rpath = path;
 	// slog_live("[imss_create] get_iuri(path:%s, rpath:%s)", path, rpath);
 
 	// Assing file handler and create dataset
 	int res = 0;
-
-	// int32_t n_servers = 0;
-
-	res = create_dataset((char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, N_SERVERS, NO_LINK, opened);
-	slog_live("[imss_create] create_dataset((char*)rpath:%s, POLICY:%s,  N_BLKS:%ld, IMSS_BLKSIZE:%d, REPL_FACTOR:%ld, N_SERVERS:%d), res:%d", (char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, N_SERVERS, res);
+	
+	res = create_dataset((char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, NO_LINK, opened);
+	slog_live("[imss_create] create_dataset((char*)rpath:%s, POLICY:%s,  N_BLKS:%ld, IMSS_BLKSIZE:%d, REPL_FACTOR:%ld, REPL_TYPE:%ld, N_SERVERS:%d), res:%d", (char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, res);
 	if (res < 0)
 	{
 		slog_error("[imss_create] Cannot create new dataset, may already exist.\n");
@@ -2476,14 +2472,14 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 			pthread_mutex_unlock(&lock_file);
 			// free(aux);
 		}
-		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, N_SERVERS, new_path_1, 3);
+		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3);
 
 		break;
 	case 1:
 		slog_debug("[FUSE][imss_posix_api] Entering case 1 ");
 		// rpath1 = new_path_1;
 		get_iuri(new_path_2, rpath2);
-		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, N_SERVERS, new_path_1, 3);
+		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3);
 		break;
 	default:
 		break;

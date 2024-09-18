@@ -135,6 +135,7 @@ int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h 
 int request_finalize(ucp_worker_h ucp_worker, send_req_t *request, send_req_t *ctx);
 size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len, char *request);
 size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
+size_t isend_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
 size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest);
 size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async);
 size_t recv_data_opt(ucp_worker_h ucp_worker, ucp_ep_h ep, void **msg, size_t msg_length, uint64_t dest, int async);

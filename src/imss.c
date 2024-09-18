@@ -996,7 +996,7 @@ int32_t open_imss(char *imss_uri)
 		if (check_imss.conns.matching_server != -2)
 			return -2;
 
-		for (int32_t i = 0; i < check_imss.info.num_storages; i++)
+		for (int32_t i = 0; i < check_imss.info.num_active_storages; i++)
 			free(check_imss.info.ips[i]);
 
 		free(check_imss.info.ips);
@@ -1008,7 +1008,7 @@ int32_t open_imss(char *imss_uri)
 		return -1;
 	}
 	}
-	slog_debug("[IMSS][open_imss] new_imss.info.num_storages=%ld", new_imss.info.num_storages);
+	slog_debug("[IMSS][open_imss] new_imss.info.num_active_storages=%ld, num_storages=%ld", new_imss.info.num_active_storages, new_imss.info.num_storages);
 
 	new_imss.conns.peer_addr = (ucp_address_t **)malloc(new_imss.info.num_storages * sizeof(ucp_address_t *));
 	new_imss.conns.eps = (ucp_ep_h *)malloc(new_imss.info.num_storages * sizeof(ucp_ep_h));
@@ -1021,18 +1021,19 @@ int32_t open_imss(char *imss_uri)
 	ucp_worker_address_query(local_addr_data, &attr);
 	local_data_uid = attr.worker_uid;
 
-	int num_down_storages = 0;
+	// int num_down_storages = 0;
 	// fprintf(stderr, "NUM_DATA_SERVERS=%d\n", NUM_DATA_SERVERS);
 	// Connect to the requested IMSS.
+	// for (int32_t i = 0; i < new_imss.info.num_storages; i++)
 	for (int32_t i = 0; i < new_imss.info.num_storages; i++)
 	{
 		// fprintf(stderr, "node=%s, status=%d\n", new_imss.info.ips[i], new_imss.info.status[i]);
-		if (new_imss.info.status[i] == 0)
-		{
-			// fprintf(stderr, "Skipping - i=%d - %s:%d, status=%d, num active storages=%d, total storages=%d\n", i, new_imss.info.ips[i], new_imss.info.conn_port, new_imss.info.status[i], new_imss.info.num_active_storages, new_imss.info.num_storages);
-			num_down_storages++;
-			continue;
-		}
+		// if (new_imss.info.status[i] == 0)
+		// {
+		// 	// fprintf(stderr, "Skipping - i=%d - %s:%d, status=%d, num active storages=%d, total storages=%d\n", i, new_imss.info.ips[i], new_imss.info.conn_port, new_imss.info.status[i], new_imss.info.num_active_storages, new_imss.info.num_storages);
+		// 	// num_down_storages++;
+		// 	continue;
+		// }
 
 		int oob_sock;
 		size_t addr_len;
@@ -1094,7 +1095,8 @@ int32_t open_imss(char *imss_uri)
 	}
 
 	// new_imss.info.num_storages -= num_down_storages;
-	NUM_DATA_SERVERS = new_imss.info.num_storages;
+	// NUM_DATA_SERVERS = new_imss.info.num_storages;
+	NUM_DATA_SERVERS = new_imss.info.num_active_storages;
 
 	char str_NUM_DATA_SERVERS[10];
 	sprintf(str_NUM_DATA_SERVERS, "%d", new_imss.info.num_active_storages);
@@ -1154,9 +1156,9 @@ int32_t release_imss(char *imss_uri, uint32_t release_op)
 
 	// Release the set of connections to the corresponding IMSS.
 	pthread_mutex_lock(&lock_network);
-	slog_live("imss_position=%d, num_storages=%d", imss_position, imss_.info.num_storages);
+	slog_live("imss_position=%d, num_active_storages=%d", imss_position, imss_.info.num_active_storages);
 	// sleep(1);
-	for (int32_t i = 0; i < imss_.info.num_storages; i++)
+	for (int32_t i = 0; i < imss_.info.num_active_storages; i++)
 	{
 		// Request IMSS instance closure per server if the instance is a DETACHED one and the corresponding argumet was provided.
 		if (release_op == CLOSE_DETACHED && imss_.info.status[i] == 1)
@@ -1264,8 +1266,8 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 	{
 		slog_live("[IMSS][stat_imss] imss_found_in=%d", imss_found_in);
 		memcpy(imss_info_, &searched_imss.info, sizeof(imss_info));
-		imss_info_->ips = (char **)malloc((imss_info_->num_storages) * sizeof(char *));
-		for (int32_t i = 0; i < imss_info_->num_storages; i++)
+		imss_info_->ips = (char **)malloc((imss_info_->num_active_storages) * sizeof(char *));
+		for (int32_t i = 0; i < imss_info_->num_active_storages; i++)
 		{
 			imss_info_->ips[i] = (char *)malloc(LINE_LENGTH * sizeof(char));
 			strcpy(imss_info_->ips[i], searched_imss.info.ips[i]);
@@ -1410,6 +1412,7 @@ int32_t create_dataset(char *dataset_uri,
 					   int32_t num_data_elem,
 					   int32_t data_elem_size,
 					   int32_t repl_factor,
+					   int32_t repl_type,
 					   int32_t n_servers,
 					   char *link,
 					   int opened)
@@ -1420,7 +1423,7 @@ int32_t create_dataset(char *dataset_uri,
 
 	curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
 
-	slog_live("[IMSS] dataset_create: starting, imss_d=%d, num_storages=%d", curr_dataset.imss_d, curr_imss.info.num_storages);
+	slog_live("[IMSS] dataset_create: starting, imss_d=%d, num_storages=%d, num_active_storages=%d", curr_dataset.imss_d, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
 
 	if ((dataset_uri == NULL) || (policy == NULL) || !num_data_elem || !data_elem_size)
 	{
@@ -1430,6 +1433,11 @@ int32_t create_dataset(char *dataset_uri,
 	if ((repl_factor < NONE) || (repl_factor > TRM))
 	{
 		slog_fatal("HERCULES_ERR_CRTDATASET_BADREPLFACTOR");
+		return -EINVAL;
+	}
+	if ((repl_type < SYNC) || (repl_type > ASYNC))
+	{
+		slog_fatal("HERCULES_ERR_CRTDATASET_BADREPLTYPE");
 		return -EINVAL;
 	}
 
@@ -1457,14 +1465,14 @@ int32_t create_dataset(char *dataset_uri,
 		new_dataset.imss_d = associated_imss_indx;
 		new_dataset.local_conn = associated_imss.conns.matching_server;
 
-		// Initialize dataset fields monitoring the dataset itself if it is a LOCAL one.
-		if (!strcmp(new_dataset.policy, "LOCAL"))
-		{
-			// Current number of blocks written by the client.
-			new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
-			*(new_dataset.num_blocks_written) = 0;
-			new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
-		}
+		// // Initialize dataset fields monitoring the dataset itself if it is a LOCAL one.
+		// if (!strcmp(new_dataset.policy, "LOCAL"))
+		// {
+		// 	// Current number of blocks written by the client.
+		// 	new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
+		// 	*(new_dataset.num_blocks_written) = 0;
+		// 	new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
+		// }
 
 		// if (opened)
 		// { // the dataset is created by an 'open' syscall.
@@ -1511,10 +1519,11 @@ int32_t create_dataset(char *dataset_uri,
 		new_dataset.is_link = 0;
 	}
 
-	slog_live("[IMSS][create_dataset] curr_imss.info.num_storages=%d, n_servers=%d", curr_imss.info.num_storages, n_servers);
+	slog_live("[IMSS][create_dataset] curr_imss.info.num_storages=%d, n_servers=%d, num_active_storages=%d", curr_imss.info.num_storages, n_servers, curr_imss.info.num_active_storages);
 	// if (n_servers > 0 && n_servers <= curr_imss.info.num_storages)
 	{
 		new_dataset.n_servers = n_servers;
+		new_dataset.n_servers_when_created = curr_imss.info.num_active_storages;
 	}
 	// else
 	// {
@@ -1522,6 +1531,7 @@ int32_t create_dataset(char *dataset_uri,
 	// }
 
 	new_dataset.repl_factor = (repl_factor < new_dataset.n_servers) ? (repl_factor) : (new_dataset.n_servers);
+	new_dataset.repl_type = repl_type;
 
 	// new_dataset.initial_node = 0;
 
@@ -1533,24 +1543,27 @@ int32_t create_dataset(char *dataset_uri,
 	uint64_t msg_size = sizeof(dataset_info);
 
 	// Reserve memory so as to store the position of each data element if the dataset is a LOCAL one.
-	if (!strcmp(new_dataset.policy, "LOCAL"))
-	{
-		uint32_t info_size = new_dataset.num_data_elem * sizeof(uint16_t);
+	// if (!strcmp(new_dataset.policy, "LOCAL"))
+	// {
+	// 	// uint32_t info_size = new_dataset.num_data_elem * sizeof(uint16_t);
+	// 	uint32_t info_size = 2000 * sizeof(uint16_t);
+	// 	slog_info("info_size=%d, sizeof(uint16_t)=%d", info_size, sizeof(uint16_t));
 
-		/*new_dataset.data_locations = (uint16_t *) malloc(info_size);
-		  memset(new_dataset.data_locations, 0, info_size);*/
-		new_dataset.data_locations = (uint16_t *)calloc(info_size, sizeof(uint16_t));
+	// 	/*new_dataset.data_locations = (uint16_t *) malloc(info_size);
+	// 	  memset(new_dataset.data_locations, 0, info_size);*/
+	// 	new_dataset.data_locations = (uint16_t *)calloc(info_size, sizeof(uint16_t));
+	// 	slog_info("new_dataset.data_locations address = %p", new_dataset.data_locations);
 
-		// Specify that the created dataset is a LOCAL one.
-		new_dataset.type = 'L';
+	// 	// Specify that the created dataset is a LOCAL one.
+	// 	new_dataset.type = 'L';
 
-		// Add additional bytes that will be sent.
-		msg_size += info_size;
-	}
-	else
+	// 	// Add additional bytes that will be sent.
+	// 	msg_size += info_size;
+	// }
+	// else
 		new_dataset.type = 'D';
 
-	slog_live("[IMSS][create_dataset] new_dataset.type=%c, local_conn=%d", new_dataset.type, associated_imss.conns.matching_server);
+	slog_live("[IMSS][create_dataset] new_dataset.type=%c, local_conn=%d, new_dataset.n_servers_when_created=%d", new_dataset.type, associated_imss.conns.matching_server, new_dataset.n_servers_when_created);
 
 	// Discover the metadata server that handle the new dataset.
 	uint32_t m_srv = discover_stat_srv(new_dataset.uri_);
@@ -1582,18 +1595,18 @@ int32_t create_dataset(char *dataset_uri,
 
 	// slog_live("[IMSS] dataset_create: sent dataset_info");
 	// Initialize dataset fields monitoring the dataset itself if it is a LOCAL one.
-	if (!strcmp(new_dataset.policy, "LOCAL"))
-	{
-		// Current number of blocks written by the client.
-		new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
-		*(new_dataset.num_blocks_written) = 0;
-		// Specific blocks written by the client.
+	// if (!strcmp(new_dataset.policy, "LOCAL"))
+	// {
+	// 	// Current number of blocks written by the client.
+	// 	new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
+	// 	*(new_dataset.num_blocks_written) = 0;
+	// 	// Specific blocks written by the client.
 
-		/*new_dataset.blocks_written = (uint32_t *) malloc(new_dataset.num_data_elem*sizeof(uint32_t));
-		  memset(new_dataset.blocks_written, 0, new_dataset.num_data_elem*sizeof(uint32_t));*/
+	// 	/*new_dataset.blocks_written = (uint32_t *) malloc(new_dataset.num_data_elem*sizeof(uint32_t));
+	// 	  memset(new_dataset.blocks_written, 0, new_dataset.num_data_elem*sizeof(uint32_t));*/
 
-		new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
-	}
+	// 	new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
+	// }
 
 	//	//Set the specified policy.
 	//	if (set_policy(&new_dataset) == -1)
@@ -1654,7 +1667,7 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	}
 	else
 	{
-		slog_debug("[IMSS][open_dataset] is_link=%d, stat_dataset_res=%d, new_dataset.local_conn=%d", new_dataset.is_link, stat_dataset_res, new_dataset.local_conn);
+		slog_debug("[IMSS][open_dataset] is_link=%d, stat_dataset_res=%d, new_dataset.local_conn=%d, n_servers=%d", new_dataset.is_link, stat_dataset_res, new_dataset.local_conn, new_dataset.n_servers);
 	}
 	int32_t not_initialized = 0;
 
@@ -1693,17 +1706,17 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	new_dataset.local_conn = associated_imss.conns.matching_server;
 
 	// Initialize dataset fields monitoring the dataset itself if it is a LOCAL one.
-	if (!strcmp(new_dataset.policy, "LOCAL"))
-	{
-		// Current number of blocks written by the client.
-		new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
-		*(new_dataset.num_blocks_written) = 0;
-		// Specific blocks written by the client.
-		/*new_dataset.blocks_written = (uint32_t *) malloc(new_dataset.num_data_elem*sizeof(uint32_t));
-		  memset(new_dataset.blocks_written, '\0', new_dataset.num_data_elem*sizeof(uint32_t));*/
+	// if (!strcmp(new_dataset.policy, "LOCAL"))
+	// {
+	// 	// Current number of blocks written by the client.
+	// 	new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
+	// 	*(new_dataset.num_blocks_written) = 0;
+	// 	// Specific blocks written by the client.
+	// 	/*new_dataset.blocks_written = (uint32_t *) malloc(new_dataset.num_data_elem*sizeof(uint32_t));
+	// 	  memset(new_dataset.blocks_written, '\0', new_dataset.num_data_elem*sizeof(uint32_t));*/
 
-		new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
-	}
+	// 	new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
+	// }
 
 	//	//Set the specified policy.
 	//	if (set_policy(&new_dataset) == -1)
@@ -1744,106 +1757,106 @@ int32_t release_dataset(int32_t dataset_id)
 	dataset_info release_dataset = g_array_index(datasetd, dataset_info, dataset_id);
 
 	// If the dataset is a LOCAL one, the position of the data elements must be updated.
-	if (!strcmp(release_dataset.policy, "LOCAL"))
-	{
-		pthread_mutex_lock(&lock_network);
-		// Discover the metadata server that handles the dataset.
-		uint32_t m_srv = discover_stat_srv(release_dataset.uri_);
+	// if (!strcmp(release_dataset.policy, "LOCAL"))
+	// {
+	// 	pthread_mutex_lock(&lock_network);
+	// 	// Discover the metadata server that handles the dataset.
+	// 	uint32_t m_srv = discover_stat_srv(release_dataset.uri_);
 
-		ep = stat_eps[m_srv];
+	// 	ep = stat_eps[m_srv];
 
-		// Formated dataset uri to be sent to the metadata server.
-		char formated_uri[REQUEST_SIZE];
-		sprintf(formated_uri, "%" PRIu32 " SET 0 %s", stat_ids[m_srv], release_dataset.uri_);
-		slog_debug("[IMSS][release_dataset] formated_uri='%s'", formated_uri);
+	// 	// Formated dataset uri to be sent to the metadata server.
+	// 	char formated_uri[REQUEST_SIZE];
+	// 	sprintf(formated_uri, "%" PRIu32 " SET 0 %s", stat_ids[m_srv], release_dataset.uri_);
+	// 	slog_debug("[IMSS][release_dataset] formated_uri='%s'", formated_uri);
 
-		if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RLSIMSS_SENDADDR");
-			slog_error("ERRIMSS_RLSIMSS_SENDADDR");
-			return -1;
-		}
+	// 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERRIMSS_RLSIMSS_SENDADDR");
+	// 		slog_error("ERRIMSS_RLSIMSS_SENDADDR");
+	// 		return -1;
+	// 	}
 
-		// Format update message to be sent to the metadata server.
-		uint64_t blocks_written_size = *(release_dataset.num_blocks_written) * sizeof(uint32_t);
-		uint64_t update_msg_size = 8 + blocks_written_size;
+	// 	// Format update message to be sent to the metadata server.
+	// 	uint64_t blocks_written_size = *(release_dataset.num_blocks_written) * sizeof(uint32_t);
+	// 	uint64_t update_msg_size = 8 + blocks_written_size;
 
-		/*char update_msg[update_msg_size];
-		  memset(update_msg, '\0', update_msg_size);*/
-		char *update_msg = (char *)calloc(update_msg_size, sizeof(char));
+	// 	/*char update_msg[update_msg_size];
+	// 	  memset(update_msg, '\0', update_msg_size);*/
+	// 	char *update_msg = (char *)calloc(update_msg_size, sizeof(char));
 
-		uint16_t update_value = (release_dataset.local_conn + 1);
-		memcpy(update_msg, release_dataset.blocks_written, blocks_written_size);
-		memcpy((update_msg + blocks_written_size), &update_value, sizeof(uint16_t));
+	// 	uint16_t update_value = (release_dataset.local_conn + 1);
+	// 	memcpy(update_msg, release_dataset.blocks_written, blocks_written_size);
+	// 	memcpy((update_msg + blocks_written_size), &update_value, sizeof(uint16_t));
 
-		// Send the list of servers storing the data elements.
-		char mode2[] = "SET";
-		if (send_data(ucp_worker_meta, ep, mode2, MODE_SIZE, local_meta_uid) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
-			slog_error("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
-			return -1;
-		}
+	// 	// Send the list of servers storing the data elements.
+	// 	char mode2[] = "SET";
+	// 	if (send_data(ucp_worker_meta, ep, mode2, MODE_SIZE, local_meta_uid) == 0)
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
+	// 		slog_error("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
+	// 		return -1;
+	// 	}
 
-		// if (send_data_addr(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta) < 0)
-		//{
-		//	perror("ERRIMSS_RLSIMSS_SENDADDR");
-		//	return -1;
-		// }
+	// 	// if (send_data_addr(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta) < 0)
+	// 	//{
+	// 	//	perror("ERRIMSS_RLSIMSS_SENDADDR");
+	// 	//	return -1;
+	// 	// }
 
-		if (send_data(ucp_worker_meta, ep, update_msg, REQUEST_SIZE, local_meta_uid) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
-			slog_error("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
-			return -1;
-		}
+	// 	if (send_data(ucp_worker_meta, ep, update_msg, REQUEST_SIZE, local_meta_uid) == 0)
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
+	// 		slog_error("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
+	// 		return -1;
+	// 	}
 
-		size_t msg_length = 0;
-		// char update_result[RESPONSE_SIZE];
-		msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
-		if (msg_length == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_REL_DATASET_INVALID_MSG_LENGTH");
-			slog_error("ERRIMSS_REL_DATASET_INVALID_MSG_LENGTH");
-			return -1;
-		}
+	// 	size_t msg_length = 0;
+	// 	// char update_result[RESPONSE_SIZE];
+	// 	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
+	// 	if (msg_length == 0)
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERRIMSS_REL_DATASET_INVALID_MSG_LENGTH");
+	// 		slog_error("ERRIMSS_REL_DATASET_INVALID_MSG_LENGTH");
+	// 		return -1;
+	// 	}
 
-		// char update_result[msg_length];
-		void *update_result = malloc(msg_length);
-		// msg_length = recv_data_opt(ucp_worker_meta, ep, &update_result, msg_length, local_meta_uid, 0);
-		msg_length = recv_data(ucp_worker_meta, ep, update_result, msg_length, local_meta_uid, 0);
-		if (msg_length == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_REL_DATASET_RECV_UPDATERES");
-			slog_error("ERRIMSS_REL_DATASET_RECV_UPDATERES");
-			free(update_result);
-			return -1;
-		}
+	// 	// char update_result[msg_length];
+	// 	void *update_result = malloc(msg_length);
+	// 	// msg_length = recv_data_opt(ucp_worker_meta, ep, &update_result, msg_length, local_meta_uid, 0);
+	// 	msg_length = recv_data(ucp_worker_meta, ep, update_result, msg_length, local_meta_uid, 0);
+	// 	if (msg_length == 0)
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERRIMSS_REL_DATASET_RECV_UPDATERES");
+	// 		slog_error("ERRIMSS_REL_DATASET_RECV_UPDATERES");
+	// 		free(update_result);
+	// 		return -1;
+	// 	}
 
-		if (strcmp((const char *)update_result, "UPDATED!"))
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RELDATASET_UPDATE");
-			// Free the message received from the metadata server.
-			free(update_result);
-			return -1;
-		}
+	// 	if (strcmp((const char *)update_result, "UPDATED!"))
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERRIMSS_RELDATASET_UPDATE");
+	// 		// Free the message received from the metadata server.
+	// 		free(update_result);
+	// 		return -1;
+	// 	}
 
-		// Free the data locations vector.
-		free(release_dataset.data_locations);
-		// Free the monitoring vector.
-		free(release_dataset.blocks_written);
-		free(release_dataset.num_blocks_written);
-		free(update_msg);
-		// Free the message received from the metadata server.
-		free(update_result);
-		pthread_mutex_unlock(&lock_network);
-	}
+	// 	// Free the data locations vector.
+	// 	free(release_dataset.data_locations);
+	// 	// Free the monitoring vector.
+	// 	free(release_dataset.blocks_written);
+	// 	free(release_dataset.num_blocks_written);
+	// 	free(update_msg);
+	// 	// Free the message received from the metadata server.
+	// 	free(update_result);
+	// 	pthread_mutex_unlock(&lock_network);
+	// }
 
 	g_array_remove_index(datasetd, dataset_id);
 	g_array_insert_val(datasetd, dataset_id, empty_dataset);
@@ -2343,7 +2356,7 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 		curr_dataset = g_array_index(datasetd, dataset_info, dataset_id);
 		// curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
 		curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
-		slog_debug("[IMSS][get_data_location] curr_dataset.uri=%s, curr_dataset.imss_d=%d, curr_dataset.repl_factor=%d, dataset_id=%d, curr_dataset.policy=%s, curr_dataset.n_servers=%d", curr_dataset.uri_, curr_dataset.imss_d, curr_dataset.repl_factor, dataset_id, curr_dataset.policy, curr_dataset.n_servers);
+		slog_debug("[IMSS][get_data_location] curr_dataset.uri=%s, curr_dataset.imss_d=%d, curr_dataset.repl_factor=%d, dataset_id=%d, curr_dataset.policy=%s, curr_dataset.n_servers=%d, curr_dataset.n_servers_when_created=%d", curr_dataset.uri_, curr_dataset.imss_d, curr_dataset.repl_factor, dataset_id, curr_dataset.policy, curr_dataset.n_servers, curr_dataset.n_servers_when_created);
 
 		// Set the corresponding.
 		if (set_policy(&curr_dataset) == -1)
@@ -2357,12 +2370,12 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 	// char *curr_num_data_nodes = getenv("HERCULES_CURR_ACTIVE_DATA_NODES");
 	int curr_num_data_nodes_env = atoi(getenv("HERCULES_CURR_ACTIVE_DATA_NODES"));
 
-	int32_t old_num_storages = curr_imss.info.num_storages;
+	int32_t old_num_storages = curr_imss.info.num_active_storages;
 	if (curr_num_data_nodes_env != curr_imss.info.num_active_storages)
 	{
 		// curr_imss.info.num_storages = atoi(curr_num_data_nodes);
 		stat_imss_info(curr_imss.info.uri_, &curr_imss.info);
-		fprintf(stderr, "HERCULES_CURR_ACTIVE_DATA_NODES=%d, old_num_storages=%d, num_active_storages=%d, uri=%s\n", curr_num_data_nodes_env, old_num_storages, curr_imss.info.num_active_storages, curr_imss.info.uri_);
+		// fprintf(stderr, "HERCULES_CURR_ACTIVE_DATA_NODES=%d, old_num_storages=%d, num_active_storages=%d, uri=%s\n", curr_num_data_nodes_env, old_num_storages, curr_imss.info.num_active_storages, curr_imss.info.uri_);
 		// unsetenv("HERCULES_CURR_ACTIVE_DATA_NODES");
 
 		// for (int i = 0; i < curr_imss.info.num_storages; i++)
@@ -2372,24 +2385,23 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 	}
 
 	int32_t server = -1;
-	slog_live("[IMSS] curr_imss.uri=%s, curr_imss.info.num_storages=%d, curr_dataset.n_servers=%d", curr_dataset.uri_, curr_imss.info.num_storages, curr_dataset.n_servers);
+	slog_live("[IMSS] curr_dataset.uri=%s, curr_imss.info.num_storages=%d, curr_dataset.n_servers=%d, curr_imss.info.num_active_storages=%d, curr_dataset.n_servers_when_created=%d", curr_dataset.uri_, curr_imss.info.num_storages, curr_dataset.n_servers, curr_imss.info.num_active_storages, curr_dataset.n_servers_when_created);
 	// Search for the server that is supposed to have the specified data element.
 	// slog_debug("[get_data_location] curr_dataset.uri_=%s", curr_dataset.uri_);
 	// if ((server = find_server(curr_dataset.n_servers, data_id, curr_dataset.uri_, op_type)) < 0)
-	if (curr_imss.info.num_storages > 1)
+	if (curr_imss.info.num_active_storages > 1)
 	{
-		int num_storages = curr_imss.info.num_storages;
+		int num_storages = curr_dataset.n_servers_when_created; //  curr_imss.info.num_active_storages;
 		int it = 0;
 		while (true)
 		{
 			// if ((server = find_server(curr_imss.info.num_storages, data_id, curr_dataset.uri_, op_type)) < 0)
-
 			if ((server = find_server(num_storages, data_id, curr_dataset.uri_, op_type)) < 0)
 			{
 				perror("ERR_HERCULES_FIND_SERVER");
 				slog_fatal("ERR_HERCULES_FIND_SERVER");
 				return -1;
-			}
+			}			
 
 			if (curr_imss.info.status[server] == 1)
 			{
@@ -2399,7 +2411,7 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 				// }
 				break;
 			}
-			// slog_warn("Server %d is not avaiable, number of active nodes was %d\n", server, curr_imss.info.arr_num_active_storages[server]);
+			 slog_warn("Server %d is not avaiable, number of active nodes was %d\n", server, curr_imss.info.arr_num_active_storages[server]);
 			// fprintf(stderr, "Server %d is not avaiable, recalculating\n", server);
 			// fprintf(stderr, "Server %d is not avaiable for data id %d, number of active nodes was %d\n", server, data_id, curr_imss.info.arr_num_active_storages[server]);
 			num_storages = curr_imss.info.arr_num_active_storages[server]; // curr_imss.info.num_active_storages;
@@ -2408,6 +2420,7 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 			if (it >= 10)
 			{
 				fprintf(stderr, "[ERROR] Not find server for data id %d after %d iterations, %s\n", data_id, it, curr_dataset.uri_);
+				slog_error("[ERROR] Not find server for data id %d after %d iterations, %s\n", data_id, it, curr_dataset.uri_);
 				break;
 			}
 		}
@@ -2434,7 +2447,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 	// Servers that the data block is going to be requested to.
 	int32_t repl_servers[curr_dataset.repl_factor];
 
-	int32_t curr_imss_storages = curr_imss.info.num_storages;
+	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
 
 	// Retrieve the corresponding connections to the previous servers.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -2458,7 +2471,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 
 	// Request the concerned block to the involved servers.
 	// for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
-	for (int32_t i = 0; i < curr_imss.info.num_storages; i++)
+	for (int32_t i = 0; i < curr_imss.info.num_active_storages; i++)
 	{
 		ucp_ep_h ep = curr_imss.conns.eps[i];
 
@@ -2522,7 +2535,7 @@ int32_t rename_dataset_srv_worker(char *old_dataset_uri, char *new_dataset_uri,
 
 	// Servers that the data block is going to be requested to.
 	int32_t repl_servers[curr_dataset.repl_factor];
-	int32_t curr_imss_storages = curr_imss.info.num_storages;
+	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
 
 	// Retrieve the corresponding connections to the previous servers.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -2615,7 +2628,7 @@ int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, i
 
 	// Servers that the data block is going to be requested to.
 	int32_t repl_servers[curr_dataset.repl_factor];
-	int32_t curr_imss_storages = curr_imss.info.num_storages;
+	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
 
 	// Retrieve the corresponding connections to the previous servers.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -2700,7 +2713,7 @@ int32_t writev_multiple(const char *buf, int32_t dataset_id, int64_t data_id,
 	char key_[REQUEST_SIZE];
 	// Key related to the requested data element.
 
-	int32_t curr_imss_storages = curr_imss.info.num_storages;
+	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
 
 	// Send the data block to every server implementing redundancy.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -2753,7 +2766,7 @@ int32_t readv_multiple(int32_t dataset_id,
 
 	// Servers that the data block is going to be requested to.
 	int32_t repl_servers[curr_dataset.repl_factor];
-	int32_t curr_imss_storages = curr_imss.info.num_storages;
+	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
 
 	// Retrieve the corresponding connections to the previous servers.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -2842,7 +2855,7 @@ void *split_writev(void *th_argv)
 	int32_t n_server;
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
-	int32_t curr_imss_storages = curr_imss.info.num_storages;
+	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
 
 	// Send the data block to every server implementing redundancy.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -2887,7 +2900,7 @@ void *split_readv(void *th_argv)
 	// Servers that the data block is going to be requested to.
 	int32_t repl_servers[curr_dataset.repl_factor];
 
-	int32_t curr_imss_storages = curr_imss.info.num_storages;
+	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
 
 	// Retrieve the corresponding connections to the previous servers.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -3085,7 +3098,7 @@ int32_t imss_flush_data()
 	// }
 
 	// Release the set of connections to the corresponding IMSS.
-	for (int32_t i = 0; i < curr_imss.info.num_storages; i++)
+	for (int32_t i = 0; i < curr_imss.info.num_active_storages; i++)
 	{
 		ucp_ep_h ep;
 
@@ -3121,7 +3134,7 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 	{
 		// Server storing the current data block.
 		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset.repl_factor)) % curr_imss_storages;
-		slog_debug("[IMSS][get_data] next_server=%d, curr_dataset.repl_factor=%d, curr_dataset.n_servers=%d, curr_imss.info.num_storages=%d", n_server_, curr_dataset.repl_factor, curr_dataset.n_servers, curr_imss.info.num_storages);
+		slog_debug("[IMSS][get_data] next_server=%d, curr_dataset.repl_factor=%d, curr_dataset.n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, curr_dataset.repl_factor, curr_dataset.n_servers, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
 
 		// printf("Server storing is=%d",n_server_);
 		repl_servers[i] = n_server_;
@@ -3149,12 +3162,18 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 		slog_debug("[IMSS][get_data] Request - '%s' to server %ld", key_, repl_servers[i]);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			slog_error("HERCULES_ERR_RLSIMSS_SENDADDR");
-			perror("HERCULES_ERR_RLSIMSS_SENDADDR");
-			return -1;
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0) {
+			// try the next replica
+			if ( i != (curr_dataset.repl_factor - 1) ) {
+				continue;
+			}
+			// all previous replicas failed, and now the last one fails too
+			else {
+				pthread_mutex_unlock(&lock_network);
+				slog_error("HERCULES_ERR_RLSIMSS_SENDADDR");
+				perror("HERCULES_ERR_RLSIMSS_SENDADDR");
+				return -1;
+			}
 		}
 
 		// slog_debug("[IMSS] Request has been sent - '%s' to server %ld", key_, repl_servers[i]);
@@ -3285,13 +3304,21 @@ size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_r
 		// slog_info("[IMSS][get_data] Request - '%s'", key_);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 		slog_debug("[get_ndata] Sending request %s", key_);
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RLSIMSS_SENDADDR");
-			return -1;
-		}
 
+		// fprintf(stderr,"[get_ndata] Sending request %s to server %d\n", key_, repl_servers[i]);
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0) {
+			// try the next replica
+			if ( i != (curr_dataset.repl_factor - 1) ) {
+				continue;
+			}
+			// all previous replicas failed, and now the last one fails too
+			else {
+				pthread_mutex_unlock(&lock_network);
+				perror("ERRIMSS_RLSIMSS_SENDADDR");
+				return -1;
+			}
+		}
+		
 		size_t msg_length = 0;
 		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
 		slog_info("[IMSS][get_ndata] Receiving data, msg_length=%lu", msg_length);
@@ -3388,12 +3415,19 @@ size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t 
 		// sprintf(key_, "GET %lu %ld %s$%d %zd", 0l, offset, curr_dataset.original_name, data_id, to_read);
 		// slog_info("[IMSS][get_data] Request - '%s'", key_);
 		ep = curr_imss.conns.eps[repl_servers[i]];
+
 		slog_debug("[get_ndata] Sending request %s", key_);
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RLSIMSS_SENDADDR");
-			return 0;
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0) {
+			// try the next replica
+			if ( i != (curr_dataset.repl_factor - 1) ) {
+				continue;
+			}
+			// all previous replicas failed, and now the last one fails too
+			else {
+				pthread_mutex_unlock(&lock_network);
+				perror("ERRIMSS_RLSIMSS_SENDADDR");
+				return 0;
+			}
 		}
 
 		size_t msg_length = 0;
@@ -3449,6 +3483,7 @@ size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t 
  */
 int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset)
 {
+	int ret = 0;
 	int32_t n_server;
 
 	// stat_imss_info(curr_imss.info.uri_, &curr_imss.info);
@@ -3501,8 +3536,17 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 			exit(-1);
 		}
 
-		// send the data to the data server of the current dataset.
-		if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+		// the first copy will always be written synchronously
+		if (i == 0 || curr_dataset.repl_type == SYNC) {
+			// send the data to the data server of the current dataset.
+			ret = send_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		// the additional replicas can be written asynchronously
+		else {
+			ret = isend_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		
+		if (ret == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
@@ -3549,7 +3593,8 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 		// 	size = curr_dataset.data_entity_size;
 
 		sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
-		slog_info("[IMSS][set_data] BLOCK %d SENT TO %d SERVER with Request: %s (%d)", data_id, n_server_, key_, size);
+		slog_info("[IMSS][set_data] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)", data_id, n_server_, key_, size);
+		// fprintf(stderr, "[IMSS][set_data] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)\n", data_id, n_server_, key_, size);
 		ep = curr_imss.conns.eps[n_server_];
 		// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id)
 		// in a dataset (curr_dataset.uri).
@@ -3589,6 +3634,7 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 // Method storing a specific data element.
 int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages)
 {
+	int ret = 0;
 	int32_t n_server;
 	clock_t t;
 	// size_t (*const send_choose_stream)(ucp_worker_h ucp_worker, ucp_ep_h ep, const char *msg, size_t msg_length) = (IMSS_WRITE_ASYNC == 1) ? send_istream : send_data;
@@ -3642,7 +3688,17 @@ int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, s
 
 		// slog_debug("[IMSS][set_data] send_data(curr_imss.conns.id[%ld]:%ld, key_:%s, REQUEST_SIZE:%d)", n_server_, curr_imss.conns.id[n_server_], key_, REQUEST_SIZE);
 
-		if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+		// the first copy will always be written synchronously
+		if (i == 0 || curr_dataset.repl_type == SYNC) {
+			// send the data to the data server of the current dataset.
+			ret = send_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		// the additional replicas can be written asynchronously
+		else {
+			ret = isend_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		
+		if (ret == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("ERR_HERCULES_SET_DATA_MALL_SEND_DATA");
@@ -3671,6 +3727,7 @@ set_ndata(int32_t dataset_id,
 		  char *buffer,
 		  uint32_t size)
 {
+	int ret = 0;
 	int32_t n_server;
 	// Server containing the corresponding data to be written.
 	if ((n_server = get_data_location(dataset_id, data_id, SET)) == -1)
@@ -3679,7 +3736,7 @@ set_ndata(int32_t dataset_id,
 
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
-	int32_t curr_imss_storages = curr_imss.info.num_storages;
+	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
 
 	// Send the data block to every server implementing redundancy.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -3702,8 +3759,17 @@ set_ndata(int32_t dataset_id,
 			return -1;
 		}
 
-		// Send read request message specifying the block data.
-		if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+		// the first copy will always be written synchronously
+		if (i == 0 || curr_dataset.repl_type == SYNC) {
+			// Send read request message specifying the block data.
+			ret = send_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		// the additional replicas can be written asynchronously
+		else {
+			ret = isend_data(ucp_worker_data, ep, buffer, size, local_data_uid);
+		}
+		
+		if (ret == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("ERR_HERCULES_SET_NDATA_SEND_DATA");
@@ -3740,13 +3806,13 @@ char **get_dataloc(const char *dataset,
 		// The dataset was retrieved from the metadata server.
 	case 1:
 	{
-		// The dataset structure will not be stored if it is a LOCAL one as those are dynamically updated.
-		if (strcmp(where_dataset.policy, "LOCAL"))
-		{
-			// Hint specifying that the dataset was retrieved but not initialized.
-			where_dataset.local_conn = -2;
-			GInsert(&datasetd_pos, &datasetd_max_size, (char *)&where_dataset, datasetd, free_datasetd);
-		}
+		// // The dataset structure will not be stored if it is a LOCAL one as those are dynamically updated.
+		// if (strcmp(where_dataset.policy, "LOCAL"))
+		// {
+		// 	// Hint specifying that the dataset was retrieved but not initialized.
+		// 	where_dataset.local_conn = -2;
+		// 	GInsert(&datasetd_pos, &datasetd_max_size, (char *)&where_dataset, datasetd, free_datasetd);
+		// }
 
 		break;
 	}
@@ -3801,7 +3867,7 @@ char **get_dataloc(const char *dataset,
 
 	int32_t server;
 	// Find the server storing the corresponding block.
-	if ((server = find_server(where_imss.info.num_storages, data_id, where_dataset.uri_, GET)) < 0)
+	if ((server = find_server(where_imss.info.num_active_storages, data_id, where_dataset.uri_, GET)) < 0)
 	{
 		slog_fatal("ERRIMSS_GETDATALOC_FINDSERVER");
 		return NULL;
@@ -3824,8 +3890,8 @@ char **get_dataloc(const char *dataset,
 	if (found_imss_in == 2)
 		free(where_imss.info.ips);
 
-	if (!strcmp(where_dataset.policy, "LOCAL"))
-		free(where_dataset.data_locations);
+	// if (!strcmp(where_dataset.policy, "LOCAL"))
+	// 	free(where_dataset.data_locations);
 
 	return machines;
 }
@@ -3967,7 +4033,7 @@ int32_t split_location_servers(int **list_servers, int32_t dataset_id, int32_t c
 // Method releasing an imss_info structure previously provided to the client.
 int32_t free_imss(imss_info *imss_info_)
 {
-	for (int32_t i = 0; i < imss_info_->num_storages; i++)
+	for (int32_t i = 0; i < imss_info_->num_active_storages; i++)
 		free(imss_info_->ips[i]);
 
 	free(imss_info_->ips);
@@ -3978,17 +4044,17 @@ int32_t free_imss(imss_info *imss_info_)
 // Method releasing a dataset structure previously provided to the client.
 int32_t free_dataset(dataset_info *dataset_info_)
 {
-	if (!strcmp(dataset_info_->policy, "LOCAL"))
-	{
-		if (dataset_info_->data_locations)
-			free(dataset_info_->data_locations);
+	// if (!strcmp(dataset_info_->policy, "LOCAL"))
+	// {
+	// 	if (dataset_info_->data_locations)
+	// 		free(dataset_info_->data_locations);
 
-		if (dataset_info_->num_blocks_written)
-			free(dataset_info_->num_blocks_written);
+	// 	if (dataset_info_->num_blocks_written)
+	// 		free(dataset_info_->num_blocks_written);
 
-		if (dataset_info_->blocks_written)
-			free(dataset_info_->blocks_written);
-	}
+	// 	if (dataset_info_->blocks_written)
+	// 		free(dataset_info_->blocks_written);
+	// }
 
 	return 0;
 }

@@ -6,6 +6,7 @@
 #include "flags.h"
 #include "resolvepath.h"
 #include "tempname.h"
+#include "shared_memory.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -60,7 +61,8 @@ uint64_t META_BUFFSIZE = 16;  // In GB
 uint64_t IMSS_BLKSIZE = 1024; // In KB
 uint64_t IMSS_BUFFSIZE = 2;	  // In GB
 uint64_t IMSS_DATA_BSIZE;	  // In Bytes.
-int32_t REPL_FACTOR = 1;	  // Default none
+int32_t REPL_FACTOR = NONE;	  // Default none
+int32_t REPL_TYPE = ASYNC;	  // Default async
 int32_t IMSS_DEBUG_FILE = 0;
 int32_t IMSS_DEBUG_SCREEN = 0;
 int IMSS_DEBUG_LEVEL = SLOG_FATAL;
@@ -315,11 +317,16 @@ char *checkHerculesPath(const char *pathname)
 
 	// if (!strncmp(pathname, MOUNT_POINT, strlen(MOUNT_POINT) - 1)) // error when  pathname=/mnt/hercules/data/unet3d and MOUNT_POINT=/mnt/hercules,
 	// if (!strncmp(pathname, MOUNT_POINT, strlen(pathname) - 1))
-	if (!strncmp(pathname, MOUNT_POINT, MAX(strlen(pathname), strlen(MOUNT_POINT)) - 1))
+	size_t pathname_len = strlen(pathname);
+	size_t max_lenght = MAX(pathname_len, strlen(MOUNT_POINT));
+	if(pathname[pathname_len-1] == '/') {
+		max_lenght--;
+	}
+	if (!strncmp(pathname, MOUNT_POINT, max_lenght))
 	{
-		// slog_debug("[HERCULES][checkHerculesPath] pathname=%s, MOUNT_POINT=%s, Success", pathname, MOUNT_POINT);
+		slog_debug("[HERCULES][checkHerculesPath] pathname=%s, MOUNT_POINT=%s, Success", pathname, MOUNT_POINT);
 		// new_path = calloc(strlen("Success"), sizeof(char));
-		new_path = calloc(strlen("imss://"), sizeof(char));
+		new_path = calloc(strlen("imss://"), sizeof(char) + 1);
 		// strcpy(new_path, "Success");
 		strcat(new_path, "imss://");
 	}
@@ -444,7 +451,6 @@ char *convert_path(const char *name)
 			break;
 		}
 	}
-	// fprintf(stderr, "path=%s, desplacements=%ld\n", path, desplacements);
 	// deletes initial slashes "/" from the path.
 	if (desplacements > 0)
 	{
@@ -453,21 +459,11 @@ char *convert_path(const char *name)
 	// add the URL to the new path.
 	strcat(new_path, "imss://");
 
-	// fprintf(stderr, "updated path=%s, desplacements=%ld\n", path, desplacements);
-	// if (!strncmp(path, "/", strlen("/")))
-	// {
-	// 	strcat(new_path, "imss:/");
-	// }
-	// else
-	// {
-	// 	strcat(new_path, "imss://");
-	// }
 	// add the path to the new_path, which has the URL prefix.
 	if (desplacements < len)
 	{
 		strcat(new_path, path);
 	}
-	// fprintf(stderr, "updated path=%s, desplacements=%ld, new_path=%s\n", path, desplacements, new_path);
 
 	return new_path;
 }
@@ -475,15 +471,9 @@ char *convert_path(const char *name)
 __attribute__((constructor)) void imss_posix_init(void)
 {
 	errno = 0;
-	// double init_time = 0.0, finish_time = 0.0;
-	// double time_taken = 0.0;
-	// init_time = clock();
-	// time(&init_time);
 
 	struct timeval start, end;
 	gettimeofday(&start, NULL);
-
-	// double begin = (tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
 
 	map_fd = map_fd_create();
 
@@ -530,6 +520,10 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// 	fprintf(stderr, "LOG PATH= %s\n", log_path); // this line raise an exception running a python app with threads.
 	// }
 	slog_init(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, rank);
+	if (IMSS_DEBUG_FILE > 0)
+	{
+		printf("Log path = %s\n", log_path);
+	}
 	slog_info(",Time(msec), Comment, RetCode");
 
 	slog_debug(" -- HERCULES_MOUNT_POINT: %s", MOUNT_POINT);
@@ -550,8 +544,13 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_debug(" -- UPPER_BOUND_SERVERS: %d", UPPER_BOUND_SERVERS);
 	slog_debug(" -- LOWER_BOUND_SERVERS: %d", LOWER_BOUND_SERVERS);
 	slog_debug(" -- REPL_FACTOR: %d", REPL_FACTOR);
+	slog_debug(" -- REPL_TYPE: %d", REPL_TYPE);
 	slog_debug(" -- POLICY: %s", POLICY);
-	slog_debug(" -- RELEASE: %d", 1);
+	slog_debug(" -- RELEASE: %d", release);
+
+	fprintf(stderr, " -- POLICY: %s\n", POLICY);
+
+	// createSM(1000);
 
 	// Metadata server
 	// if (release == 1)
@@ -564,11 +563,12 @@ __attribute__((constructor)) void imss_posix_init(void)
 	}
 
 	// if (DEPLOYMENT == 2 && release == 1)
+	int num_active_storages = 0;
 	if (DEPLOYMENT == 2)
 	{
 		// fprintf(stderr,"Constructor has been called\n");
-		ret = open_imss(IMSS_ROOT);
-		if (ret < 0)
+		num_active_storages = open_imss(IMSS_ROOT);
+		if (num_active_storages < 0)
 		{
 			release = 0;
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
@@ -606,27 +606,15 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_debug("IMSS EXIST=%d\n", is_alive(IMSS_ROOT));
 	slog_debug("[CLIENT %d] ready!\n", rank);
 
-	// fprintf(stderr, "[CLIENT %d] ready!\n", rank);
-
-	// sleep(10);
-
-	// finish_time = clock();
-	// time(&finish_time);
-	// time_taken = ((double)(finish_time - init_time)) / (CLOCKS_PER_SEC);
-
 	gettimeofday(&end, NULL);
 	long seconds, useconds;
 	double elapsed;
 	seconds = end.tv_sec - start.tv_sec;
 	useconds = end.tv_usec - start.tv_usec;
 	elapsed = seconds + useconds / 1e6;
-	// double end = (tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
-	
-	// sleep(10);
 
-	// fprintf(stderr, "CLIENT_CONSTRUCTOR_TIME %.6f seconds\n", elapsed);
-	// fprintf(stderr, "Client started\n");
 	init = 1;
+	fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
 
 int getConfiguration()
@@ -757,6 +745,9 @@ int getConfiguration()
 	if (cfg_get(cfg, "REPL_FACTOR"))
 		REPL_FACTOR = atoi(cfg_get(cfg, "REPL_FACTOR"));
 
+	if (cfg_get(cfg, "REPL_TYPE"))
+		REPL_TYPE = atoi(cfg_get(cfg, "REPL_TYPE"));
+
 	if (cfg_get(cfg, "POLICY"))
 		POLICY = cfg_get(cfg, "POLICY");
 
@@ -832,8 +823,6 @@ int getConfiguration()
 		strcpy(MOUNT_POINT, getenv("IMSS_MOUNT_POINT"));
 	}
 
-	// strcpy(IMSS_ROOT, "imss://");
-
 	if (getenv("IMSS_HOSTFILE") != NULL)
 	{
 		strcpy(IMSS_HOSTFILE, getenv("IMSS_HOSTFILE"));
@@ -843,7 +832,6 @@ int getConfiguration()
 	{
 		N_SERVERS = atoi(getenv("IMSS_N_SERVERS"));
 	}
-	// fprintf(stderr,"N_SERVERS=%d\n", N_SERVERS);
 
 	if (getenv("IMSS_SRV_PORT") != NULL)
 	{
@@ -913,7 +901,8 @@ void __attribute__((destructor)) run_me_last()
 	errno = 0;
 	// fprintf(stderr, "Calling 'run_me_last', pid=%d, rank=%d, release=%d\n", g_pid, rank, release);
 	slog_debug("Calling 'run_me_last', pid=%d, rank=%d, release=%d", g_pid, rank, release);
-	if (release == 1)
+	release--;
+	if (release == 0)
 	{
 		// clock_t t_s;
 		// double time_taken;
@@ -1184,7 +1173,6 @@ pid_t fork(void)
 
 		perror("Fork error");
 		slog_error("[POSIX] Error 'real fork', errno=%d:%s", errno, strerror(errno));
-		// exit(EXIT_FAILURE);
 		return pid;
 	}
 
@@ -1205,7 +1193,6 @@ pid_t fork(void)
 		// if (ret == -1)
 		// {
 		// 	perror("gethostname");
-		// 	exit(EXIT_FAILURE);
 		// }
 		// sprintf(hostname, "%s:%d", hostname_, pid);
 
@@ -1226,6 +1213,7 @@ pid_t fork(void)
 	else // parent process.
 	{
 		slog_debug("[POSIX] Parent process, pid=%d", pid);
+		release += 1;
 		// release = 0;
 		// fprintf(stderr, "[POSIX]. Fork parent status, pid=%d, rank=%d, log_path=%s, old_log_path=%s\n", pid, rank, log_path, old_log_path);
 		// slog_info("[POSIX]. Calling fork, rank=%d, log_path=%s, old_log_path=%s", rank, log_path, old_log_path);
@@ -1258,7 +1246,6 @@ pid_t fork(void)
 
 // 		slog_error("[POSIX] Error 'real %s', errno=%d:%s", __func__, errno, strerror(errno));
 // 		perror("Vfork error");
-// 		// exit(EXIT_FAILURE);
 // 		return pid;
 // 	}
 
@@ -1759,16 +1746,23 @@ int fclose(FILE *fp)
 	{
 		slog_debug("[POSIX]. Calling Hercules 'fclose', pathname=%s, fd=%d", pathname, fd);
 		ret = imss_close(pathname, fd);
-		if (ret)
+		// Upon successful completion, fclose() shall return 0;
+		// otherwise, it shall return EOF and set errno to indicate the error.
+		// To control this situations, we check the value of "ret" before we return it.
+		// greater than 0.
+		if (ret > 0)
 		{
-			// Upon successful completion, fclose() shall return 0; otherwise, it shall return EOF and set errno to indicate the error.
 			ret = 0;
 		}
+		// less than 0 (error).
+		if (ret < 0)
+		{
+			ret = EOF;
+		}
+
 		slog_debug("[POSIX]. Ending Hercules 'fclose' pathname=%s, fd=%d\n", pathname, fd);
-		// fprintf(stderr, "Calling Hercules 'fclose', pathname=%s, fd=%d, ret=%d\n", pathname, fd, ret);
 		// Set offset to 0.
 		map_fd_update_value(map_fd, pathname, fd, 0);
-		// free(fp);
 	}
 	else
 	{ // don't call slog here!
@@ -3590,8 +3584,6 @@ size_t fread(void *buf, size_t size, size_t count, FILE *fp)
 
 int unlink(const char *name)
 {
-	// fprintf(stderr, "Starting unlink, name=%s\n", name);
-
 	if (!real_unlink)
 		real_unlink = dlsym(RTLD_NEXT, "unlink");
 
@@ -5406,7 +5398,7 @@ int fprintf(FILE *restrict stream, const char *restrict format, ...)
 	if (!real_fprintf)
 	{
 		// vfprintf always expect a 'va_list' type as last argument.
-		// The behaviour of both calls are similar, so we can oversuscribe 
+		// The behaviour of both calls are similar, so we can oversuscribe
 		// 'real_fprintf' by 'vfprintf'.
 		real_fprintf = dlsym(RTLD_NEXT, "vfprintf");
 	}
@@ -5419,7 +5411,7 @@ int fprintf(FILE *restrict stream, const char *restrict format, ...)
 	{
 		// printf("Calling Hercules fprintf, fd=%d\n", stream->_fileno);
 		slog_debug("Calling Hercules fprintf, fd=%d\n", stream->_fileno);
-		
+
 		va_list args;
 		va_start(args, format);
 		// Get the size to be copy into the buffer. +1 to '\n'.

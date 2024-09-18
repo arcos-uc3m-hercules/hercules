@@ -60,32 +60,47 @@ ucp_address_t **local_addr;
 size_t *local_addr_len;
 
 extern int IMSS_THREAD_POOL;
-
-// const char *TESTX = "imss://lorem_text.txt$1";
-// const char *TESTX = "imss://wfc1.dat$1";
-// const char *TESTX = "p4x2.save/wfc1.dat";
+int global_finish_threads = 0;
+int global_server_fd_thread = -1;
 
 #define GARBAGE_COLLECTOR_PERIOD 120
 
 int ready(char *tmp_file_path, const char *msg)
 {
+	// fprintf(stderr, "Trying to create the file %s with the message %s\n", tmp_file_path, msg);
 	char status[25];
-	FILE *tmp_file = tmpfile(); // make the file pointer as temporary file.
+	char err_msg[132];
+	FILE *tmp_file; // = tmpfile(); // make the file pointer as temporary file.
+
 	tmp_file = fopen(tmp_file_path, "w");
 	if (tmp_file == NULL)
 	{
-		// puts("Error in creating temporary file");
-		fprintf(stderr, "Error in creating temporary file %s", tmp_file_path);
+		sprintf(err_msg, "Error in creating the temporary file %s\n", tmp_file_path);
+		perror(err_msg);
 		return -1;
 	}
 
 	strcpy(status, "STATUS = ");
 	strcat(status, msg);
 
-	fwrite(status, strlen(status), 1, tmp_file);
+	size_t written = fwrite(status, strlen(status), 1, tmp_file);
+	if (written < 0)
+	{
+		sprintf(err_msg, "Error writting in temporary file %s\n", tmp_file_path);
+		perror(err_msg);
+		fclose(tmp_file);
+		return -1;
+	}
 
-	fclose(tmp_file);
+	if (fclose(tmp_file) == EOF)
+	{
+		sprintf(err_msg, "Error closing the temporary file %s\n", tmp_file_path);
+		perror(err_msg);
+		return -1;
+	}
 
+	// if there was an error in the initialization of the server,
+	// we kill the process.
 	if (!strncmp(msg, "ERROR", sizeof("ERROR")))
 	{
 		exit(1);
@@ -94,11 +109,10 @@ int ready(char *tmp_file_path, const char *msg)
 }
 
 // ucp_worker_h *global_ucp_worker;
-int finished = 0;
-int global_server_fd = -1;
+
 // if malleability_on = 1, new requests will be not handled and server will
 // respond with a "malleability" string.
-int malleability_on = 0;
+// int malleability_on = 0;
 #define MALLEABILITY_MESSAGE = "MALLEABILITY";
 
 void handle_signal(int signal)
@@ -106,11 +120,11 @@ void handle_signal(int signal)
 	if (signal == SIGUSR1)
 	{
 		fprintf(stderr, "*** Received SIGUSR1\n");
-		finished = 1;
-		malleability_on = 1;
+		global_finish_threads = 1;
+		// malleability_on = 1;
 
 		// To dispatcher thread.
-		if (shutdown(global_server_fd, SHUT_RD) == -1)
+		if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
 		{
 			fprintf(stderr, "Error closing server_fd\n");
 		}
@@ -165,6 +179,13 @@ void handle_signal(int signal)
 // Thread method attending client read-write data requests.
 void *srv_worker(void *th_argv)
 {
+
+	// Enable thread cancellation
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
+	// Set the cancellation type to deferred
+	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
 	ucp_ep_params_t ep_params;
 
 	ucp_am_handler_param_t param;
@@ -203,7 +224,7 @@ void *srv_worker(void *th_argv)
 		t = clock();
 
 		// Register signal handler
-		signal(SIGUSR1, handle_signal);
+		// signal(SIGUSR1, handle_signal);
 
 		do
 		{
@@ -211,7 +232,7 @@ void *srv_worker(void *th_argv)
 			TIMING(ucp_worker_progress(arguments->ucp_worker), "[srv_worker]ucp_worker_progress", unsigned int);
 			/* Probing incoming events in non-block mode */
 			msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, tag_req, tag_mask, 1, &info_tag);
-			if (finished)
+			if (global_finish_threads == 1)
 			{
 				fprintf(stderr, "Ending data server thread.\n");
 				pthread_exit(NULL);
@@ -322,8 +343,6 @@ void *srv_worker(void *th_argv)
 
 int srv_worker_helper(p_argv *arguments, const char *req)
 {
-	// slog_init("workers", SLOG_INFO, 1, 0, 1, 1, 1);
-	// std::unique_lock<std::mutex> lock(*mut2);
 
 	ucs_status_t status;
 	int ret = -1;
@@ -1117,8 +1136,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					// slog_live("msg_length=%lu", msg_length);
 					if (msg_length == 0)
 					{
-						perror("ERRIMSS_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
-						slog_error("ERRIMSS_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
+						perror("ERR_HERCULES_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
+						slog_error("ERR_HERCULES_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
 						free(buffer);
 						return -1;
 					}
@@ -1206,6 +1225,13 @@ void *garbage_collector(void *th_argv)
 // Thread method attending client read-write metadata requests.
 void *stat_worker(void *th_argv)
 {
+
+	// Enable thread cancellation
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
+	// Set the cancellation type to deferred
+	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
 	ucp_am_handler_param_t param;
 	ucs_status_t status;
 	int ret = 0;
@@ -1228,7 +1254,7 @@ void *stat_worker(void *th_argv)
 		ucp_request_param_t recv_param;
 
 		// Register signal handler
-		signal(SIGUSR1, handle_signal);
+		// signal(SIGUSR1, handle_signal);
 
 		ucs_status_t status;
 		/* Receive test string from server */
@@ -1238,7 +1264,7 @@ void *stat_worker(void *th_argv)
 			ucp_worker_progress(arguments->ucp_worker);
 			/* Probing incoming events in non-block mode */
 			msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, tag_req, tag_mask, 1, &info_tag);
-			if (finished == 1)
+			if (global_finish_threads == 1)
 			{
 				fprintf(stderr, "Ending metadata thread.\n");
 				pthread_exit(NULL);
@@ -1369,17 +1395,26 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	/*struct timeval start, end;
 	  long delta_us;*/
 
-	int operation = 0;
+	int operation = 0; // server id.
 	char mode[MODE_SIZE];
+	int32_t req_size = 0;
+	char raw_msg[req_size + 1];
+	char number[16];
+	// char *uri_;
+	char uri_[URI_];
+	int extra_info = 0;
+	int num_characters_read = 0;
+	int num_input_read = 0;
 
 	// slog_debug("[STAT WORKER] Waiting for new request.");
 	// Save the request to be served.
 	// recv_data(arguments->ucp_worker, arguments->server_ep, req);
-	// slog_info("[STAT WORKER] Request - '%s'", req);
-	sscanf(req, "%" PRIu32 " %s", &operation, mode);
+	slog_info("[STAT WORKER] Request - '%s'", req);
+	// 	sscanf(req, "%" PRIu32 " %s", &operation, mode);
+	num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
 
-	char *req_content = strstr(req, mode);
-	req_content += 4;
+	// char *req_content = strstr(req, mode);
+	// req_content += 4;
 
 	if (!strcmp(mode, "GET"))
 		more = GET_OP;
@@ -1387,28 +1422,27 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		more = SET_OP;
 
 	// Expeted incomming message format: "SIZE_IN_KB KEY"
-	int32_t req_size = strlen(req_content);
+	// int32_t req_size = strlen(req_content);
 
-	char raw_msg[req_size + 1];
-	memcpy((void *)raw_msg, req_content, req_size);
-	raw_msg[req_size] = '\0';
+	// memcpy((void *)raw_msg, req_content, req_size);
+	// raw_msg[req_size] = '\0';
 
 	// printf("*********worker_metadata raw_msg %s",raw_msg);
 	slog_info("[workers][stat_worker_helper] request received=%s", req);
 
 	// Reference to the client request.
-	char number[16];
-	sscanf(raw_msg, "%s", number);
-	int32_t number_length = (int32_t)strlen(number);
+	// sscanf(raw_msg, "%s", number);
+	// int32_t number_length = (int32_t)strlen(number);
 	// Elements conforming the request.
-	char *uri_ = raw_msg + number_length + 1;
+	// char *uri_ = raw_msg + number_length + 1;
 	// raw_msg += number_length + 1;
 	// memcpy(uri, raw_msg, number_length + 1);
 	uint64_t block_size_recv = (uint64_t)atoi(number);
 
 	// req_content += req_size;
 
-	slog_info("[workers][stat_worker_helper] operation=%d, number=%s, number_length=%d, uri=%s, block_size_recv=%ld", operation, number, number_length, uri_, block_size_recv);
+	// slog_info("[workers][stat_worker_helper] operation=%d, number=%s, number_length=%d, uri=%s, block_size_recv=%ld", operation, number, number_length, uri_, block_size_recv);
+	slog_info("[workers][stat_worker_helper] operation=%d, number=%s, uri=%s, block_size_recv=%ld", operation, number, uri_, block_size_recv);
 
 	// Create an std::string in order to be managed by the map structure.
 	std::string key;
@@ -1773,7 +1807,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		if (!map->get(key, &address_, &block_size_rtvd))
 		{
 			pthread_mutex_unlock(&mp);
-			slog_debug("[STAT WORKER] Adding new block %p", &address_);
+			// slog_debug("[STAT WORKER] Adding new block %p", &address_);
 
 			slog_debug("[STAT WORKER] Recv dynamic buffer size %ld", block_size_recv);
 			// Get the length of the message to be received.
@@ -1789,9 +1823,12 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			// Receive the block into the buffer.
 			void *buffer = malloc(block_size_recv);
 			ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
+
+			dataset_info *struct_ = (dataset_info *)buffer;
+
 			// ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
 			// length = recv_dynamic_stream_opt(arguments->ucp_worker, arguments->server_ep, &buffer, BUFFER, arguments->worker_uid, length);
-			slog_debug("[STAT WORKER] END Recv dynamic");
+			slog_debug("[STAT WORKER] END Recv dynamic, n_server_when_created=%d", struct_->n_servers_when_created);
 
 			if (ret < 0)
 			{
@@ -1826,8 +1863,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				return -1;
 			}
 
-			// copy the block into disk.
-
 			// Update the pointer.
 			arguments->pt += block_size_recv;
 			slog_debug("[STAT WORKER] Dataset %s has been created.", key.c_str());
@@ -1837,7 +1872,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		{
 			// Follow a certain behavior if the received block was already stored.
 			slog_debug("[STAT WORKER] LOCAL DATASET_UPDATE %ld", block_size_recv);
-			switch (1) // TO CKECK!S
+			switch (1) // TO CKECK!
 			{
 			// Update where the blocks of a LOCAL dataset have been stored.
 			case LOCAL_DATASET_UPDATE:
@@ -1848,6 +1883,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				{
 					perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
 					slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
+					pthread_mutex_unlock(&mp);
 					// perror("ERRIMSS_METADATA_LOCAL_DATASET_UPDATE_INVALID_MSG_LENGTH");
 					return -1;
 				}
@@ -1861,6 +1897,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					perror("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP");
 					slog_error("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP");
 					free(data_ref);
+					pthread_mutex_unlock(&mp);
 					// perror("ERRIMSS_METADATA_LOCAL_DATASET_UPDATE_RECV_DATA");
 					return -1;
 				}
@@ -1891,6 +1928,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					perror("HERCULES_ERR_METADATA_WORKER_SEND_DATA_SET_OP");
 					// perror("ERRIMSS_WORKER_DATALOCATANSWER2");
 					free(data_ref);
+					pthread_mutex_unlock(&mp);
 					return -1;
 				}
 				free(data_ref);
@@ -1900,9 +1938,30 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 			default:
 			{
+				int new_server_status = 0;
+				switch (num_input_read)
+				{
+				case 4: // we expect to get 4 values in a normal case.
+					// we look for extra information.
+					if (req[num_characters_read] != '\0')
+					{
+						slog_live("Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
+						// get the server status to be set.
+						sscanf(&req[num_characters_read], "%d", &new_server_status);
+					}
+					else
+					{
+						slog_live("No extra characters found.\n");
+					}
+					break;
+				default:
+					break;
+				}
+
 				unsigned long num_active_storages = atol(number);
 				int delete_dataserver_indx = operation;
 				slog_debug("[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
+				// fprintf(stderr, "[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
 
 				char *address_aux = (char *)address_;
 
@@ -1924,9 +1983,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 				// int current_num_storages = imss_info_->num_storages;
 				// slog_debug("[STAT_WORKER] prev. num data servers=%d", imss_info_->num_storages);
-				slog_debug("[STAT_WORKER] stopping %d with status=%d", delete_dataserver_indx, imss_info_->status[delete_dataserver_indx]);
+				slog_debug("[STAT_WORKER] changing data server %d with status=%d to a new status=%d", delete_dataserver_indx, imss_info_->status[delete_dataserver_indx], new_server_status);
 				// free(imss_info_->ips[delete_dataserver_indx]);
-				imss_info_->status[delete_dataserver_indx] = 0;
+				imss_info_->status[delete_dataserver_indx] = new_server_status;
 				slog_debug("[STAT_WORKER] new num data servers=%d, new status=%d", imss_info_->num_active_storages, imss_info_->status[delete_dataserver_indx]);
 				// address_ += sizeof(imss_info);
 				// address_ += imss_info_->num_storages * LINE_LENGTH;
@@ -1977,13 +2036,14 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				break;
 			}
 			}
+			pthread_mutex_unlock(&mp);
 		}
 		break;
 	}
 	default:
 		break;
 	}
-	pthread_mutex_unlock(&mp);
+	// pthread_mutex_unlock(&mp);
 
 	slog_debug("[srv_worker_thread] Terminated meta helper\n");
 
@@ -2019,7 +2079,7 @@ void *srv_attached_dispatcher(void *th_argv)
 	context.conn_request = StsQueue.create();
 
 	// Register signal handler
-	signal(SIGUSR1, handle_signal);
+	// signal(SIGUSR1, handle_signal);
 
 	for (;;)
 	{
@@ -2029,7 +2089,7 @@ void *srv_attached_dispatcher(void *th_argv)
 		while (StsQueue.size(context.conn_request) == 0)
 		{
 			ucp_worker_progress(arguments->ucp_worker);
-			if (finished == 1)
+			if (global_finish_threads == 1)
 			{
 				fprintf(stderr, "Ending srv_attached_dispatcher thread\n");
 				pthread_exit(NULL);
@@ -2151,6 +2211,11 @@ void *srv_attached_dispatcher(void *th_argv)
 // Metadata dispatcher thread method.
 void *dispatcher(void *th_argv)
 {
+	// Enable thread cancellation
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
+	// Set the cancellation type to deferred
+	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 
 	// Cast from generic pointer type to p_argv struct type pointer.
 	p_argv *arguments = (p_argv *)th_argv;
@@ -2169,18 +2234,16 @@ void *dispatcher(void *th_argv)
 
 	// snprintf(service, sizeof(service), "%ld", arguments->port);
 	// Get a socket file descriptor.
-	global_server_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (global_server_fd < 0)
+	global_server_fd_thread = socket(AF_INET, SOCK_STREAM, 0);
+	if (global_server_fd_thread < 0)
 	{
 		perror("ERR_HERCULES_DISPATCHER_SOCKET");
 		ready(tmp_file_path, "ERROR");
 		pthread_exit(NULL);
 	}
 
-	// global_server_fd = &server_fd;
-
 	// To reuse the address and port.
-	ret = setsockopt(global_server_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+	ret = setsockopt(global_server_fd_thread, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
 	if (ret < 0)
 	{
 		perror("ERR_HERCULES_DISPATCHER_SET_SOCKET_OPT");
@@ -2195,7 +2258,7 @@ void *dispatcher(void *th_argv)
 	server_addr.sin_port = htons(arguments->port);
 
 	// Asociamos el socket a la dirección del servidor
-	if (bind(global_server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+	if (bind(global_server_fd_thread, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
 	{
 		perror("ERR_HERCULES_DISPATCHER_BIND");
 		ready(tmp_file_path, "ERROR");
@@ -2203,7 +2266,7 @@ void *dispatcher(void *th_argv)
 	}
 
 	// Prepare to accept connections.
-	ret = listen(global_server_fd, 3);
+	ret = listen(global_server_fd_thread, 3);
 	if (ret < 0)
 	{
 		perror("ERR_HERCULES_DISPATCHER_LISTEN");
@@ -2221,9 +2284,9 @@ void *dispatcher(void *th_argv)
 
 		slog_debug("[DISPATCHER] Waiting for connection requests.");
 		// fprintf(stderr, "[DISPATCHER] Waiting for connection requests.\n");
-		new_socket = accept(global_server_fd, (struct sockaddr *)&server_addr, &addrlen);
+		new_socket = accept(global_server_fd_thread, (struct sockaddr *)&server_addr, &addrlen);
 
-		if (finished == 1)
+		if (global_finish_threads == 1)
 		{
 			fprintf(stderr, "Ending dispatcher thread.\n");
 			pthread_exit(NULL);
@@ -2278,7 +2341,7 @@ void *dispatcher(void *th_argv)
 		// MIRAR ucp_worker_release_address(ucp_worker_threads[client_id_ % IMSS_THREAD_POOL], local_addr);
 		close(new_socket);
 	}
-	close(global_server_fd);
+	close(global_server_fd_thread);
 
 	pthread_exit(NULL);
 }

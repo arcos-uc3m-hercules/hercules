@@ -30,6 +30,7 @@ set_policy(dataset_info *dataset)
 
 	// Save the connection to the imss server running in the same node.
 	matching_node_socket = dataset->local_conn;
+	slog_info("matching_node_socket = %d", matching_node_socket);
 
 	// Set blocks to be sent.
 	n_blocks = dataset->num_data_elem;
@@ -60,9 +61,10 @@ set_policy(dataset_info *dataset)
 		session_plcy = 5;
 
 		// Initialize variables hanlding LOCAL datasets.
-		data_locations = dataset->data_locations;
-		num_blocks_written = dataset->num_blocks_written;
-		blocks_written = dataset->blocks_written;
+		// data_locations = dataset->data_locations;
+		// num_blocks_written = dataset->num_blocks_written;
+		// blocks_written = dataset->blocks_written;
+		// slog_debug("data_locations=%u, num_blocks_written=%u, blocks_written=%u", *data_locations, *num_blocks_written, *blocks_written);
 	}
 	else
 	{
@@ -76,8 +78,8 @@ set_policy(dataset_info *dataset)
 
 /**
  * @brief Method retrieving the server that will receive the following message attending a policy.
- * @return next server number (positive integer, >= 0) to send the operation according to the policy, on error -1 is returned, 
-*/
+ * @return next server number (positive integer, >= 0) to send the operation according to the policy, on error -1 is returned,
+ */
 int32_t
 find_server(int32_t n_servers,
 			int32_t n_msg,
@@ -169,7 +171,6 @@ find_server(int32_t n_servers,
 		int32_t stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
 		if (stat_dataset_res == 0)
 		{
-
 			// Key identifying the current to-be-sent file block.
 			char key[strlen(fname) + 64];
 			sprintf(key, "%s%c%d", fname, '$', n_msg);
@@ -221,7 +222,6 @@ find_server(int32_t n_servers,
 		int32_t stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
 		if (stat_dataset_res == 0)
 		{
-
 			// Key identifying the current to-be-sent file block.
 			char key[strlen(fname) + 64];
 			sprintf(key, "%s%c%d", fname, '$', n_msg);
@@ -245,7 +245,6 @@ find_server(int32_t n_servers,
 		int32_t stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
 		if (stat_dataset_res == 0)
 		{
-
 			// Key identifying the current to-be-sent file block.
 			char key[strlen(fname) + 64];
 			sprintf(key, "%s%c%d", fname, '$', n_msg);
@@ -264,14 +263,17 @@ find_server(int32_t n_servers,
 	// Follow a LOCAL distribution.
 	case LOCAL_: // FIXME: improve the following case!
 	{
+		slog_debug("op_type=%d", op_type);
+		next_server = matching_node_socket;
+		break;
 		// Operate in relation to the type of operation.
 		switch (op_type)
 		{
 		// Retrieve the socket connection number associated to the server storing the block.
 		case GET:
 		{
+			slog_debug("GET, data_locations[%d] = %u", n_msg, data_locations[n_msg]);
 			if (data_locations[n_msg])
-
 				next_server = (int32_t)(data_locations[n_msg] - 1);
 
 			break;
@@ -279,6 +281,7 @@ find_server(int32_t n_servers,
 		// Store the connection number associated to the server storing the data element.
 		case SET:
 		{
+			slog_debug("SET, data_locations[%d] = %u", n_msg, data_locations[n_msg]);
 			switch (data_locations[n_msg])
 			{
 			// If the block was not written yet, write it in the local IMSS server and save the storage event.
@@ -289,8 +292,8 @@ find_server(int32_t n_servers,
 				data_locations[n_msg] = (uint16_t)(next_server + 1);
 
 				// Save the block number that the client has written.
-
 				blocks_written[(*num_blocks_written)++] = n_msg;
+				slog_debug("next_server=%d, data_locations[%d]=%u", next_server, n_msg, data_locations[n_msg]);
 
 				break;
 			}
@@ -309,11 +312,18 @@ find_server(int32_t n_servers,
 
 		break;
 	}
-
 	default:
-
 		break;
 	}
-	slog_debug("[find_server] next_server=%ld", next_server);
+
+	// "next_server" must be a value between 0 and n_servers-1.
+	if (next_server < 0 || next_server >= n_servers)
+	{
+		perror("ERR_HERCULES_FIND_SERVER_WRONG_VALUE");
+		slog_error("ERR_HERCULES_FIND_SERVER_WRONG_VALUE, next_server=%d, n_servers=%d", next_server, n_servers);
+		return -1;
+	}
+
+	slog_debug("next_server=%ld", next_server);
 	return next_server;
 }
