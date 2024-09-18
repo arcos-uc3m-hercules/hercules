@@ -1459,14 +1459,14 @@ int32_t create_dataset(char *dataset_uri,
 		new_dataset.imss_d = associated_imss_indx;
 		new_dataset.local_conn = associated_imss.conns.matching_server;
 
-		// Initialize dataset fields monitoring the dataset itself if it is a LOCAL one.
-		if (!strcmp(new_dataset.policy, "LOCAL"))
-		{
-			// Current number of blocks written by the client.
-			new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
-			*(new_dataset.num_blocks_written) = 0;
-			new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
-		}
+		// // Initialize dataset fields monitoring the dataset itself if it is a LOCAL one.
+		// if (!strcmp(new_dataset.policy, "LOCAL"))
+		// {
+		// 	// Current number of blocks written by the client.
+		// 	new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
+		// 	*(new_dataset.num_blocks_written) = 0;
+		// 	new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
+		// }
 
 		// if (opened)
 		// { // the dataset is created by an 'open' syscall.
@@ -1536,21 +1536,24 @@ int32_t create_dataset(char *dataset_uri,
 	uint64_t msg_size = sizeof(dataset_info);
 
 	// Reserve memory so as to store the position of each data element if the dataset is a LOCAL one.
-	if (!strcmp(new_dataset.policy, "LOCAL"))
-	{
-		uint32_t info_size = new_dataset.num_data_elem * sizeof(uint16_t);
+	// if (!strcmp(new_dataset.policy, "LOCAL"))
+	// {
+	// 	// uint32_t info_size = new_dataset.num_data_elem * sizeof(uint16_t);
+	// 	uint32_t info_size = 2000 * sizeof(uint16_t);
+	// 	slog_info("info_size=%d, sizeof(uint16_t)=%d", info_size, sizeof(uint16_t));
 
-		/*new_dataset.data_locations = (uint16_t *) malloc(info_size);
-		  memset(new_dataset.data_locations, 0, info_size);*/
-		new_dataset.data_locations = (uint16_t *)calloc(info_size, sizeof(uint16_t));
+	// 	/*new_dataset.data_locations = (uint16_t *) malloc(info_size);
+	// 	  memset(new_dataset.data_locations, 0, info_size);*/
+	// 	new_dataset.data_locations = (uint16_t *)calloc(info_size, sizeof(uint16_t));
+	// 	slog_info("new_dataset.data_locations address = %p", new_dataset.data_locations);
 
-		// Specify that the created dataset is a LOCAL one.
-		new_dataset.type = 'L';
+	// 	// Specify that the created dataset is a LOCAL one.
+	// 	new_dataset.type = 'L';
 
-		// Add additional bytes that will be sent.
-		msg_size += info_size;
-	}
-	else
+	// 	// Add additional bytes that will be sent.
+	// 	msg_size += info_size;
+	// }
+	// else
 		new_dataset.type = 'D';
 
 	slog_live("[IMSS][create_dataset] new_dataset.type=%c, local_conn=%d, new_dataset.n_servers_when_created=%d", new_dataset.type, associated_imss.conns.matching_server, new_dataset.n_servers_when_created);
@@ -1585,18 +1588,18 @@ int32_t create_dataset(char *dataset_uri,
 
 	// slog_live("[IMSS] dataset_create: sent dataset_info");
 	// Initialize dataset fields monitoring the dataset itself if it is a LOCAL one.
-	if (!strcmp(new_dataset.policy, "LOCAL"))
-	{
-		// Current number of blocks written by the client.
-		new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
-		*(new_dataset.num_blocks_written) = 0;
-		// Specific blocks written by the client.
+	// if (!strcmp(new_dataset.policy, "LOCAL"))
+	// {
+	// 	// Current number of blocks written by the client.
+	// 	new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
+	// 	*(new_dataset.num_blocks_written) = 0;
+	// 	// Specific blocks written by the client.
 
-		/*new_dataset.blocks_written = (uint32_t *) malloc(new_dataset.num_data_elem*sizeof(uint32_t));
-		  memset(new_dataset.blocks_written, 0, new_dataset.num_data_elem*sizeof(uint32_t));*/
+	// 	/*new_dataset.blocks_written = (uint32_t *) malloc(new_dataset.num_data_elem*sizeof(uint32_t));
+	// 	  memset(new_dataset.blocks_written, 0, new_dataset.num_data_elem*sizeof(uint32_t));*/
 
-		new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
-	}
+	// 	new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
+	// }
 
 	//	//Set the specified policy.
 	//	if (set_policy(&new_dataset) == -1)
@@ -1696,17 +1699,17 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	new_dataset.local_conn = associated_imss.conns.matching_server;
 
 	// Initialize dataset fields monitoring the dataset itself if it is a LOCAL one.
-	if (!strcmp(new_dataset.policy, "LOCAL"))
-	{
-		// Current number of blocks written by the client.
-		new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
-		*(new_dataset.num_blocks_written) = 0;
-		// Specific blocks written by the client.
-		/*new_dataset.blocks_written = (uint32_t *) malloc(new_dataset.num_data_elem*sizeof(uint32_t));
-		  memset(new_dataset.blocks_written, '\0', new_dataset.num_data_elem*sizeof(uint32_t));*/
+	// if (!strcmp(new_dataset.policy, "LOCAL"))
+	// {
+	// 	// Current number of blocks written by the client.
+	// 	new_dataset.num_blocks_written = (uint64_t *)malloc(1 * sizeof(uint64_t));
+	// 	*(new_dataset.num_blocks_written) = 0;
+	// 	// Specific blocks written by the client.
+	// 	/*new_dataset.blocks_written = (uint32_t *) malloc(new_dataset.num_data_elem*sizeof(uint32_t));
+	// 	  memset(new_dataset.blocks_written, '\0', new_dataset.num_data_elem*sizeof(uint32_t));*/
 
-		new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
-	}
+	// 	new_dataset.blocks_written = (uint32_t *)calloc(new_dataset.num_data_elem, sizeof(uint32_t));
+	// }
 
 	//	//Set the specified policy.
 	//	if (set_policy(&new_dataset) == -1)
@@ -1747,106 +1750,106 @@ int32_t release_dataset(int32_t dataset_id)
 	dataset_info release_dataset = g_array_index(datasetd, dataset_info, dataset_id);
 
 	// If the dataset is a LOCAL one, the position of the data elements must be updated.
-	if (!strcmp(release_dataset.policy, "LOCAL"))
-	{
-		pthread_mutex_lock(&lock_network);
-		// Discover the metadata server that handles the dataset.
-		uint32_t m_srv = discover_stat_srv(release_dataset.uri_);
+	// if (!strcmp(release_dataset.policy, "LOCAL"))
+	// {
+	// 	pthread_mutex_lock(&lock_network);
+	// 	// Discover the metadata server that handles the dataset.
+	// 	uint32_t m_srv = discover_stat_srv(release_dataset.uri_);
 
-		ep = stat_eps[m_srv];
+	// 	ep = stat_eps[m_srv];
 
-		// Formated dataset uri to be sent to the metadata server.
-		char formated_uri[REQUEST_SIZE];
-		sprintf(formated_uri, "%" PRIu32 " SET 0 %s", stat_ids[m_srv], release_dataset.uri_);
-		slog_debug("[IMSS][release_dataset] formated_uri='%s'", formated_uri);
+	// 	// Formated dataset uri to be sent to the metadata server.
+	// 	char formated_uri[REQUEST_SIZE];
+	// 	sprintf(formated_uri, "%" PRIu32 " SET 0 %s", stat_ids[m_srv], release_dataset.uri_);
+	// 	slog_debug("[IMSS][release_dataset] formated_uri='%s'", formated_uri);
 
-		if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RLSIMSS_SENDADDR");
-			slog_error("ERRIMSS_RLSIMSS_SENDADDR");
-			return -1;
-		}
+	// 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERRIMSS_RLSIMSS_SENDADDR");
+	// 		slog_error("ERRIMSS_RLSIMSS_SENDADDR");
+	// 		return -1;
+	// 	}
 
-		// Format update message to be sent to the metadata server.
-		uint64_t blocks_written_size = *(release_dataset.num_blocks_written) * sizeof(uint32_t);
-		uint64_t update_msg_size = 8 + blocks_written_size;
+	// 	// Format update message to be sent to the metadata server.
+	// 	uint64_t blocks_written_size = *(release_dataset.num_blocks_written) * sizeof(uint32_t);
+	// 	uint64_t update_msg_size = 8 + blocks_written_size;
 
-		/*char update_msg[update_msg_size];
-		  memset(update_msg, '\0', update_msg_size);*/
-		char *update_msg = (char *)calloc(update_msg_size, sizeof(char));
+	// 	/*char update_msg[update_msg_size];
+	// 	  memset(update_msg, '\0', update_msg_size);*/
+	// 	char *update_msg = (char *)calloc(update_msg_size, sizeof(char));
 
-		uint16_t update_value = (release_dataset.local_conn + 1);
-		memcpy(update_msg, release_dataset.blocks_written, blocks_written_size);
-		memcpy((update_msg + blocks_written_size), &update_value, sizeof(uint16_t));
+	// 	uint16_t update_value = (release_dataset.local_conn + 1);
+	// 	memcpy(update_msg, release_dataset.blocks_written, blocks_written_size);
+	// 	memcpy((update_msg + blocks_written_size), &update_value, sizeof(uint16_t));
 
-		// Send the list of servers storing the data elements.
-		char mode2[] = "SET";
-		if (send_data(ucp_worker_meta, ep, mode2, MODE_SIZE, local_meta_uid) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
-			slog_error("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
-			return -1;
-		}
+	// 	// Send the list of servers storing the data elements.
+	// 	char mode2[] = "SET";
+	// 	if (send_data(ucp_worker_meta, ep, mode2, MODE_SIZE, local_meta_uid) == 0)
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
+	// 		slog_error("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
+	// 		return -1;
+	// 	}
 
-		// if (send_data_addr(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta) < 0)
-		//{
-		//	perror("ERRIMSS_RLSIMSS_SENDADDR");
-		//	return -1;
-		// }
+	// 	// if (send_data_addr(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta) < 0)
+	// 	//{
+	// 	//	perror("ERRIMSS_RLSIMSS_SENDADDR");
+	// 	//	return -1;
+	// 	// }
 
-		if (send_data(ucp_worker_meta, ep, update_msg, REQUEST_SIZE, local_meta_uid) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
-			slog_error("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
-			return -1;
-		}
+	// 	if (send_data(ucp_worker_meta, ep, update_msg, REQUEST_SIZE, local_meta_uid) == 0)
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
+	// 		slog_error("ERR_HERCULES_RELEASE_DATASET_SEND_DATA");
+	// 		return -1;
+	// 	}
 
-		size_t msg_length = 0;
-		// char update_result[RESPONSE_SIZE];
-		msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
-		if (msg_length == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_REL_DATASET_INVALID_MSG_LENGTH");
-			slog_error("ERRIMSS_REL_DATASET_INVALID_MSG_LENGTH");
-			return -1;
-		}
+	// 	size_t msg_length = 0;
+	// 	// char update_result[RESPONSE_SIZE];
+	// 	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
+	// 	if (msg_length == 0)
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERRIMSS_REL_DATASET_INVALID_MSG_LENGTH");
+	// 		slog_error("ERRIMSS_REL_DATASET_INVALID_MSG_LENGTH");
+	// 		return -1;
+	// 	}
 
-		// char update_result[msg_length];
-		void *update_result = malloc(msg_length);
-		// msg_length = recv_data_opt(ucp_worker_meta, ep, &update_result, msg_length, local_meta_uid, 0);
-		msg_length = recv_data(ucp_worker_meta, ep, update_result, msg_length, local_meta_uid, 0);
-		if (msg_length == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_REL_DATASET_RECV_UPDATERES");
-			slog_error("ERRIMSS_REL_DATASET_RECV_UPDATERES");
-			free(update_result);
-			return -1;
-		}
+	// 	// char update_result[msg_length];
+	// 	void *update_result = malloc(msg_length);
+	// 	// msg_length = recv_data_opt(ucp_worker_meta, ep, &update_result, msg_length, local_meta_uid, 0);
+	// 	msg_length = recv_data(ucp_worker_meta, ep, update_result, msg_length, local_meta_uid, 0);
+	// 	if (msg_length == 0)
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERRIMSS_REL_DATASET_RECV_UPDATERES");
+	// 		slog_error("ERRIMSS_REL_DATASET_RECV_UPDATERES");
+	// 		free(update_result);
+	// 		return -1;
+	// 	}
 
-		if (strcmp((const char *)update_result, "UPDATED!"))
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RELDATASET_UPDATE");
-			// Free the message received from the metadata server.
-			free(update_result);
-			return -1;
-		}
+	// 	if (strcmp((const char *)update_result, "UPDATED!"))
+	// 	{
+	// 		pthread_mutex_unlock(&lock_network);
+	// 		perror("ERRIMSS_RELDATASET_UPDATE");
+	// 		// Free the message received from the metadata server.
+	// 		free(update_result);
+	// 		return -1;
+	// 	}
 
-		// Free the data locations vector.
-		free(release_dataset.data_locations);
-		// Free the monitoring vector.
-		free(release_dataset.blocks_written);
-		free(release_dataset.num_blocks_written);
-		free(update_msg);
-		// Free the message received from the metadata server.
-		free(update_result);
-		pthread_mutex_unlock(&lock_network);
-	}
+	// 	// Free the data locations vector.
+	// 	free(release_dataset.data_locations);
+	// 	// Free the monitoring vector.
+	// 	free(release_dataset.blocks_written);
+	// 	free(release_dataset.num_blocks_written);
+	// 	free(update_msg);
+	// 	// Free the message received from the metadata server.
+	// 	free(update_result);
+	// 	pthread_mutex_unlock(&lock_network);
+	// }
 
 	g_array_remove_index(datasetd, dataset_id);
 	g_array_insert_val(datasetd, dataset_id, empty_dataset);
@@ -2386,13 +2389,12 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 		while (true)
 		{
 			// if ((server = find_server(curr_imss.info.num_storages, data_id, curr_dataset.uri_, op_type)) < 0)
-
 			if ((server = find_server(num_storages, data_id, curr_dataset.uri_, op_type)) < 0)
 			{
 				perror("ERR_HERCULES_FIND_SERVER");
 				slog_fatal("ERR_HERCULES_FIND_SERVER");
 				return -1;
-			}
+			}			
 
 			if (curr_imss.info.status[server] == 1)
 			{
@@ -3746,13 +3748,13 @@ char **get_dataloc(const char *dataset,
 		// The dataset was retrieved from the metadata server.
 	case 1:
 	{
-		// The dataset structure will not be stored if it is a LOCAL one as those are dynamically updated.
-		if (strcmp(where_dataset.policy, "LOCAL"))
-		{
-			// Hint specifying that the dataset was retrieved but not initialized.
-			where_dataset.local_conn = -2;
-			GInsert(&datasetd_pos, &datasetd_max_size, (char *)&where_dataset, datasetd, free_datasetd);
-		}
+		// // The dataset structure will not be stored if it is a LOCAL one as those are dynamically updated.
+		// if (strcmp(where_dataset.policy, "LOCAL"))
+		// {
+		// 	// Hint specifying that the dataset was retrieved but not initialized.
+		// 	where_dataset.local_conn = -2;
+		// 	GInsert(&datasetd_pos, &datasetd_max_size, (char *)&where_dataset, datasetd, free_datasetd);
+		// }
 
 		break;
 	}
@@ -3830,8 +3832,8 @@ char **get_dataloc(const char *dataset,
 	if (found_imss_in == 2)
 		free(where_imss.info.ips);
 
-	if (!strcmp(where_dataset.policy, "LOCAL"))
-		free(where_dataset.data_locations);
+	// if (!strcmp(where_dataset.policy, "LOCAL"))
+	// 	free(where_dataset.data_locations);
 
 	return machines;
 }
@@ -3984,17 +3986,17 @@ int32_t free_imss(imss_info *imss_info_)
 // Method releasing a dataset structure previously provided to the client.
 int32_t free_dataset(dataset_info *dataset_info_)
 {
-	if (!strcmp(dataset_info_->policy, "LOCAL"))
-	{
-		if (dataset_info_->data_locations)
-			free(dataset_info_->data_locations);
+	// if (!strcmp(dataset_info_->policy, "LOCAL"))
+	// {
+	// 	if (dataset_info_->data_locations)
+	// 		free(dataset_info_->data_locations);
 
-		if (dataset_info_->num_blocks_written)
-			free(dataset_info_->num_blocks_written);
+	// 	if (dataset_info_->num_blocks_written)
+	// 		free(dataset_info_->num_blocks_written);
 
-		if (dataset_info_->blocks_written)
-			free(dataset_info_->blocks_written);
-	}
+	// 	if (dataset_info_->blocks_written)
+	// 		free(dataset_info_->blocks_written);
+	// }
 
 	return 0;
 }

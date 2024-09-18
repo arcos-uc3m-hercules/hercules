@@ -815,8 +815,8 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		msg_size = sizeof(dataset_info);
 
 		// If the dataset is a LOCAL one, the list of position characters must be added.
-		if (!strcmp(struct_->policy, "LOCAL"))
-			msg_size += (struct_->num_data_elem * sizeof(uint16_t));
+		// if (!strcmp(struct_->policy, "LOCAL"))
+		// 	msg_size += (struct_->num_data_elem * sizeof(uint16_t));
 
 		// Reserve the corresponding amount of memory for the previous buffer.
 		info_buffer = (char *)malloc(msg_size * sizeof(char));
@@ -828,11 +828,11 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		memcpy(info_buffer, struct_, msg_size);
 
 		// Copy the remaining 'data_locations' field if the dataset is a LOCAL one.
-		if (!strcmp(struct_->policy, "LOCAL"))
-		{
-			offset_pt += sizeof(dataset_info);
-			memcpy(offset_pt, struct_->data_locations, (struct_->num_data_elem * sizeof(uint16_t)));
-		}
+		// if (!strcmp(struct_->policy,"LOCAL"))
+		// {
+		// 	offset_pt += sizeof(dataset_info);
+		// 	memcpy(offset_pt, struct_->data_locations, (struct_->num_data_elem * sizeof(uint16_t)));
+		// }
 		slog_debug("[COMM] Prepared DATASET_INFO for sending.");
 		break;
 	}

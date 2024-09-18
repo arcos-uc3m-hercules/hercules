@@ -55,9 +55,10 @@ whereis mpiexec
 # spack load /sxjvb77
 set -x
 # export UCX_NET_DEVICES="opap6s0:1"
+#export UCX_IB_RCACHE_MAX_REGIONS="100"
 
 # mpiexec -env UCX_NET_DEVICES "opap6s0:1" -n=1 ucx_info -T
-mpiexec -n=1 ucx_info -T
+#mpiexec -n=1 ucx_info -T
 set +x
 
 

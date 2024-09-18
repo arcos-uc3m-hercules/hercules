@@ -513,7 +513,10 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// 	fprintf(stderr, "LOG PATH= %s\n", log_path); // this line raise an exception running a python app with threads.
 	// }
 	slog_init(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, rank);
-	printf("Log path = %s\n", log_path);
+	if (IMSS_DEBUG_FILE > 0)
+	{
+		printf("Log path = %s\n", log_path);
+	}
 	slog_info(",Time(msec), Comment, RetCode");
 
 	slog_debug(" -- HERCULES_MOUNT_POINT: %s", MOUNT_POINT);
@@ -537,6 +540,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_debug(" -- POLICY: %s", POLICY);
 	slog_debug(" -- RELEASE: %d", release);
 
+	fprintf(stderr, " -- POLICY: %s\n", POLICY);
 	// Metadata server
 	// if (release == 1)
 	if (stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank) == -1)
@@ -1156,7 +1160,6 @@ pid_t fork(void)
 
 		perror("Fork error");
 		slog_error("[POSIX] Error 'real fork', errno=%d:%s", errno, strerror(errno));
-		// exit(EXIT_FAILURE);
 		return pid;
 	}
 
@@ -1177,7 +1180,6 @@ pid_t fork(void)
 		// if (ret == -1)
 		// {
 		// 	perror("gethostname");
-		// 	exit(EXIT_FAILURE);
 		// }
 		// sprintf(hostname, "%s:%d", hostname_, pid);
 
@@ -1231,7 +1233,6 @@ pid_t fork(void)
 
 // 		slog_error("[POSIX] Error 'real %s', errno=%d:%s", __func__, errno, strerror(errno));
 // 		perror("Vfork error");
-// 		// exit(EXIT_FAILURE);
 // 		return pid;
 // 	}
 

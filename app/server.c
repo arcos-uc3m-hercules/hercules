@@ -1016,7 +1016,6 @@ int32_t main(int32_t argc, char **argv)
 			// 	fprintf(stderr, "Server %d is idle\n", args.id);
 			// }
 			my_imss.status[i] = init_server_status;
-			// my_imss.arr_num_active_storages[i] = num_servers;
 			my_imss.arr_num_active_storages[i] = init_number_of_server;
 			// fprintf(stderr,"status=%d\n", my_imss.status[i]);
 		}
