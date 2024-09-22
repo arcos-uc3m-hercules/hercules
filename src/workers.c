@@ -62,6 +62,7 @@ size_t *local_addr_len;
 extern int IMSS_THREAD_POOL;
 int global_finish_threads = 0;
 int global_server_fd_thread = -1;
+size_t global_offset = 0;
 
 #define GARBAGE_COLLECTOR_PERIOD 120
 
@@ -294,7 +295,7 @@ void *srv_worker(void *th_argv)
 		ucp_worker_address_attr_t attr;
 		attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
 		ucp_worker_address_query(peer_addr, &attr);
-		slog_debug("[srv_worker_thread] Receiving request from %" PRIu64 ".", attr.worker_uid);
+		slog_debug(" Receiving request from %" PRIu64 ".", attr.worker_uid);
 
 		//  look for this peer_addr in the map and get the ep
 		ret = map_server_eps_search(map_server_eps, attr.worker_uid, &ep);
@@ -355,16 +356,16 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 	// Resources specifying if the ZMQ_SNDMORE flag was set in the sender.
 	int64_t more;
 	size_t more_size = sizeof(more);
+	int is_shared_memory = 0;
 
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
-
 	char mode[MODE_SIZE];
 
-	slog_debug("[srv_worker_thread] Waiting for new request.");
+	slog_debug(" Waiting for new request.");
 	// Save the request to be served.
-	// TIMING(ret = recv_data(arguments->ucp_worker, arguments->server_ep, req), "[srv_worker_thread] Save the request to be served");
-	slog_debug("[srv_worker_thread] request to be served %s", req);
+	// TIMING(ret = recv_data(arguments->ucp_worker, arguments->server_ep, req), " Save the request to be served");
+	slog_debug(" request to be served %s", req);
 
 	// slog_info("********** %d",ret);
 
@@ -376,11 +377,25 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 	sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read);
 
 	if (!strcmp(mode, "GET"))
+	{
 		more = GET_OP;
-	else
+	}
+	if (!strcmp(mode, "SET"))
+	{
 		more = SET_OP;
+	}
+	if (!strcmp(mode, "LOCALGET"))
+	{
+		more = GET_OP;
+		is_shared_memory = 1;
+	}
+	if (!strcmp(mode, "LOCALSET"))
+	{
+		more = SET_OP;
+		is_shared_memory = 1;
+	}
 
-	slog_debug("[srv_worker_thread] Request - mode '%s', block_size_recv '%" PRIu32 "', block_offset '%" PRIu32 "', uri_ '%s', more %ld", mode, block_size_recv, block_offset, uri_, more);
+	slog_debug(" Request - mode '%s', block_size_recv '%" PRIu32 "', block_offset '%" PRIu32 "', uri_ '%s', more %ld", mode, block_size_recv, block_offset, uri_, more);
 
 	// Create an std::string in order to be managed by the map structure.
 	std::string key;
@@ -415,24 +430,49 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			}
 			else
 			{
-				// Send the requested block.
-				// ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, address_, block_size_rtvd, arguments->worker_uid), "[srv_worker_thread][READ_OP][READ_OP] Send the requested block");
+				// ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, address_, block_size_rtvd, arguments->worker_uid), "[READ_OP][READ_OP] Send the requested block");
 				if (to_read <= 0)
 				{
 					to_read = block_size_rtvd;
 				}
-				struct stat *stats;
-				stats = (struct stat *)address_;
-				slog_debug("[srv_worker_thread][READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, stat->st_nlink=%lu", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, stats->st_nlink);
-				size_t ret_send_data = 0;
-				ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
-				// fprintf(stderr,"\tblock_size_rtvd=%ld, address_=%s\n", block_size_rtvd, address_);
-				slog_debug("[srv_worker_thread][READ_OP][READ_OP] send_data, ret_send_data=%lu", ret_send_data);
-				if (ret_send_data == 0)
+				// if (is_shared_memory)
+				// {
+				// 	slog_debug("[READ_OP][READ_OP] Send requested block size, key=%s", key.c_str());
+				// 	// Send the size of the block, without any data.
+				// 	char size_of_block[10];
+				// 	sprintf(size_of_block, "%lu", to_read);
+				// 	ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, size_of_block, STRING, arguments->worker_uid);
+				// 	if (ret < 0)
+				// 	{
+				// 		slog_error("ERR_HERCULES_WORKER_SEND_READ_OP");
+				// 		perror("ERR_HERCULES_WORKER_SEND_READ_OP");
+				// 		return -1;
+				// 	}
+				// }
+				// else
 				{
-					slog_error("ERR_HERCULES_WORKER_SENDBLOCK");
-					perror("ERR_HERCULES_WORKER_SENDBLOCK");
-					return -1;
+					// Send the requested block.
+
+					struct stat *stats;
+					stats = (struct stat *)address_;
+					slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, stat->st_nlink=%lu", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, stats->st_nlink);
+					size_t ret_send_data = 0;
+					if (is_shared_memory)
+					{
+						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_, to_read, arguments->worker_uid);
+					}
+					else
+					{
+						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
+					}
+					// fprintf(stderr,"\tblock_size_rtvd=%ld, address_=%s\n", block_size_rtvd, address_);
+					slog_debug("[READ_OP][READ_OP] send_data, ret_send_data=%lu", ret_send_data);
+					if (ret_send_data == 0)
+					{
+						slog_error("ERR_HERCULES_WORKER_SENDBLOCK");
+						perror("ERR_HERCULES_WORKER_SENDBLOCK");
+						return -1;
+					}
 				}
 			}
 			break;
@@ -441,10 +481,10 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 		{
 			// sleep(10);
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
-			slog_debug("[srv_worker_thread][READ_OP][RELEASE]");
+			slog_debug("[READ_OP][RELEASE]");
 			char release_msg[] = "RELEASE\0";
 
-			ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid), "[srv_worker_thread][READ_OP][RENAME_OP] Send release", int);
+			ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send release", int);
 			if (ret == 0)
 			{
 				perror("ERR_HERCULES_SRV_SEND_DATA_RELEASE");
@@ -471,13 +511,13 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 		case RENAME_OP:
 		{
 			std::size_t found = key.find(',');
-			slog_debug("[srv_worker_thread][RENAME_OP], key=%s, found=%d", key.c_str(), found);
+			slog_debug("[RENAME_OP], key=%s, found=%d", key.c_str(), found);
 			if (found != std::string::npos)
 			{
-				slog_debug("[srv_worker_thread][RENAME_OP], found != npos");
+				slog_debug("[RENAME_OP], found != npos");
 				std::string old_key = key.substr(0, found);
 				std::string new_key = key.substr(found + 1, key.length());
-				slog_debug("[srv_worker_thread][RENAME_OP], old_key=%s, new_key=%s", old_key.c_str(), new_key.c_str());
+				slog_debug("[RENAME_OP], old_key=%s, new_key=%s", old_key.c_str(), new_key.c_str());
 				// RENAME MAP
 				map->cleaning_specific(new_key);
 				int32_t result = map->rename_data_srv_worker(old_key, new_key);
@@ -488,11 +528,11 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			}
 			else
 			{
-				slog_debug("[srv_worker_thread][RENAME_OP], found == npos");
+				slog_debug("[RENAME_OP], found == npos");
 			}
 
 			char release_msg[] = "RENAME\0";
-			ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid), "[srv_worker_thread][READ_OP][RENAME_OP] Send rename", int);
+			ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send rename", int);
 			if (ret == 0)
 			{
 				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
@@ -515,7 +555,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			}
 
 			char release_msg[] = "RENAME\0";
-			ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid), "[srv_worker_thread][READ_OP][RENAME_DIR_DIR_OP] Send rename", int);
+			ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_DIR_DIR_OP] Send rename", int);
 			if (ret == 0)
 			{
 				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
@@ -579,7 +619,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					{ // If dont exist
 					  // Send the error code block.
 					  // std::cout <<"SERVER READV NO EXISTE element:" << element << '';
-						ret = TIMING(send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid), "[srv_worker_thread][READ_OP][READV] send_dynamic_stream", int);
+						ret = TIMING(send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid), "[READ_OP][READV] send_dynamic_stream", int);
 						if (ret < 0)
 						{
 							perror("ERRIMSS_WORKER_SENDERR");
@@ -633,7 +673,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					}
 					++curr_blk;
 				}
-				ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, buf, size, arguments->worker_uid), "[srv_worker_thread][READ_OP][READV] send", int);
+				ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, buf, size, arguments->worker_uid), "[READ_OP][READV] send", int);
 				// Send the requested block.
 				if (ret == 0)
 				{
@@ -739,7 +779,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					byte_count += blocksize;
 				}
 				// Send the requested block.
-				ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, buf, byte_count, arguments->worker_uid), "[srv_worker_thread][READ_OP][READV] send buf", int);
+				ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, buf, byte_count, arguments->worker_uid), "[READ_OP][READV] send buf", int);
 				if (ret == 0)
 				{
 					free(msg);
@@ -753,7 +793,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 		case WHO:
 		{
 			// Provide the uri of this instance.
-			ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, arguments->my_uri, strlen(arguments->my_uri) + 1, arguments->worker_uid), ("[srv_worker_thread][READ_OP][WHO] send uri: %s", arguments->my_uri), int);
+			ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, arguments->my_uri, strlen(arguments->my_uri) + 1, arguments->worker_uid), ("[READ_OP][WHO] send uri: %s", arguments->my_uri), int);
 			if (ret == 0)
 			{
 				perror("ERR_HERCULES_WHOREQUEST");
@@ -773,10 +813,10 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 		int op;
 		std::size_t found = key.find(' ');
 		std::size_t found2 = key.find("[OP]=");
-		slog_debug("[srv_worker_thread][WRITE_OP] found=%d, found2=%d", found, found2);
+		slog_debug("[WRITE_OP] found=%d, found2=%d", found, found2);
 		if (found2 != std::string::npos)
 		{
-			slog_debug("[srv_worker_thread][WRITE_OP] Entra en found2");
+			slog_debug("[WRITE_OP] Entra en found2");
 			op = stoi(key.substr(found2 + 5, (found - (found2 + 5))));
 			key.erase(0, found + 1);
 		}
@@ -1026,15 +1066,15 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 		}
 		else
 		{
-			slog_debug("[srv_worker_thread][WRITE_OP] WRITE NORMAL CASE. Size %ld, offset=%ld", block_size_recv, block_offset);
+			slog_debug("[WRITE_OP] WRITE NORMAL CASE. Size %ld, offset=%ld", block_size_recv, block_offset);
 			// search for the block to know if it was previously stored.
 			int ret = map->get(key, &address_, &block_size_rtvd);
 
 			// if the block was not already stored:
 			if (ret == 0)
 			{
-				// fprintf(stderr,"[srv_worker_thread][WRITE_OP] NO key find %s\n", key.c_str());
-				slog_debug("[srv_worker_thread][WRITE_OP] NO key find %s", key.c_str());
+				// fprintf(stderr,"[WRITE_OP] NO key find %s\n", key.c_str());
+				slog_debug("[WRITE_OP] NO key find %s", key.c_str());
 				clock_t tp;
 				tp = clock();
 				void *buffer = NULL;
@@ -1043,58 +1083,98 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				double time_taken2 = ((double)tp) / CLOCKS_PER_SEC; // in seconds
 				// slog_info("[srv_worker_helper] pop time %f s", time_taken2);
 				//  Receive the block into the buffer.
-
-				// char *buffer = (char *)malloc(block_size_recv);
 				clock_t tr;
-				// TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, buffer, arguments->worker_uid, 1), "[srv_worker_thread][WRITE_OP] recv_data: Receive the block into the buffer.");
+				// get the buffer data length.
 				size_t msg_length = 0;
-				msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-				if (msg_length == 0)
-				{
-					perror("ERRIMSS_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
-					slog_error("ERRIMSS_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
-					return -1;
-				}
-
 				int size_asigned_to_block = 0;
-				if (buffer == NULL)
+				// If data is stored in shared memory due LOCAL policy, the server does not need to receive the data.
+				if (!is_shared_memory)
 				{
-					// buffer = (void *)calloc(BLOCK_SIZE, sizeof(char));
-					std::size_t found = key.find("$0");
-					if (found != std::string::npos)
-					{ // block 0.
-						size_asigned_to_block = BLOCK_SIZE;
+					msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+					if (msg_length == 0)
+					{
+						perror("ERRIMSS_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
+						slog_error("ERRIMSS_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
+						return -1;
 					}
-					else
-					{ // non block 0.
-						// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
-						size_asigned_to_block = msg_length + block_offset;
-					}
-				}
-				buffer = (void *)calloc(size_asigned_to_block, sizeof(char));
 
-				// void *aux_buf = (char *)buffer + block_offset;
-				msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
-				if (msg_length == 0)
-				{
-					perror("ERRIMSS_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
-					slog_error("ERRIMSS_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
-					return -1;
+					if (buffer == NULL)
+					{
+						// buffer = (void *)calloc(BLOCK_SIZE, sizeof(char));
+						std::size_t found = key.find("$0");
+						if (found != std::string::npos)
+						{ // block 0.
+							size_asigned_to_block = BLOCK_SIZE;
+						}
+						else
+						{ // non block 0.
+							// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
+							size_asigned_to_block = msg_length + block_offset;
+						}
+					}
+
+					buffer = (void *)calloc(size_asigned_to_block, sizeof(char));
+
+					// Receive the data from the front end.
+					msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
+					if (msg_length == 0)
+					{
+						perror("ERRIMSS_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
+						slog_error("ERRIMSS_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
+						return -1;
+					}
 				}
-				// sleep(5);
-				// struct stat *stats = (struct stat *)buffer;
+				else // Data in shared memory.
+				{
+					//  Tell the client to update the shared memory.
+					char answer[15]; //  = "NEW\0";
+					sprintf(answer, "NEW %ld", global_offset);
+					slog_info("Answer=%s", answer);
+					ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
+					if (ret < 0)
+					{
+						perror("ERR_HERCULES_WORKER_SEND_DYNAMIC_SHM_LOCAL");
+						slog_error("ERR_HERCULES_WORKER_SEND_DYNAMIC_SHM_LOCAL");
+						return -1;
+					}
+
+					// Find the length of the string required to store the number, including the null terminator
+					int length_number = snprintf(NULL, 0, "%lu", global_offset) + 1;
+					buffer = (void *)calloc(length_number, sizeof(char));
+					if (buffer == NULL)
+					{
+						perror("ERR_HERCULES_MEMORY_ALLOCATION");
+						slog_error("ERR_HERCULES_MEMORY_ALLOCATION");
+						return -1;
+					}
+
+					// When using shared memory, buffer will store the offset.
+					ret = snprintf((char *)buffer, length_number, "%ld", global_offset);
+					if (ret < 0)
+					{
+						perror("ERR_HERCULES_ENCODING");
+						slog_error("ERR_HERCULES_ENCODING");
+						return -1;
+					}
+
+					slog_info("buffer=%s, length_number=%d, global_offset=%lu", buffer, length_number, global_offset);
+
+					size_asigned_to_block = block_size_recv;
+					global_offset += block_size_recv;
+				}
+
 				int32_t insert_successful;
 
 				// Include the new record in the tracking structure.
 				tr = clock();
-				// fprintf(stderr,"[srv_worker_thread][WRITE_OP] ****[PUT]********* key=%s\n",  key.c_str());
-				slog_debug("[srv_worker_thread][WRITE_OP] ****[PUT, block_size_recv=%ld, BLOCK_SIZE=%lu, msg_length=%lu]********* key=%s", block_size_recv, BLOCK_SIZE, msg_length, key.c_str());
+				// fprintf(stderr,"[WRITE_OP] ****[PUT]********* key=%s\n",  key.c_str());
+				slog_debug("[WRITE_OP] ****[PUT, block_size_recv=%ld, BLOCK_SIZE=%lu, msg_length=%lu]********* key=%s", block_size_recv, BLOCK_SIZE, msg_length, key.c_str());
 				// TODO: should this be block_size_recv or a different size? block_size_recv might not be the full block size
 				// insert_successful = map->put(key, buffer, block_size_recv);
 				// insert_successful = map->put(key, buffer, BLOCK_SIZE);
 				insert_successful = map->put(key, buffer, size_asigned_to_block);
 
-				slog_debug("[srv_worker_thread][WRITE_OP] insert_successful %d key=%s", insert_successful, key.c_str());
+				slog_debug("[WRITE_OP] insert_successful %d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
 				tr = clock() - tr;
 				double time_taken = ((double)tr) / CLOCKS_PER_SEC; // in seconds
 
@@ -1112,95 +1192,138 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			// if the block was already stored:
 			else
 			{
-				slog_debug("[srv_worker_thread][WRITE_OP] Key find %s", key.c_str());
+				slog_debug("[WRITE_OP] Key find %s", key.c_str());
 				// Receive the block into the buffer.
 				std::size_t found = key.find("$0");
 				if (found != std::string::npos)
 				{ // block 0.
-					slog_debug("[srv_worker_thread][WRITE_OP] Updating block $0 (%d)", block_size_rtvd);
+					slog_debug("[WRITE_OP] Updating block $0 (%d)", block_size_rtvd);
 					struct stat *old, *latest;
 					// TODO: make sure this works.
 					size_t msg_length = 0;
-					msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-					if (msg_length == 0)
+					// If data is stored in shared memory due LOCAL policy, the server does not need to receive the data.
+					if (!is_shared_memory)
 					{
-						perror("ERRIMSS_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
-						slog_error("ERRIMSS_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
-						return -1;
-					}
-					slog_live("msg_length=%lu", msg_length);
-					// void *buffer = malloc(block_size_recv);
-					void *buffer = malloc(msg_length);
-					msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buffer, msg_length, arguments->worker_uid, 0);
-					// msg_length = recv_data_opt(arguments->ucp_worker, arguments->server_ep, &buffer, msg_length, arguments->worker_uid, 0);
-					// slog_live("msg_length=%lu", msg_length);
-					if (msg_length == 0)
-					{
-						perror("ERR_HERCULES_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
-						slog_error("ERR_HERCULES_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
+						msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+						if (msg_length == 0)
+						{
+							perror("ERR_HERCULES_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
+							slog_error("ERR_HERCULES_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
+							return -1;
+						}
+						slog_live("msg_length=%lu", msg_length);
+						// void *buffer = malloc(block_size_recv);
+						void *buffer = malloc(msg_length);
+						msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buffer, msg_length, arguments->worker_uid, 0);
+						// msg_length = recv_data_opt(arguments->ucp_worker, arguments->server_ep, &buffer, msg_length, arguments->worker_uid, 0);
+						// slog_live("msg_length=%lu", msg_length);
+						if (msg_length == 0)
+						{
+							perror("ERR_HERCULES_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
+							slog_error("ERR_HERCULES_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
+							free(buffer);
+							return -1;
+						}
+
+						old = (struct stat *)address_;
+						latest = (struct stat *)buffer;
+						slog_debug(" File size new %ld old %ld", latest->st_size, old->st_size);
+						latest->st_size = std::max(latest->st_size, old->st_size);
+						// slog_debug(" buffer->st_size: %ld, block_offset=%ld", latest->st_size, block_offset);
+						slog_debug(" buffer->st_size: %ld, block_offset=%ld, old->st_nlink: %ld, new->st_nlink: %ld", latest->st_size, block_offset, old->st_nlink, latest->st_nlink);
+
+						// TODO: make sure this works
+						// memcpy((char *)address_ + block_offset, buffer, block_size_recv);
+						memcpy((char *)address_ + block_offset, buffer, msg_length);
+
+						// TODO: should we update this block's size in the map?
 						free(buffer);
-						return -1;
 					}
-
-					old = (struct stat *)address_;
-					latest = (struct stat *)buffer;
-					slog_debug("[srv_worker_thread] File size new %ld old %ld", latest->st_size, old->st_size);
-					latest->st_size = std::max(latest->st_size, old->st_size);
-					// slog_debug("[srv_worker_thread] buffer->st_size: %ld, block_offset=%ld", latest->st_size, block_offset);
-					slog_debug("[srv_worker_thread] buffer->st_size: %ld, block_offset=%ld, old->st_nlink: %ld, new->st_nlink: %ld", latest->st_size, block_offset, old->st_nlink, latest->st_nlink);
-
-					// TODO: make sure this works
-					// memcpy((char *)address_ + block_offset, buffer, block_size_recv);
-					memcpy((char *)address_ + block_offset, buffer, msg_length);
-					// TODO: should we update this block's size in the map?
-					free(buffer);
+					else
+					{ // Data is in shared memory.
+						//  Tell the client to update the shared memory.
+						// char answer[] = "TOUPDATE\0";
+						char answer[RESPONSE_SIZE];
+						// "address_" is the shared memory offset.
+						sprintf(answer, "TOUPDATE %s", (char *)address_);
+						ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
+						if (ret < 0)
+						{
+							slog_error("ERR_HERCULES_WORKER_SEND_DYNAMIC_BLOCK_0_WRITE_OP");
+							perror("ERR_HERCULES_WORKER_SEND_DYNAMIC_BLOCK_0_WRITE_OP");
+							return -1;
+						}
+					}
 				}
 				else
 				{ // non block 0.
-					// TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, address_, arguments->worker_uid, 1), ("[srv_worker_thread][WRITE_OP] recv_data Updated non 0 existing block"));
-					slog_debug("[srv_worker_thread][WRITE_OP] Updated non 0 existing block, key.c_str(): %s", key.c_str());
+					// TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, address_, arguments->worker_uid, 1), ("[WRITE_OP] recv_data Updated non 0 existing block"));
+					slog_debug("[WRITE_OP] Updated non 0 existing block, key.c_str(): %s", key.c_str());
 					size_t msg_length = 0;
-					msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-					if (msg_length == 0)
+					if (!is_shared_memory)
 					{
-						slog_error("ERRIMSS_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
-						perror("ERRIMSS_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
-						return -1;
+						msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+						if (msg_length == 0)
+						{
+							slog_error("ERR_HERCULES_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
+							perror("ERR_HERCULES_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
+							return -1;
+						}
+						if (msg_length != block_size_rtvd)
+						{
+							block_size_rtvd = msg_length;
+						}
 					}
-					// void *buffer = NULL;
-					if (msg_length + block_offset > block_size_rtvd)
+					// Verify if the new size (msg_length + block_offset) is greater than the old size (block_size_rtvd).
+					if (block_size_rtvd + block_offset > block_size_rtvd)
 					{
 						// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
-						size_t new_size = msg_length + block_offset;
-						// fprintf(stderr, "** Extra size=%lu, msg_length=%lu, block_offset=%u, block_size_rtvd=%lu, address_=%p, ", new_size, msg_length, block_offset, block_size_rtvd, address_);
-						address_ = (void *)realloc(address_, new_size);
+						size_t new_size = block_size_rtvd + block_offset;
+						if (!is_shared_memory)
+						{
+							// fprintf(stderr, "** Extra size=%lu, msg_length=%lu, block_offset=%u, block_size_rtvd=%lu, address_=%p, ", new_size, msg_length, block_offset, block_size_rtvd, address_);
+							address_ = (void *)realloc(address_, new_size);
+						}
 						// fprintf(stderr, "new address = %p\n", address_);
 						map->update(key, address_, new_size);
 					}
-					// else
-					// {
-					// 	buffer = address_;
-					// }
-
-					msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, msg_length, arguments->worker_uid, 1);
-					// msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
-					if (msg_length == 0)
+					if (!is_shared_memory)
 					{
-						slog_error("ERRIMSS_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
-						perror("ERRIMSS_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
-						return -1;
+						msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, block_size_rtvd, arguments->worker_uid, 1);
+						// msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
+						if (msg_length == 0)
+						{
+							slog_error("ERRIMSS_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
+							perror("ERRIMSS_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
+							return -1;
+						}
 					}
-					// slog_debug("address_=%x", address_);
+					else
+					{ // Data is in shared memory.
+						//  Tell the client to update the shared memory.
+						// char answer[] = "TOUPDATE\0";
+						char answer[RESPONSE_SIZE];
+						// "address_" is the shared memory offset.
+						sprintf(answer, "TOUPDATE %s", (char *)address_);
+						ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
+						if (ret < 0)
+						{
+							slog_error("ERR_HERCULES_WORKER_SEND_DYNAMIC_NON_BLOCK_0_WRITE_OP");
+							perror("ERR_HERCULES_WORKER_SEND_DYNAMIC_NON_BLOCK_0_WRITE_OP");
+							return -1;
+						}
+					}
 				}
+				// slog_debug("address_=%x", address_);
 			}
-			break;
 		}
+		break;
 	}
 	default:
 		break;
 	}
 
-	slog_debug("[srv_worker_thread] Terminated data helper");
+	slog_debug(" Terminated data helper");
 	return 0;
 }
 
@@ -2045,7 +2168,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	}
 	// pthread_mutex_unlock(&mp);
 
-	slog_debug("[srv_worker_thread] Terminated meta helper\n");
+	slog_debug(" Terminated meta helper\n");
 
 	return 0;
 }

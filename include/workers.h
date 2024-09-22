@@ -4,6 +4,7 @@
 #include "imss.h"
 #include "comms.h"
 #include "records.hpp"
+#include "shared_memory.h"
 #include <memory>
 
 #define READ_OP			  0

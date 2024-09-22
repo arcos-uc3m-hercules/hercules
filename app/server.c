@@ -29,6 +29,7 @@ extern char *buffer_address;
 extern pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
 extern uint64_t buffer_segment;
+char *POLICY = NULL;
 
 extern ucp_worker_h *ucp_worker_threads;
 extern ucp_address_t **local_addr;
@@ -65,6 +66,8 @@ pthread_t *threads;
 // global variables usted to finish threads.
 extern int global_finish_threads;
 extern int global_server_fd_thread;
+
+#define SHM_SIZE 1 * 1024 * 1024 * 1024
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
@@ -274,7 +277,8 @@ void handle_signal_server(int signal)
 	{
 		slog_info("SIGUSR1 received");
 		int pkill_operation = 0, ret = 0;
-		char buf[10], action[20];;
+		char buf[10], action[20];
+		;
 		// Get the operation number.
 		int fd = open("/tmp/hercules_pkill_operation", O_RDONLY);
 		if (fd == -1)
@@ -316,7 +320,7 @@ void handle_signal_server(int signal)
 			// by the file descriptor "global_server_fd_thread".
 			if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
 			{
-				fprintf(stderr, "Error closing server_fd\n");
+				perror("ERR_HERCULES_SHUTDOWN_SERVER_FD\n");
 			}
 			break;
 		default: // suspend the data server.
@@ -477,7 +481,7 @@ int32_t main(int32_t argc, char **argv)
 		else
 		{
 			fprintf(stderr, "Configuration file not found\n");
-			perror("ERRIMSS_CONF_NOT_FOUND");
+			perror("ERR_HERCULES_CONF_NOT_FOUND");
 			return -1;
 		}
 		free(conf_path);
@@ -538,6 +542,15 @@ int32_t main(int32_t argc, char **argv)
 	{
 		aux = cfg_get(cfg, "DATA_HOSTFILE");
 		strcpy(args.deploy_hostfile, aux);
+	}
+
+	if (cfg_get(cfg, "POLICY"))
+		POLICY = cfg_get(cfg, "POLICY");
+	else
+	{
+		fprintf(stderr, "Distributiin Policy has not been stablish. \n Please, add the following line in your configuration file POLICY = RR\n");
+		perror("ERR_HERCULES_POLICY_NOT_FOUND");
+		return -1;
 	}
 
 	if (getenv("HERCULES_DEBUG_LEVEL") != NULL)
@@ -808,6 +821,34 @@ int32_t main(int32_t argc, char **argv)
 			perror("HERCULES_ERR_SERVER_URITAKEN");
 			ready(tmp_file_path, "ERROR");
 			return 0;
+		}
+
+		// When LOCAL policy is used, the server creates a shared memory region.
+		if (!strcmp(POLICY, "LOCAL"))
+		{
+
+			key_t key = getKeySM();
+			slog_info("Generated Key = %d\n", key);
+
+			int shm_data_id = getIdentifierSM(key, SHM_SIZE);
+			if (shm_data_id == -1)
+			{
+				perror("ERR_HERCULES_GET_SM_IDENTIFIER");
+				// Do not stop the process.
+			}
+			else
+			{
+				void *pool_memory = createSM(shm_data_id);
+				if (pool_memory == NULL)
+				{
+					perror("ERR_HERCULES_CREATE_SM");
+					// Do not stop the process.
+				}
+				else
+				{
+					unlinkSM(pool_memory);
+				}
+			}
 		}
 	}
 	// Metadata server.

@@ -6,7 +6,6 @@
 #include "flags.h"
 #include "resolvepath.h"
 #include "tempname.h"
-#include "shared_memory.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -318,7 +317,8 @@ char *checkHerculesPath(const char *pathname)
 	// if (!strncmp(pathname, MOUNT_POINT, strlen(pathname) - 1))
 	size_t pathname_len = strlen(pathname);
 	size_t max_lenght = MAX(pathname_len, strlen(MOUNT_POINT));
-	if(pathname[pathname_len-1] == '/') {
+	if (pathname[pathname_len - 1] == '/')
+	{
 		max_lenght--;
 	}
 	if (!strncmp(pathname, MOUNT_POINT, max_lenght))
@@ -548,8 +548,6 @@ __attribute__((constructor)) void imss_posix_init(void)
 
 	fprintf(stderr, " -- POLICY: %s\n", POLICY);
 
-	// createSM(1000);
-
 	// Metadata server
 	// if (release == 1)
 	if (stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank) == -1)
@@ -745,6 +743,12 @@ int getConfiguration()
 
 	if (cfg_get(cfg, "POLICY"))
 		POLICY = cfg_get(cfg, "POLICY");
+	else
+	{
+		fprintf(stderr, "Distributiin Policy has not been stablish. \n Please, add the following line in your configuration file POLICY = RR\n");
+		perror("ERR_HERCULES_POLICY_NOT_FOUND");
+		return -1;
+	}
 
 	if (cfg_get(cfg, "METADATA_HOSTFILE"))
 	{
@@ -1551,22 +1555,24 @@ char *realpath(const char *pathname, char *resolved_path)
 	return p;
 }
 
-int __open_2(const char *pathname, int flags, ...)
+// used by IOR.
+// int __open_2(const char *pathname, int flags, ...)
+int __open_2(const char *pathname, int flags)
 {
 	if (!real__open_2)
 	{
 		real__open_2 = dlsym(RTLD_NEXT, "__open_2");
 	}
 
-	// Access additional arguments when O_CREAT flag is set.
+	// // Access additional arguments when O_CREAT flag is set.
 	mode_t mode = 0;
-	if (flags & O_CREAT)
-	{
-		va_list ap;
-		va_start(ap, flags);
-		mode = va_arg(ap, mode_t);
-		va_end(ap);
-	}
+	// if (flags & O_CREAT)
+	// {
+	// 	va_list ap;
+	// 	va_start(ap, flags);
+	// 	mode = va_arg(ap, mode_t);
+	// 	va_end(ap);
+	// }
 
 	if (!init)
 	{
@@ -5448,17 +5454,14 @@ char *getcwd(char *buf, size_t size)
 {
 	if (!real_getcwd)
 		real_getcwd = dlsym(RTLD_NEXT, "getcwd");
-	// fprintf(stderr, "Calling getcwd, size=%ld\n", size);
-	// buf = real_getcwd(buf, size);
-	// ***
+
 	if (!strncmp(getenv("PWD"), MOUNT_POINT, strlen(MOUNT_POINT)))
 	{
 		slog_debug("[POSIX] Calling Hercules 'getcwd'");
-		// buf = getenv("PWD");
 		char *curr_dir = getenv("PWD");
-		strncpy(buf, curr_dir, strlen(curr_dir));
+		size_t buf_length = strlen(buf);
+		strncpy(buf, curr_dir, buf_length);
 		slog_debug("[POSIX] Ending Hercules 'getcwd', buf=%s", buf);
-		// return buf;
 	}
 	else
 	{
@@ -5466,8 +5469,6 @@ char *getcwd(char *buf, size_t size)
 		buf = real_getcwd(buf, size);
 		slog_full("[POSIX] Ending real 'getcwd', buf=%s", buf);
 	}
-	// fprintf(stderr, "End getcwd, buf=%s\n", buf);
-	// ***return buf;
 	return buf;
 }
 
