@@ -70,13 +70,14 @@ extern "C"
 		if (search != m->end())
 		{
 			free(search->second.aux);
-			slog_debug("[FUSE][map_erase] erasing element with key %s", k);
+			slog_debug("[map] erasing element with key %s", k);
 		}
 		else
 		{
-			slog_debug("[FUSE][map_erase] element with key %s was not find", k);
+			slog_debug("[map] element with key %s was not find", k);
 		}
 		m->erase(std::string(k));
+		slog_debug("[map] finish map_erase");
 		// return ret;
 	}
 

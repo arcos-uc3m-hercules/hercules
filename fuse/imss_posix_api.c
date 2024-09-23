@@ -817,7 +817,11 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 			to_read = get_ndata(ds, curr_blk, buf + byte_count, to_read, block_offset);
 		}
 		// TODO: error handling when get_ndata does not found the request data. to_read = 1
-
+		if (to_read == -1)
+		{
+			return to_read;
+		}
+		
 		block_offset = 0;
 		// memcpy(buf + byte_count, aux, to_read);
 

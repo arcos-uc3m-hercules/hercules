@@ -369,6 +369,11 @@ void handle_signal_server(int signal)
 	}
 }
 
+void print_usage(const char *msg)
+{
+	fprintf(stderr, "%s\n usage for METADATA server: hercules_server m <server_id>\n usage for DATA server: hercules_server d <server_id> <metadata_host> <initial_number_of_data_servers> \n", msg);
+}
+
 int32_t main(int32_t argc, char **argv)
 {
 	signal(SIGUSR1, handle_signal_server);
@@ -418,14 +423,31 @@ int32_t main(int32_t argc, char **argv)
 	/******************* PARSE FILE ARGUMENTS **********************/
 	/***************************************************************/
 
+	if (argc < 3)
+	{
+		print_usage("Too few arguments");
+		return 0;
+	}
+
 	args.type = argv[1][0];
 	args.id = atoi(argv[2]);
 
 	if (args.type != TYPE_METADATA_SERVER && args.type != TYPE_DATA_SERVER)
 	{
-		fprintf(stderr, "%c is not a valid server type \n usage: hercules_server <m|d> <server_id> <metadata_host> <0|1>\n", args.type);
+		// fprintf(stderr, "%c is not a valid server type \n usage: hercules_server <m|d> <server_id> <metadata_host> <0|1>\n", args.type);
+		char usage_msg[64];
+		sprintf(usage_msg, "%c is not a valid server type", args.type);
+		print_usage((const char *)usage_msg);
 		return 0;
 	}
+
+	// Checks arguments for metadata and data servers.
+	if ((argc != 3 && args.type == TYPE_METADATA_SERVER) || (argc != 5 && args.type == TYPE_DATA_SERVER))
+	{
+		print_usage("Wrong number of arguments");
+		return 0;
+	}
+
 
 	sprintf(tmp_file_path, "/tmp/%c-hercules-%d-start", args.type, args.id);
 

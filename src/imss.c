@@ -1353,7 +1353,6 @@ int32_t stat_imss_info(char *imss_uri, imss_info *imss_info_)
 		pthread_mutex_unlock(&lock_network);
 		perror("HERCULES_ERR_STAT_IMSS_SEND_REQ");
 		slog_error("HERCULES_ERR_STAT_IMSS_SEND_REQ");
-		// perror("ERRIMSS_RLSIMSS_SENDADDR");
 		return -1;
 	}
 
@@ -1962,8 +1961,8 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
-		perror("ERRIMSS_RLSIMSS_SENDADDR");
-		slog_error("ERRIMSS_RLSIMSS_SENDADDR");
+		perror("ERR_HERCULES_DELETE_DATASET_SEND_REQ");
+		slog_error("ERR_HERCULES_DELETE_DATASET_SEND_REQ");
 		return -1;
 	}
 
@@ -2065,7 +2064,8 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
-		perror("ERRIMSS_RLSIMSS_SENDADDR");
+		perror("ERR_HERCULES_RENAME_DATASET_METADATA_DIR_DIR_SEND_REQ");
+		slog_error("ERR_HERCULES_RENAME_DATASET_METADATA_DIR_DIR_SEND_REQ");
 		return -1;
 	}
 
@@ -2476,7 +2476,8 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RLSIMSS_SENDADDR");
+			perror("ERR_HERCULES_RENAME_DATASET_SRV_WORKER_DIR_DIR_SEND_REQ");
+			slog_error("ERR_HERCULES_RENAME_DATASET_SRV_WORKER_DIR_DIR_SEND_REQ");
 			return -1;
 		}
 
@@ -3238,24 +3239,28 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 				// sprintf(dataset_name_id, "%s$%d", curr_dataset.uri_, data_id);
 				// key_t key = MurmurOAAT32(dataset_name_id);
 				size_t server_offset = 0;
+				uint32_t size = 0;
 				key_t key = getKeySM();
 				slog_debug("Getting data from shared memory, id=%d, response_bufer=%s, key=%ld", data_id, response_bufer, key);
 				// msg_length = atoi((const char *)response_bufer);
 
-				server_offset = atol((const char *)response_bufer);
-				// sscanf((const char *)msg_received, "%s %lu", response, &server_offset);
+				// server_offset = atol((const char *)response_bufer);
+				sscanf((const char *)response_bufer, "%lu %u", &server_offset, &size);
 
-				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu", curr_dataset.uri_, data_id, key, response_bufer, server_offset);
+				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%lu", curr_dataset.uri_, data_id, key, response_bufer, server_offset, size);
 
 				slog_debug("msg_length=%ld", msg_length);
+				// TODO: EL PUNTERO A MEMORIA COMPARTIDA SE PUEDE MANTENER ABIERTO!
 				SharedMemory *shared_memory;
 				shared_memory = getContentSM(key, SHM_SIZE);
 
 				slog_debug("shared_memory->size=%ld", shared_memory->size);
 				// memcpy(response_bufer, shared_memory->content, shared_memory->size);
 				// buffer = shared_memory->content;
-				memcpy(buffer, shared_memory->content+server_offset, msg_length);
-				
+				memcpy(buffer, shared_memory->content + server_offset, size);
+
+				msg_length = size;
+
 				unlinkSM(shared_memory->content);
 				// freeSM(shared_memory->id);
 				free(shared_memory);
@@ -3280,7 +3285,7 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 }
 
 // Method retrieving a data element associated to a certain dataset.
-size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset)
+ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset)
 {
 	// slog_fatal("Caller name: %pS", __builtin_return_address(0));
 	int32_t n_server;
@@ -3337,26 +3342,27 @@ size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_r
 			sprintf(mode, "GET");
 		}
 
-		//  Key related to the requested data element.		
+		//  Key related to the requested data element.
 		sprintf(key_, "%s %lu %ld %s$%d %ld", mode, 0l, offset, curr_dataset.uri_, data_id, to_read);
 		// sprintf(key_, "GET %lu %ld %s$%d %zd", 0l, offset, curr_dataset.original_name, data_id, to_read);
 		ep = curr_imss.conns.eps[repl_servers[i]];
-		slog_debug("[get_ndata] Sending request %s", key_);
-		// fprintf(stderr,"[get_ndata] Sending request %s to server %d\n", key_, repl_servers[i]);
+		slog_debug("[IMSS] Sending request %s", key_);
+
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RLSIMSS_SENDADDR");
+			perror("ERR_HERCULES_GET_NDATA_SEND_REQ");
+			slog_error("ERR_HERCULES_GET_NDATA_SEND_REQ");
 			return -1;
 		}
 
 		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
-		slog_info("[IMSS][get_ndata] Receiving data, msg_length=%lu", msg_length);
+		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
-			perror("HERCULES_ERR_REN_DATASET_DATA_INVALID_MSG_LENGTH");
-			slog_error("HERCULES_ERR_REN_DATASET_DATA_INVALID_MSG_LENGTH");
+			perror("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
+			slog_error("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
 			return -1;
 		}
 
@@ -3390,7 +3396,13 @@ size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_r
 		// 	// free(buffer);
 		// 	slog_warn("[IMSS] HERCULES_ERR_NO_KEY_AVAIL");
 		// }
-		void *response_bufer = malloc(msg_length);
+		void *response_bufer = (void *)malloc(msg_length * sizeof(char));
+		if (response_bufer == NULL)
+		{
+			perror("HERCULES_ERR_GET_NDATA_MEMORY_ALLOCATION");
+			slog_error("HERCULES_ERR_GET_NDATA_MEMORY_ALLOCATION");
+			return -1;
+		}
 
 		// msg_length = recv_data(ucp_worker_data, ep, buffer, msg_length, local_data_uid, 0);
 		msg_length = recv_data(ucp_worker_data, ep, response_bufer, msg_length, local_data_uid, 0);
@@ -3420,14 +3432,15 @@ size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_r
 				// sprintf(dataset_name_id, "%s$%d", curr_dataset.uri_, data_id);
 				// key_t key = MurmurOAAT32(dataset_name_id);
 				size_t server_offset = 0;
+				uint32_t size = 0;
 				key_t key = getKeySM();
 				slog_debug("Getting data from shared memory, id=%d, response_bufer=%s, key=%ld", data_id, response_bufer, key);
 				// msg_length = atoi((const char *)response_bufer);
 
-				server_offset = atol((const char *)response_bufer);
-				// sscanf((const char *)msg_received, "%s %lu", response, &server_offset);
+				// server_offset = atol((const char *)response_bufer);
+				sscanf((const char *)response_bufer, "%lu %u", &server_offset, &size);
 
-				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu", curr_dataset.uri_, data_id, key, response_bufer, server_offset);
+				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%lu", curr_dataset.uri_, data_id, key, response_bufer, server_offset, size);
 
 				slog_debug("msg_length=%ld", msg_length);
 				SharedMemory *shared_memory;
@@ -3436,10 +3449,10 @@ size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_r
 				slog_debug("shared_memory->size=%ld", shared_memory->size);
 				// memcpy(response_bufer, shared_memory->content, shared_memory->size);
 				// buffer = shared_memory->content;
-				memcpy(buffer, shared_memory->content+server_offset, to_read);
+				memcpy(buffer, shared_memory->content + server_offset, to_read);
 
 				msg_length = to_read;
-				
+
 				unlinkSM(shared_memory->content);
 				// freeSM(shared_memory->id);
 				free(shared_memory);
@@ -3449,8 +3462,9 @@ size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_r
 				memcpy(buffer, response_bufer, msg_length);
 			}
 
+			free(response_bufer);
 			pthread_mutex_unlock(&lock_network);
-			return (int32_t)msg_length;
+			return (ssize_t)msg_length;
 		}
 		else
 		{
@@ -3460,7 +3474,7 @@ size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_r
 	}
 
 	pthread_mutex_unlock(&lock_network);
-	return 1;
+	return -1;
 }
 
 // Method retrieving a data element associated to a certain dataset.
@@ -3516,7 +3530,8 @@ size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t 
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
-			perror("ERRIMSS_RLSIMSS_SENDADDR");
+			perror("HERCULES_ERR_GET_DATA_MALL_SEND_REQ");
+			slog_error("HERCULES_ERR_GET_DATA_MALL_SEND_REQ");
 			return 0;
 		}
 
@@ -3674,7 +3689,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 				size_t server_offset = 0;
 				sscanf((const char *)msg_received, "%s %lu", response, &server_offset);
 
-				slog_info("Updating shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld", curr_dataset.uri_, data_id, key, response, server_offset);
+				slog_info("Updating shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld, buffer_size=%ld", curr_dataset.uri_, data_id, key, response, server_offset, size);
 				// const void* old_buffer;
 
 				shared_memory = getContentSM(key, SHM_SIZE);

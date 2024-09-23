@@ -455,11 +455,11 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 
 					struct stat *stats;
 					stats = (struct stat *)address_;
-					slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, stat->st_nlink=%lu", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, stats->st_nlink);
+					slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, stat->st_nlink=%lu, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, stats->st_nlink, is_shared_memory);
 					size_t ret_send_data = 0;
 					if (is_shared_memory)
 					{
-						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_, to_read, arguments->worker_uid);
+						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_, block_size_rtvd, arguments->worker_uid);
 					}
 					else
 					{
@@ -469,8 +469,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					slog_debug("[READ_OP][READ_OP] send_data, ret_send_data=%lu", ret_send_data);
 					if (ret_send_data == 0)
 					{
-						slog_error("ERR_HERCULES_WORKER_SENDBLOCK");
-						perror("ERR_HERCULES_WORKER_SENDBLOCK");
+						slog_error("HERCULES_ERR_WORKER_SENDBLOCK");
+						perror("HERCULES_ERR_WORKER_SENDBLOCK");
 						return -1;
 					}
 				}
@@ -1127,7 +1127,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				else // Data in shared memory.
 				{
 					//  Tell the client to update the shared memory.
-					char answer[15]; //  = "NEW\0";
+					char answer[RESPONSE_SIZE]; //  = "NEW\0";
 					sprintf(answer, "NEW %ld", global_offset);
 					slog_info("Answer=%s", answer);
 					ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
@@ -1139,7 +1139,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					}
 
 					// Find the length of the string required to store the number, including the null terminator
-					int length_number = snprintf(NULL, 0, "%lu", global_offset) + 1;
+					int length_number = snprintf(NULL, 0, "%lu %u", global_offset, block_size_recv) + 1;
 					buffer = (void *)calloc(length_number, sizeof(char));
 					if (buffer == NULL)
 					{
@@ -1149,7 +1149,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					}
 
 					// When using shared memory, buffer will store the offset.
-					ret = snprintf((char *)buffer, length_number, "%ld", global_offset);
+					ret = snprintf((char *)buffer, length_number, "%lu %u", global_offset, block_size_recv);
 					if (ret < 0)
 					{
 						perror("ERR_HERCULES_ENCODING");
@@ -1159,7 +1159,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 
 					slog_info("buffer=%s, length_number=%d, global_offset=%lu", buffer, length_number, global_offset);
 
-					size_asigned_to_block = block_size_recv;
+					// size_asigned_to_block = block_size_recv;
+					size_asigned_to_block = length_number;
 					global_offset += block_size_recv;
 				}
 
@@ -1273,28 +1274,28 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						{
 							block_size_rtvd = msg_length;
 						}
-					}
-					// Verify if the new size (msg_length + block_offset) is greater than the old size (block_size_rtvd).
-					if (block_size_rtvd + block_offset > block_size_rtvd)
-					{
-						// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
-						size_t new_size = block_size_rtvd + block_offset;
-						if (!is_shared_memory)
+						// Verify if the new size (msg_length + block_offset) is greater than the old size (block_size_rtvd).
+						if (block_size_rtvd + block_offset > block_size_rtvd)
 						{
-							// fprintf(stderr, "** Extra size=%lu, msg_length=%lu, block_offset=%u, block_size_rtvd=%lu, address_=%p, ", new_size, msg_length, block_offset, block_size_rtvd, address_);
-							address_ = (void *)realloc(address_, new_size);
+							// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
+							size_t new_size = block_size_rtvd + block_offset;
+							if (!is_shared_memory)
+							{
+								// fprintf(stderr, "** Extra size=%lu, msg_length=%lu, block_offset=%u, block_size_rtvd=%lu, address_=%p, ", new_size, msg_length, block_offset, block_size_rtvd, address_);
+								address_ = (void *)realloc(address_, new_size);
+							}
+							// fprintf(stderr, "new address = %p\n", address_);
+							map->update(key, address_, new_size);
 						}
-						// fprintf(stderr, "new address = %p\n", address_);
-						map->update(key, address_, new_size);
-					}
-					if (!is_shared_memory)
-					{
+						// }
+						// if (!is_shared_memory)
+						// {
 						msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, block_size_rtvd, arguments->worker_uid, 1);
 						// msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
 						if (msg_length == 0)
 						{
-							slog_error("ERRIMSS_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
-							perror("ERRIMSS_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
+							slog_error("ERR_HERCULES_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
+							perror("ERR_HERCULES_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
 							return -1;
 						}
 					}

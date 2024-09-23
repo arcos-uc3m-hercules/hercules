@@ -458,7 +458,7 @@ The current function does not allocate memory.
 	 * @returns 0 if the requested block was successfully retrieved, 0 if the requested block was not find in the remote server,
 	 * or -1 in case of error.
 	 */
-	size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
+	ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
 
 	/**
 	 * @brief Method used during malleability to retrieving a data element associated to a certain dataset starting in an offset.
