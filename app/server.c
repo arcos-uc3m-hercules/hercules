@@ -67,7 +67,7 @@ pthread_t *threads;
 extern int global_finish_threads;
 extern int global_server_fd_thread;
 
-#define SHM_SIZE 1 * 1024 * 1024 * 1024
+#define SHM_SIZE 20L * 1024L * 1024L * 1024L
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
@@ -448,7 +448,6 @@ int32_t main(int32_t argc, char **argv)
 		return 0;
 	}
 
-
 	sprintf(tmp_file_path, "/tmp/%c-hercules-%d-start", args.type, args.id);
 
 	cfg = cfg_init();
@@ -639,6 +638,12 @@ int32_t main(int32_t argc, char **argv)
 	sprintf(log_path, "./%c-server-%d.%02d-%02d-%02d", args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
 	// sprintf(log_path, "./%c-server", args.type);
 	slog_init(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, args.id);
+
+	if (IMSS_DEBUG_FILE > 0)
+	{
+		printf("Log path = %s\n", log_path);
+		fflush(stdout);
+	}
 	// fprintf(stderr, "IMSS DEBUG FILE AT %s\n", log_path);
 	slog_info(",Time(msec), Comment, RetCode");
 
@@ -1141,6 +1146,7 @@ int32_t main(int32_t argc, char **argv)
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
 		ready(tmp_file_path, "OK");
+		printf("Server %d is ready\n", args.id);
 		if (pthread_join(threads[i], NULL) != 0)
 		{
 			perror("ERR_HERCULES_SERVER_THREAD_JOIN");

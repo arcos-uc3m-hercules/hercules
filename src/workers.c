@@ -453,9 +453,10 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				{
 					// Send the requested block.
 
-					struct stat *stats;
-					stats = (struct stat *)address_;
-					slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, stat->st_nlink=%lu, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, stats->st_nlink, is_shared_memory);
+					// struct stat *stats;
+					// stats = (struct stat *)address_;
+					// slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, stat->st_nlink=%lu, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, stats->st_nlink, is_shared_memory);
+					slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, is_shared_memory);
 					size_t ret_send_data = 0;
 					if (is_shared_memory)
 					{
@@ -870,7 +871,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				return -1;
 			}
 
-			// printf("WRITEV-buffer=%s",buf);
 			int pos = path.find('$');
 			std::string first_element = path.substr(0, pos + 1);
 			first_element = first_element + "0";
@@ -1139,7 +1139,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					}
 
 					// Find the length of the string required to store the number, including the null terminator
-					int length_number = snprintf(NULL, 0, "%lu %u", global_offset, block_size_recv) + 1;
+					int length_number = snprintf(NULL, 0, "%lu %d", global_offset, block_size_recv) + 1;
 					buffer = (void *)calloc(length_number, sizeof(char));
 					if (buffer == NULL)
 					{
@@ -1149,7 +1149,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					}
 
 					// When using shared memory, buffer will store the offset.
-					ret = snprintf((char *)buffer, length_number, "%lu %u", global_offset, block_size_recv);
+					ret = snprintf((char *)buffer, length_number, "%lu %d", global_offset, block_size_recv);
 					if (ret < 0)
 					{
 						perror("ERR_HERCULES_ENCODING");
@@ -1243,7 +1243,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					else
 					{ // Data is in shared memory.
 						//  Tell the client to update the shared memory.
-						// char answer[] = "TOUPDATE\0";
 						char answer[RESPONSE_SIZE];
 						// "address_" is the shared memory offset.
 						sprintf(answer, "TOUPDATE %s", (char *)address_);
@@ -1302,7 +1301,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					else
 					{ // Data is in shared memory.
 						//  Tell the client to update the shared memory.
-						// char answer[] = "TOUPDATE\0";
 						char answer[RESPONSE_SIZE];
 						// "address_" is the shared memory offset.
 						sprintf(answer, "TOUPDATE %s", (char *)address_);
@@ -2356,7 +2354,6 @@ void *dispatcher(void *th_argv)
 	char *tmp_file_path = arguments->tmp_file_path;
 	int client = 0;
 
-	// snprintf(service, sizeof(service), "%ld", arguments->port);
 	// Get a socket file descriptor.
 	global_server_fd_thread = socket(AF_INET, SOCK_STREAM, 0);
 	if (global_server_fd_thread < 0)

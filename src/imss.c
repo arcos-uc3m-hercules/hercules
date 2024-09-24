@@ -94,7 +94,7 @@ pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
 // To synchronize network operations.
 pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
-#define SHM_SIZE 1 * 1024 * 1024 * 1024
+#define SHM_SIZE 20L * 1024L * 1024L * 1024L
 
 int32_t imss_comm_cleanup()
 {
@@ -2676,7 +2676,7 @@ int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, i
 
 		// // char result[msg_length];
 		// char *result = (char *)malloc(msg_length * sizeof(char));
-		void *result = malloc(msg_length);
+		void *result = (void *)malloc(msg_length);
 		msg_length = recv_data(ucp_worker_data, ep, result, msg_length, local_data_uid, 0);
 		// msg_length = recv_data_opt(ucp_worker_data, ep, &result, msg_length, local_data_uid, 0);
 		free(result);
@@ -3209,7 +3209,7 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 			return -EINVAL;
 		}
 
-		void *response_bufer = malloc(msg_length);
+		void *response_bufer = malloc(msg_length*sizeof(char));
 
 		// msg_length = recv_data(ucp_worker_data, ep, buffer, msg_length, local_data_uid, 0);
 		msg_length = recv_data(ucp_worker_data, ep, response_bufer, msg_length, local_data_uid, 0);
@@ -3245,9 +3245,9 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 				// msg_length = atoi((const char *)response_bufer);
 
 				// server_offset = atol((const char *)response_bufer);
-				sscanf((const char *)response_bufer, "%lu %u", &server_offset, &size);
+				sscanf((const char *)response_bufer, "%lu %d", &server_offset, &size);
 
-				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%lu", curr_dataset.uri_, data_id, key, response_bufer, server_offset, size);
+				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%d", curr_dataset.uri_, data_id, key, response_bufer, server_offset, size);
 
 				slog_debug("msg_length=%ld", msg_length);
 				// TODO: EL PUNTERO A MEMORIA COMPARTIDA SE PUEDE MANTENER ABIERTO!
@@ -3271,6 +3271,7 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 			}
 
 			pthread_mutex_unlock(&lock_network);
+			free(response_bufer);
 			return (int32_t)msg_length;
 		}
 		else
@@ -3617,9 +3618,9 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 		// when "LOCAL" is in use, we copy the data to shared memory.
 		if (!strcmp(curr_dataset.policy, "LOCAL"))
 		{
+			ep = curr_imss.conns.eps[n_server_];
 			sprintf(key_, "LOCALSET %lu %ld %s$%d", size, offset, curr_dataset.uri_, data_id);
 			slog_info("[IMSS] BLOCK %d SENT TO SERVER %d  with Request: %s (%d)", data_id, n_server_, key_, size);
-			ep = curr_imss.conns.eps[n_server_];
 			// send the request to the data server, indicating we will perform a local write operation (LOCALSET) to certain data block (data_id)
 			// in a dataset (curr_dataset.uri).
 			if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
@@ -3642,7 +3643,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 				return -EINVAL;
 			}
 
-			void *msg_received = malloc(msg_length);
+			void *msg_received = (void *)malloc(msg_length*sizeof(char));
 			msg_length = recv_data(ucp_worker_data, ep, msg_received, msg_length, local_data_uid, 0);
 
 			slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
@@ -3687,9 +3688,10 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 			{ // Updates the shared memory segment.
 				char response[strlen("TOUPDATE") + 1];
 				size_t server_offset = 0;
-				sscanf((const char *)msg_received, "%s %lu", response, &server_offset);
+				uint32_t block_size = 0;
+				sscanf((const char *)msg_received, "%s %lu %d", response, &server_offset, &block_size);
 
-				slog_info("Updating shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld, buffer_size=%ld", curr_dataset.uri_, data_id, key, response, server_offset, size);
+				slog_info("Updating shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld, block_size=%d, size=%ld", curr_dataset.uri_, data_id, key, response, server_offset, block_size, size);
 				// const void* old_buffer;
 
 				shared_memory = getContentSM(key, SHM_SIZE);
@@ -3705,11 +3707,12 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 				unlinkSM(shared_memory->content);
 				free(shared_memory);
 			}
+			free(msg_received);
 		}
 		else
 		{
 			sprintf(key_, "SET %lu %ld %s$%d", size, offset, curr_dataset.uri_, data_id);
-			slog_info("[IMSS][set_data] BLOCK %d SENT TO SERVER %d  with Request: %s (%d)", data_id, n_server_, key_, size);
+			slog_info("[IMSS] BLOCK %d SENT TO SERVER %d  with Request: %s (%d)", data_id, n_server_, key_, size);
 			ep = curr_imss.conns.eps[n_server_];
 
 			// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id)
@@ -3800,8 +3803,6 @@ int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, s
 	int32_t n_server;
 	clock_t t;
 	// size_t (*const send_choose_stream)(ucp_worker_h ucp_worker, ucp_ep_h ep, const char *msg, size_t msg_length) = (IMSS_WRITE_ASYNC == 1) ? send_istream : send_data;
-
-	// slog_debug("[IMSS][set_data]");
 	t = clock();
 
 	curr_imss.info.num_storages = num_storages;
@@ -3835,7 +3836,7 @@ int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, s
 			size = curr_dataset.data_entity_size;
 
 		sprintf(key_, "SET %lu %ld %s$%d", size, offset, curr_dataset.uri_, data_id);
-		slog_info("[IMSS][set_data] Request - '%s'", key_);
+		slog_info("[IMSS] Request - '%s'", key_);
 		ep = curr_imss.conns.eps[n_server_];
 
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
@@ -3846,8 +3847,7 @@ int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, s
 			return -1;
 		}
 
-		// slog_debug("[IMSS][set_data] send_data(curr_imss.conns.id[%ld]:%ld, key_:%s, REQUEST_SIZE:%d)", n_server_, curr_imss.conns.id[n_server_], key_, REQUEST_SIZE);
-
+		// slog_debug("[IMSS] send_data(curr_imss.conns.id[%ld]:%ld, key_:%s, REQUEST_SIZE:%d)", n_server_, curr_imss.conns.id[n_server_], key_, REQUEST_SIZE);
 		if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -3859,8 +3859,8 @@ int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, s
 			delta_us = (long) (end.tv_usec - start.tv_usec);
 			printf("[CLIENT] [SWRITE SEND_DATA] delta_us=%6.3f",(delta_us/1000.0F));*/
 
-		// slog_debug("[IMSS] Request set_data: client_id '%" PRIu32 "', mode 'SET', key '%s'", curr_imss.conns.id[n_server_], key_);
-		// slog_debug("[IMSS][set_data] send_data(curr_imss.conns.id[%ld]:%ld, curr_dataset.data_entity_size:%ld)", n_server_, curr_imss.conns.id[n_server_], curr_dataset.data_entity_size);
+		// slog_debug("[IMSS] Request: client_id '%" PRIu32 "', mode 'SET', key '%s'", curr_imss.conns.id[n_server_], key_);
+		// slog_debug("[IMSS] send_data(curr_imss.conns.id[%ld]:%ld, curr_dataset.data_entity_size:%ld)", n_server_, curr_imss.conns.id[n_server_], curr_dataset.data_entity_size);
 	}
 	t = clock() - t;
 	double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
