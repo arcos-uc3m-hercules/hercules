@@ -14,6 +14,8 @@
 
 #define CLOSE_EP 9999999
 
+#define SHM_SIZE 30L * 1024L * 1024L * 1024L
+
 #include "queue.h"
 #include <arpa/inet.h> /* inet_addr */
 #include <sys/socket.h>

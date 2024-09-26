@@ -94,7 +94,6 @@ pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
 // To synchronize network operations.
 pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
-#define SHM_SIZE 20L * 1024L * 1024L * 1024L
 
 int32_t imss_comm_cleanup()
 {
@@ -3209,7 +3208,7 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 			return -EINVAL;
 		}
 
-		void *response_bufer = malloc(msg_length*sizeof(char));
+		void *response_bufer = malloc(msg_length * sizeof(char));
 
 		// msg_length = recv_data(ucp_worker_data, ep, buffer, msg_length, local_data_uid, 0);
 		msg_length = recv_data(ucp_worker_data, ep, response_bufer, msg_length, local_data_uid, 0);
@@ -3252,12 +3251,12 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 				slog_debug("msg_length=%ld", msg_length);
 				// TODO: EL PUNTERO A MEMORIA COMPARTIDA SE PUEDE MANTENER ABIERTO!
 				SharedMemory *shared_memory;
-				shared_memory = getContentSM(key, SHM_SIZE);
+				TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from memory", SharedMemory *);
 
 				slog_debug("shared_memory->size=%ld", shared_memory->size);
 				// memcpy(response_bufer, shared_memory->content, shared_memory->size);
 				// buffer = shared_memory->content;
-				memcpy(buffer, shared_memory->content + server_offset, size);
+				TIMING(memcpy(buffer, shared_memory->content + server_offset, size), "Memcpy from shared memory to buffer", void *);
 
 				msg_length = size;
 
@@ -3445,7 +3444,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 
 				slog_debug("msg_length=%ld", msg_length);
 				SharedMemory *shared_memory;
-				shared_memory = getContentSM(key, SHM_SIZE);
+				TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
 
 				slog_debug("shared_memory->size=%ld", shared_memory->size);
 				// memcpy(response_bufer, shared_memory->content, shared_memory->size);
@@ -3643,7 +3642,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 				return -EINVAL;
 			}
 
-			void *msg_received = (void *)malloc(msg_length*sizeof(char));
+			void *msg_received = (void *)malloc(msg_length * sizeof(char));
 			msg_length = recv_data(ucp_worker_data, ep, msg_received, msg_length, local_data_uid, 0);
 
 			slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
@@ -3677,12 +3676,12 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 				sscanf((const char *)msg_received, "%s %lu", response, &server_offset);
 
 				slog_info("Setting data into shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld", curr_dataset.uri_, data_id, key, response, server_offset);
-				shared_memory = getContentSM(key, SHM_SIZE);
+				TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
 
-				copyContentSM(shared_memory->content + server_offset, buffer, size);
+				TIMING_NO_RETURN(copyContentSM(shared_memory->content + server_offset, buffer, size), "Copying buffer to shared memory");
 
-				unlinkSM(shared_memory->content);
-				free(shared_memory);
+				TIMING_NO_RETURN(unlinkSM(shared_memory->content), "Unlinking shared memory");
+				TIMING_NO_RETURN(free(shared_memory), "Free shared memory");
 			}
 			if (!strncmp((const char *)msg_received, "TOUPDATE", strlen("TOUPDATE")))
 			{ // Updates the shared memory segment.
@@ -3694,7 +3693,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 				slog_info("Updating shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld, block_size=%d, size=%ld", curr_dataset.uri_, data_id, key, response, server_offset, block_size, size);
 				// const void* old_buffer;
 
-				shared_memory = getContentSM(key, SHM_SIZE);
+				TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
 				// old_buffer = malloc(shared_memory->size);
 				// memcpy(old_buffer, shared_memory->content, shared_memory->size);
 				// memcpy(buffer, shared_memory->content, shared_memory->size);

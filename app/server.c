@@ -67,7 +67,7 @@ pthread_t *threads;
 extern int global_finish_threads;
 extern int global_server_fd_thread;
 
-#define SHM_SIZE 20L * 1024L * 1024L * 1024L
+// #define SHM_SIZE 20L * 1024L * 1024L * 1024L
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 

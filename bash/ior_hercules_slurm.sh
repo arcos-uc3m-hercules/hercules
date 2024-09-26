@@ -102,3 +102,5 @@ mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_H
 
 mpiexec $HERCULES_MPI_HOSTFILE_DEF=./data_hostfile \
 	ipcrm -a
+
+echo "done!"
