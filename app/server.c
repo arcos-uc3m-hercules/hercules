@@ -410,6 +410,9 @@ int32_t main(int32_t argc, char **argv)
 	uint64_t max_storage_size; // memory pool size
 	uint32_t num_blocks;
 
+	// shared memory.
+	int shm_data_id;
+
 	char tmp_file_path[100];
 
 	char *conf_path;
@@ -857,7 +860,7 @@ int32_t main(int32_t argc, char **argv)
 			key_t key = getKeySM();
 			slog_info("Generated Key = %d\n", key);
 
-			int shm_data_id = getIdentifierSM(key, SHM_SIZE);
+			shm_data_id = getIdentifierSM(key, SHM_SIZE);
 			if (shm_data_id == -1)
 			{
 				perror("ERR_HERCULES_GET_SM_IDENTIFIER");
@@ -1195,6 +1198,9 @@ int32_t main(int32_t argc, char **argv)
 		// 	return -1;
 		// }
 
+		// Destroy the shared memory segment.
+    	freeSM(shm_data_id);
+		
 		free(region_locks);
 		// fprintf(stderr, "Ending data server.\n");
 	}

@@ -611,7 +611,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	elapsed = seconds + useconds / 1e6;
 
 	init = 1;
-	fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
+	// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
 
 int getConfiguration()
@@ -909,7 +909,7 @@ void __attribute__((destructor)) run_me_last()
 		// t_s = clock();
 		release = -1;
 		slog_debug("[POSIX] release_imss()");
-		// release_imss("imss://", CLOSE_DETACHED);
+		release_imss("imss://", CLOSE_DETACHED);
 		slog_debug("[POSIX] stat_release()");
 		// stat_release();
 		//  imss_comm_cleanup();
@@ -963,6 +963,7 @@ int close(int fd)
 			// fprintf(stderr,"[POSIX]. Ending Hercules 'close', pathname=%s, ret=%d\n", pathname, ret);
 			// Set offset to 0.
 			map_fd_update_value(map_fd, pathname, fd, 0);
+			map_fd_erase(map_fd, fd);
 		}
 		// pthread_mutex_unlock(&system_lock);
 	}
@@ -1765,6 +1766,9 @@ int fclose(FILE *fp)
 		slog_debug("[POSIX]. Ending Hercules 'fclose' pathname=%s, fd=%d\n", pathname, fd);
 		// Set offset to 0.
 		map_fd_update_value(map_fd, pathname, fd, 0);
+		map_fd_erase(map_fd, fd);
+		// TO CHECK!
+		real_fclose(fp);
 	}
 	else
 	{ // don't call slog here!
@@ -2298,7 +2302,7 @@ void rewind(FILE *stream)
 	char *pathname = map_fd_search_by_val(map_fd, fd);
 	if (pathname != NULL)
 	{
-		slog_debug("[POSIX]. Calling Hercules 'rewind', pathname=%s, fd=%d, errno=%d:%s", pathname, fd, errno, strerror(errno));
+		slog_debug("[POSIX]. Calling Hercules 'rewind', pathname=%s, fd=%d", pathname, fd);
 
 		fseek(stream, 0L, SEEK_SET);
 
@@ -2326,6 +2330,7 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 	char *new_path = checkHerculesPath(pathname);
 	if (new_path != NULL)
 	{
+		slog_debug("[POSIX]. Calling Hercules 'fopen', pathname=%s", pathname);
 		uint64_t ret_ds;
 		unsigned long offset = 0;
 		// mode_t new_mode = 0;
@@ -2360,12 +2365,12 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 		ret = file->_fileno; // get file descriptor.
 		// real_fclose(file);
 
+		slog_debug("[POSIX] File descriptor=%d", ret);
 		// fprintf(stderr, "Hercules fd =%d\n", ret);
 
 		ret = generalOpen(new_path, oflags, ALLPERMS, ret);
 		// ret = generalOpen(new_path, flags, new_mode);
 
-		// slog_debug("[POSIX][fopen] File descriptor=%d", ret);
 
 		if (ret < 0)
 		{
@@ -2405,7 +2410,7 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 		// fprintf(stderr, "Calling Hercules 'fopen', file NULL\n");
 
 		// slog_debug("[POSIX] Calling Hercules 'fopen', pathname=%s, mode=%s", new_path, mode);
-		// fprintf(stderr, "[POSIX] Ending Hercules 'fopen', new_path=%s, ret=%d, fd=%d\n", new_path, ret, file->_fileno);
+		fprintf(stderr, "[POSIX] Ending Hercules 'fopen', new_path=%s, ret=%d, fd=%d\n", new_path, ret, file->_fileno);
 		free(new_path);
 	}
 	else /* Do not try to use slog_ here! This function uses 'fopen' internally. */
@@ -2613,7 +2618,7 @@ int generalOpen(char *new_path, int flags, mode_t mode, int createFd)
 		}
 		else if (ret > -1 && createFd >= 0)
 		{
-			slog_debug("[POSIX] Puting fd %d into map, passed from arguments.", ret);
+			slog_debug("[POSIX] Puting fd %d into map, passed from arguments.", createFd);
 			// fprintf(stderr, "Putting fd %d into map\n", createFd);
 			map_fd_put(map_fd, new_path, createFd, p);
 			ret = createFd;

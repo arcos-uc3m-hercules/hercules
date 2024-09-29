@@ -94,6 +94,8 @@ pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
 // To synchronize network operations.
 pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
+SharedMemory *shared_memory;
+key_t shared_memory_key;
 
 int32_t imss_comm_cleanup()
 {
@@ -1115,6 +1117,10 @@ int32_t open_imss(char *imss_uri)
 
 	curr_imss = new_imss;
 
+	// Open shared memory segment.
+	shared_memory_key = getKeySM();
+	TIMING(shared_memory = getContentSM(shared_memory_key, SHM_SIZE), "Getting content from memory", SharedMemory *);
+
 	// Add the created struture into the underlying IMSSs.
 	GInsert(&imssd_pos, &imssd_max_size, (char *)&new_imss, imssd, free_imssd);
 	// return 0;
@@ -1146,6 +1152,12 @@ void ucx_cleanup()
 // Method releasing client-side and/or server-side resources related to a certain IMSS instance.
 int32_t release_imss(char *imss_uri, uint32_t release_op)
 {
+
+	// detach shared memory.
+	unlinkSM(shared_memory->content);
+	// freeSM(shared_memory->id);
+	free(shared_memory);
+
 	// Search for the requested IMSS.
 	imss imss_;
 	int32_t imss_position;
@@ -3125,7 +3137,6 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 	int32_t curr_imss_storages = curr_dataset.n_servers; // curr_imss.info.num_storages;
 
 	// Retrieve the corresponding connections to the previous servers.
-	// slog_debug("[IMSS][get_data] curr_dataset.repl_factor=%d", curr_dataset.repl_factor);
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
 	{
 		// Server storing the current data block.
@@ -3166,7 +3177,7 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 
 		//  Key related to the requested data element.
 		sprintf(key_, "%s 0 0 %s$%d", mode, curr_dataset.uri_, data_id);
-		slog_debug("[IMSS][get_data] Request - '%s' to server %ld", key_, repl_servers[i]);
+		slog_debug("[IMSS] Request - '%s' to server %ld", key_, repl_servers[i]);
 
 		ep = curr_imss.conns.eps[repl_servers[i]];
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
@@ -3185,7 +3196,6 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 
 		// t = clock() - t;
 		// time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
-		// slog_debug("[IMSS][get_data] send_data %f s", time_taken);
 
 		// int size = 0;
 		// if (data_id)
@@ -3194,7 +3204,6 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 		// 	size = sizeof(struct stat);
 
 		//	gettimeofday(&start, NULL);
-		// printf("GET_DATA after send petition to read");
 		// Receive data related to the previous read request directly into the buffer.
 		// t = clock();
 		// slog_info("[IMSS] Before getting length");
@@ -3239,30 +3248,31 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 				// key_t key = MurmurOAAT32(dataset_name_id);
 				size_t server_offset = 0;
 				uint32_t size = 0;
-				key_t key = getKeySM();
-				slog_debug("Getting data from shared memory, id=%d, response_bufer=%s, key=%ld", data_id, response_bufer, key);
+				slog_debug("Getting data from shared memory, id=%d, response_bufer=%s, key=%ld", data_id, response_bufer, shared_memory_key);
 				// msg_length = atoi((const char *)response_bufer);
 
 				// server_offset = atol((const char *)response_bufer);
 				sscanf((const char *)response_bufer, "%lu %d", &server_offset, &size);
 
-				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%d", curr_dataset.uri_, data_id, key, response_bufer, server_offset, size);
+				// slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%d", curr_dataset.uri_, data_id, key, response_bufer, server_offset, size);
 
 				slog_debug("msg_length=%ld", msg_length);
 				// TODO: EL PUNTERO A MEMORIA COMPARTIDA SE PUEDE MANTENER ABIERTO!
-				SharedMemory *shared_memory;
-				TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from memory", SharedMemory *);
+				// SharedMemory *shared_memory;
+				// TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from memory", SharedMemory *);
 
 				slog_debug("shared_memory->size=%ld", shared_memory->size);
 				// memcpy(response_bufer, shared_memory->content, shared_memory->size);
 				// buffer = shared_memory->content;
 				TIMING(memcpy(buffer, shared_memory->content + server_offset, size), "Memcpy from shared memory to buffer", void *);
+				// The following line does not work. Anyway, is not secure.
+				// buffer = shared_memory->content + server_offset;
 
 				msg_length = size;
 
-				unlinkSM(shared_memory->content);
-				// freeSM(shared_memory->id);
-				free(shared_memory);
+				// unlinkSM(shared_memory->content);
+				// // freeSM(shared_memory->id);
+				// free(shared_memory);
 			}
 			else
 			{
@@ -3433,29 +3443,32 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 				// key_t key = MurmurOAAT32(dataset_name_id);
 				size_t server_offset = 0;
 				uint32_t size = 0;
-				key_t key = getKeySM();
-				slog_debug("Getting data from shared memory, id=%d, response_bufer=%s, key=%ld", data_id, response_bufer, key);
+				// key_t key = getKeySM();
+				slog_debug("Getting data from shared memory, id=%d, response_bufer=%s, key=%ld", data_id, response_bufer, shared_memory_key);
 				// msg_length = atoi((const char *)response_bufer);
 
 				// server_offset = atol((const char *)response_bufer);
 				sscanf((const char *)response_bufer, "%lu %u", &server_offset, &size);
 
-				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%lu", curr_dataset.uri_, data_id, key, response_bufer, server_offset, size);
+				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%lu", curr_dataset.uri_, data_id, shared_memory_key, response_bufer, server_offset, size);
 
 				slog_debug("msg_length=%ld", msg_length);
-				SharedMemory *shared_memory;
-				TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
+				// SharedMemory *shared_memory;
+				// TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
 
 				slog_debug("shared_memory->size=%ld", shared_memory->size);
 				// memcpy(response_bufer, shared_memory->content, shared_memory->size);
 				// buffer = shared_memory->content;
-				memcpy(buffer, shared_memory->content + server_offset, to_read);
+				memcpy(buffer, shared_memory->content + server_offset + offset, to_read);
+
+				// Not secure.
+				// buffer = shared_memory->content + server_offset;
 
 				msg_length = to_read;
 
-				unlinkSM(shared_memory->content);
-				// freeSM(shared_memory->id);
-				free(shared_memory);
+				// unlinkSM(shared_memory->content);
+				// // freeSM(shared_memory->id);
+				// free(shared_memory);
 			}
 			else
 			{
@@ -3524,7 +3537,6 @@ size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t 
 		//  sprintf(key_, "GET 0 0 %s$%d", curr_dataset.uri_, data_id);
 		sprintf(key_, "GET %lu %ld %s$%d %ld", 0l, offset, curr_dataset.uri_, data_id, to_read);
 		// sprintf(key_, "GET %lu %ld %s$%d %zd", 0l, offset, curr_dataset.original_name, data_id, to_read);
-		// slog_info("[IMSS][get_data] Request - '%s'", key_);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 		slog_debug("[get_ndata] Sending request %s", key_);
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
@@ -3665,47 +3677,67 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 			// 	exit(EXIT_FAILURE);
 			// }
 			// key_t key = MurmurOAAT32(dataset_name_id);
-			key_t key = getKeySM();
-			SharedMemory *shared_memory;
+			// key_t key = getKeySM();
+			// SharedMemory *shared_memory;
 
 			// Check if the requested was correctly retrieved.
+			int shared_memory_operation = 0;
+			size_t server_offset = 0;
+
 			if (!strncmp((const char *)msg_received, "NEW", strlen("NEW")))
 			{ // Creates the shared memory segment.
+				shared_memory_operation = 1;
 				char response[strlen("NEW") + 1];
-				size_t server_offset = 0;
+				// size_t server_offset = 0;
 				sscanf((const char *)msg_received, "%s %lu", response, &server_offset);
 
-				slog_info("Setting data into shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld", curr_dataset.uri_, data_id, key, response, server_offset);
-				TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
+				slog_info("Setting data into shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld", curr_dataset.uri_, data_id, shared_memory_key, response, server_offset);
+				// TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
 
-				TIMING_NO_RETURN(copyContentSM(shared_memory->content + server_offset, buffer, size), "Copying buffer to shared memory");
+				// TIMING_NO_RETURN(copyContentSM(shared_memory->content + server_offset, buffer, size), "Copying buffer to shared memory");
 
-				TIMING_NO_RETURN(unlinkSM(shared_memory->content), "Unlinking shared memory");
-				TIMING_NO_RETURN(free(shared_memory), "Free shared memory");
+				// TIMING_NO_RETURN(unlinkSM(shared_memory->content), "Unlinking shared memory");
+				// TIMING_NO_RETURN(free(shared_memory), "Free shared memory");
 			}
 			if (!strncmp((const char *)msg_received, "TOUPDATE", strlen("TOUPDATE")))
 			{ // Updates the shared memory segment.
+				shared_memory_operation = 1;
 				char response[strlen("TOUPDATE") + 1];
-				size_t server_offset = 0;
+				// size_t server_offset = 0;
 				uint32_t block_size = 0;
 				sscanf((const char *)msg_received, "%s %lu %d", response, &server_offset, &block_size);
 
-				slog_info("Updating shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld, block_size=%d, size=%ld", curr_dataset.uri_, data_id, key, response, server_offset, block_size, size);
+				slog_info("Updating shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld, block_size=%d, size=%ld", curr_dataset.uri_, data_id, shared_memory_key, response, server_offset, block_size, size);
 				// const void* old_buffer;
 
-				TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
-				// old_buffer = malloc(shared_memory->size);
-				// memcpy(old_buffer, shared_memory->content, shared_memory->size);
-				// memcpy(buffer, shared_memory->content, shared_memory->size);
-				// unlinkSM(shared_memory->content);
-				// freeSM(shared_memory->id);
-				// free(shared_memory);
-				// memcpy((char *)shared_memory->content + offset, buffer, msg_length);
-				copyContentSM(shared_memory->content + server_offset, buffer, size);
+				// TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
+				// copyContentSM(shared_memory->content + server_offset, buffer, size);
+				// if (data_id == 0)
+				// {
+				// 	TIMING_NO_RETURN(copyContentSM(shared_memory->content + server_offset, buffer, size), "Updating buffer to shared memory");
+				// }
+				// else
+				// {
+				// 	shared_memory->content + server_offset = buffer;
+				// }
 
-				unlinkSM(shared_memory->content);
-				free(shared_memory);
+				// unlinkSM(shared_memory->content);
+				// free(shared_memory);
 			}
+			if (shared_memory_operation)
+			{
+				// if (data_id == 0)
+				{
+					TIMING_NO_RETURN(copyContentSM(shared_memory->content + server_offset + offset, buffer, size), "Updating buffer to shared memory");
+				}
+				// Returning the pointer is not secure.
+				// else
+				// {
+				// 	void *content_pointer = shared_memory->content + server_offset;
+				// 	content_pointer = (void *) buffer;
+				// }
+			}
+
 			free(msg_received);
 		}
 		else

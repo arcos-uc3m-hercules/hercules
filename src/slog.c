@@ -228,6 +228,13 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
         return;
     }
 
+    char *ld_preload_path = getenv("LD_PRELOAD");
+    if (ld_preload_path != NULL)
+    {
+        unsetenv("LD_PRELOAD");
+    }
+    
+
     /* Lock thread for safe. */
     if (slg.td_safe)
     {
@@ -369,8 +376,14 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
         {
             fprintf(stderr, "[ERROR][%s] <%s:%d> inside %s(): Can not deinitialize mutex: %s\n",
                     slg.fname, __FILE__, __LINE__, __func__, strerror(rc));
+            setenv("LD_PRELOAD", ld_preload_path, 1);
             exit(EXIT_FAILURE);
         }
+    }
+
+    if (ld_preload_path != NULL)
+    {
+        setenv("LD_PRELOAD", ld_preload_path, 1);
     }
 
     // fprintf(stderr,"prev_errno=%d, actual_errno=%d\t", prev_errno, errno);

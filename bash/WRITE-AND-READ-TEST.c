@@ -551,10 +551,10 @@ int main(int argc, char **argv)
     {
         fprintf(stderr, "[Summary] \n%s\n", _header);
     }
-    MPI_Barrier(MPI_COMM_WORLD);
-    fprintf(stderr, "%s", _summary);
+    // MPI_Barrier(MPI_COMM_WORLD);
 
     MPI_Finalize();
+    fprintf(stderr, "%s", _summary);
 }
 
 off_t fsize(const char *filename)

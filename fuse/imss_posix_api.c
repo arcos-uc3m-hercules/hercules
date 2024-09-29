@@ -776,13 +776,13 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 			if (start_offset + to_read > IMSS_DATA_BSIZE)
 			{
 				to_read = IMSS_DATA_BSIZE - start_offset;
-				slog_warn("[imss_read] data block overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
+				slog_warn("data block overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
 			}
 			// prevents to read out of the EOF.
 			if (offset + to_read > stats.st_size)
 			{
 				to_read = stats.st_size - offset;
-				slog_warn("[imss_read] EOF overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
+				slog_warn("EOF overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
 			}
 		}
 		else if (curr_blk != end_blk) // Middle block case
@@ -793,9 +793,9 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 		{
 			// Read the minimum between end_offset and filled (read_ = min(end_offset, filled))
 			to_read = size - byte_count;
-			slog_debug("[imss_read] END BLOCK CASE, to_read=%zd", to_read);
+			slog_debug("END BLOCK CASE, to_read=%zd", to_read);
 		}
-		slog_debug("[imss_read] curr_blk=%ld, reading %ld bytes (%ld kilobytes) with an offset of %ld bytes (%ld kilobytes), byte_count=%zd bytes (%zd kilobytes)", curr_blk, to_read, to_read / 1024, block_offset, block_offset / 1024, byte_count, byte_count / 1024);
+		slog_debug("curr_blk=%ld, reading %ld bytes (%ld kilobytes) with an offset of %ld bytes (%ld kilobytes), byte_count=%zd bytes (%zd kilobytes)", curr_blk, to_read, to_read / 1024, block_offset, block_offset / 1024, byte_count, byte_count / 1024);
 
 		if (to_read <= 0)
 		{
