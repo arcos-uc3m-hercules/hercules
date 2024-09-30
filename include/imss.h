@@ -60,6 +60,7 @@ extern int32_t IMSS_DEBUG;
  * Macro to measure the time spend by function_to_call.
  * char*::print_comment: comment to be concatenated to the elapsed time.
  */
+#define __TIMING__
 #ifdef __TIMING__
 #define TIMING(function_to_call, print_comment, type)          \
 	({                                                         \
@@ -72,6 +73,16 @@ extern int32_t IMSS_DEBUG;
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
 		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
 		ret;                                                   \
+	})
+#define TIMING_NO_RETURN(function_to_call, print_comment)          \
+	({                                                         \
+		clock_t t;                                             \
+		double time_taken;                                     \
+		t = clock();                                           \
+		function_to_call;                                \
+		t = clock() - t;                                       \
+		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
+		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
 	})
 #else
 #define TIMING(function_to_call, print_comment, type) \
@@ -465,7 +476,7 @@ The current function does not allocate memory.
 	 * @returns 0 if the requested block was successfully retrieved, 0 if the requested block was not find in the remote server,
 	 * or -1 in case of error.
 	 */
-	size_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
+	ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
 
 	/**
 	 * @brief Method used during malleability to retrieving a data element associated to a certain dataset starting in an offset.

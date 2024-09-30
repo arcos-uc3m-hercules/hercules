@@ -6,7 +6,6 @@
 #include "flags.h"
 #include "resolvepath.h"
 #include "tempname.h"
-#include "shared_memory.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -319,7 +318,8 @@ char *checkHerculesPath(const char *pathname)
 	// if (!strncmp(pathname, MOUNT_POINT, strlen(pathname) - 1))
 	size_t pathname_len = strlen(pathname);
 	size_t max_lenght = MAX(pathname_len, strlen(MOUNT_POINT));
-	if(pathname[pathname_len-1] == '/') {
+	if (pathname[pathname_len - 1] == '/')
+	{
 		max_lenght--;
 	}
 	if (!strncmp(pathname, MOUNT_POINT, max_lenght))
@@ -523,6 +523,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	if (IMSS_DEBUG_FILE > 0)
 	{
 		printf("Log path = %s\n", log_path);
+		fflush(stdout);
 	}
 	slog_info(",Time(msec), Comment, RetCode");
 
@@ -550,8 +551,6 @@ __attribute__((constructor)) void imss_posix_init(void)
 
 	fprintf(stderr, " -- POLICY: %s\n", POLICY);
 
-	// createSM(1000);
-
 	// Metadata server
 	// if (release == 1)
 	if (stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank) == -1)
@@ -572,7 +571,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 		{
 			release = 0;
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-			printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can stablish conections.\n");
+			printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can stablish connections.\n");
 			return;
 		}
 	}
@@ -614,7 +613,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	elapsed = seconds + useconds / 1e6;
 
 	init = 1;
-	fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
+	// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
 
 int getConfiguration()
@@ -750,6 +749,12 @@ int getConfiguration()
 
 	if (cfg_get(cfg, "POLICY"))
 		POLICY = cfg_get(cfg, "POLICY");
+	else
+	{
+		fprintf(stderr, "Distributiin Policy has not been stablish. \n Please, add the following line in your configuration file POLICY = RR\n");
+		perror("ERR_HERCULES_POLICY_NOT_FOUND");
+		return -1;
+	}
 
 	if (cfg_get(cfg, "METADATA_HOSTFILE"))
 	{
@@ -909,7 +914,7 @@ void __attribute__((destructor)) run_me_last()
 		// t_s = clock();
 		release = -1;
 		slog_debug("[POSIX] release_imss()");
-		// release_imss("imss://", CLOSE_DETACHED);
+		release_imss("imss://", CLOSE_DETACHED);
 		slog_debug("[POSIX] stat_release()");
 		// stat_release();
 		//  imss_comm_cleanup();
@@ -963,6 +968,7 @@ int close(int fd)
 			// fprintf(stderr,"[POSIX]. Ending Hercules 'close', pathname=%s, ret=%d\n", pathname, ret);
 			// Set offset to 0.
 			map_fd_update_value(map_fd, pathname, fd, 0);
+			map_fd_erase(map_fd, fd);
 		}
 		// pthread_mutex_unlock(&system_lock);
 	}
@@ -1206,7 +1212,7 @@ pid_t fork(void)
 		// sprintf(log_path, "%s/client-child.%02d-%02d.%d", HERCULES_PATH, tm.tm_hour, tm.tm_min, pid); // original.
 
 		// fprintf(stderr, "[POSIX]. Fork child created, hostname=%s, pid=%d, new rank = %d, log_path=%s, old_log_path=%s\n", hostname, pid, new_rank, log_path, old_log_path);
-		// slog_init(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, new_rank);
+		// slog_xinit(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, new_rank);
 		// slog_info("[POSIX]. Fork child created, hostname=%s, new rank=%d, log_path=%s, old_log_path=%s, init=%d", hostname, new_rank, log_path, old_log_path, init);
 		// slog_info("[POSIX]. Fork child created, hostname=%s, pid=%d, log_path=%s, old_log_path=%s, init=%d", hostname, pid, log_path, old_log_path, init);
 	}
@@ -1556,22 +1562,24 @@ char *realpath(const char *pathname, char *resolved_path)
 	return p;
 }
 
-int __open_2(const char *pathname, int flags, ...)
+// used by IOR.
+// int __open_2(const char *pathname, int flags, ...)
+int __open_2(const char *pathname, int flags)
 {
 	if (!real__open_2)
 	{
 		real__open_2 = dlsym(RTLD_NEXT, "__open_2");
 	}
 
-	// Access additional arguments when O_CREAT flag is set.
+	// // Access additional arguments when O_CREAT flag is set.
 	mode_t mode = 0;
-	if (flags & O_CREAT)
-	{
-		va_list ap;
-		va_start(ap, flags);
-		mode = va_arg(ap, mode_t);
-		va_end(ap);
-	}
+	// if (flags & O_CREAT)
+	// {
+	// 	va_list ap;
+	// 	va_start(ap, flags);
+	// 	mode = va_arg(ap, mode_t);
+	// 	va_end(ap);
+	// }
 
 	if (!init)
 	{
@@ -1763,6 +1771,9 @@ int fclose(FILE *fp)
 		slog_debug("[POSIX]. Ending Hercules 'fclose' pathname=%s, fd=%d\n", pathname, fd);
 		// Set offset to 0.
 		map_fd_update_value(map_fd, pathname, fd, 0);
+		map_fd_erase(map_fd, fd);
+		// TO CHECK!
+		real_fclose(fp);
 	}
 	else
 	{ // don't call slog here!
@@ -2296,7 +2307,7 @@ void rewind(FILE *stream)
 	char *pathname = map_fd_search_by_val(map_fd, fd);
 	if (pathname != NULL)
 	{
-		slog_debug("[POSIX]. Calling Hercules 'rewind', pathname=%s, fd=%d, errno=%d:%s", pathname, fd, errno, strerror(errno));
+		slog_debug("[POSIX]. Calling Hercules 'rewind', pathname=%s, fd=%d", pathname, fd);
 
 		fseek(stream, 0L, SEEK_SET);
 
@@ -2324,6 +2335,7 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 	char *new_path = checkHerculesPath(pathname);
 	if (new_path != NULL)
 	{
+		slog_debug("[POSIX]. Calling Hercules 'fopen', pathname=%s", pathname);
 		uint64_t ret_ds;
 		unsigned long offset = 0;
 		// mode_t new_mode = 0;
@@ -2358,12 +2370,12 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 		ret = file->_fileno; // get file descriptor.
 		// real_fclose(file);
 
+		slog_debug("[POSIX] File descriptor=%d", ret);
 		// fprintf(stderr, "Hercules fd =%d\n", ret);
 
 		ret = generalOpen(new_path, oflags, ALLPERMS, ret);
 		// ret = generalOpen(new_path, flags, new_mode);
 
-		// slog_debug("[POSIX][fopen] File descriptor=%d", ret);
 
 		if (ret < 0)
 		{
@@ -2403,7 +2415,7 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 		// fprintf(stderr, "Calling Hercules 'fopen', file NULL\n");
 
 		// slog_debug("[POSIX] Calling Hercules 'fopen', pathname=%s, mode=%s", new_path, mode);
-		// fprintf(stderr, "[POSIX] Ending Hercules 'fopen', new_path=%s, ret=%d, fd=%d\n", new_path, ret, file->_fileno);
+		fprintf(stderr, "[POSIX] Ending Hercules 'fopen', new_path=%s, ret=%d, fd=%d\n", new_path, ret, file->_fileno);
 		free(new_path);
 	}
 	else /* Do not try to use slog_ here! This function uses 'fopen' internally. */
@@ -2611,7 +2623,7 @@ int generalOpen(char *new_path, int flags, mode_t mode, int createFd)
 		}
 		else if (ret > -1 && createFd >= 0)
 		{
-			slog_debug("[POSIX] Puting fd %d into map, passed from arguments.", ret);
+			slog_debug("[POSIX] Puting fd %d into map, passed from arguments.", createFd);
 			// fprintf(stderr, "Putting fd %d into map\n", createFd);
 			map_fd_put(map_fd, new_path, createFd, p);
 			ret = createFd;
@@ -5453,17 +5465,14 @@ char *getcwd(char *buf, size_t size)
 {
 	if (!real_getcwd)
 		real_getcwd = dlsym(RTLD_NEXT, "getcwd");
-	// fprintf(stderr, "Calling getcwd, size=%ld\n", size);
-	// buf = real_getcwd(buf, size);
-	// ***
+
 	if (!strncmp(getenv("PWD"), MOUNT_POINT, strlen(MOUNT_POINT)))
 	{
 		slog_debug("[POSIX] Calling Hercules 'getcwd'");
-		// buf = getenv("PWD");
 		char *curr_dir = getenv("PWD");
-		strncpy(buf, curr_dir, strlen(curr_dir));
+		size_t buf_length = strlen(buf);
+		strncpy(buf, curr_dir, buf_length);
 		slog_debug("[POSIX] Ending Hercules 'getcwd', buf=%s", buf);
-		// return buf;
 	}
 	else
 	{
@@ -5471,8 +5480,6 @@ char *getcwd(char *buf, size_t size)
 		buf = real_getcwd(buf, size);
 		slog_full("[POSIX] Ending real 'getcwd', buf=%s", buf);
 	}
-	// fprintf(stderr, "End getcwd, buf=%s\n", buf);
-	// ***return buf;
 	return buf;
 }
 

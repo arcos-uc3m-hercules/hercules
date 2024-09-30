@@ -49,7 +49,7 @@ uint32_t MurmurOAAT32(const char *key)
 
 void printUsage(char *exe)
 {
-    printf("Not enough arguments, usage: \n %s <directory_path> <file_name> <buffer_size>", exe);
+    printf("Not enough arguments, usage: \n %s <directory_path> <file_name> <buffer_size_in_MB>\n", exe);
 }
 
 int main(int argc, char **argv)
@@ -62,6 +62,7 @@ int main(int argc, char **argv)
     }
 
     int ret = -1;
+    int errors = 0;
     char err_msg[100] = {0};
     char _stdout[10000] = {0};
     char _summary[10000] = {0};
@@ -74,7 +75,7 @@ int main(int argc, char **argv)
     int fd; // file descriptor.
     // Getting a mostly unique id for the distributed deployment.
     char hostname[1024];
-    char hostname_pid[1024];
+    char hostname_pid[2048];
 
     ret = gethostname(&hostname[0], 512);
     if (ret == -1)
@@ -286,7 +287,7 @@ int main(int argc, char **argv)
             }
             else
             {
-                ret = lseek(fp->_fileno, start_position, SEEK_SET);
+                ret = fseek(fp, start_position, SEEK_SET);
             }
             if (ret == -1)
             {
@@ -295,7 +296,7 @@ int main(int argc, char **argv)
             }
             else
             {
-                fprintf(stderr, "Lseek, ret=%d: %d:%s\n", ret, errno, strerror(errno));
+                fprintf(stderr, "seek, ret=%d: %d:%s\n", ret, errno, strerror(errno));
             }
             end = MPI_Wtime();
             sprintf(msg, "%f", end - start);
@@ -310,7 +311,7 @@ int main(int argc, char **argv)
                 if (real_write_size != buffer_size)
                 {
                     char error[500];
-                    sprintf(error, "[%d][Test %ld] error write, write size: %ld/%ld\n", rank, h, real_write_size, buffer_size);
+                    sprintf(error, "[%d][Test %ld] error write, write size: %ld/%ld\n", rank, iteration, real_write_size, buffer_size);
                     perror(error);
                     ret = -1;
                 }
@@ -321,14 +322,14 @@ int main(int argc, char **argv)
                 if (ferror(fp))
                 {
                     char error[500];
-                    sprintf(error, "[%d][Test %ld] Error writing %s\n", rank, h, file_path);
+                    sprintf(error, "[%d][Test %ld] Error writing %s\n", rank, iteration, file_path);
                     perror(error);
                     ret = -1;
                 }
                 else if (feof(fp))
                 {
                     char error[500];
-                    sprintf(error, "[%d][Test %ld] EOF found while writing %s\n", rank, h, file_path);
+                    sprintf(error, "[%d][Test %ld] EOF found while writing %s\n", rank, iteration, file_path);
                     perror(error);
                     ret = -1;
                 }
@@ -437,7 +438,7 @@ int main(int argc, char **argv)
                 {
                     fprintf(stderr, "[%d] Error during reading - %d:%s\n", rank, errno, strerror(errno));
                     char error[500];
-                    sprintf(error, "[%d][Test %ld] error read, read size: %ld/%ld\n", rank, h, real_read_size, buffer_size);
+                    sprintf(error, "[%d][Test %ld] error read, read size: %ld/%ld\n", rank, iteration, real_read_size, buffer_size);
                     perror(error);
                     ret = -1;
                 }
@@ -448,22 +449,23 @@ int main(int argc, char **argv)
                 if (ferror(fp))
                 {
                     char error[500];
-                    sprintf(error, "[%d][Test %ld] Error reading %s\n", rank, h, file_path);
+                    sprintf(error, "[%d][Test %ld] Error reading %s\n", rank, iteration, file_path);
                     perror(error);
                     ret = -1;
                 }
-                else if (feof(fp))
-                {
-                    char error[500];
-                    sprintf(error, "[%d][Test %ld] EOF found while reading %s\n", rank, h, file_path);
-                    perror(error);
-                    ret = -1;
-                }
+                // else if (feof(fp))
+                // {
+                //     char error[500];
+                //     sprintf(error, "[%d][Test %ld] EOF found while reading %s\n", rank, iteration, file_path);
+                //     perror(error);
+                //     ret = -1;
+                // }
             }
             if (ret == -1)
             {
                 exit(EXIT_FAILURE);
-            } else
+            }
+            else
             {
                 fprintf(stderr, "Read: %d:%s\n", errno, strerror(errno));
             }
@@ -498,11 +500,16 @@ int main(int argc, char **argv)
         start = MPI_Wtime();
         if (SYSTEM)
         {
-            close(fd);
+            ret = close(fd);
         }
         else
         {
-            fclose(fp);
+            ret = fclose(fp);
+        }
+        if (ret == -1)
+        {
+            perror("Error closing the file");
+            exit(EXIT_FAILURE);
         }
         end = MPI_Wtime();
         sprintf(msg, "%f\n", end - start);
@@ -538,6 +545,9 @@ int main(int argc, char **argv)
             // fprintf(stderr, "buffer_r=%s\n", buffer_r);
         }
 
+	MPI_Reduce(&result, &errors, sizeof(result), MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+
+
         // free memory.
         fprintf(stderr, "Deleting buffers\n");
         free(buffer_w);
@@ -545,16 +555,22 @@ int main(int argc, char **argv)
         write_header = 0;
     } // end for
 
+    MPI_Barrier(MPI_COMM_WORLD);
     fprintf(stderr, "[CLIENT] %s\n", _stdout);
     MPI_Barrier(MPI_COMM_WORLD);
     if (!rank)
     {
         fprintf(stderr, "[Summary] \n%s\n", _header);
     }
-    // MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD);
+    fprintf(stderr, "%s", _summary);
+    fprintf(stderr,"\n");
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if(rank == 0)
+	fprintf(stderr, "+++++ Num of errors = %d\n", errors);
 
     MPI_Finalize();
-    fprintf(stderr, "%s", _summary);
 }
 
 off_t fsize(const char *filename)

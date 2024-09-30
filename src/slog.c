@@ -221,12 +221,19 @@ char *slog_get(SlogDate *pDate, char *msg, ...)
  */
 void slog(int flag, char const *caller_name, const char *msg, ...)
 {
-    int prev_errno = errno;
+    // int prev_errno = errno;
 
     if (flag > slg.level || (slg.level >= SLOG_READ && flag != SLOG_READ))
     {
         return;
     }
+
+    char *ld_preload_path = getenv("LD_PRELOAD");
+    if (ld_preload_path != NULL)
+    {
+        unsetenv("LD_PRELOAD");
+    }
+    
 
     /* Lock thread for safe. */
     if (slg.td_safe)
@@ -369,12 +376,18 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
         {
             fprintf(stderr, "[ERROR][%s] <%s:%d> inside %s(): Can not deinitialize mutex: %s\n",
                     slg.fname, __FILE__, __LINE__, __func__, strerror(rc));
+            setenv("LD_PRELOAD", ld_preload_path, 1);
             exit(EXIT_FAILURE);
         }
     }
 
+    if (ld_preload_path != NULL)
+    {
+        setenv("LD_PRELOAD", ld_preload_path, 1);
+    }
+
     // fprintf(stderr,"prev_errno=%d, actual_errno=%d\t", prev_errno, errno);
-    errno = prev_errno;
+    // errno = prev_errno;
 }
 
 void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int debugColor, int filestamp, int t_safe, unsigned int rank)

@@ -29,6 +29,7 @@ extern char *buffer_address;
 extern pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
 extern uint64_t buffer_segment;
+char *POLICY = NULL;
 
 extern ucp_worker_h *ucp_worker_threads;
 extern ucp_address_t **local_addr;
@@ -65,6 +66,8 @@ pthread_t *threads;
 // global variables usted to finish threads.
 extern int global_finish_threads;
 extern int global_server_fd_thread;
+
+// #define SHM_SIZE 20L * 1024L * 1024L * 1024L
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
@@ -274,7 +277,8 @@ void handle_signal_server(int signal)
 	{
 		slog_info("SIGUSR1 received");
 		int pkill_operation = 0, ret = 0;
-		char buf[10], action[20];;
+		char buf[10], action[20];
+		;
 		// Get the operation number.
 		int fd = open("/tmp/hercules_pkill_operation", O_RDONLY);
 		if (fd == -1)
@@ -316,7 +320,7 @@ void handle_signal_server(int signal)
 			// by the file descriptor "global_server_fd_thread".
 			if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
 			{
-				fprintf(stderr, "Error closing server_fd\n");
+				perror("ERR_HERCULES_SHUTDOWN_SERVER_FD\n");
 			}
 			break;
 		default: // suspend the data server.
@@ -365,6 +369,11 @@ void handle_signal_server(int signal)
 	}
 }
 
+void print_usage(const char *msg)
+{
+	fprintf(stderr, "%s\n usage for METADATA server: hercules_server m <server_id>\n usage for DATA server: hercules_server d <server_id> <metadata_host> <initial_number_of_data_servers> \n", msg);
+}
+
 int32_t main(int32_t argc, char **argv)
 {
 	signal(SIGUSR1, handle_signal_server);
@@ -401,6 +410,9 @@ int32_t main(int32_t argc, char **argv)
 	uint64_t max_storage_size; // memory pool size
 	uint32_t num_blocks;
 
+	// shared memory.
+	int shm_data_id;
+
 	char tmp_file_path[100];
 
 	char *conf_path;
@@ -414,12 +426,28 @@ int32_t main(int32_t argc, char **argv)
 	/******************* PARSE FILE ARGUMENTS **********************/
 	/***************************************************************/
 
+	if (argc < 3)
+	{
+		print_usage("Too few arguments");
+		return 0;
+	}
+
 	args.type = argv[1][0];
 	args.id = atoi(argv[2]);
 
 	if (args.type != TYPE_METADATA_SERVER && args.type != TYPE_DATA_SERVER)
 	{
-		fprintf(stderr, "%c is not a valid server type \n usage: hercules_server <m|d> <server_id> <metadata_host> <0|1>\n", args.type);
+		// fprintf(stderr, "%c is not a valid server type \n usage: hercules_server <m|d> <server_id> <metadata_host> <0|1>\n", args.type);
+		char usage_msg[64];
+		sprintf(usage_msg, "%c is not a valid server type", args.type);
+		print_usage((const char *)usage_msg);
+		return 0;
+	}
+
+	// Checks arguments for metadata and data servers.
+	if ((argc != 3 && args.type == TYPE_METADATA_SERVER) || (argc != 5 && args.type == TYPE_DATA_SERVER))
+	{
+		print_usage("Wrong number of arguments");
 		return 0;
 	}
 
@@ -477,7 +505,7 @@ int32_t main(int32_t argc, char **argv)
 		else
 		{
 			fprintf(stderr, "Configuration file not found\n");
-			perror("ERRIMSS_CONF_NOT_FOUND");
+			perror("ERR_HERCULES_CONF_NOT_FOUND");
 			return -1;
 		}
 		free(conf_path);
@@ -538,6 +566,15 @@ int32_t main(int32_t argc, char **argv)
 	{
 		aux = cfg_get(cfg, "DATA_HOSTFILE");
 		strcpy(args.deploy_hostfile, aux);
+	}
+
+	if (cfg_get(cfg, "POLICY"))
+		POLICY = cfg_get(cfg, "POLICY");
+	else
+	{
+		fprintf(stderr, "Distributiin Policy has not been stablish. \n Please, add the following line in your configuration file POLICY = RR\n");
+		perror("ERR_HERCULES_POLICY_NOT_FOUND");
+		return -1;
 	}
 
 	if (getenv("HERCULES_DEBUG_LEVEL") != NULL)
@@ -604,6 +641,12 @@ int32_t main(int32_t argc, char **argv)
 	sprintf(log_path, "./%c-server-%d.%02d-%02d-%02d", args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
 	// sprintf(log_path, "./%c-server", args.type);
 	slog_init(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, args.id);
+
+	if (IMSS_DEBUG_FILE > 0)
+	{
+		printf("Log path = %s\n", log_path);
+		fflush(stdout);
+	}
 	// fprintf(stderr, "IMSS DEBUG FILE AT %s\n", log_path);
 	slog_info(",Time(msec), Comment, RetCode");
 
@@ -808,6 +851,34 @@ int32_t main(int32_t argc, char **argv)
 			perror("HERCULES_ERR_SERVER_URITAKEN");
 			ready(tmp_file_path, "ERROR");
 			return 0;
+		}
+
+		// When LOCAL policy is used, the server creates a shared memory region.
+		if (!strcmp(POLICY, "LOCAL"))
+		{
+
+			key_t key = getKeySM();
+			slog_info("Generated Key = %d\n", key);
+
+			shm_data_id = getIdentifierSM(key, SHM_SIZE);
+			if (shm_data_id == -1)
+			{
+				perror("ERR_HERCULES_GET_SM_IDENTIFIER");
+				// Do not stop the process.
+			}
+			else
+			{
+				void *pool_memory = createSM(shm_data_id);
+				if (pool_memory == NULL)
+				{
+					perror("ERR_HERCULES_CREATE_SM");
+					// Do not stop the process.
+				}
+				else
+				{
+					unlinkSM(pool_memory);
+				}
+			}
 		}
 	}
 	// Metadata server.
@@ -1078,6 +1149,7 @@ int32_t main(int32_t argc, char **argv)
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
 		ready(tmp_file_path, "OK");
+		printf("Server %d is ready\n", args.id);
 		if (pthread_join(threads[i], NULL) != 0)
 		{
 			perror("ERR_HERCULES_SERVER_THREAD_JOIN");
@@ -1126,6 +1198,9 @@ int32_t main(int32_t argc, char **argv)
 		// 	return -1;
 		// }
 
+		// Destroy the shared memory segment.
+    	freeSM(shm_data_id);
+		
 		free(region_locks);
 		// fprintf(stderr, "Ending data server.\n");
 	}
