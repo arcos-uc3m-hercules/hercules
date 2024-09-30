@@ -3271,7 +3271,7 @@ int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
 				slog_debug("shared_memory->size=%ld", shared_memory->size);
 				// memcpy(response_bufer, shared_memory->content, shared_memory->size);
 				// buffer = shared_memory->content;
-				TIMING(memcpy(buffer, shared_memory->content + server_offset, size), "Memcpy from shared memory to buffer", void *);
+				TIMING(memcpy(buffer, (char *)shared_memory->content + server_offset, size), "Memcpy from shared memory to buffer", void *);
 				// The following line does not work. Anyway, is not secure.
 				// buffer = shared_memory->content + server_offset;
 
@@ -3466,7 +3466,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 				slog_debug("shared_memory->size=%ld", shared_memory->size);
 				// memcpy(response_bufer, shared_memory->content, shared_memory->size);
 				// buffer = shared_memory->content;
-				memcpy(buffer, shared_memory->content + server_offset + offset, to_read);
+				memcpy(buffer, (char *)shared_memory->content + server_offset + offset, to_read);
 
 				// Not secure.
 				// buffer = shared_memory->content + server_offset;
@@ -3737,7 +3737,9 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 			{
 				// if (data_id == 0)
 				{
-					TIMING_NO_RETURN(copyContentSM(shared_memory->content + server_offset + offset, buffer, size), "Updating buffer to shared memory");
+					// "server_offset" is the offset used to move across shared memory, while "offset" is used to move
+					// the pointer across the data block.
+					TIMING_NO_RETURN(copyContentSM((char *)shared_memory->content + server_offset + offset, buffer, size), "Updating buffer to shared memory");
 				}
 				// Returning the pointer is not secure.
 				// else
@@ -3951,15 +3953,17 @@ set_ndata(int32_t dataset_id,
 		}
 
 		// the first copy will always be written synchronously
-		if (i == 0 || curr_dataset.repl_type == SYNC) {
+		if (i == 0 || curr_dataset.repl_type == SYNC)
+		{
 			// Send read request message specifying the block data.
 			ret = send_data(ucp_worker_data, ep, buffer, size, local_data_uid);
 		}
 		// the additional replicas can be written asynchronously
-		else {
+		else
+		{
 			ret = isend_data(ucp_worker_data, ep, buffer, size, local_data_uid);
 		}
-		
+
 		if (ret == 0)
 		{
 			pthread_mutex_unlock(&lock_network);

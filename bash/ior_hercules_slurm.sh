@@ -83,7 +83,7 @@ echo "Running clients"
 # TRANSFER_SIZE=$((1024*1))
 TRANSFER_SIZE=$FILE_SIZE_PER_CLIENT
 #COMMAND="$IOR_PATH/ior -o /mnt/hercules/data.out -t 100M -b 100M -s 1 -i 5 -w -r -W -R -k"
-COMMAND="$IOR_PATH/ior -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -F -o /mnt/hercules/data.out"
+COMMAND="$IOR_PATH/ior -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 1 -F -o /mnt/hercules/data.out"
 #COMMAND="../../bin/nekbmpi eddy_uv 2"
 #COMMAND="/beegfs/home/javier.garciablas/nek5000/run/eddy_uv/nek5000"
 #COMMAND="./exe_WRITE_AND_READ-TEST /mnt/hercules/eddy hola.txt 1024"

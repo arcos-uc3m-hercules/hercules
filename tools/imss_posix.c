@@ -2376,7 +2376,6 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 		ret = generalOpen(new_path, oflags, ALLPERMS, ret);
 		// ret = generalOpen(new_path, flags, new_mode);
 
-
 		if (ret < 0)
 		{
 			return NULL;

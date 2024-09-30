@@ -2,7 +2,7 @@
 
 SCRIPT_NAME="ior_hercules_slurm.sh"
 #FILE_SIZE=$((1024*1024*1))
-FILE_SIZE=$((1024*1024*10))
+FILE_SIZE=$((1024*1024*100))
 ATTACHED=1
 #TEST_TYPE="weak"
 TEST_TYPE="strong"
