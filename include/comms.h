@@ -1,6 +1,19 @@
 #ifndef COMMS
 #define COMMS
 
+#include "queue.h"
+#include <arpa/inet.h> /* inet_addr */
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/epoll.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <ucp/api/ucp.h>
+#include <semaphore.h>
+#include <fcntl.h>    // for O_* constants
+// to manage logs.
+#include "slog.h"
+
 #define IMSS_INFO 0
 #define DATASET_INFO 1
 #define STRING 2
@@ -14,22 +27,8 @@
 
 #define CLOSE_EP 9999999
 
-#define SHM_SIZE 30L * 1024L * 1024L * 1024L
+#define SHM_SIZE 50L * 1024L * 1024L * 1024L
 
-#include "queue.h"
-#include <arpa/inet.h> /* inet_addr */
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/epoll.h>
-#include <netinet/in.h>
-#include <netdb.h>
-
-#include <ucp/api/ucp.h>
-
-// to manage logs.
-#include "slog.h"
-
-extern int32_t IMSS_DEBUG;
 
 #define IP_STRING_LEN 50
 #define PORT_STRING_LEN 8

@@ -66,6 +66,16 @@ set_policy(dataset_info *dataset)
 		// blocks_written = dataset->blocks_written;
 		// slog_debug("data_locations=%u, num_blocks_written=%u, blocks_written=%u", *data_locations, *num_blocks_written, *blocks_written);
 	}
+	else if (!strcmp(dataset->policy, "ZCOPY"))
+	{
+		session_plcy = 6;
+
+		// Initialize variables hanlding LOCAL datasets.
+		// data_locations = dataset->data_locations;
+		// num_blocks_written = dataset->num_blocks_written;
+		// blocks_written = dataset->blocks_written;
+		// slog_debug("data_locations=%u, num_blocks_written=%u, blocks_written=%u", *data_locations, *num_blocks_written, *blocks_written);
+	}
 	else
 	{
 		slog_error("HERCULES_ERR_SETPLCY_INVLD : %s", dataset->uri_);
@@ -74,6 +84,10 @@ set_policy(dataset_info *dataset)
 	}
 
 	return 0;
+}
+
+int32_t get_policy() {
+	return session_plcy;
 }
 
 /**
@@ -261,12 +275,15 @@ find_server(int32_t n_servers,
 	break;
 
 	// Follow a LOCAL distribution.
-	case LOCAL_: // FIXME: improve the following case!
+	case LOCAL_: 
+	// ZERO COPY follows LOCAL distribution but reducing memory copies.
+	case ZCOPY_:
 	{
 		slog_debug("op_type=%d", op_type);
 		next_server = matching_node_socket;
 		break;
 		// Operate in relation to the type of operation.
+		// FIXME: improve the following case!
 		switch (op_type)
 		{
 		// Retrieve the socket connection number associated to the server storing the block.

@@ -4,10 +4,10 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <sys/signal.h>
-#include "imss.h"
+// #include "imss.h"
 #include "metadata_stat.h"
-#include "comms.h"
-#include "workers.h"
+// #include "comms.h"
+// #include "workers.h"
 #include "memalloc.h"
 #include "directory.h"
 #include "records.hpp"
@@ -16,7 +16,7 @@
 #include "cfg_parse.h"
 #include <inttypes.h>
 #include <unistd.h>
-#include <fcntl.h>
+// #include <fcntl.h>
 // #include <disk.h>
 
 // Pointer to the tree's root node.
@@ -856,7 +856,7 @@ int32_t main(int32_t argc, char **argv)
 		// When LOCAL policy is used, the server creates a shared memory region.
 		if (!strcmp(POLICY, "LOCAL"))
 		{
-
+			// Get the shared memory key and tries to create the shared memory region (pool).
 			key_t key = getKeySM();
 			slog_info("Generated Key = %d\n", key);
 
@@ -870,13 +870,26 @@ int32_t main(int32_t argc, char **argv)
 			{
 				void *pool_memory = createSM(shm_data_id);
 				if (pool_memory == NULL)
-				{
+				{ // error creating the shared memory region.
 					perror("ERR_HERCULES_CREATE_SM");
 					// Do not stop the process.
 				}
 				else
 				{
+					// Shared memory has been created, we unlink the segment becuase
+					// this process won't use the shared memory, it is used by the front-end.
 					unlinkSM(pool_memory);
+					// Becasue the shared memory was successfully created, we
+					// initializate a semaphore to sincronize block 0.
+					sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1);
+					if (sem_shared_memory == SEM_FAILED)
+					{
+						perror("HERCULES_ERR_SHM_SEM_OPEN");
+						exit(-1);
+					}
+					// Close the semaphore. The semaphore will remain and can be used by
+					// the front-end until unlink is called.
+					sem_close(sem_shared_memory);
 				}
 			}
 		}
@@ -1149,7 +1162,7 @@ int32_t main(int32_t argc, char **argv)
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
 		ready(tmp_file_path, "OK");
-		printf("Server %d is ready\n", args.id);
+		fprintf(stderr, "Server %d is ready\n", args.id);
 		if (pthread_join(threads[i], NULL) != 0)
 		{
 			perror("ERR_HERCULES_SERVER_THREAD_JOIN");
@@ -1199,8 +1212,10 @@ int32_t main(int32_t argc, char **argv)
 		// }
 
 		// Destroy the shared memory segment.
-    	freeSM(shm_data_id);
-		
+		freeSM(shm_data_id);
+		// Remove the named semaphore.
+		sem_unlink("/hercules_shm_sem");
+
 		free(region_locks);
 		// fprintf(stderr, "Ending data server.\n");
 	}

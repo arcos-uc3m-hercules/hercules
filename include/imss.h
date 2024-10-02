@@ -3,8 +3,10 @@
 
 #include <stdint.h>
 #include <ucp/api/ucp.h>
+#include "comms.h"
 // to manage logs.
 #include "slog.h"
+
 
 // Maximum number of bytes assigned to a dataset or IMSS URI.
 #define URI_ 256
@@ -456,16 +458,6 @@ The current function does not allocate memory.
 				   uint64_t BLOCKSIZE,
 				   int64_t start_offset,
 				   int64_t size);
-
-	/**
-	 * @brief Method retrieving a data element associated to a certain dataset.
-	 * @param dataset_id - Number identifying the concerned dataset among the client's session.
-	 * @param data_id    - Data block number identifying the data block to be retrieved.
-	 * @param buffer     - Memory address where the requested block will be received. WARNING: memory must have been allocated.
-	 * @returns 0 if the requested block was successfully retrieved, 0 if the requested block was not find in the remote server,
-	 * or -1 in case of error.
-	 */
-	int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer);
 
 	/**
 	 * @brief Method retrieving a data element associated to a certain dataset starting in an offset.

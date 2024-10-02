@@ -2,8 +2,11 @@
 #define SHARED_M_H
 
 #include <stdlib.h>
+#include <semaphore.h>
 
 typedef struct SharedMemory SharedMemory;
+// Used for shared memory synchronization.
+static sem_t *sem_shared_memory;
 
 struct SharedMemory
 {

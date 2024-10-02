@@ -83,10 +83,16 @@ echo "Running clients"
 # TRANSFER_SIZE=$((1024*1))
 TRANSFER_SIZE=$FILE_SIZE_PER_CLIENT
 #COMMAND="$IOR_PATH/ior -o /mnt/hercules/data.out -t 100M -b 100M -s 1 -i 5 -w -r -W -R -k"
-COMMAND="$IOR_PATH/ior -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 1 -F -o /mnt/hercules/data.out"
+
+## File-per-process with write and read verification.
+COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -F -o /mnt/hercules/data.out"
+
+## Single-file with write and read verification.
+#COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 1 -o /mnt/hercules/data.out"
+
 #COMMAND="../../bin/nekbmpi eddy_uv 2"
 #COMMAND="/beegfs/home/javier.garciablas/nek5000/run/eddy_uv/nek5000"
-#COMMAND="./exe_WRITE_AND_READ-TEST /mnt/hercules/eddy hola.txt 1024"
+#COMMAND="./tests/exe-WRITE-AND-READ-TEST /mnt/hercules/eddy hola.txt 1024"
 # COMMAND="/beegfs/home/javier.garciablas/nek5000/run/eddy_uv_spack/nek5000"
 #COMMAND="~/Nek5000/run/turbPipe/nek5000"
 #COMMAND="strace -o strace.out ./exe_test_mpi_set_view /mnt/hercules/example.txt"
@@ -99,6 +105,8 @@ mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_H
    $HERCULES_MPI_ENV_DEF HERCULES_CONF=$HERCULES_CONF \
    $HERCULES_MPI_ENV_DEF LD_PRELOAD=$HERCULES_POSIX_PRELOAD \
    $COMMAND
+
+#LD_PRELOAD=$HERCULES_POSIX_PRELOAD ls -lth /mnt/hercules/
 
 mpiexec $HERCULES_MPI_HOSTFILE_DEF=./data_hostfile \
 	ipcrm -a

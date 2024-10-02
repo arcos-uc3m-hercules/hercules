@@ -7,6 +7,7 @@
 #define CRC16_			3
 #define CRC64_			4
 #define LOCAL_ 			5
+#define ZCOPY_           6
 
 #define GET			6
 #define SET			7
@@ -15,6 +16,12 @@
 
 //Method specifying the policy.
 int32_t set_policy  (dataset_info * dataset);
+
+/**
+ * @brief Method retriving the policy number setted by the "set_policy" method.
+ * @return policy number according to the distribution policy chosen by the user.
+ */
+int32_t get_policy();
 
 /**
  * @brief Method retrieving the server that will receive the following message attending a policy.

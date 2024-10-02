@@ -239,59 +239,35 @@ int imss_refresh(const char *path)
 	uint32_t ds;
 	int fd = -1;
 	char *aux2 = NULL;
-	// slog_live("[imss_refresh] Before calloc, IMSS_DATA_BSIZE=%ld", IMSS_DATA_BSIZE);
 	const char *imss_path = path; // calloc(MAX_PATH, sizeof(char)); // this pointer should not be free.
-	// char *aux = (char *)malloc(IMSS_DATA_BSIZE);
 	void *aux = NULL;
-	// slog_live("[imss_refresh] After malloc, IMSS_DATA_BSIZE=%ld", IMSS_DATA_BSIZE);
 
-	// get_iuri(path, imss_path);
-
-	// fd_lookup(imss_path, &fd, &old_stats, &aux2);
 	fd_lookup(imss_path, &fd, &old_stats, (char **)&aux);
-	// slog_debug("[imss_refresh] fd_lookup=%d", fd);
 	if (fd >= 0)
 	{
-		// fprintf(stderr, "[imss_refresh] fd_lookup=%d\n", fd);
-		// slog_info("[imss_refresh] fd_lookup=%d", fd);
 		ds = fd;
 	}
 	else
 	{
 		slog_warn("[imss_refresh] %s", strerror(ENOENT));
-		// fprintf(stderr, "[imss_refresh] File %s not found\n", imss_path);
-		// free(imss_path);
-		// free(aux);
 		return -ENOENT;
 	}
 
 	// get block 0 from data server.
-	ret = get_data(ds, 0, aux);
+	ret = get_ndata(ds, 0, aux, 0, 0);
 	if (ret < 0)
 	{
 		char err_msg[128];
 		sprintf(err_msg, "HERCULES_ERR_REFRESH: %s", path);
 		slog_error("[imss_refresh] %s", err_msg);
-		// perror(err_msg);
-		// free(imss_path);
-		// free(aux);
 		return -1;
 	}
 	stats = (struct stat *)aux;
-	// fprintf(stderr, "[imss_refresh] path=%s, ret=%d, ds=%d, st_size=%ld, st_nlink=%lu\n", path, ret, ds, stats->st_size, stats->st_nlink);
+
 	// HERE STATS->ST_NLINK RETURNS 0, IT MUST BE 1.
 	slog_debug("ret=%d, ds=%d, st_size=%ld, stats->st_nlink=%lu, old_stats.st_nlink=%lu", ret, ds, stats->st_size, stats->st_nlink, old_stats.st_nlink);
 	map_update(map, imss_path, ds, *stats);
 
-	// 	slog_debug("[imss_refresh] Calling map_search, %s", path);
-	// if(map_search(map, path, &fd, stats, &aux)){
-	// 	slog_debug("[imss_refresh] key %s has been found", path);
-	// } else {
-	// 	slog_debug("[imss_refresh] key %s has not been found", path);
-	// }
-
-	// free(aux);
-	// free(imss_path);
 	return 0;
 }
 
@@ -395,10 +371,10 @@ int imss_getattr(const char *path, struct stat *stbuf)
 			{
 				int ret = 0;
 				// slog_live("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
-				void *data = (void *)malloc(IMSS_DATA_BSIZE*sizeof(char));
+				void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
 				// void *data = NULL;
 				//  data is allocated in "get data".
-				ret = get_data(ds, 0, data);
+				ret = get_ndata(ds, 0, data, 0, 0);
 				if (ret < 0)
 				{
 					slog_error("Error getting data: %s", imss_path);
@@ -619,8 +595,8 @@ int imss_open(char *path, uint64_t *fh)
 		}
 
 		// aux = (char *)malloc(IMSS_DATA_BSIZE);
-		void *data = (void *)malloc(IMSS_DATA_BSIZE);
-		ret = get_data(file_desc, 0, data);
+		void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+		ret = get_ndata(file_desc, 0, data, 0, 0);
 		if (ret < 0)
 		{
 			perror("ERR_HERCULES_IMSS_OPEN_GET_DATA");
@@ -697,7 +673,7 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 		end_blk = ceil((double)(offset + stats.st_size) / IMSS_DATA_BSIZE);
 	}
 
-	slog_debug("[imss_read] TotalSizeToRead=%ld (%ld kb), start_offset=%ld, curr_blk=%ld, end_blk=%ld, num_of_blks=%ld, offset=%ld, end_offset=%ld, IMSS_DATA_BSIZE=%ld, stats.st_size=%ld", size, size / 1024, start_offset, curr_blk, end_blk, num_of_blk, offset, end_offset, IMSS_DATA_BSIZE, stats.st_size);
+	slog_debug("TotalSizeToRead=%ld (%ld kb), start_offset=%ld, curr_blk=%ld, end_blk=%ld, num_of_blks=%ld, offset=%ld, end_offset=%ld, IMSS_DATA_BSIZE=%ld, stats.st_size=%ld", size, size / 1024, start_offset, curr_blk, end_blk, num_of_blk, offset, end_offset, IMSS_DATA_BSIZE, stats.st_size);
 
 	// Check if offset is bigger than filled, return 0 because is EOF case
 	if (offset >= stats.st_size)
@@ -713,27 +689,7 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 		return 0;
 	}
 
-	//	gettimeofday(&start, NULL);
-	// tm = clock();
-	// memset(buf, 0, size);
-	// tm = clock() - tm;
-	// tmm += tm;
 
-	// slog_live("size=%ld\n", size);
-
-	// if (size <= IMSS_DATA_BSIZE)
-	// {
-	// 	slog_warn("[imss_read] Reads over buf, size %ld == %ld IMSS_DATA_BSIZE", size, IMSS_DATA_BSIZE);
-	// 	// length  = get_data(ds, curr_blk, (char *)buf);
-	// 	length = get_ndata(ds, curr_blk, (char *)buf, size, start_offset);
-	// 	// fprintf(stderr, "[imss_read] Get data length=%d\n", length);
-	// 	free(rpath);
-	// 	return length;
-	// }
-
-	/*	struct timeval start1, end1;
-		long delta_us1;
-		gettimeofday(&start1, NULL);*/
 	i_blk = 0;
 	while (curr_blk <= end_blk)
 	{
@@ -1082,7 +1038,7 @@ int imss_vread_no_prefetch(const char *path, char *buf, size_t size, off_t offse
 	size_t byte_count = 0;
 	int64_t rbytes;
 
-	slog_live("[imss_read] size %ld, start_blk %ld, start_offset %ld, end_blk %ld, end_offset %ld, curr_blk %ld", size, first, start_offset, end_blk, end_offset, curr_blk);
+	slog_live("size %ld, start_blk %ld, start_offset %ld, end_blk %ld, end_offset %ld, curr_blk %ld", size, first, start_offset, end_blk, end_offset, curr_blk);
 
 	char *rpath = (char *)calloc(MAX_PATH, sizeof(char));
 	get_iuri(path, rpath);
@@ -2288,7 +2244,7 @@ int imss_unlink(const char *path)
 	}
 
 	// Get initial block (0).
-	ret = get_data(ds, 0, buff);
+	ret = get_ndata(ds, 0, buff, 0, 0);
 	if (ret < 0)
 	{
 		pthread_mutex_unlock(&lock);
@@ -2398,7 +2354,7 @@ int imss_utimens(const char *path, const struct timespec tv[2])
 
 	// char *buff = malloc(IMSS_DATA_BSIZE);
 	pthread_mutex_lock(&lock);
-	get_data(file_desc, 0, (char *)buff);
+	get_ndata(file_desc, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
 	memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2412,7 +2368,7 @@ int imss_utimens(const char *path, const struct timespec tv[2])
 	set_data(file_desc, 0, (char *)buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
-	free(rpath);
+	// free(rpath);
 
 	return 0;
 }
@@ -2466,7 +2422,7 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 			}
 			aux = (char *)malloc(IMSS_DATA_BSIZE);
 			// void *aux = NULL;
-			ret = get_data(file_desc, 0, aux);
+			ret = get_ndata(file_desc, 0, aux, 0, 0);
 			memcpy(&stats, aux, sizeof(struct stat));
 			pthread_mutex_lock(&lock_file);
 			map_put(map, new_path_1, file_desc, stats, aux);
@@ -2611,7 +2567,7 @@ int imss_chmod(const char *path, mode_t mode)
 	}
 
 	pthread_mutex_lock(&lock);
-	get_data(file_desc, 0, buff);
+	get_ndata(file_desc, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
 	memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2659,7 +2615,7 @@ int imss_chown(const char *path, uid_t uid, gid_t gid)
 	}
 
 	pthread_mutex_lock(&lock);
-	get_data(file_desc, 0, (char *)buff);
+	get_ndata(file_desc, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
 	memcpy(&ds_stat, buff, sizeof(struct stat));

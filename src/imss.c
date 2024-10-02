@@ -12,7 +12,7 @@
 #include <netinet/in.h>
 #include "crc.h"
 #include "imss.h"
-#include "comms.h"
+// #include "comms.h"
 #include "map_ep.hpp"
 #include "workers.h"
 #include "policies.h"
@@ -1120,6 +1120,12 @@ int32_t open_imss(char *imss_uri)
 	// Open shared memory segment.
 	shared_memory_key = getKeySM();
 	TIMING(shared_memory = getContentSM(shared_memory_key, SHM_SIZE), "Getting content from memory", SharedMemory *);
+	sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1); // Create or open named semaphore.
+	if (sem_shared_memory == SEM_FAILED)
+	{
+		perror("HERCULES_ERR_SHM_SEM_OPEN");
+		return -1;
+	}
 
 	// Add the created struture into the underlying IMSSs.
 	GInsert(&imssd_pos, &imssd_max_size, (char *)&new_imss, imssd, free_imssd);
@@ -1152,11 +1158,12 @@ void ucx_cleanup()
 // Method releasing client-side and/or server-side resources related to a certain IMSS instance.
 int32_t release_imss(char *imss_uri, uint32_t release_op)
 {
-
 	// detach shared memory.
 	unlinkSM(shared_memory->content);
 	// freeSM(shared_memory->id);
 	free(shared_memory);
+	// Close the semaphore.
+	sem_close(sem_shared_memory);
 
 	// Search for the requested IMSS.
 	imss imss_;
@@ -1887,7 +1894,6 @@ int32_t release_dataset(int32_t dataset_id)
  */
 int32_t close_dataset(const char *dataset_uri, int fd)
 {
-	pthread_mutex_lock(&lock_network);
 	ucp_ep_h ep;
 	// size_t ret = 0;
 	size_t msg_length = 0;
@@ -1900,6 +1906,8 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	ep = stat_eps[m_srv];
 
 	sprintf(formated_uri, "%" PRIu32 " GET 7 %s", stat_ids[m_srv], dataset_uri); // delete
+
+	pthread_mutex_lock(&lock_network);
 
 	slog_debug("[IMSS][close_dataset] formated_uri='%s'", formated_uri);
 	// Send the request set the current dataset as closed on the metadata server.
@@ -3126,185 +3134,9 @@ int32_t imss_flush_data()
 }
 
 // Method retrieving a data element associated to a certain dataset.
-int32_t get_data(int32_t dataset_id, int32_t data_id, void *buffer)
-{
-	slog_debug("[IMSS] dataset_id=%d, data_id=%d", dataset_id, data_id);
-	// slog_fatal("Caller name: %pS", __builtin_return_address(0));
-	int32_t n_server;
-
-	// Server containing the corresponding data to be retrieved.
-	if ((n_server = get_data_location(dataset_id, data_id, GET)) == -1)
-	{
-		return -1;
-	}
-
-	// Servers that the data block is going to be requested to.
-	int32_t repl_servers[curr_dataset.repl_factor];
-	// int32_t curr_imss_storages = curr_imss.info.num_storages; // (original)
-	int32_t curr_imss_storages = curr_dataset.n_servers; // curr_imss.info.num_storages;
-
-	// Retrieve the corresponding connections to the previous servers.
-	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
-	{
-		// Server storing the current data block.
-		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset.repl_factor)) % curr_imss_storages;
-		slog_debug("[IMSS] next_server=%d, curr_dataset.repl_factor=%d, curr_dataset.n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, curr_dataset.repl_factor, curr_dataset.n_servers, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
-
-		// printf("Server storing is=%d",n_server_);
-		repl_servers[i] = n_server_;
-
-		// Check if the current connection is the local one (if there is).
-		if (repl_servers[i] == curr_dataset.local_conn)
-		{
-			// Move the local connection to the first one to be requested.
-			int32_t aux_conn = repl_servers[0];
-			repl_servers[0] = repl_servers[i];
-			repl_servers[i] = aux_conn;
-		}
-	}
-	pthread_mutex_lock(&lock_network);
-	char key_[REQUEST_SIZE];
-	clock_t t;
-	double time_taken;
-	// Request the concerned block to the involved servers.
-	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
-	{
-		ucp_ep_h ep;
-		char mode[10];
-		// t = clock();
-		size_t msg_length = 0;
-		if (!strcmp(curr_dataset.policy, "LOCAL"))
-		{
-			sprintf(mode, "LOCALGET");
-		}
-		else
-		{
-			sprintf(mode, "GET");
-		}
-
-		//  Key related to the requested data element.
-		sprintf(key_, "%s 0 0 %s$%d", mode, curr_dataset.uri_, data_id);
-		slog_debug("[IMSS] Request - '%s' to server %ld", key_, repl_servers[i]);
-
-		ep = curr_imss.conns.eps[repl_servers[i]];
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			slog_error("HERCULES_ERR_RLSIMSS_SENDADDR");
-			perror("HERCULES_ERR_RLSIMSS_SENDADDR");
-			return -1;
-		}
-
-		// slog_debug("[IMSS] Request has been sent - '%s' to server %ld", key_, repl_servers[i]);
-
-		/*	gettimeofday(&end, NULL);
-			delta_us = (long) (end.tv_usec - start.tv_usec);
-			printf("[CLIENT] [GET DATA] send petition delta_us=%6.3f",(delta_us/1000.0F));*/
-
-		// t = clock() - t;
-		// time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
-
-		// int size = 0;
-		// if (data_id)
-		// 	size = curr_dataset.data_entity_size;
-		// else
-		// 	size = sizeof(struct stat);
-
-		//	gettimeofday(&start, NULL);
-		// Receive data related to the previous read request directly into the buffer.
-		// t = clock();
-		// slog_info("[IMSS] Before getting length");
-		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
-		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
-		if (msg_length == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERR_HERCULES_GET_DATA_INVALID_MSG_LENGTH");
-			slog_error("ERR_HERCULES_GET_DATA_INVALID_MSG_LENGTH");
-			return -EINVAL;
-		}
-
-		void *response_bufer = malloc(msg_length * sizeof(char));
-
-		// msg_length = recv_data(ucp_worker_data, ep, buffer, msg_length, local_data_uid, 0);
-		msg_length = recv_data(ucp_worker_data, ep, response_bufer, msg_length, local_data_uid, 0);
-
-		slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
-		if (msg_length == 0)
-		{
-			if (errno != EAGAIN)
-			{
-				pthread_mutex_unlock(&lock_network);
-				slog_error("ERR_HERCULES_GETDATA_RECV");
-				perror("ERR_HERCULES_GETDATA_RECV");
-				return -1;
-			}
-			else
-				break;
-		}
-
-		// Check if the requested key was correctly retrieved.
-		if (strncmp((const char *)response_bufer, "$ERRIMSS_NO_KEY_AVAIL$", 22))
-		{
-			slog_info("OK!, length=%ld", msg_length);
-
-			if (!strcmp(curr_dataset.policy, "LOCAL"))
-			{
-				// char dataset_name_id[PATH_MAX];
-				// sprintf(dataset_name_id, "%s$%d", curr_dataset.uri_, data_id);
-				// key_t key = MurmurOAAT32(dataset_name_id);
-				size_t server_offset = 0;
-				uint32_t size = 0;
-				slog_debug("Getting data from shared memory, id=%d, response_bufer=%s, key=%ld", data_id, response_bufer, shared_memory_key);
-				// msg_length = atoi((const char *)response_bufer);
-
-				// server_offset = atol((const char *)response_bufer);
-				sscanf((const char *)response_bufer, "%lu %d", &server_offset, &size);
-
-				// slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%d", curr_dataset.uri_, data_id, key, response_bufer, server_offset, size);
-
-				slog_debug("msg_length=%ld", msg_length);
-				// TODO: EL PUNTERO A MEMORIA COMPARTIDA SE PUEDE MANTENER ABIERTO!
-				// SharedMemory *shared_memory;
-				// TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from memory", SharedMemory *);
-
-				slog_debug("shared_memory->size=%ld", shared_memory->size);
-				// memcpy(response_bufer, shared_memory->content, shared_memory->size);
-				// buffer = shared_memory->content;
-				TIMING(memcpy(buffer, (char *)shared_memory->content + server_offset, size), "Memcpy from shared memory to buffer", void *);
-				// The following line does not work. Anyway, is not secure.
-				// buffer = shared_memory->content + server_offset;
-
-				msg_length = size;
-
-				// unlinkSM(shared_memory->content);
-				// // freeSM(shared_memory->id);
-				// free(shared_memory);
-			}
-			else
-			{
-				memcpy(buffer, response_bufer, msg_length);
-			}
-
-			pthread_mutex_unlock(&lock_network);
-			free(response_bufer);
-			return (int32_t)msg_length;
-		}
-		else
-		{
-			// free(buffer);
-			slog_error("ERR_HERCULES_NO_KEY_AVAIL");
-		}
-	}
-
-	pthread_mutex_unlock(&lock_network);
-	return -1;
-}
-
-// Method retrieving a data element associated to a certain dataset.
 ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset)
 {
-	// slog_fatal("Caller name: %pS", __builtin_return_address(0));
+	slog_debug("[IMSS] dataset_id=%d, data_id=%d", dataset_id, data_id);
 	int32_t n_server;
 
 	// Server containing the corresponding data to be retrieved.
@@ -3323,6 +3155,8 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 	{
 		// Server storing the current data block.
 		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset.repl_factor)) % curr_imss_storages;
+		slog_debug("[IMSS] next_server=%d, curr_dataset.repl_factor=%d, curr_dataset.n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, curr_dataset.repl_factor, curr_dataset.n_servers, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
+
 		// printf("Server storing is=%d",n_server_);
 		repl_servers[i] = n_server_;
 
@@ -3336,10 +3170,12 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		}
 	}
 
+	int32_t session_policy = get_policy();
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
 	clock_t t;
 	double time_taken;
+
 	// Request the concerned block to the involved servers.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
 	{
@@ -3350,7 +3186,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		// t = clock();
 		//  Key related to the requested data element.
 		//  sprintf(key_, "GET 0 0 %s$%d", curr_dataset.uri_, data_id);
-		if (!strcmp(curr_dataset.policy, "LOCAL"))
+		if (session_policy == LOCAL_ || session_policy == ZCOPY_)
 		{
 			sprintf(mode, "LOCALGET");
 		}
@@ -3363,7 +3199,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		sprintf(key_, "%s %lu %ld %s$%d %ld", mode, 0l, offset, curr_dataset.uri_, data_id, to_read);
 		// sprintf(key_, "GET %lu %ld %s$%d %zd", 0l, offset, curr_dataset.original_name, data_id, to_read);
 		ep = curr_imss.conns.eps[repl_servers[i]];
-		slog_debug("[IMSS] Sending request %s", key_);
+		slog_debug("[IMSS] Request - '%s' to server %ld", key_, repl_servers[i]);
 
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
@@ -3380,14 +3216,14 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 			pthread_mutex_unlock(&lock_network);
 			perror("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
 			slog_error("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
-			return -1;
+			return -EINVAL;
 		}
 
 		// Receive data related to the previous read request directly into the buffer.
 		// size_t length = 0;
 		// msg_length = recv_data_opt(ucp_worker_data, ep, &buffer, msg_length, local_data_uid, 0);
 		// msg_length = recv_data(ucp_worker_data, ep, buffer, msg_length, local_data_uid, 0);
-		// slog_debug("[IMSS][get_ndata] After request data, length=%lu", msg_length);
+		// slog_debug("[IMSS] After request data, length=%lu", msg_length);
 		// if (msg_length == 0)
 		// {
 		// 	if (errno != EAGAIN)
@@ -3443,7 +3279,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		{
 			slog_info("OK!, length=%ld", msg_length);
 
-			if (!strcmp(curr_dataset.policy, "LOCAL"))
+			if (session_policy == LOCAL_ || session_policy == ZCOPY_)
 			{
 				// char dataset_name_id[PATH_MAX];
 				// sprintf(dataset_name_id, "%s$%d", curr_dataset.uri_, data_id);
@@ -3457,25 +3293,34 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 				// server_offset = atol((const char *)response_bufer);
 				sscanf((const char *)response_bufer, "%lu %u", &server_offset, &size);
 
-				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%lu", curr_dataset.uri_, data_id, shared_memory_key, response_bufer, server_offset, size);
+				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%lu, to_read=%lu", curr_dataset.uri_, data_id, shared_memory_key, response_bufer, server_offset, size, to_read);
 
 				slog_debug("msg_length=%ld", msg_length);
 				// SharedMemory *shared_memory;
 				// TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
 
+				// "to_read" is 0 when block 0 is read, but "msg_length"
+				// is updating according to the current block size.
+				if (to_read == 0)
+				{
+					msg_length = size;
+				}
+				else
+				{
+					msg_length = to_read;
+				}
+
 				slog_debug("shared_memory->size=%ld", shared_memory->size);
-				// memcpy(response_bufer, shared_memory->content, shared_memory->size);
-				// buffer = shared_memory->content;
-				memcpy(buffer, (char *)shared_memory->content + server_offset + offset, to_read);
-
-				// Not secure.
-				// buffer = shared_memory->content + server_offset;
-
-				msg_length = to_read;
-
-				// unlinkSM(shared_memory->content);
-				// // freeSM(shared_memory->id);
-				// free(shared_memory);
+				void *content_pointer = (char *)shared_memory->content + server_offset + offset;
+				if (data_id == 0 || session_policy == LOCAL_)
+				{
+					memcpy(buffer, content_pointer, msg_length);
+				}
+				else if (session_policy == ZCOPY_)
+				{
+					// Not secure.
+					buffer = content_pointer;
+				}
 			}
 			else
 			{
@@ -3492,7 +3337,6 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 			slog_error("ERR_HERCULES_NO_KEY_AVAIL");
 		}
 	}
-
 	pthread_mutex_unlock(&lock_network);
 	return -1;
 }
@@ -3546,7 +3390,7 @@ size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t 
 		// sprintf(key_, "GET %lu %ld %s$%d %zd", 0l, offset, curr_dataset.original_name, data_id, to_read);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 
-		slog_debug("[get_ndata] Sending request %s", key_);
+		slog_debug("[IMSS] Sending request %s", key_);
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -3557,7 +3401,7 @@ size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t 
 
 		size_t msg_length = 0;
 		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
-		slog_info("[IMSS][get_ndata] Receiving data, msg_length=%lu", msg_length);
+		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -3570,7 +3414,7 @@ size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t 
 		// size_t length = 0;
 		// msg_length = recv_data_opt(ucp_worker_data, ep, &buffer, msg_length, local_data_uid, 0);
 		msg_length = recv_data(ucp_worker_data, ep, buffer, msg_length, local_data_uid, 0);
-		slog_debug("[IMSS][get_ndata] After request data, length=%lu", msg_length);
+		slog_debug("[IMSS] After request data, length=%lu", msg_length);
 		if (msg_length == 0)
 		{
 			if (errno != EAGAIN)
@@ -3619,6 +3463,8 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 		return -1;
 	}
 
+	int32_t session_policy = get_policy();
+
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
 	int32_t curr_imss_storages = curr_imss.info.num_active_storages; // curr_imss.info.num_storages;
@@ -3635,8 +3481,8 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 		else if (size == 0)
 			size = curr_dataset.data_entity_size;
 
-		// when "LOCAL" is in use, we copy the data to shared memory.
-		if (!strcmp(curr_dataset.policy, "LOCAL"))
+		// when "LOCAL" or "ZCOPY_" is in use, we copy the data to shared memory.
+		if (session_policy == LOCAL_ || session_policy == ZCOPY_)
 		{
 			ep = curr_imss.conns.eps[n_server_];
 			sprintf(key_, "LOCALSET %lu %ld %s$%d", size, offset, curr_dataset.uri_, data_id);
@@ -3676,77 +3522,72 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 			}
 
 			slog_info("OK!, length=%ld, msg_received=%s", msg_length, msg_received);
-			// char dataset_name_id[PATH_MAX];
-			// printf(dataset_name_id, "%s$%d", curr_dataset.uri_, data_id);
-			// char hostname[512];
-			// ret = gethostname(&hostname[0], 512);
-			// if (ret == -1)
-			// {
-			// 	perror("gethostname");
-			// 	exit(EXIT_FAILURE);
-			// }
-			// key_t key = MurmurOAAT32(dataset_name_id);
-			// key_t key = getKeySM();
-			// SharedMemory *shared_memory;
 
 			// Check if the requested was correctly retrieved.
 			int shared_memory_operation = 0;
 			size_t server_offset = 0;
 
+			struct stat *old, *latest;
 			if (!strncmp((const char *)msg_received, "NEW", strlen("NEW")))
 			{ // Creates the shared memory segment.
 				shared_memory_operation = 1;
 				char response[strlen("NEW") + 1];
-				// size_t server_offset = 0;
 				sscanf((const char *)msg_received, "%s %lu", response, &server_offset);
 
 				slog_info("Setting data into shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld", curr_dataset.uri_, data_id, shared_memory_key, response, server_offset);
-				// TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
-
-				// TIMING_NO_RETURN(copyContentSM(shared_memory->content + server_offset, buffer, size), "Copying buffer to shared memory");
-
-				// TIMING_NO_RETURN(unlinkSM(shared_memory->content), "Unlinking shared memory");
-				// TIMING_NO_RETURN(free(shared_memory), "Free shared memory");
 			}
 			if (!strncmp((const char *)msg_received, "TOUPDATE", strlen("TOUPDATE")))
 			{ // Updates the shared memory segment.
 				shared_memory_operation = 1;
 				char response[strlen("TOUPDATE") + 1];
-				// size_t server_offset = 0;
 				uint32_t block_size = 0;
 				sscanf((const char *)msg_received, "%s %lu %d", response, &server_offset, &block_size);
 
 				slog_info("Updating shared memory, name=%s, id=%ld, key=%d, response=%s, server_offset=%ld, block_size=%d, size=%ld", curr_dataset.uri_, data_id, shared_memory_key, response, server_offset, block_size, size);
-				// const void* old_buffer;
 
-				// TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
-				// copyContentSM(shared_memory->content + server_offset, buffer, size);
-				// if (data_id == 0)
-				// {
-				// 	TIMING_NO_RETURN(copyContentSM(shared_memory->content + server_offset, buffer, size), "Updating buffer to shared memory");
-				// }
-				// else
-				// {
-				// 	shared_memory->content + server_offset = buffer;
-				// }
+				if (data_id == 0)
+				{
+					// Lock the semaphore.
+					sem_wait(sem_shared_memory);
 
-				// unlinkSM(shared_memory->content);
-				// free(shared_memory);
+					old = (struct stat *)((char *)shared_memory->content + server_offset + offset);
+					latest = (struct stat *)buffer;
+					latest->st_size = std::max(latest->st_size, old->st_size);
+					slog_debug("old->st_size=%ld, latest->st_size=%ld, block_offset=%ld, old->st_nlink: %ld, new->st_nlink: %ld", old->st_size, latest->st_size, offset, old->st_nlink, latest->st_nlink);
+
+					// sem_post(sem_shared_memory);
+				}
 			}
 			if (shared_memory_operation)
 			{
+				// "server_offset" is the offset used to move across shared memory, while "offset" is used to move
+				// the pointer across the data block.
 				// if (data_id == 0)
-				{
-					// "server_offset" is the offset used to move across shared memory, while "offset" is used to move
-					// the pointer across the data block.
-					TIMING_NO_RETURN(copyContentSM((char *)shared_memory->content + server_offset + offset, buffer, size), "Updating buffer to shared memory");
-				}
-				// Returning the pointer is not secure.
-				// else
 				// {
-				// 	void *content_pointer = shared_memory->content + server_offset;
-				// 	content_pointer = (void *) buffer;
+				// 	// Lock the semaphore.
+				// 	sem_wait(sem_shared_memory);
 				// }
+
+				void *content_pointer = (char *)shared_memory->content + server_offset + offset;
+				if (data_id == 0 || session_policy == LOCAL_)
+				{
+					slog_debug("Copying data to block %d", data_id);
+					TIMING_NO_RETURN(copyContentSM(content_pointer, buffer, size), "Updating buffer to shared memory");
+				}
+				else if (session_policy == ZCOPY_)
+				{
+					slog_debug("Pointing data to block %d", data_id);
+					// Returning the pointer is not secure.
+					// void *content_pointer = (char *)shared_memory->content + server_offset + offset;
+					// content_pointer = (void *)buffer;
+					content_pointer = (void *)buffer;
+				}
+
+				if (data_id == 0)
+				{
+					// Unlock the semaphore.
+					sem_post(sem_shared_memory);
+				}
 			}
 
 			free(msg_received);
@@ -3972,7 +3813,7 @@ set_ndata(int32_t dataset_id,
 			return -1;
 		}
 
-		slog_debug("[IMSS] Request set_ndata: client_id '%" PRIu32 "', mode 'SET', key '%s'", curr_imss.conns.id[n_server_], key_);
+		slog_debug("[IMSS] Request: client_id '%" PRIu32 "', mode 'SET', key '%s'", curr_imss.conns.id[n_server_], key_);
 	}
 
 	pthread_mutex_unlock(&lock_network);
