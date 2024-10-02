@@ -854,7 +854,7 @@ int32_t main(int32_t argc, char **argv)
 		}
 
 		// When LOCAL policy is used, the server creates a shared memory region.
-		if (!strcmp(POLICY, "LOCAL"))
+		if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
 		{
 			// Get the shared memory key and tries to create the shared memory region (pool).
 			key_t key = getKeySM();

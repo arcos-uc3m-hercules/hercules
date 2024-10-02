@@ -18,7 +18,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/statvfs.h>
-#include <sys/vfs.h> // statfs
+// #include <sys/vfs.h> // statfs
 // #include "imss.h"
 #include <imss_posix_api.h>
 #include <stdarg.h>
@@ -39,6 +39,31 @@
 // #ifndef FCNTL_ADJUST_CMD
 // #define FCNTL_ADJUST_CMD(__cmd) __cmd
 // #endif
+
+
+struct statfs
+  {
+    __fsword_t f_type;
+    __fsword_t f_bsize;
+#ifndef __USE_FILE_OFFSET64
+    __fsblkcnt_t f_blocks;
+    __fsblkcnt_t f_bfree;
+    __fsblkcnt_t f_bavail;
+    __fsfilcnt_t f_files;
+    __fsfilcnt_t f_ffree;
+#else
+    __fsblkcnt64_t f_blocks;
+    __fsblkcnt64_t f_bfree;
+    __fsblkcnt64_t f_bavail;
+    __fsfilcnt64_t f_files;
+    __fsfilcnt64_t f_ffree;
+#endif
+    __fsid_t f_fsid;
+    __fsword_t f_namelen;
+    __fsword_t f_frsize;
+    __fsword_t f_flags;
+    __fsword_t f_spare[4];
+  };
 
 #define KB 1024
 #define GB 1073741824
@@ -515,7 +540,8 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// log init.
 	time_t t = time(NULL);
 	struct tm tm = *localtime(&t);
-	sprintf(log_path, "%s/client-thread-%ld.%02d-%02d.%d", HERCULES_PATH, pthread_self(), tm.tm_hour, tm.tm_min, getpid());
+	// sprintf(log_path, "%s/client-thread-%ld.%02d-%02d.%d", HERCULES_PATH, pthread_self(), tm.tm_hour, tm.tm_min, getpid());
+	sprintf(log_path, "./client-thread-%ld.%02d-%02d.%d", pthread_self(), tm.tm_hour, tm.tm_min, getpid());
 	// {
 	// 	fprintf(stderr, "LOG PATH= %s\n", log_path); // this line raise an exception running a python app with threads.
 	// }
@@ -1278,6 +1304,19 @@ pid_t fork(void)
 
 // 	return pid;
 // }
+static int (*real_lstat64)(const char *__restrict__ pathname, struct stat64 *__restrict__ buf);
+int lstat64(const char *__restrict__ pathname, struct stat64 *__restrict__ buf) {
+	if (!real_lstat64)
+		real_lstat64 = dlsym(RTLD_NEXT, "lstat64");
+
+	if (!init)
+	{
+		return real_lstat64(pathname, buf);
+	}
+	slog_debug("[POSIX][TODO] Calling Hercules 'lstat64', new_path=%s", pathname);
+	fprintf(stderr, "[POSIX][TODO] Calling Hercules 'lstat64', new_path=%s\n", pathname);
+	return real_lstat64(pathname, buf);
+}
 
 int lstat(const char *pathname, struct stat *buf)
 {
@@ -1292,6 +1331,7 @@ int lstat(const char *pathname, struct stat *buf)
 	errno = 0;
 	int ret;
 	char *new_path = checkHerculesPath(pathname);
+	fprintf(stderr, "[POSIX] Calling 'lstat', pathname=%s\n", pathname);
 	if (new_path != NULL)
 	{
 		slog_debug("[POSIX] Calling Hercules 'lstat', new_path=%s", new_path);
@@ -1373,7 +1413,7 @@ extern int statvfs(const char *__restrict __file, struct statvfs *__restrict __b
 		slog_debug("[POSIX]. Calling Hercules 'statvfs', path=%s", new_path);
 		__buf->f_bsize = IMSS_BLKSIZE * KB;
 		__buf->f_namemax = URI_;
-		slog_debug("[POSIX]. End Hercules 'statvfs', path=%s", new_path);
+		slog_debug("[POSIX]. End Hercules 'statvfs', path=%s, ret=%d", new_path, ret);
 		free(new_path);
 	}
 	else
@@ -1452,7 +1492,7 @@ int statvfs64(const char *restrict path, struct statvfs64 *restrict buf)
 	return ret;
 }
 
-int statfs(const char *restrict path, struct statfs *restrict buf)
+extern int statfs(const char *restrict path, struct statfs *restrict buf)
 {
 	if (!real_statfs)
 		real_statfs = dlsym(RTLD_NEXT, "statfs");
@@ -1470,7 +1510,7 @@ int statfs(const char *restrict path, struct statfs *restrict buf)
 		slog_debug("[POSIX]. Calling Hercules 'statfs', path=%s, new_path=%s", path, new_path);
 		buf->f_bsize = IMSS_BLKSIZE * KB;
 		buf->f_namelen = URI_;
-		slog_debug("[POSIX]. Ending Hercules 'statfs', path=%s", path);
+		slog_debug("[POSIX]. Ending Hercules 'statfs', path=%s, ret=%d", path, ret);
 		free(new_path);
 	}
 	else
@@ -1478,7 +1518,7 @@ int statfs(const char *restrict path, struct statfs *restrict buf)
 		slog_full("[POSIX]. Calling Real 'statfs', path=%s.", path);
 		// fprintf(stderr, "[POSIX]. Calling Real 'statfs', path=%s.\n", path);
 		ret = real_statfs(path, buf);
-		slog_full("[POSIX]. Ending Real 'statfs', path=%s.", path);
+		slog_full("[POSIX]. Ending Real 'statfs', path=%s, ret=%d.", path, ret);
 	}
 	return ret;
 }
@@ -2565,7 +2605,7 @@ int generalOpen(char *new_path, int flags, mode_t mode, int createFd)
 				slog_debug("[POSIX] 1 - Dataset already exists, imss_open(%s, %ld)", new_path, ret_ds);
 				ret = imss_open(new_path, &ret_ds);
 				// errno = EEXIST;
-				errno = -ret;
+				// errno = -ret;
 				slog_debug("[POSIX] 1 - imss_open(%s, %ld), ret=%d", new_path, ret_ds, ret);
 				ret = 0;
 			}
@@ -3820,9 +3860,9 @@ int remove(const char *name)
 	}
 	else
 	{
-		slog_debug("[POSIX] Calling real 'remove', pathname=%s", name);
+		slog_full("[POSIX] Calling real 'remove', pathname=%s", name);
 		ret = real_remove(name);
-		slog_debug("[POSIX] Ending real 'remove', pathname=%s, errno=%d:%s", name, errno, strerror(errno));
+		slog_full("[POSIX] Ending real 'remove', pathname=%s", name);
 	}
 
 	return ret;
@@ -5053,7 +5093,7 @@ int fstatat(int __fd, const char *__restrict __file, struct stat *__restrict __b
 		return real_fstatat(__fd, __file, __buf, __flag);
 	}
 
-	slog_debug("[POSIX] Calling fstatat, pathname=%s", __file);
+	slog_debug("[POSIX][TODO] Calling fstatat, pathname=%s", __file);
 	// fprintf(stderr, "[POSIX] Calling fstatat, pathname=%s\n", __file);
 
 	return real_fstatat(__fd, __file, __buf, __flag);
@@ -5072,7 +5112,7 @@ int fstatat64(int __fd, const char *__restrict __file, struct stat64 *__restrict
 		return real_fstatat64(__fd, __file, __buf, __flag);
 	}
 
-	slog_debug("[POSIX] Calling fstatat64, pathname=%s", __file);
+	slog_debug("[POSIX][TODO] Calling fstatat64, pathname=%s", __file);
 	// fprintf(stderr, "[POSIX] Calling fstatat64, pathname=%s\n", __file);
 
 	return real_fstatat64(__fd, __file, __buf, __flag);
@@ -5140,7 +5180,7 @@ int newfstatat(int __fd, const char *__restrict __file, struct stat *__restrict 
 		// slog_warn("[POSIX][TODO]. Calling Real 'newfstatat', pathname=%s", __file);
 	}
 
-	// fprintf(stderr, "[POSIX][TODO]. Calling Real 'newfstatat', pathname=%s\n", __file);
+	slog_debug("[POSIX][TODO]. Calling Real 'newfstatat', pathname=%s\n", __file);
 	// TODO.
 
 	return real_newfstatat(__fd, __file, __buf, __flag);
@@ -5405,61 +5445,61 @@ int fsync(int fd)
 // 	return real_fflush(stream);
 // }
 
-int fprintf(FILE *restrict stream, const char *restrict format, ...)
-{
-	if (!real_fprintf)
-	{
-		// vfprintf always expect a 'va_list' type as last argument.
-		// The behaviour of both calls are similar, so we can oversuscribe
-		// 'real_fprintf' by 'vfprintf'.
-		real_fprintf = dlsym(RTLD_NEXT, "vfprintf");
-	}
+// int fprintf(FILE *restrict stream, const char *restrict format, ...)
+// {
+// 	if (!real_fprintf)
+// 	{
+// 		// vfprintf always expect a 'va_list' type as last argument.
+// 		// The behaviour of both calls are similar, so we can oversuscribe
+// 		// 'real_fprintf' by 'vfprintf'.
+// 		real_fprintf = dlsym(RTLD_NEXT, "vfprintf");
+// 	}
 
-	errno = 0;
-	int ret = -1;
-	char *pathname;
-	int fd = stream->_fileno;
-	if (pathname = map_fd_search_by_val(map_fd, fd))
-	{
-		// printf("Calling Hercules fprintf, fd=%d\n", stream->_fileno);
-		slog_debug("Calling Hercules fprintf, fd=%d\n", stream->_fileno);
+// 	errno = 0;
+// 	int ret = -1;
+// 	char *pathname;
+// 	int fd = stream->_fileno;
+// 	if (pathname = map_fd_search_by_val(map_fd, fd))
+// 	{
+// 		// printf("Calling Hercules fprintf, fd=%d\n", stream->_fileno);
+// 		slog_debug("Calling Hercules fprintf, fd=%d\n", stream->_fileno);
 
-		va_list args;
-		va_start(args, format);
-		// Get the size to be copy into the buffer. +1 to '\n'.
-		size_t size = vsnprintf(NULL, 0, format, args) + 1;
-		va_end(args);
+// 		va_list args;
+// 		va_start(args, format);
+// 		// Get the size to be copy into the buffer. +1 to '\n'.
+// 		size_t size = vsnprintf(NULL, 0, format, args) + 1;
+// 		va_end(args);
 
-		char *buffer = (char *)malloc(size);
-		if (!buffer)
-		{
-			return -1; // Return an error if malloc fails
-		}
+// 		char *buffer = (char *)malloc(size);
+// 		if (!buffer)
+// 		{
+// 			return -1; // Return an error if malloc fails
+// 		}
 
-		// Save the formated string into the buffer.
-		va_start(args, format);
-		vsnprintf(buffer, size, format, args);
-		va_end(args);
-		// printf("Writing '%s'\n", buffer);
-		// Use fwrite to write the formatted string to the file.
-		ret = fwrite(buffer, 1, size - 1, stream);
-		free(buffer);
-	}
-	else
-	{
-		// printf("Calling real fprintf, fd=%d\n", stream->_fileno);
-		slog_full("Calling real fprintf, fd=%d\n", stream->_fileno);
-		va_list args;
-		va_start(args, format);
-		// if (args)
-		ret = real_fprintf(stream, format, args);
-		// else
-		// 	ret = real_fprintf(stream, format);
-		va_end(args);
-	}
+// 		// Save the formated string into the buffer.
+// 		va_start(args, format);
+// 		vsnprintf(buffer, size, format, args);
+// 		va_end(args);
+// 		// printf("Writing '%s'\n", buffer);
+// 		// Use fwrite to write the formatted string to the file.
+// 		ret = fwrite(buffer, 1, size - 1, stream);
+// 		free(buffer);
+// 	}
+// 	else
+// 	{
+// 		// printf("Calling real fprintf, fd=%d\n", stream->_fileno);
+// 		slog_full("Calling real fprintf, fd=%d\n", stream->_fileno);
+// 		va_list args;
+// 		va_start(args, format);
+// 		// if (args)
+// 		ret = real_fprintf(stream, format, args);
+// 		// else
+// 		// 	ret = real_fprintf(stream, format);
+// 		va_end(args);
+// 	}
 
-	return ret;
-}
+// 	return ret;
+// }
 
 char *getcwd(char *buf, size_t size)
 {
@@ -5523,12 +5563,29 @@ int fchdir(int fd)
 	if (!real_fchdir)
 		real_fchdir = dlsym(RTLD_NEXT, "fchdir");
 
-	if (init)
+	if (!init)
 	{
-		slog_debug("[POSIX][TODO] Calling real 'fchdir'");
+		// slog_debug("[POSIX][TODO] Calling real 'fchdir', fd=%d", fd);
+		return real_fchdir(fd);
 	}
 
-	return real_fchdir(fd);
+	int ret = -1;
+	char *pathname = map_fd_search_by_val(map_fd, fd);
+	if (pathname != NULL)
+	{
+		slog_debug("[POSIX] Calling Hercules 'fchdir', fd=%d, pathname=%s", fd, pathname);
+		setenv("PWD", pathname, 1);
+		ret = 1;
+		slog_debug("[POSIX] Ending Hercules 'fchdir', fd=%d, pathname=%s, ret=1", fd, pathname, ret);
+	}
+	else
+	{
+		slog_debug("[POSIX] Calling Real 'fchdir', fd=%d", fd);
+		ret = real_fchdir(fd);
+		slog_debug("[POSIX] Ending Real 'fchdir', fd=%d", fd);
+	}
+
+	return ret;
 }
 
 // int __chdir(const char *path)

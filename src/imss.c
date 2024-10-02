@@ -89,6 +89,7 @@ ucp_address_t **stat_addr;
 ucp_ep_h *stat_eps;
 
 extern int IMSS_THREAD_POOL;
+extern char *POLICY;
 
 pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
 // To synchronize network operations.
@@ -1117,14 +1118,17 @@ int32_t open_imss(char *imss_uri)
 
 	curr_imss = new_imss;
 
-	// Open shared memory segment.
-	shared_memory_key = getKeySM();
-	TIMING(shared_memory = getContentSM(shared_memory_key, SHM_SIZE), "Getting content from memory", SharedMemory *);
-	sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1); // Create or open named semaphore.
-	if (sem_shared_memory == SEM_FAILED)
+	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
 	{
-		perror("HERCULES_ERR_SHM_SEM_OPEN");
-		return -1;
+		// Open shared memory segment.
+		shared_memory_key = getKeySM();
+		TIMING(shared_memory = getContentSM(shared_memory_key, SHM_SIZE), "Getting content from memory", SharedMemory *);
+		sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1); // Create or open named semaphore.
+		if (sem_shared_memory == SEM_FAILED)
+		{
+			perror("HERCULES_ERR_SHM_SEM_OPEN");
+			return -1;
+		}
 	}
 
 	// Add the created struture into the underlying IMSSs.
@@ -1158,12 +1162,15 @@ void ucx_cleanup()
 // Method releasing client-side and/or server-side resources related to a certain IMSS instance.
 int32_t release_imss(char *imss_uri, uint32_t release_op)
 {
-	// detach shared memory.
-	unlinkSM(shared_memory->content);
-	// freeSM(shared_memory->id);
-	free(shared_memory);
-	// Close the semaphore.
-	sem_close(sem_shared_memory);
+	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
+	{
+		// detach shared memory.
+		unlinkSM(shared_memory->content);
+		// freeSM(shared_memory->id);
+		free(shared_memory);
+		// Close the semaphore.
+		sem_close(sem_shared_memory);
+	}
 
 	// Search for the requested IMSS.
 	imss imss_;
@@ -1707,9 +1714,11 @@ int32_t open_dataset(char *dataset_uri, int opened)
 			slog_fatal("HERCULES_ERR_OPEN_DATASET_ALREADY_STORED");
 			slog_live("new_dataset.local_conn=%d", new_dataset.local_conn);
 			// fprintf(stderr, "HERCULES_ERR_OPEN_DATASET_ALREADY_STORED\n");
-			return -EEXIST;
+			// return -EEXIST;
 			// return -1;
 			// return 0;
+			errno = EEXIST;
+			return GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
 		}
 		not_initialized = 1;
 
