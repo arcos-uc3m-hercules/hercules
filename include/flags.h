@@ -64,6 +64,8 @@
 #define __SWR 0x0002 /* OK to write */
 #define __SRW 0x0100 /* open for reading & writing */
 
+
+
 /*
  * Return the (stdio) flags for a given mode.  Store the flags
  * to be passed to an open() syscall through *optr.
