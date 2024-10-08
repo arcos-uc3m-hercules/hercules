@@ -84,11 +84,11 @@ do
 				## The first job does not have dependencie (do not wait for another job to end). 
 				if [ "$jid" -eq 1 ]; then
 					jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
-					echo $jid
 				## The following jobs wait for the previous job to finish.
 				else
 					jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT"  "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
 				fi
+				echo $jid
 				### exit 0
 				set +x
 

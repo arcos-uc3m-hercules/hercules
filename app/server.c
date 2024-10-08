@@ -572,7 +572,7 @@ int32_t main(int32_t argc, char **argv)
 		POLICY = cfg_get(cfg, "POLICY");
 	else
 	{
-		fprintf(stderr, "Distributiin Policy has not been stablish. \n Please, add the following line in your configuration file POLICY = RR\n");
+		fprintf(stderr, "Distribution Policy has not been stablish. \n Please, add the following line in your configuration file POLICY = RR\n");
 		perror("ERR_HERCULES_POLICY_NOT_FOUND");
 		return -1;
 	}
@@ -623,6 +623,7 @@ int32_t main(int32_t argc, char **argv)
 			IMSS_DEBUG_LEVEL = getLevel(aux);
 		}
 	}
+	// IMSS_DEBUG_LEVEL = SLOG_NONE;
 
 	/***************************************************************/
 	/******************** PARSE INPUT ARGUMENTS ********************/
@@ -654,7 +655,7 @@ int32_t main(int32_t argc, char **argv)
 	if (args.type == TYPE_DATA_SERVER)
 	{
 		args.stat_host = argv[3];
-		slog_debug("imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB, errno=%d:%s", args.imss_uri, args.stat_host, args.stat_port, args.num_servers, args.deploy_hostfile, args.block_size, args.storage_size, errno, strerror(errno));
+		slog_debug("imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_host, args.stat_port, args.num_servers, args.deploy_hostfile, args.block_size, args.storage_size, args.bufsize);
 		// bind port number.
 		bind_port = args.port;
 
@@ -674,6 +675,7 @@ int32_t main(int32_t argc, char **argv)
 	else
 	{
 		slog_debug("[CLI PARAMS] type = %c port = %" PRId64 " bufsize = %" PRId64 "", args.type, args.stat_port, args.bufsize);
+		// fprintf(stderr, "[CLI PARAMS] type = %c port = %" PRId64 " bufsize = %" PRId64 "\n", args.type, args.stat_port, args.bufsize);
 		// slog_debug("stat-logfile = %s", args.stat_logfile);
 		// bind port number.
 		bind_port = args.stat_port;

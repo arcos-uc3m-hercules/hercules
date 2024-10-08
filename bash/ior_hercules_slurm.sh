@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=hercules    # Job name
 #SBATCH --time=01:00:00               # Time limit hrs:min:sec
-#SBATCH --output=logs/hercules/%j_hercules.log   # Standard output and error log
+#SBATCH --output=logs/hercules/%j.log   # Standard output and error log
 #SBATCH --mem=0
 ##SBATCH --oversubscribe
 ##SBATCH --exclude=broadwell-[000-002]
@@ -13,6 +13,8 @@ CONFIG_PATH=$1
 FILE_SIZE_PER_CLIENT=$2
 NUMBER_OF_PROCESS=$3
 PROCESS_PER_NODE=$4
+IOR_FILE_PER_PROCESS=$5
+IOR_AVOID_CACHE=$6
 
 ## Uncomment when working in Tucan.
 # IOR_PATH=/home/software/io500/bin
@@ -84,8 +86,13 @@ echo "Running clients"
 TRANSFER_SIZE=$FILE_SIZE_PER_CLIENT
 #COMMAND="$IOR_PATH/ior -o /mnt/hercules/data.out -t 100M -b 100M -s 1 -i 5 -w -r -W -R -k"
 
-## File-per-process with write and read verification.
-COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -F -o /mnt/hercules/data.out"
+# if [ "$IOR_MODE" -eq 0 ]; then
+# ## File-per-process with write and read verification.
+# COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -F -o /mnt/hercules/data.out"
+# else
+# ## Single-shared-file with write and read verification.
+# COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -o /mnt/hercules/data.out"
+# fi
 
 ## Single-file with write and read verification.
 #COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 1 -o /mnt/hercules/data.out"
@@ -99,6 +106,25 @@ COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIE
 #COMMAND="ls -lh /mnt/hercules"
 #COMMAND="echo \"hola\" > /mnt/hercules/hola.txt"
 
+COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5"
+
+if [ "$IOR_FILE_PER_PROCESS" -eq 1 ]; then
+## File-per-process with write and read verification.
+#COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -F -o /lustre/scratch/javier.garciablas/ior_output/data.txt"
+COMMAND="$COMMAND -F"
+#else
+## Single-shared-file with write and read verification.
+#COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -o /lustre/scratch/javier.garciablas/ior_output/data.txt"
+fi
+
+if [ "$IOR_AVOID_CACHE" -eq 1 ]; then
+## -C to reorder Tasks and -e to work around the effects of the page cache by using fsync.
+COMMAND="$COMMAND -C -e"
+fi
+
+##  Add the output file path.
+COMMAND="$COMMAND -o /mnt/hercules/data.out"
+
 # MPIEXEC="mpiexec"
 set -x
 mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_HOSTFILE_DEF=$HERCULES_MPI_HOSTFILE_NAME \
@@ -108,7 +134,7 @@ mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_H
 
 #LD_PRELOAD=$HERCULES_POSIX_PRELOAD ls -lth /mnt/hercules/
 
-mpiexec $HERCULES_MPI_HOSTFILE_DEF=./data_hostfile \
+mpiexec $HERCULES_MPI_HOSTFILE_DEF=./hostfile \
 	ipcrm -a
 
 echo "done!"

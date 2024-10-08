@@ -129,7 +129,7 @@ int32_t map_records::put(std::string key, void *address, uint64_t length)
 	// struct utsname detect;
 	// uname(&detect);
 	// DPRINT("Nodename    - %s add in map=%s\n", detect.nodename, key.c_str());
-	// printf("quantity=%ld total size=%ld\n",quantity_occupied, total_size);
+	// fprintf(stderr, "key=%s, quantity=%ld total size=%ld\n", key.c_str(), quantity_occupied, total_size);
 	quantity_occupied = quantity_occupied + length;
 	buffer.insert({key, value});
 	return 0;
@@ -436,6 +436,7 @@ int32_t map_records::cleaning()
 	{
 		// std::cout << "Garbage Collector: Deleting " << *i << "\n";
 		auto item = buffer.find(*i);
+		// push the memory of this block inside the mem pool to be reused.
 		StsQueue.push(mem_pool, item->second.first);
 		// free(item->second.first);
 		buffer.erase(*i);

@@ -373,29 +373,7 @@ size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_len
 	ucs_status_t status;
 
 	async = 1;
-	// clock_t t;
 
-	// slog_debug("[COMM] Waiting message  as  %" PRIu64 ".", dest)
-	// do
-	// {
-	// 	ucp_worker_progress(ucp_worker);
-	// 	msg_tag = ucp_tag_probe_nb(ucp_worker, dest, tag_mask, 0, &info_tag);
-	// } while (msg_tag == NULL);
-
-	// msg = (void *)malloc(info_tag.length);
-
-	/*
-	   for (;;) {
-	   msg_tag = ucp_tag_probe_nb(ucp_worker, tag_data, tag_mask, 0, &info_tag);
-	   if (msg_tag != NULL) {
-	   break;
-	   } else if (ucp_worker_progress(ucp_worker)) {
-	   continue;
-	   }
-	   status = ucp_worker_wait(ucp_worker);
-
-	   }
-	 */
 	recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
 							  UCP_OP_ATTR_FIELD_CALLBACK |
 							  UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
@@ -418,39 +396,18 @@ size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_len
 		memcpy(msg, recv_buffer, msg_length);
 	}
 
-	// if (errno != 0)
-	// {
-	// 	slog_debug("[COMM] Msg in error: %s, length=%d, errno=%d:%s", msg, msg_length, errno, strerror(errno));
-	// }
-
-	// sleep(1);
 
 	status = ucx_wait(ucp_worker, request, "recv", "data");
 
 	t = clock() - t;
 	double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
-	// fprintf(stderr,"********** recv data = %lf\n", time_taken);
-
-	// slog_debug("[COMM] status=%s.", ucs_status_string(status));
-	// slog_debug("--- %s\n", msg);
-
-	// t = clock() -t;
-	//	double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
-	//               slog_info("[srv_worker_helper] recv_nbx time %f s", time_taken);
-
-	// slog_debug("[COMM] Recv tag (%ld bytes).", msg_length);
-	// fprintf(stderr, "[COMM] Recv tag (%ld bytes).\n", msg_length);
-	// pthread_mutex_unlock(&lock_ucx_comm);
 
 	if (status != UCS_OK)
 	{
 		slog_error("[COMM] HERCULES_RECV_DATA_ERR, msg_length=%lu", msg_length);
-		// pthread_mutex_unlock(&lock_ucx_comm);
-		// return -1;
 		return 0;
 	}
 
-	// pthread_mutex_unlock(&lock_ucx_comm);
 
 	return msg_length;
 }
@@ -669,7 +626,7 @@ void err_cb_server(void *arg, ucp_ep_h ep, ucs_status_t status)
 	uint64_t worker_uid = (uint64_t)arg;
 	// struct worker_info *worker_info = (struct worker_info *)arg;
 
-	if (status != UCS_ERR_CONNECTION_RESET && status != UCS_ERR_ENDPOINT_TIMEOUT)
+	// if (status != UCS_ERR_CONNECTION_RESET && status != UCS_ERR_ENDPOINT_TIMEOUT)
 	{
 		// fprintf(stderr, "\t [COMM]['%" PRIu64 "'] Server error handling callback was invoked with status %d (%s)\n", worker_uid, status, ucs_status_string(status));
 	}
@@ -1046,7 +1003,7 @@ int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 	}
 	}
 	slog_info("[COMM] recv_dynamic_stream end %lu", length);
-	// free(result);
+	free(result);
 	return length;
 }
 

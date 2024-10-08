@@ -1,38 +1,25 @@
 #!/bin/bash
 
-SCRIPT_NAME="ior_hercules_slurm.sh"
-FILE_SIZE=$((1024*1024*100))
-
-ATTACHED=1
-
-# 0 = Shared single file, 1 = File per process.
-IOR_FILE_PER_PROCESS=0
-# 0 = Do not avoid cache, 1 = Avoid cache (recommend, https://ior.readthedocs.io/en/latest/userDoc/tutorial.html).
-IOR_AVOID_CACHE=1
-
+SCRIPT_NAME=c_slurm.sh
+FILE_SIZE=$((1024*1024*10))
+ATTACHED=0
 #TEST_TYPE="weak"
 TEST_TYPE="strong"
 TEMPLATE_CONFIG_PATH="../conf/hercules-template.conf"
-#RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
-POLICY="HASH"
 
-NUM_SERVERS_RANGE=( 16 )
-#NUM_SERVERS_RANGE=( 1 4 8 16 32 )
-NODES_FOR_CLIENTS_RANGE=( 16 )
-#NODES_FOR_CLIENTS_RANGE=( 1 4 8 16 32 )
-#CLIENTS_PER_NODE_RANGE=( 1 2 4 8 16 32 )
-CLIENTS_PER_NODE_RANGE=( 16 )
+NUM_SERVERS_RANGE=( 1 )
+#NUM_SERVERS_RANGE=( 1 2 4 8 )
+NODES_FOR_CLIENTS_RANGE=( 1 )
+#NODES_FOR_CLIENTS_RANGE=( 1 2 4 8 16 )
+CLIENTS_PER_NODE_RANGE=( 1 )
+#CLIENTS_PER_NODE_RANGE=( 1 )
 BLOCK_SIZE_RANGE=( 512 )
-
-MAX_ITERATIONS=4
 
 # set -o xtrace
 #set -x
 
 jid=1
 
-for loop_number in $(seq 1 $MAX_ITERATIONS);
-do
 for NUM_SERVERS in "${NUM_SERVERS_RANGE[@]}"
 do
 	LOWER_BOUND=$NUM_SERVERS
@@ -61,33 +48,29 @@ do
 					FILE_SIZE_PER_CLIENT=$((FILE_SIZE/TOTAL_NUMBER_OF_CLIENTS))
 				fi
 
-				CONFIG_PATH="../conf/attached/${NUM_SERVERS}s-${NODES_FOR_CLIENTS}nfc-${CLIENTS_PER_NODE}cpd_${BLOCK_SIZE}blocksize.conf"
+				CONFIG_PATH="../conf/${NUM_SERVERS}s-${NODES_FOR_CLIENTS}nfc-${CLIENTS_PER_NODE}cpd.conf"
 				## If the configuration file does not exist then we create one by using a template and modifying the necessary variables.
-#				if ! [ -f "$CONFIG_PATH" ]; then
+				if ! [ -f "$CONFIG_PATH" ]; then
 					
 					cp $TEMPLATE_CONFIG_PATH $TEMPLATE_CONFIG_PATH."_TEMP"
-					sed -i "s/^BLOCK_SIZE = [0-9]*/BLOCK_SIZE = $BLOCK_SIZE/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_DATA_SERVERS = [0-9]/NUM_DATA_SERVERS = $NUM_SERVERS/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_NODES_FOR_CLIENTS = [0-9]/NUM_NODES_FOR_CLIENTS = $NODES_FOR_CLIENTS/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_CLIENTS_PER_NODE = [0-9]/NUM_CLIENTS_PER_NODE = $CLIENTS_PER_NODE/g"  "$TEMPLATE_CONFIG_PATH"
-					sed -i "s/^ATTACHED = [0-9]/ATTACHED = $ATTACHED/g"  "$TEMPLATE_CONFIG_PATH"
-					sed -i "s/^POLICY = [a-zA-Z0-9]*/POLICY = $POLICY/g"  "$TEMPLATE_CONFIG_PATH"
 				
 					cat $TEMPLATE_CONFIG_PATH > "$CONFIG_PATH"
 					cp $TEMPLATE_CONFIG_PATH."_TEMP" $TEMPLATE_CONFIG_PATH
-#				fi
+				fi
+			
 				### continue	FIXED
-				echo $CONFIG_PATH
-#				exit 0
 				set -x
 
 				## The first job does not have dependencie (do not wait for another job to end). 
 				if [ "$jid" -eq 1 ]; then
-					jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
+					jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" | cut -d ' ' -f4)
 					echo $jid
 				## The following jobs wait for the previous job to finish.
 				else
-					jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT"  "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
+					jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" | cut -d ' ' -f4)
 				fi
 				### exit 0
 				set +x
@@ -96,6 +79,6 @@ do
 	    done	 
 	done
 done
-done
+
 
 set +o xtrace

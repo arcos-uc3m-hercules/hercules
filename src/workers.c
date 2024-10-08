@@ -17,6 +17,7 @@
 #include <netinet/in.h>
 #include <net/if.h>
 #include <arpa/inet.h>
+#include <mcheck.h>
 
 #include <fcntl.h>
 
@@ -282,7 +283,6 @@ void *srv_worker(void *th_argv)
 		recv_param.cb.recv = recv_handler;
 
 		request = (struct ucx_context *)ucp_tag_msg_recv_nbx(arguments->ucp_worker, msg, info_tag.length, msg_tag, &recv_param);
-		// request = (struct ucx_context *)ucp_tag_recv_nbx(arguments->ucp_worker, msg, info_tag.length, msg_tag, &recv_param);
 
 		status = ucx_wait(arguments->ucp_worker, request, "receive", "srv_worker");
 
@@ -318,15 +318,12 @@ void *srv_worker(void *th_argv)
 		else
 		{
 			slog_debug("\t[srv_worker]['%" PRIu64 "] Endpoint already exist'", attr.worker_uid);
-			// fprintf(stderr, "\t[d]['%" PRIu64 "] Endpoint already exist'\n", attr.worker_uid);
 		}
 
 		arguments->peer_address = peer_addr;
 		arguments->server_ep = ep;
 		arguments->worker_uid = attr.worker_uid;
 
-		// char msg_[2024];
-		// sprintf(msg_, "[srv_worker] srv_worker_helper req %s", req);
 		srv_worker_helper(arguments, req);
 		t = clock() - t;
 
@@ -334,11 +331,7 @@ void *srv_worker(void *th_argv)
 		slog_info("[srv_worker] Serving time %f s\n", time_taken);
 
 		free(peer_addr);
-
-		// fprintf(stderr, "\t[d]['%" PRIu64 "'] Ending srv worker\n", attr.worker_uid);
-
-		// flush_ep(arguments->ucp_worker, ep);
-		// ep_close(arguments->ucp_worker, arguments->server_ep, UCP_EP_CLOSE_MODE_FLUSH);
+		free(msg);
 	}
 }
 
@@ -665,7 +658,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						}
 						else
 						{
-
 							// Read the minimum between end_offset and filled (read_ = min(end_offset, filled))
 							int64_t pending = size - byte_count;
 							memcpy((char *)buf + byte_count, address_, pending);
@@ -1077,8 +1069,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				slog_debug("[WRITE_OP] NO key find %s", key.c_str());
 				clock_t tp;
 				tp = clock();
-				void *buffer = NULL;
-				// (void *)StsQueue.pop(mem_pool);
+				void *buffer = (void *)StsQueue.pop(mem_pool);
 				tp = clock() - tp;
 				double time_taken2 = ((double)tp) / CLOCKS_PER_SEC; // in seconds
 				// slog_info("[srv_worker_helper] pop time %f s", time_taken2);
@@ -1098,29 +1089,38 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						return -1;
 					}
 
+					// buffer = (void *)calloc(BLOCK_SIZE, sizeof(char));
 					if (buffer == NULL)
 					{
-						// buffer = (void *)calloc(BLOCK_SIZE, sizeof(char));
-						std::size_t found = key.find("$0");
-						if (found != std::string::npos)
-						{ // block 0.
-							size_asigned_to_block = BLOCK_SIZE;
-						}
-						else
-						{ // non block 0.
-							// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
-							size_asigned_to_block = msg_length + block_offset;
-						}
+						buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
 					}
 
-					buffer = (void *)calloc(size_asigned_to_block, sizeof(char));
+					if (buffer == NULL)
+					{
+						perror("HERCULES_ERR_MEMORY_ALLOCATION");
+						slog_error("HERCULES_ERR_MEMORY_ALLOCATION");
+						return -1;
+						// std::size_t found = key.find("$0");
+						// if (found != std::string::npos)
+						// { // block 0.
+						// 	size_asigned_to_block = BLOCK_SIZE;
+						// }
+						// else
+						// { // non block 0.
+						// 	// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
+						// 	size_asigned_to_block = msg_length + block_offset;
+						// }
+					}
+					size_asigned_to_block = BLOCK_SIZE;
+
+					// buffer = (void *)calloc(size_asigned_to_block, sizeof(char));
 
 					// Receive the data from the front end.
 					msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
 					if (msg_length == 0)
 					{
-						perror("ERRIMSS_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
-						slog_error("ERRIMSS_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
+						perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
+						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
 						return -1;
 					}
 				}
@@ -1143,8 +1143,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					buffer = (void *)calloc(length_number, sizeof(char));
 					if (buffer == NULL)
 					{
-						perror("ERR_HERCULES_MEMORY_ALLOCATION");
-						slog_error("ERR_HERCULES_MEMORY_ALLOCATION");
+						perror("ERR_HERCULES_MEMORY_ALLOCATION_SHM");
+						slog_error("ERR_HERCULES_MEMORY_ALLOCATION_SHM");
 						return -1;
 					}
 
@@ -1214,7 +1214,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						}
 						slog_live("msg_length=%lu", msg_length);
 						// void *buffer = malloc(block_size_recv);
-						void *buffer = malloc(msg_length);
+						void *buffer = (void *)malloc(msg_length * sizeof(char));
 						msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buffer, msg_length, arguments->worker_uid, 0);
 						// msg_length = recv_data_opt(arguments->ucp_worker, arguments->server_ep, &buffer, msg_length, arguments->worker_uid, 0);
 						// slog_live("msg_length=%lu", msg_length);
@@ -1232,12 +1232,13 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						latest->st_size = std::max(latest->st_size, old->st_size);
 						// slog_debug(" buffer->st_size: %ld, block_offset=%ld", latest->st_size, block_offset);
 						slog_debug(" buffer->st_size: %ld, block_offset=%ld, old->st_nlink: %ld, new->st_nlink: %ld", latest->st_size, block_offset, old->st_nlink, latest->st_nlink);
-
 						// TODO: make sure this works
 						// memcpy((char *)address_ + block_offset, buffer, block_size_recv);
+						// Overwrite block 0 data.
 						memcpy((char *)address_ + block_offset, buffer, msg_length);
 
 						// TODO: should we update this block's size in the map?
+						// map->update(key, address_, msg_length);
 						free(buffer);
 					}
 					else
@@ -1257,7 +1258,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				}
 				else
 				{ // non block 0.
-					// TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, address_, arguments->worker_uid, 1), ("[WRITE_OP] recv_data Updated non 0 existing block"));
 					slog_debug("[WRITE_OP] Updated non 0 existing block, key.c_str(): %s", key.c_str());
 					size_t msg_length = 0;
 					if (!is_shared_memory)
@@ -1269,27 +1269,25 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 							perror("ERR_HERCULES_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
 							return -1;
 						}
-						if (msg_length != block_size_rtvd)
-						{
-							block_size_rtvd = msg_length;
-						}
+						// if (msg_length != block_size_rtvd)
+						// {
+						// 	block_size_rtvd = msg_length;
+						// }
 						// Verify if the new size (msg_length + block_offset) is greater than the old size (block_size_rtvd).
-						if (block_size_rtvd + block_offset > block_size_rtvd)
-						{
-							// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
-							size_t new_size = block_size_rtvd + block_offset;
-							if (!is_shared_memory)
-							{
-								// fprintf(stderr, "** Extra size=%lu, msg_length=%lu, block_offset=%u, block_size_rtvd=%lu, address_=%p, ", new_size, msg_length, block_offset, block_size_rtvd, address_);
-								address_ = (void *)realloc(address_, new_size);
-							}
-							// fprintf(stderr, "new address = %p\n", address_);
-							map->update(key, address_, new_size);
-						}
+						slog_debug("msg_length=%lu, block_offset=%d, msg_length=%d", msg_length, block_offset, msg_length);
+						// if (block_size_rtvd < msg_length + block_offset)
+						// {
+						// 	// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
+						// 	size_t new_size = msg_length + block_offset; // block_size_rtvd + block_offset;
+						// 	// fprintf(stderr, "** Extra size=%lu, msg_length=%lu, block_offset=%u, block_size_rtvd=%lu, address_=%p, ", new_size, msg_length, block_offset, block_size_rtvd, address_);
+						// 	address_ = (void *)realloc(address_, new_size);
+						// 	// fprintf(stderr, "new address = %p\n", address_);
+						// 	map->update(key, address_, new_size);
+						// }
 						// }
 						// if (!is_shared_memory)
 						// {
-						msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, block_size_rtvd, arguments->worker_uid, 1);
+						msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, msg_length, arguments->worker_uid, 1);
 						// msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
 						if (msg_length == 0)
 						{
@@ -1364,6 +1362,8 @@ void *stat_worker(void *th_argv)
 
 	for (;;)
 	{
+		mtrace();
+
 		size_t peer_addr_len;
 		ucp_address_t *peer_addr;
 		ucs_status_t ep_status = UCS_OK;
@@ -1487,11 +1487,14 @@ void *stat_worker(void *th_argv)
 		arguments->peer_address = peer_addr;
 		arguments->server_ep = ep;
 		arguments->worker_uid = attr.worker_uid;
+		muntrace();
+
 		// arguments->worker_uid = attr.worker_uid;
 		stat_worker_helper(arguments, req);
 
 		// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
 		free(peer_addr);
+		free(msg);
 
 		// ep_close(arguments->ucp_worker, arguments->server_ep, UCP_EP_CLOSE_MODE_FLUSH);
 	}
@@ -1500,7 +1503,7 @@ void *stat_worker(void *th_argv)
 int stat_worker_helper(p_argv *arguments, char *req)
 {
 	ucs_status_t status;
-	int ret;
+	int ret = 0;
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
@@ -1635,7 +1638,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		}
 		case READ_OP:
 		{
-			// printf("STAT_WORKER READ_OP");
 			// Check if there was an associated block to the key.
 			int err = map->get(key, &address_, &block_size_rtvd);
 			slog_debug("[STAT WORKER] map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
@@ -1943,7 +1945,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				return -1;
 			}
 			// Receive the block into the buffer.
-			void *buffer = malloc(block_size_recv);
+			void *buffer = (void *)malloc(length * sizeof(char));
 			ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
 
 			dataset_info *struct_ = (dataset_info *)buffer;
@@ -1961,7 +1963,8 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			}
 
 			int32_t insert_successful = -1;
-			insert_successful = map->put(key, buffer, block_size_recv);
+			// insert_successful = map->put(key, buffer, block_size_recv);
+			insert_successful = map->put(key, buffer, length);
 			slog_debug("[STAT WORKER] map->put (key %s) err %d", key.c_str(), insert_successful);
 
 			if (insert_successful != 0)
@@ -1994,6 +1997,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		{
 			// Follow a certain behavior if the received block was already stored.
 			slog_debug("[STAT WORKER] LOCAL DATASET_UPDATE %ld", block_size_recv);
+			// fprintf(stderr, "[STAT WORKER] LOCAL DATASET_UPDATE %ld, key=%s, req=%s\n", block_size_recv, key.c_str(), req);
 			switch (1) // TO CKECK!
 			{
 			// Update where the blocks of a LOCAL dataset have been stored.
@@ -2060,7 +2064,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 			default:
 			{
+				// fprintf(stderr, "num_input_read=%d\n", num_input_read);
 				int new_server_status = 0;
+				int flag = 0;
 				switch (num_input_read)
 				{
 				case 4: // we expect to get 4 values in a normal case.
@@ -2068,60 +2074,84 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					if (req[num_characters_read] != '\0')
 					{
 						slog_live("Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
+						// fprintf(stderr, "Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
 						// get the server status to be set.
 						sscanf(&req[num_characters_read], "%d", &new_server_status);
+						flag = 1;
 					}
 					else
 					{
 						slog_live("No extra characters found.\n");
+						// fprintf(stderr, "No extra characters found.\n");
 					}
 					break;
 				default:
 					break;
 				}
 
-				unsigned long num_active_storages = atol(number);
-				int delete_dataserver_indx = operation;
-				slog_debug("[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
-				// fprintf(stderr, "[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
+				if (flag)
+				{
 
-				char *address_aux = (char *)address_;
+					unsigned long num_active_storages = atol(number);
+					int delete_dataserver_indx = operation;
+					slog_debug("[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
+					// fprintf(stderr, "[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
 
-				imss_info *imss_info_ = (imss_info *)malloc(block_size_rtvd * sizeof(imss_info));
-				// = (imss_info *)address_aux;
-				memcpy(imss_info_, address_aux, sizeof(imss_info));
+					char *address_aux = (char *)address_;
+					// fprintf(stderr, "block_size_rtvd=%lu\n", block_size_rtvd);
+					imss_info *imss_info_ = (imss_info *)malloc(block_size_rtvd * sizeof(imss_info));
+					// = (imss_info *)address_aux;
+					memcpy(imss_info_, address_aux, sizeof(imss_info));
 
-				// imss_info_->num_active_storages--;
-				imss_info_->num_active_storages = num_active_storages;
-				memcpy(address_aux, imss_info_, sizeof(imss_info));
+					// imss_info_->num_active_storages--;
+					imss_info_->num_active_storages = num_active_storages;
+					memcpy(address_aux, imss_info_, sizeof(imss_info));
 
-				// skip imss_info and num_storages.
-				address_aux += sizeof(imss_info);
-				address_aux += imss_info_->num_storages * LINE_LENGTH;
-				// reserve memory to store the status list.
-				imss_info_->status = (int *)malloc(imss_info_->num_storages * sizeof(int));
-				// copy the status list.
-				memcpy(imss_info_->status, address_aux, imss_info_->num_storages * sizeof(int));
+					// skip imss_info and num_storages.
+					address_aux += sizeof(imss_info);
+					address_aux += imss_info_->num_storages * LINE_LENGTH;
+					// reserve memory to store the status list.
+					imss_info_->status = (int *)malloc(imss_info_->num_storages * sizeof(int));
+					// copy the status list.
+					memcpy(imss_info_->status, address_aux, imss_info_->num_storages * sizeof(int));
 
-				// int current_num_storages = imss_info_->num_storages;
-				// slog_debug("[STAT_WORKER] prev. num data servers=%d", imss_info_->num_storages);
-				slog_debug("[STAT_WORKER] changing data server %d with status=%d to a new status=%d", delete_dataserver_indx, imss_info_->status[delete_dataserver_indx], new_server_status);
-				// free(imss_info_->ips[delete_dataserver_indx]);
-				imss_info_->status[delete_dataserver_indx] = new_server_status;
-				slog_debug("[STAT_WORKER] new num data servers=%d, new status=%d", imss_info_->num_active_storages, imss_info_->status[delete_dataserver_indx]);
-				// address_ += sizeof(imss_info);
-				// address_ += imss_info_->num_storages * LINE_LENGTH;
-				memcpy(address_aux, imss_info_->status, imss_info_->num_storages * sizeof(int));
-				// move the pointer to the arr_num_active_storages position.
-				address_aux += (imss_info_->num_storages * sizeof(int));
+					// int current_num_storages = imss_info_->num_storages;
+					// slog_debug("[STAT_WORKER] prev. num data servers=%d", imss_info_->num_storages);
+					slog_debug("[STAT_WORKER] changing data server %d with status=%d to a new status=%d", delete_dataserver_indx, imss_info_->status[delete_dataserver_indx], new_server_status);
+					// free(imss_info_->ips[delete_dataserver_indx]);
+					imss_info_->status[delete_dataserver_indx] = new_server_status;
+					slog_debug("[STAT_WORKER] new num data servers=%d, new status=%d", imss_info_->num_active_storages, imss_info_->status[delete_dataserver_indx]);
+					// address_ += sizeof(imss_info);
+					// address_ += imss_info_->num_storages * LINE_LENGTH;
+					memcpy(address_aux, imss_info_->status, imss_info_->num_storages * sizeof(int));
+					// move the pointer to the arr_num_active_storages position.
+					address_aux += (imss_info_->num_storages * sizeof(int));
 
-				// copy the arr_num_active_storages list.
-				imss_info_->arr_num_active_storages = (int *)malloc(imss_info_->num_storages * sizeof(int));
-				memcpy(imss_info_->arr_num_active_storages, address_aux, imss_info_->num_storages * sizeof(int));
-				// set the value.
-				imss_info_->arr_num_active_storages[delete_dataserver_indx] = imss_info_->num_active_storages;
-				memcpy(address_aux, imss_info_->arr_num_active_storages, imss_info_->num_storages * sizeof(int));
-
+					// copy the arr_num_active_storages list.
+					imss_info_->arr_num_active_storages = (int *)malloc(imss_info_->num_storages * sizeof(int));
+					memcpy(imss_info_->arr_num_active_storages, address_aux, imss_info_->num_storages * sizeof(int));
+					// set the value.
+					imss_info_->arr_num_active_storages[delete_dataserver_indx] = imss_info_->num_active_storages;
+					memcpy(address_aux, imss_info_->arr_num_active_storages, imss_info_->num_storages * sizeof(int));
+					free(imss_info_);
+				}
+				else
+				{
+					size_t length = -1;
+					length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+					if (length == 0)
+					{
+						slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_UPDATE_DATASET");
+						perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_UPDATE_DATASET");
+						return -1;
+					}
+					// Clear the corresponding memory region.
+					void *buffer = (void *)malloc(block_size_recv);
+					// Receive the block into the buffer.
+					recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
+					free(buffer);
+					slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
+				}
 				// address_ += sizeof(int);
 				// memcpy(address_aux, imss_info_->status, imss_info_->num_storages * sizeof(int));
 
@@ -2155,6 +2185,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				// free(buffer);
 
 				slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
+				// fprintf(stderr, "[STAT_WORKER] End Updating existing dataset %s.\n", key.c_str());
 				break;
 			}
 			}
