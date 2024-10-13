@@ -66,6 +66,7 @@ int global_server_fd_thread = -1;
 size_t global_offset = 0;
 
 #define GARBAGE_COLLECTOR_PERIOD 120
+#define CKECKPOINT_PERIOD 120
 
 int ready(char *tmp_file_path, const char *msg)
 {
@@ -143,40 +144,6 @@ void handle_signal(int signal)
 	}
 }
 
-// int write_2_disk(char *filename)
-// {
-// 	char disk_path[PATH_MAX];
-// 	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/disk/%s", filename);
-// 	int file_fd = open(disk_path, O_CREAT | O_WRONLY | O_TRUNC, 0600);
-// 	if (file_fd < 0)
-// 	{
-// 		// fprintf(stderr, "Error opening file %s on the server, fd=%d\n", my_path, fd_);
-// 		perror("ERR_HERCULES_OPEN_DISK");
-// 		slog_error("ERR_HERCULES_OPEN_DISK");
-// 		return -1;
-// 	}
-// 	ssize_t bytes = write(file_fd, buffer, block_size_recv);
-// 	if (bytes < 0)
-// 	{
-// 		perror("ERR_HERCULES_WRITE_DISK");
-// 		slog_error("ERR_HERCULES_WRITE_DISK");
-// 		ret = close(file_fd);
-// 		if (ret < 0)
-// 		{
-// 			perror("ERR_HERCULES_CLOSE_DISK");
-// 			slog_error("ERR_HERCULES_CLOSE_DISK");
-// 		}
-// 		return -1;
-// 	}
-// 	ret = close(file_fd);
-// 	if (ret < 0)
-// 	{
-// 		perror("ERR_HERCULES_CLOSE_DISK");
-// 		slog_error("ERR_HERCULES_CLOSE_DISK");
-// 		return -1;
-// 	}
-// 	return 0;
-// }
 
 // Thread method attending client read-write data requests.
 void *srv_worker(void *th_argv)
@@ -1327,7 +1294,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 // Thread method searching and cleaning nodes with st_nlink=0
 void *garbage_collector(void *th_argv)
 {
-	fprintf(stderr, "Init garbage collector\n");
+	// fprintf(stderr, "Init garbage collector\n");
+	slog_debug("Init garbage collector");
 	// Obtain the current map class element from the set of arguments.
 	map_records *map = (map_records *)th_argv;
 
@@ -1335,6 +1303,24 @@ void *garbage_collector(void *th_argv)
 	{
 		// Gnodetraverse_garbage_collector(map);//Future
 		sleep(GARBAGE_COLLECTOR_PERIOD);
+		pthread_mutex_lock(&mutex_garbage);
+		map->cleaning();
+		pthread_mutex_unlock(&mutex_garbage);
+	}
+	pthread_exit(NULL);
+}
+
+// Thread method to copy datasets from Hercules to Disk. 
+void *checkpoint(void *th_argv)
+{
+	slog_debug("Init garbage collector");
+	// Obtain the current map class element from the set of arguments.
+	map_records *map = (map_records *)th_argv;
+
+	for (;;)
+	{
+		// Gnodetraverse_garbage_collector(map);//Future
+		sleep(CKECKPOINT_PERIOD);
 		pthread_mutex_lock(&mutex_garbage);
 		map->cleaning();
 		pthread_mutex_unlock(&mutex_garbage);

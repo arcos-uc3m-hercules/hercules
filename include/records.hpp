@@ -55,7 +55,7 @@ public:
 	int32_t put(std::string key, void *address, uint64_t length);
 	// Method retrieving the address associated to a certain record.
 	int32_t get(std::string key, void **add_, uint64_t *size_);
-	
+
 	int32_t update(std::string key, void *add_, uint64_t length);
 
 	// Method renaming from stat_worker
@@ -70,6 +70,7 @@ public:
 	// Method retrieving the address associated to a certain record.
 	int32_t cleaning();
 	int32_t cleaning_specific(std::string new_key);
+	int32_t memory2disk();
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.
 	std::map<std::string, std::pair<void *, uint64_t>>::iterator begin()
@@ -92,6 +93,7 @@ private:
 	// Map structure tracking stored records (by default sorts keys with '<' op).
 	// <key(file uri), <data, lenght>>
 	std::map<std::string, std::pair<void *, uint64_t>> buffer;
+	std::map<std::string, int> buffer_checkpoint;
 	// Mutex restricting access to structure.
 	uint64_t total_size;
 	uint64_t quantity_occupied = 0;

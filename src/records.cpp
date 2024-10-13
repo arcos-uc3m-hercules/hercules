@@ -95,20 +95,15 @@ void map_records::print_map()
 	// std::vector<string> vec;
 	// get_data_location(0, 0, SET);
 
-	// Iterate using C++17 facilities
 	slog_info("Datasets in this servers");
 	for (const auto &[key, value] : buffer)
 	{
 		slog_info("key = %s\n", key.c_str());
 		int pos = key.find('$');
 		string block = key.substr(pos, key.length() + 1);
-		// int uri_string_lenght = key.length() - pos;
 		string data_uri = key.substr(0, pos);
-		// find_server(1, stoi(block, 0, 10), data_uri.c_str(), 0);
 		fprintf(stderr, "key=%s,\turi=%s,\tblock=%s\n", key.c_str(), data_uri.c_str(), block.c_str());
 	}
-	// fprintf(stderr, "key = %s\n", key.c_str());
-	// std::cout << '[' << key << "] = " << value << "; ";
 }
 
 // Method storing a new record.
@@ -132,6 +127,11 @@ int32_t map_records::put(std::string key, void *address, uint64_t length)
 	// fprintf(stderr, "key=%s, quantity=%ld total size=%ld\n", key.c_str(), quantity_occupied, total_size);
 	quantity_occupied = quantity_occupied + length;
 	buffer.insert({key, value});
+
+	// The following buffer is used for checkpoints.
+	// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding checkpoint thread copy the data to disk.
+	buffer_checkpoint.insert({key, 1});
+
 	return 0;
 }
 
@@ -172,7 +172,6 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	// Return the address associated to the record.
 	return 1;
 }
-
 
 int32_t map_records::update(std::string key, void *add_, uint64_t length)
 {
@@ -393,6 +392,7 @@ int32_t map_records::cleaning()
 	for (const auto &it : buffer)
 	{
 		string key = it.first;
+		// Verify if this is a block 0.
 		int found = key.find("$0");
 
 		if (found != std::string::npos)
@@ -403,11 +403,9 @@ int32_t map_records::cleaning()
 			// std::cout << key << "stlink:" <<st_p->st_nlink<<'\n';
 			if (st_p->st_nlink == 0)
 			{
-
 				// borrar todos los bloques con mismo path/key
 				for (const auto &it2 : buffer)
 				{
-
 					string partner_key = it2.first;
 					if (partner_key.compare(key) != 0)
 					{ // para no borrar el actual con el que estoy comparando
@@ -434,11 +432,11 @@ int32_t map_records::cleaning()
 	std::vector<string>::iterator i;
 	for (i = vec.begin(); i < vec.end(); i++)
 	{
-		// std::cout << "Garbage Collector: Deleting " << *i << "\n";
+		// find the element on all the datasets map.
 		auto item = buffer.find(*i);
-		// push the memory of this block inside the mem pool to be reused.
+		// push the memory pointer of this block inside the mem pool to be reused.
 		StsQueue.push(mem_pool, item->second.first);
-		// free(item->second.first);
+		// erase the dataset information from the map.
 		buffer.erase(*i);
 	}
 
@@ -484,5 +482,83 @@ int32_t map_records::cleaning_specific(std::string new_key)
 	  string key = it.first;
 	  std::cout <<"Garbage Collector: Exist " << key << '\n';
 	  }*/
+	return 0;
+}
+
+int write_2_disk(const char *filename, void *buffer, size_t size)
+{
+	char disk_path[PATH_MAX];
+	int ret = -1;
+	int file_fd = -1;
+
+	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/disk/%s", filename);
+	file_fd = open(disk_path, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+	if (file_fd < 0)
+	{
+		// fprintf(stderr, "Error opening file %s on the server, fd=%d\n", my_path, fd_);
+		perror("ERR_HERCULES_OPEN_DISK");
+		slog_error("ERR_HERCULES_OPEN_DISK");
+		return -1;
+	}
+	ssize_t bytes = write(file_fd, buffer, size);
+	if (bytes < 0)
+	{
+		perror("ERR_HERCULES_WRITE_DISK");
+		slog_error("ERR_HERCULES_WRITE_DISK");
+		ret = close(file_fd);
+		if (ret < 0)
+		{
+			perror("ERR_HERCULES_CLOSE_DISK");
+			slog_error("ERR_HERCULES_CLOSE_DISK");
+		}
+		return -1;
+	}
+	ret = close(file_fd);
+	if (ret < 0)
+	{
+		perror("ERR_HERCULES_CLOSE_DISK");
+		slog_error("ERR_HERCULES_CLOSE_DISK");
+		return -1;
+	}
+	return 0;
+}
+
+// Used in str_worker threads.
+int32_t map_records::memory2disk()
+{
+	// Save key value on a vector to know which of them have been copy to diks.
+	std::vector<string> vec;
+
+	// We need to check if the block has been copied to disk or if it was updated.
+
+	// TODO: add a new field to the map to know if the block needs to be copy to disk. For example, a field called: status = dirty means there are new information. This can be stablish on the block 0 o by each block.
+	// As a second solution, we will make an array an each new/updated block
+	// is going to be add to it on write operations. We do not need to store
+	// the block 0.
+	int pos = 0, copy_to_disk = 0, ret = 0, fd = -1;
+	string key, path, data_uri;
+	void *address_ = NULL;
+	uint64_t block_size_rtvd = 0;
+	// char checkpoint_hercules_path[PATH_MAX];
+
+	for (const auto &it : buffer_checkpoint)
+	{
+		copy_to_disk = it.second;
+		if (copy_to_disk == 1)
+		{
+			key = it.first;
+			pos = key.find('$');
+			path = key.substr(0, pos);
+			data_uri = key.substr(pos, key.length() + 1);
+
+			ret = get(key, &address_, &block_size_rtvd);
+			if (ret == 0)
+			{
+				fprintf(stderr, "key %s not found for checkpointing\n", key.c_str());
+				continue;
+			}
+			write_2_disk(key.c_str(), address_, block_size_rtvd);
+		}
+	}
 	return 0;
 }

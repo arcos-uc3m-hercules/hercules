@@ -36,7 +36,7 @@ extern ucp_address_t **local_addr;
 extern size_t *local_addr_len;
 extern StsHeader *mem_pool;
 
-// URI of the created IMSS.
+// URI of the created HERCULES.
 char *imss_uri;
 char META_HOSTFILE[512];
 
@@ -640,7 +640,6 @@ int32_t main(int32_t argc, char **argv)
 	slog_debug("Server type=%c\n", args.type);
 	struct tm tm = *localtime(&t);
 	sprintf(log_path, "./%c-server-%d.%02d-%02d-%02d", args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
-	// sprintf(log_path, "./%c-server", args.type);
 	slog_init(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, args.id);
 
 	if (IMSS_DEBUG_FILE > 0)
@@ -648,7 +647,6 @@ int32_t main(int32_t argc, char **argv)
 		printf("Log path = %s\n", log_path);
 		fflush(stdout);
 	}
-	// fprintf(stderr, "IMSS DEBUG FILE AT %s\n", log_path);
 	slog_info(",Time(msec), Comment, RetCode");
 
 	slog_debug("[SERVER] Starting server.");
@@ -681,11 +679,9 @@ int32_t main(int32_t argc, char **argv)
 		bind_port = args.stat_port;
 	}
 
-	// status = ucp_config_read(NULL, NULL, &config);
-
 	// buffer size provided
 	buffer_size = args.bufsize;
-	// set up imss uri (default value is already set up in args)
+	// set up HERCULES uri (default value is already set up in args)
 	imss_uri = (char *)calloc(32, sizeof(char));
 
 	/* Initialize the UCX required objects */
@@ -724,12 +720,12 @@ int32_t main(int32_t argc, char **argv)
 
 	/* CHECK THIS OUT!
 	 ***************************************************
-	 In relation to the type argument provided, an IMSS or a metadata server will be deployed. */
+	 In relation to the type argument provided, an HERCULES or a metadata server will be deployed. */
 
-	// IMSS server.
+	// HERCULES server.
 	if (args.type == TYPE_DATA_SERVER)
 	{
-		// IMSS name.
+		// HERCULES name.
 		strcpy(imss_uri, args.imss_uri);
 		// machine name where the metadata server is being executed.
 		stat_add = args.stat_host;
@@ -739,7 +735,7 @@ int32_t main(int32_t argc, char **argv)
 		num_servers = args.num_servers;
 		// Dinamic number of servers conforming the HERCULES deployment used by malleability.
 		number_active_storage_servers = num_servers;
-		// IMSS' MPI deployment file.
+		// HERCULES' MPI deployment file.
 		deployfile = args.deploy_hostfile;
 		// data block size
 		block_size = args.block_size; // in kilobytes.
@@ -806,7 +802,7 @@ int32_t main(int32_t argc, char **argv)
 
 		if (!args.id)
 		{
-			// Formated imss uri to be sent to the metadata server.
+			// Formated HERCULES uri to be sent to the metadata server.
 			char formated_uri[REQUEST_SIZE];
 			sprintf(formated_uri, "%" PRIu32 " GET 0 %s", id, imss_uri);
 			slog_debug("[main] Request - %s, errno=%d:%s", formated_uri, errno, strerror(errno));
@@ -830,13 +826,8 @@ int32_t main(int32_t argc, char **argv)
 			// Receive the associated structure.
 			// void *data = (void *)malloc(length);
 			imss_info imss_info_ = *(imss_info *)malloc(sizeof(imss_info) * length);
-			// memcpy(&imss_info_, data, sizeof(imss_info));
-			// free(data);
 			ret = recv_dynamic_stream(ucp_worker, client_ep, &imss_info_, BUFFER, attr.worker_uid, length);
-			// ret = recv_dynamic_stream_opt(ucp_worker, client_ep, &data, BUFFER, attr.worker_uid, length);
 
-			// fprintf(stderr, "Server %d, ret=%d, sizeof(imss_info)=%ld\n", args.id, ret, sizeof(imss_info));
-			// if (ret > sizeof(imss_info))
 			if (ret != -1)
 			{
 				// fprintf(stderr,"ret > imss_info\n");
@@ -845,6 +836,7 @@ int32_t main(int32_t argc, char **argv)
 					free(imss_info_.ips[i]);
 				free(imss_info_.ips);
 			}
+			// free(imss_info_);
 		}
 
 		if (imss_exists)
@@ -899,9 +891,6 @@ int32_t main(int32_t argc, char **argv)
 	// Metadata server.
 	else
 	{
-		// metadata file.
-		// metadata_file = args.stat_logfile;
-
 		// Create the tree_root node.
 		char *root_data = (char *)calloc(8, sizeof(char));
 		strcpy(root_data, "imss://");
@@ -952,19 +941,21 @@ int32_t main(int32_t argc, char **argv)
 
 	// Initialize pool of threads.
 	// pthread_t threads[(args.thread_pool + 1)];
-	threads = (pthread_t *)malloc((args.thread_pool + 1) * sizeof(pthread_t));
+	int extra_threads = 2;
+	int total_threads = args.thread_pool + extra_threads;
+	threads = (pthread_t *)malloc(total_threads * sizeof(pthread_t));
 	// Thread arguments.
-	p_argv arguments[(args.thread_pool + 1)];
+	p_argv arguments[total_threads];
 
 	if (args.type == TYPE_DATA_SERVER)
 		region_locks = (pthread_mutex_t *)calloc(args.thread_pool, sizeof(pthread_mutex_t));
 
-	ucp_worker_threads = (ucp_worker_h *)malloc((args.thread_pool + 1) * sizeof(ucp_worker_h));
-	local_addr = (ucp_address_t **)malloc((args.thread_pool + 1) * sizeof(ucp_address_t *));
-	local_addr_len = (size_t *)malloc((args.thread_pool + 1) * sizeof(size_t));
+	ucp_worker_threads = (ucp_worker_h *)malloc(total_threads * sizeof(ucp_worker_h));
+	local_addr = (ucp_address_t **)malloc(total_threads * sizeof(ucp_address_t *));
+	local_addr_len = (size_t *)malloc(total_threads * sizeof(size_t));
 
 	// Execute all threads.
-	for (int32_t i = 0; i < (args.thread_pool + 1); i++)
+	for (int32_t i = 0; i < total_threads; i++)
 	{
 		// Add port number to thread arguments.
 		arguments[i].ucp_context = ucp_context;
@@ -985,9 +976,23 @@ int32_t main(int32_t argc, char **argv)
 			{
 				// Notify thread error deployment.
 				ready(tmp_file_path, "ERROR");
-				perror("ERR_HERCULES_DISPATCHER_DEPLOY");
+				perror("HERCULES_ERR_DISPATCHER_DEPLOY");
 				return -1;
 			}
+		}
+		else if (i == 1)
+		{
+			if (pthread_create(&threads[i], NULL, checkpoint, (void *)g_map.get()) == -1)
+			{
+				perror("HERCULES_ERR_GARBAGECOLLECTOR_DEPLOY");
+				pthread_exit(NULL);
+			}
+			// // Wait for the threads to conclude.
+			// if (pthread_join(thread_garbage_collector, NULL) != 0)
+			// {
+			// 	perror("HERCULES_ERR_METADISPATCHER_JOIN");
+			// 	pthread_exit(NULL);
+			// }
 		}
 		else
 		{
@@ -1009,39 +1014,39 @@ int32_t main(int32_t argc, char **argv)
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
 			// Specify the address used by each thread to write inside the buffer.
-			arguments[i].pt = (char *)((i - 1) * buffer_segment + buffer_address);
+			arguments[i].pt = (char *)((i - extra_threads) * buffer_segment + buffer_address);
 
-			// IMSS server.
+			// HERCULES data server.
 			if (args.type == TYPE_DATA_SERVER)
 			{
 				slog_debug("[SERVER] Creating data thread.");
 				if (pthread_create(&threads[i], NULL, srv_worker, (void *)&arguments[i]) == -1)
 				{
 					// Notify thread error deployment.
-					perror("ERRHERCULES__SRVWORKER_DEPLOY");
-					slog_fatal("ERRHERCULES__SRVWORKER_DEPLOY");
+					perror("HERCULES_ERR__SRVWORKER_DEPLOY");
+					slog_fatal("HERCULES_ERR__SRVWORKER_DEPLOY");
 					return -1;
 				}
 			}
-			// Metadata server.
+			// HERCULES Metadata server.
 			else
 			{
 				slog_debug("[SERVER] Creating metadata thread.");
 				if (pthread_create(&threads[i], NULL, stat_worker, (void *)&arguments[i]) == -1)
 				{
 					// Notify thread error deployment.
-					perror("ERRIMSS_STATWORKER_DEPLOY");
-					slog_fatal("ERRIMSS_STATWORKER_DEPLOY");
+					perror("HERCULES_ERR_STATWORKER_DEPLOY");
+					slog_fatal("HERCULES_ERR_STATWORKER_DEPLOY");
 					return -1;
 				}
 			}
 		}
 	}
 
-	// Notify to the metadata server the deployment of a new IMSS.
+	// Notify to the metadata server the deployment of a new HERCULES.
 	if ((args.type == TYPE_DATA_SERVER) && !args.id && stat_port)
 	{
-		// Metadata structure containing the novel IMSS info.
+		// Metadata structure containing the novel HERCULES info.
 		imss_info my_imss;
 
 		strcpy(my_imss.uri_, imss_uri);
@@ -1052,7 +1057,7 @@ int32_t main(int32_t argc, char **argv)
 		my_imss.num_active_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important
-		// FILE entity managing the IMSS deployfile.
+		// FILE entity managing the HERCULES deployfile.
 		FILE *svr_nodes;
 
 		if ((svr_nodes = fopen(deployfile, "r+")) == NULL)
@@ -1070,11 +1075,11 @@ int32_t main(int32_t argc, char **argv)
 		// int num_active_data_servers = 0;
 		for (int32_t i = 0; i < num_servers; i++)
 		{
-			// Allocate resources in the metadata structure so as to store the current IMSS's IP.
+			// Allocate resources in the metadata structure so as to store the current HERCULES's IP.
 			(my_imss.ips)[i] = (char *)calloc(LINE_LENGTH, sizeof(char));
 			size_t l_size = LINE_LENGTH;
 
-			// Save IMSS metadata deployment.
+			// Save HERCULES metadata deployment.
 			n_chars = getline(&((my_imss.ips)[i]), &l_size, svr_nodes);
 
 			// Erase the new line character ('') from the string.
@@ -1127,14 +1132,13 @@ int32_t main(int32_t argc, char **argv)
 		}
 
 		slog_debug("[SERVER] Creating IMSS_INFO at metadata server. ");
-		// Send the new IMSS metadata structure to the metadata server entity.
+		// Send the new HERCULES metadata structure to the metadata server entity.
 		if (send_dynamic_stream(ucp_worker, client_ep, (char *)&my_imss, IMSS_INFO, attr.worker_uid) == -1)
 			return -1;
 
 		for (int32_t i = 0; i < num_servers; i++)
 			free(my_imss.ips[i]);
 		free(my_imss.ips);
-
 		// ucp_ep_close_nb(client_ep, UCP_EP_CLOSE_MODE_FORCE);
 	}
 
@@ -1157,7 +1161,7 @@ int32_t main(int32_t argc, char **argv)
 	}
 
 	// Wait for threads to finish.
-	for (int32_t i = 0; i < (args.thread_pool + 1); i++)
+	for (int32_t i = 0; i < (args.thread_pool + extra_threads); i++)
 	{
 		// final deployment time.
 		t = clock() - t;
@@ -1180,7 +1184,6 @@ int32_t main(int32_t argc, char **argv)
 		// save metadata info in disk.
 		// if (metadata_write(metadata_file, buffer, map.get(), arguments, buffer_segment, bytes_written) == -1)
 		// 	return -1;
-
 		// free(imss_uri);
 
 		// Freeing all resources of the tree structure.
@@ -1195,7 +1198,6 @@ int32_t main(int32_t argc, char **argv)
 	}
 	else
 	{
-
 		// this sleep ensures all others servers have time to tell metadata server
 		// they will be shut down, and then this servers has the updated value of the
 		// active number of servers.
