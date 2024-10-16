@@ -66,6 +66,7 @@ do
 #				if ! [ -f "$CONFIG_PATH" ]; then
 					
 					cp $TEMPLATE_CONFIG_PATH $TEMPLATE_CONFIG_PATH."_TEMP"
+					## TODO: .* to match all characters in regulars expression.
 					sed -i "s/^BLOCK_SIZE = [0-9]*/BLOCK_SIZE = $BLOCK_SIZE/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_DATA_SERVERS = [0-9]/NUM_DATA_SERVERS = $NUM_SERVERS/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_NODES_FOR_CLIENTS = [0-9]/NUM_NODES_FOR_CLIENTS = $NODES_FOR_CLIENTS/g"  "$TEMPLATE_CONFIG_PATH"

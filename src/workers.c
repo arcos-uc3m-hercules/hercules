@@ -1313,7 +1313,7 @@ void *garbage_collector(void *th_argv)
 // Thread method to copy datasets from Hercules to Disk. 
 void *checkpoint(void *th_argv)
 {
-	slog_debug("Init garbage collector");
+	slog_debug("Init checkpoint writter");
 	// Obtain the current map class element from the set of arguments.
 	map_records *map = (map_records *)th_argv;
 
@@ -1322,7 +1322,7 @@ void *checkpoint(void *th_argv)
 		// Gnodetraverse_garbage_collector(map);//Future
 		sleep(CKECKPOINT_PERIOD);
 		pthread_mutex_lock(&mutex_garbage);
-		map->cleaning();
+		map->memory2disk();
 		pthread_mutex_unlock(&mutex_garbage);
 	}
 	pthread_exit(NULL);
@@ -2404,7 +2404,7 @@ void *dispatcher(void *th_argv)
 	}
 
 	// Prepare to accept connections.
-	ret = listen(global_server_fd_thread, 3);
+	ret = listen(global_server_fd_thread, 100);
 	if (ret < 0)
 	{
 		perror("ERR_HERCULES_DISPATCHER_LISTEN");
@@ -2450,12 +2450,12 @@ void *dispatcher(void *th_argv)
 		// Check if the client is requesting connection resources.
 		if (!strncmp(req_content, "HELLO!", 6))
 		{
-			ret = send(new_socket, &local_addr_len[(client % IMSS_THREAD_POOL) + 1], sizeof(local_addr_len[(client % IMSS_THREAD_POOL) + 1]), 0);
+			ret = send(new_socket, &local_addr_len[(client % IMSS_THREAD_POOL)], sizeof(local_addr_len[(client % IMSS_THREAD_POOL)]), 0);
 			if (ret == -1)
 			{
 				slog_error("ERR_HERCULES_DISPATCHER_SEND1");
 			}
-			ret = send(new_socket, local_addr[(client % IMSS_THREAD_POOL) + 1], local_addr_len[(client % IMSS_THREAD_POOL) + 1], 0);
+			ret = send(new_socket, local_addr[(client % IMSS_THREAD_POOL)], local_addr_len[(client % IMSS_THREAD_POOL)], 0);
 			if (ret == -1)
 			{
 				slog_error("ERR_HERCULES_DISPATCHER_SEND2");
@@ -2465,8 +2465,10 @@ void *dispatcher(void *th_argv)
 		}
 		else if (!strncmp(req_content, "MAIN!", 5))
 		{
-			ret = send(new_socket, &local_addr_len[1], sizeof(local_addr_len[1]), 0);
-			ret = send(new_socket, local_addr[1], local_addr_len[1], 0);
+			// TO FIX: 0 must be a dynamic value depending on the number of
+			// metadata servers.
+			ret = send(new_socket, &local_addr_len[0], sizeof(local_addr_len[0]), 0);
+			ret = send(new_socket, local_addr[0], local_addr_len[0], 0);
 		}
 		// Check if someone is requesting identity resources.
 		else if (*((int32_t *)req) == WHO)
