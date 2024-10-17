@@ -130,6 +130,7 @@ int32_t map_records::put(std::string key, void *address, uint64_t length)
 
 	// The following buffer is used for checkpoints.
 	// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding checkpoint thread copy the data to disk.
+	fprintf(stderr, "Inserting key = %s\n", key.c_str());
 	buffer_checkpoint.insert({key, 1});
 
 	return 0;
@@ -491,7 +492,8 @@ int write_2_disk(const char *filename, void *buffer, size_t size, size_t offset)
 	int ret = -1;
 	int file_fd = -1;
 
-	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/disk/%s", filename);
+	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", filename);
+	fprintf(stderr, "disk path = %s\n", disk_path);
 	file_fd = open(disk_path, O_CREAT | O_WRONLY, 0600);
 	if (file_fd < 0)
 	{
@@ -535,8 +537,8 @@ int32_t map_records::memory2disk()
 	// As a second solution, we will make an array an each new/updated block
 	// is going to be add to it on write operations. We do not need to store
 	// the block 0.
-	int pos = 0, copy_to_disk = 0, ret = 0, fd = -1, offset = 0, block_number;
-	string key, block, data_uri;
+	int pos = 0, copy_to_disk = 0, ret = 0, fd = -1, offset = 0, block_number = 0, skip = 0;
+	string  key, block, file_name;
 	void *address_ = NULL;
 	uint64_t block_size_rtvd = 0;
 
@@ -546,31 +548,40 @@ int32_t map_records::memory2disk()
 		if (copy_to_disk == 1)
 		{
 			key = it.first;
+			fprintf(stderr, "key.c_str(): %s\n", key.c_str());
 			if (key.empty())
 			{
-				fprintf(stderr,"Key is missing\n");
+				fprintf(stderr, "Key is missing\n");
 				continue;
 			}
-			
+
 			std::size_t found = key.find("$0");
 			if (found != std::string::npos)
 			{ // skips block 0.
 				continue;
 			}
+			// slog_debug("key.c_str(): %s", key.c_str());
 			// pos = key.find('$');
 			// path = key.substr(0, pos);
-			// data_uri = key.substr(pos, key.length() + 1);
 			pos = key.find('$');
-			block = key.substr(pos, key.length() + 1);
-			data_uri = key.substr(0, pos);
-			fprintf(stderr, "key=%s,\turi=%s,\tblock=%s\n", key.c_str(), data_uri.c_str(), block.c_str());
+			if (pos == std::string::npos) {
+				perror("HERCULES_ERR_MISSFORMAT_KEY");
+				slog_error("HERCULES_ERR_MISSFORMAT_KEY");
+				continue;
+			}
+
+			block = key.substr(pos+1, key.length());
+			skip = strlen("imss://");// +strlen(block.c_str());
+			fprintf(stderr, "pos=%d, skip=%d\n", pos, skip);
+			file_name = key.substr(strlen("imss://"), pos-skip);
+			fprintf(stderr, "key=%s,\tfile name=%s,\tblock=%s\n", key.c_str(), file_name.c_str(), block.c_str());
 
 			if (block.empty())
 			{
-				fprintf(stderr,"Block number is missing in %s\n", key.c_str());
+				fprintf(stderr, "Block number is missing in %s\n", key.c_str());
 				continue;
 			}
-			block_number =  std::stoi(block);
+			block_number = std::stoi(block);
 
 			ret = get(key, &address_, &block_size_rtvd);
 			if (ret == 0)
@@ -580,7 +591,8 @@ int32_t map_records::memory2disk()
 			}
 			offset = 512 * block_number; // TODO: block size * block number.
 
-			write_2_disk(data_uri.c_str(), address_, block_size_rtvd, offset);
+			write_2_disk(file_name.c_str(), address_, block_size_rtvd, offset);
+			buffer_checkpoint[key] = 0;
 		}
 	}
 	return 0;

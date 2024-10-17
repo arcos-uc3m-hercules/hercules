@@ -344,10 +344,8 @@ char *checkHerculesPath(const char *pathname)
 	}
 	else
 	{
-		//
 		if (!strncmp(pathname, MOUNT_POINT, strlen(MOUNT_POINT) - 1) || (pathname[0] != '/' && !strncmp(workdir, MOUNT_POINT, strlen(MOUNT_POINT) - 1)))
 		{
-			// if (pathname[0] == '.')
 			if (!strncmp(pathname, ".", strlen(pathname)))
 			{
 				slog_live("[IMSS] pathname=%s, workdir=%s", pathname, workdir);
@@ -363,7 +361,7 @@ char *checkHerculesPath(const char *pathname)
 				// slog_live("[HERCULES] after resolve path, pathname=%s, real_pathname=%s", pathname, real_pathname);
 				// new_path = convert_path(pathname);
 				ret = ResolvePath(pathname, absolute_pathname);
-				// slog_live("[IMSS] last option, pathname=%s, absolute_pathname_len=%d, workdir=%s", pathname, ret, workdir);
+				fprintf(stderr, "[IMSS] last option, pathname=%s, absolute_pathname_len=%d, workdir=%s\n", pathname, ret, workdir);
 				if (ret > 0)
 				{
 					// slog_live("[IMSS] absolute_pathname=%s", absolute_pathname);
@@ -442,6 +440,8 @@ char *convert_path(const char *name)
 			memmove(p, p + len, strlen(p + len) + 1);
 		}
 	}
+
+	fprintf(stderr, "name=%s, path=%s\n", name, path);
 
 	char *new_path = calloc(1024, sizeof(char));
 

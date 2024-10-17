@@ -803,7 +803,6 @@ int32_t main(int32_t argc, char **argv)
 			char formated_uri[REQUEST_SIZE];
 			sprintf(formated_uri, "%" PRIu32 " GET 0 %s", id, imss_uri);
 			slog_debug("[main] Request - %s", formated_uri);
-			fprintf(stderr, "[main] Request - %s, errno=%d:%s\n", formated_uri, errno, strerror(errno));
 			// Send the request.
 			if (send_req(ucp_worker, client_ep, req_addr, req_addr_len, formated_uri) == 0)
 			{
@@ -811,7 +810,6 @@ int32_t main(int32_t argc, char **argv)
 				perror("HERCULES_ERR__SEND_REQ");
 				return -1;
 			}
-			fprintf(stderr, "------------ AQUI\n");
 
 			// Get the length of the message to be received.
 			size_t length = 0;
@@ -940,14 +938,21 @@ int32_t main(int32_t argc, char **argv)
 
 	// Initialize pool of threads.
 	// pthread_t threads[(args.thread_pool + 1)];
-	int extra_threads = 2;
-	int total_threads = args.thread_pool + extra_threads;
+	int extra_threads = 0, total_threads = 0;
+	if (args.type == TYPE_DATA_SERVER)
+	{
+		region_locks = (pthread_mutex_t *)calloc(args.thread_pool, sizeof(pthread_mutex_t));
+		extra_threads = 2;
+	}
+	else
+	{
+		extra_threads = 1;
+	}
+
+	total_threads = args.thread_pool + extra_threads;
 	threads = (pthread_t *)malloc(total_threads * sizeof(pthread_t));
 	// Thread arguments.
 	p_argv arguments[total_threads];
-
-	if (args.type == TYPE_DATA_SERVER)
-		region_locks = (pthread_mutex_t *)calloc(args.thread_pool, sizeof(pthread_mutex_t));
 
 	ucp_worker_threads = (ucp_worker_h *)malloc(args.thread_pool * sizeof(ucp_worker_h));
 	local_addr = (ucp_address_t **)malloc(args.thread_pool * sizeof(ucp_address_t *));
@@ -981,7 +986,7 @@ int32_t main(int32_t argc, char **argv)
 				return -1;
 			}
 		}
-		else if (i == 1)
+		else if (i == 1 && args.type == TYPE_DATA_SERVER)
 		{
 			// TO FIX: This thread must be running only by the data server.
 			slog_debug("[SERVER] Creating checkpoint thread.");
@@ -997,7 +1002,6 @@ int32_t main(int32_t argc, char **argv)
 		else
 		{
 			aux_idx = i - extra_threads;
-			fprintf(stderr, "aux_idx=%d\n", aux_idx);
 			ret = init_worker(ucp_context, &ucp_worker_threads[aux_idx]);
 			if (ret != 0)
 			{
@@ -1122,7 +1126,7 @@ int32_t main(int32_t argc, char **argv)
 		slog_debug("[main] Request - %s", key_plus_size);
 		if (send_req(ucp_worker, client_ep, req_addr, req_addr_len, key_plus_size) == 0)
 		{
-			perror("ERR_HERCULES_RLSIMSS_SENDADDR");
+			perror("HERCULES_ERR_RLSIMSS_SENDADDR");
 			return -1;
 		}
 
@@ -1166,7 +1170,7 @@ int32_t main(int32_t argc, char **argv)
 		fprintf(stderr, "Server %d is ready\n", args.id);
 		if (pthread_join(threads[i], NULL) != 0)
 		{
-			perror("ERR_HERCULES_SERVER_THREAD_JOIN");
+			perror("HERCULES_ERR_SERVER_THREAD_JOIN");
 			return -1;
 		}
 		// fprintf(stderr,"Ending %c server %d\n", args.type, args.id);

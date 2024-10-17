@@ -66,7 +66,7 @@ int global_server_fd_thread = -1;
 size_t global_offset = 0;
 
 #define GARBAGE_COLLECTOR_PERIOD 120
-#define CKECKPOINT_PERIOD 120
+#define CKECKPOINT_PERIOD 5
 
 int ready(char *tmp_file_path, const char *msg)
 {
@@ -1321,6 +1321,7 @@ void *checkpoint(void *th_argv)
 	{
 		// Gnodetraverse_garbage_collector(map);//Future
 		sleep(CKECKPOINT_PERIOD);
+		fprintf(stderr,"Running Checkpointing\n");
 		pthread_mutex_lock(&mutex_garbage);
 		map->memory2disk();
 		pthread_mutex_unlock(&mutex_garbage);
