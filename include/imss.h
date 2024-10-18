@@ -43,6 +43,7 @@
 #define NO_LINK NULL
 
 extern int32_t IMSS_DEBUG;
+static uint64_t BLOCK_SIZE;
 
 #ifndef MAX
 #define MAX(x, y) ((x > y) ? x : y)

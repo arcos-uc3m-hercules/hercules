@@ -40,6 +40,7 @@
 typedef struct {
 	//Pointer to the corresponding type storing key-address couples.
 	std::shared_ptr<map_records> map = NULL;
+	std::shared_ptr<map_records> secondary_map = NULL;
 	//Pointer to the corresponding buffer region assigned to a thread. 
 	char *        pt;
 	//Integer specifying the port that a certain thread will listen to.
@@ -81,6 +82,8 @@ void * srv_attached_dispatcher (void * th_argv);
 void * dispatcher (void * th_argv);
 
 int ready(char *tmp_file_path, const char *msg);
+
+int get_number_of_active_nodes();
 
 #endif
 

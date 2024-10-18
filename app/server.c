@@ -71,52 +71,7 @@ extern int global_server_fd_thread;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
-/**
- * @brief Read the file "hercules_num_act_nodes" from disk, which contains
- * the current number of active data nodes.
- * @return Current number of active data nodes, on error -1 is returned.
- */
-int get_number_of_active_nodes()
-{
-	char buf[10];
-	// Open the "hercules_num_act_nodes" file. This file should be created by the
-	// user application or the malleability manager.
-	int fd = open("./hercules_num_act_nodes", O_RDONLY);
-	if (fd == -1)
-	{
-		perror("ERR_HERCULES_OPEN_NUM_ACTVIES_NODES");
-		return -1;
-	}
-	// Read the content.
-	int ret = read(fd, buf, sizeof(buf) - 1);
-	buf[ret] = '\0';
 
-	// In case of error, the number of active storage servers
-	// is not updated.
-	if (ret == -1)
-	{
-		perror("ERR_HERCULES_READ_NUM_ACTIVES_NODES");
-		ret = close(fd);
-		if (fd == -1)
-		{
-			perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
-		}
-		return -1;
-	}
-	else
-	{
-		number_active_storage_servers = atoi(buf);
-		fprintf(stderr, "[Wake up server] The new number of active data nodes is %s\n", buf);
-		slog_debug("[Wake up server] The new number of active data nodes is %s\n", buf);
-	}
-	// Close the file.
-	ret = close(fd);
-	if (fd == -1)
-	{
-		perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
-	}
-	return number_active_storage_servers;
-}
 
 /**
  * @brief Re-distribute the blocks of this server to another servers
@@ -906,6 +861,8 @@ int32_t main(int32_t argc, char **argv)
 
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(buffer_size * KB));
+	std::shared_ptr<map_records> secondary_map(new map_records(buffer_size * KB));
+
 	// copy the reference to a global map.
 	g_map = map;
 
@@ -1021,6 +978,7 @@ int32_t main(int32_t argc, char **argv)
 
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
+			arguments[i].secondary_map = secondary_map;
 			// Specify the address used by each thread to write inside the buffer.
 			arguments[i].pt = (char *)(aux_idx * buffer_segment + buffer_address);
 

@@ -40,7 +40,7 @@ pthread_mutex_t buff_size_mut;
 pthread_cond_t buff_size_cond;
 int32_t copied;
 
-uint64_t BLOCK_SIZE; // In KB
+// extern uint64_t BLOCK_SIZE; // In KB
 
 StsHeader *mem_pool;
 
@@ -111,7 +111,53 @@ int ready(char *tmp_file_path, const char *msg)
 	return 0;
 }
 
-// ucp_worker_h *global_ucp_worker;
+
+/**
+ * @brief Read the file "hercules_num_act_nodes" from disk, which contains
+ * the current number of active data nodes.
+ * @return Current number of active data nodes, on error -1 is returned.
+ */
+int get_number_of_active_nodes()
+{
+	char buf[10];
+	// Open the "hercules_num_act_nodes" file. This file should be created by the
+	// user application or the malleability manager.
+	int fd = open("./hercules_num_act_nodes", O_RDONLY);
+	if (fd == -1)
+	{
+		perror("ERR_HERCULES_OPEN_NUM_ACTVIES_NODES");
+		return -1;
+	}
+	// Read the content.
+	int ret = read(fd, buf, sizeof(buf) - 1);
+	buf[ret] = '\0';
+
+	// In case of error, the number of active storage servers
+	// is not updated.
+	if (ret == -1)
+	{
+		perror("ERR_HERCULES_READ_NUM_ACTIVES_NODES");
+		ret = close(fd);
+		if (fd == -1)
+		{
+			perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
+		}
+		return -1;
+	}
+	else
+	{
+		number_active_storage_servers = atoi(buf);
+		fprintf(stderr, "[Wake up server] The new number of active data nodes is %s\n", buf);
+		slog_debug("[Wake up server] The new number of active data nodes is %s\n", buf);
+	}
+	// Close the file.
+	ret = close(fd);
+	if (fd == -1)
+	{
+		perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
+	}
+	return number_active_storage_servers;
+}
 
 // if malleability_on = 1, new requests will be not handled and server will
 // respond with a "malleability" string.
@@ -143,7 +189,6 @@ void handle_signal(int signal)
 		// exit(0);
 	}
 }
-
 
 // Thread method attending client read-write data requests.
 void *srv_worker(void *th_argv)
@@ -312,6 +357,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
+	std::shared_ptr<map_records> secondary_map = arguments->secondary_map;
 
 	// Resources specifying if the ZMQ_SNDMORE flag was set in the sender.
 	int64_t more;
@@ -1056,7 +1102,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						return -1;
 					}
 
-					// buffer = (void *)calloc(BLOCK_SIZE, sizeof(char));
 					if (buffer == NULL)
 					{
 						buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
@@ -1141,7 +1186,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				// insert_successful = map->put(key, buffer, block_size_recv);
 				// insert_successful = map->put(key, buffer, BLOCK_SIZE);
 				insert_successful = map->put(key, buffer, size_asigned_to_block);
-
 				slog_debug("[WRITE_OP] insert_successful %d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
 				tr = clock() - tr;
 				double time_taken = ((double)tr) / CLOCKS_PER_SEC; // in seconds
@@ -1153,6 +1197,12 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					slog_error("ERR_HERCULES_WORKER_MAPPUT");
 					return -1;
 				}
+
+				// The following buffer is used for checkpoints.
+				// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding checkpoint thread copy the data to disk.
+				// fprintf(stderr, "Inserting key = %s\n", key.c_str());
+				// buffer_checkpoint.insert({key, 1});
+				secondary_map->put_simple(key, 1);
 
 				// Update the pointer.
 				arguments->pt += block_size_recv;
@@ -1206,6 +1256,9 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 
 						// TODO: should we update this block's size in the map?
 						// map->update(key, address_, msg_length);
+
+						secondary_map->update_simple(key, 1);
+
 						free(buffer);
 					}
 					else
@@ -1236,24 +1289,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 							perror("ERR_HERCULES_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
 							return -1;
 						}
-						// if (msg_length != block_size_rtvd)
-						// {
-						// 	block_size_rtvd = msg_length;
-						// }
 						// Verify if the new size (msg_length + block_offset) is greater than the old size (block_size_rtvd).
 						slog_debug("msg_length=%lu, block_offset=%d, msg_length=%d", msg_length, block_offset, msg_length);
-						// if (block_size_rtvd < msg_length + block_offset)
-						// {
-						// 	// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
-						// 	size_t new_size = msg_length + block_offset; // block_size_rtvd + block_offset;
-						// 	// fprintf(stderr, "** Extra size=%lu, msg_length=%lu, block_offset=%u, block_size_rtvd=%lu, address_=%p, ", new_size, msg_length, block_offset, block_size_rtvd, address_);
-						// 	address_ = (void *)realloc(address_, new_size);
-						// 	// fprintf(stderr, "new address = %p\n", address_);
-						// 	map->update(key, address_, new_size);
-						// }
-						// }
-						// if (!is_shared_memory)
-						// {
 						msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, msg_length, arguments->worker_uid, 1);
 						// msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
 						if (msg_length == 0)
@@ -1310,7 +1347,7 @@ void *garbage_collector(void *th_argv)
 	pthread_exit(NULL);
 }
 
-// Thread method to copy datasets from Hercules to Disk. 
+// Thread method to copy datasets from Hercules to Disk.
 void *checkpoint(void *th_argv)
 {
 	slog_debug("Init checkpoint writter");
@@ -1321,7 +1358,7 @@ void *checkpoint(void *th_argv)
 	{
 		// Gnodetraverse_garbage_collector(map);//Future
 		sleep(CKECKPOINT_PERIOD);
-		fprintf(stderr,"Running Checkpointing\n");
+		fprintf(stderr, "Running Checkpointing\n");
 		pthread_mutex_lock(&mutex_garbage);
 		map->memory2disk();
 		pthread_mutex_unlock(&mutex_garbage);

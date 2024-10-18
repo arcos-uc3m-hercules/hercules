@@ -53,10 +53,15 @@ public:
 
 	// Method storing a new record.
 	int32_t put(std::string key, void *address, uint64_t length);
+	int32_t put_simple(std::string key, int value);
+
 	// Method retrieving the address associated to a certain record.
 	int32_t get(std::string key, void **add_, uint64_t *size_);
+	int32_t get_simple(std::string key);
 
+	// Method updating a new record.
 	int32_t update(std::string key, void *add_, uint64_t length);
+	int32_t update_simple(std::string key, int value);
 
 	// Method renaming from stat_worker
 	int32_t rename_metadata_stat_worker(std::string old_key, std::string new_key);
