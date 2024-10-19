@@ -4,20 +4,13 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <sys/signal.h>
-// #include "imss.h"
 #include "metadata_stat.h"
-// #include "comms.h"
-// #include "workers.h"
 #include "memalloc.h"
 #include "directory.h"
 #include "records.hpp"
-#include "arg_parser.h"
 #include "map_ep.hpp"
-#include "cfg_parse.h"
 #include <inttypes.h>
 #include <unistd.h>
-// #include <fcntl.h>
-// #include <disk.h>
 
 // Pointer to the tree's root node.
 extern GNode *tree_root;
@@ -36,10 +29,6 @@ extern ucp_address_t **local_addr;
 extern size_t *local_addr_len;
 extern StsHeader *mem_pool;
 
-// URI of the created HERCULES.
-char *imss_uri;
-char META_HOSTFILE[512];
-
 struct arguments args;
 std::shared_ptr<map_records> g_map;
 
@@ -52,14 +41,6 @@ ucp_address_t *req_addr;
 ucp_ep_h client_ep;
 size_t req_addr_len;
 
-// void *map_ep;		   // map_ep used for async write; server doesn't use it
-// int32_t is_client = 0; // also used for async write
-
-int32_t IMSS_DEBUG_FILE = 0;
-int IMSS_DEBUG_LEVEL = SLOG_FATAL;
-int32_t IMSS_DEBUG_SCREEN = 0;
-int IMSS_THREAD_POOL = 1;
-int32_t MALLEABILITY = 0;
 unsigned long number_active_storage_servers = 0; // stores the current number of active storage servers.
 pthread_t *threads;
 
@@ -67,11 +48,7 @@ pthread_t *threads;
 extern int global_finish_threads;
 extern int global_server_fd_thread;
 
-// #define SHM_SIZE 20L * 1024L * 1024L * 1024L
-
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
-
-
 
 /**
  * @brief Re-distribute the blocks of this server to another servers
@@ -103,8 +80,6 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 	// Get the number of blocks stored by this data server.
 	int number_of_blocks_2_move = map->size();
 
-	// fprintf(stderr, "Server %d, has %d blocks, active storage servers=%lu, UCX_IB_RCACHE_MAX_REGIONS=%s\n", args.id, map->size(), number_active_storage_servers, getenv("UCX_IB_RCACHE_MAX_REGIONS"));
-	// fprintf(stderr, "Server %d, has %d blocks, active storage servers=%lu\n", args.id, map->size(), number_active_storage_servers);
 	slog_info("Server %d, has %d blocks, active storage servers=%lu", args.id, map->size(), number_active_storage_servers);
 	while ((curr_map_size = map->size()) > 0 && number_active_storage_servers > 0)
 	{
@@ -177,7 +152,7 @@ int stop_server()
 	char key_plus_size[REQUEST_SIZE];
 	// Send the created structure to the metadata server.
 	// last "0" is the server status to be set.
-	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, imss_uri, 0);
+	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, args.imss_uri, 0);
 	slog_debug("[main] Request - %s", key_plus_size);
 	if (send_req(ucp_worker, client_ep, req_addr, req_addr_len, key_plus_size) == 0)
 	{
@@ -208,7 +183,7 @@ int wakeup_server()
 	char key_plus_size[REQUEST_SIZE];
 	// Send the created structure to the metadata server.
 	// last "1" is the server status to be set.
-	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, imss_uri, 1);
+	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, args.imss_uri, 1);
 	// fprintf(stderr, "Request - %s\n", key_plus_size);
 	slog_debug("[main] Request - %s", key_plus_size);
 	if (send_req(ucp_worker, client_ep, req_addr, req_addr_len, key_plus_size) == 0)
@@ -287,12 +262,12 @@ void handle_signal_server(int signal)
 		}
 
 		// Data servers performs malleability operations if it is enabled.
-		if (args.type == TYPE_DATA_SERVER && MALLEABILITY == 1)
+		if (args.type == TYPE_DATA_SERVER && args.malleability == 1)
 		{
 			ret = stop_server();
 			if (ret == 0) // success.
 			{
-				ret = move_blocks_2_server(args.stat_port, args.id, imss_uri, g_map);
+				ret = move_blocks_2_server(args.stat_port, args.id, args.imss_uri, g_map);
 				if (ret < 0) // error.
 				{
 					// TODO: if "move_blocks_2_server" fails, try again?
@@ -334,18 +309,15 @@ int32_t main(int32_t argc, char **argv)
 	signal(SIGUSR1, handle_signal_server);
 	signal(SIGUSR2, handle_signal_server);
 
-	// Print off a hello world message
-	struct cfg_struct *cfg;
 	// clock_t t;
 	double time_taken;
 	int init_number_of_server = 1;
 
 	uint64_t bind_port;
-	char *stat_add;
+	char *stat_add = NULL;
 	// char *metadata_file;
-	char *deployfile;
+	char *deployfile = NULL;
 	int64_t buffer_size, stat_port, num_servers;
-	void *socket;
 	ucp_ep_params_t ep_params;
 	ucp_address_t *peer_addr;
 	size_t addr_len;
@@ -366,20 +338,10 @@ int32_t main(int32_t argc, char **argv)
 	uint32_t num_blocks;
 
 	// shared memory.
-	int shm_data_id;
+	int shm_data_id = 0;
+	char tmp_file_path[PATH_MAX];
 
-	char tmp_file_path[100];
-
-	char *conf_path;
-	char abs_exe_path[1024];
-	char *aux;
-
-	// t = clock();
 	time_t t = time(NULL);
-
-	/***************************************************************/
-	/******************* PARSE FILE ARGUMENTS **********************/
-	/***************************************************************/
 
 	if (argc < 3)
 	{
@@ -408,205 +370,25 @@ int32_t main(int32_t argc, char **argv)
 
 	sprintf(tmp_file_path, "/tmp/%c-hercules-%d-start", args.type, args.id);
 
-	cfg = cfg_init();
-	conf_path = getenv("HERCULES_CONF");
-	if (conf_path != NULL)
+	// Fill the args struct with the enviroment variables or config file values.
+	ret = getConfiguration(&args);
+	if (ret == -1)
 	{
-		fprintf(stderr, "Loading %s\n", conf_path);
-		ret = cfg_load(cfg, conf_path);
-		if (ret)
-		{
-			fprintf(stderr, "%s has not been loaded\n", conf_path);
-		}
-	}
-	else
-	{
-		ret = 1;
+		return 0;
 	}
 
-	if (ret)
-	{
-		char default_paths[3][PATH_MAX] = {
-			"/etc/hercules.conf",
-			"./hercules.conf",
-			"hercules.conf"};
-
-		for (size_t i = 0; i < 3; i++)
-		{
-			// fprintf(stderr, "Loading %s\n", default_paths[i]);
-			if (cfg_load(cfg, default_paths[i]) == 0)
-			{
-				ret = 0;
-				break;
-			}
-		}
-		if (ret)
-		{
-			if (getcwd(abs_exe_path, sizeof(abs_exe_path)) != NULL)
-			{
-				conf_path = (char *)malloc(sizeof(char) * PATH_MAX);
-				sprintf(conf_path, "%s/%s", abs_exe_path, "../conf/hercules.conf");
-				if (cfg_load(cfg, conf_path) == 0)
-				{
-					ret = 0;
-				}
-			}
-		}
-
-		if (!ret)
-		{
-			// fprintf(stderr, "Configuration file loaded: %s\n", conf_path);
-		}
-		else
-		{
-			fprintf(stderr, "Configuration file not found\n");
-			perror("ERR_HERCULES_CONF_NOT_FOUND");
-			return -1;
-		}
-		free(conf_path);
-	}
-	else
-	{
-		// fprintf(stderr, "Configuration file loaded: %s\n", conf_path);
-	}
-
-	if (cfg_get(cfg, "URI"))
-	{
-		aux = cfg_get(cfg, "URI");
-		strcpy(args.imss_uri, aux);
-	}
-
-	if (cfg_get(cfg, "BLOCK_SIZE"))
-		args.block_size = atoi(cfg_get(cfg, "BLOCK_SIZE")); // block size in kilobytes.
-
-	if (args.type == TYPE_DATA_SERVER)
-	{
-		if (cfg_get(cfg, "NUM_DATA_SERVERS"))
-			args.num_servers = atoi(cfg_get(cfg, "NUM_DATA_SERVERS"));
-	}
-
-	if (cfg_get(cfg, "MALLEABILITY"))
-		MALLEABILITY = atoi(cfg_get(cfg, "MALLEABILITY"));
-
-	if (MALLEABILITY != 0 && MALLEABILITY != 1)
-	{
-		perror("ERR_HERCULES_BAD_MALLEABILITY_OPTION");
-	}
-
-	if (cfg_get(cfg, "THREAD_POOL"))
-		args.thread_pool = atoi(cfg_get(cfg, "THREAD_POOL"));
-
-	if (cfg_get(cfg, "STORAGE_SIZE"))
-		args.storage_size = atoi(cfg_get(cfg, "STORAGE_SIZE")); // in giga bytes.
-
-	if (cfg_get(cfg, "METADA_PERSISTENCE_FILE"))
-	{
-		aux = cfg_get(cfg, "METADA_PERSISTENCE_FILE");
-		strcpy(args.stat_logfile, aux);
-	}
-
-	if (cfg_get(cfg, "METADATA_PORT"))
-		args.stat_port = atol(cfg_get(cfg, "METADATA_PORT"));
-
-	if (cfg_get(cfg, "METADATA_HOSTFILE"))
-	{
-		aux = cfg_get(cfg, "METADATA_HOSTFILE");
-		strcpy(META_HOSTFILE, aux);
-	}
-
-	if (cfg_get(cfg, "DATA_PORT"))
-		args.port = atol(cfg_get(cfg, "DATA_PORT"));
-
-	if (cfg_get(cfg, "DATA_HOSTFILE"))
-	{
-		aux = cfg_get(cfg, "DATA_HOSTFILE");
-		strcpy(args.deploy_hostfile, aux);
-	}
-
-	if (cfg_get(cfg, "POLICY"))
-		POLICY = cfg_get(cfg, "POLICY");
-	else
-	{
-		fprintf(stderr, "Distribution Policy has not been stablish. \n Please, add the following line in your configuration file POLICY = RR\n");
-		perror("ERR_HERCULES_POLICY_NOT_FOUND");
-		return -1;
-	}
-
-	if (getenv("HERCULES_DEBUG_LEVEL") != NULL)
-	{
-		aux = getenv("HERCULES_DEBUG_LEVEL");
-	}
-	else if (cfg_get(cfg, "DEBUG_LEVEL"))
-	{
-		aux = cfg_get(cfg, "DEBUG_LEVEL");
-	}
-	else
-	{
-		aux = NULL;
-	}
-
-	if (aux != NULL)
-	{
-		if (strstr(aux, "file"))
-		{
-			IMSS_DEBUG_FILE = 1;
-			IMSS_DEBUG_SCREEN = 0;
-			IMSS_DEBUG_LEVEL = SLOG_LIVE;
-		}
-		else if (strstr(aux, "stdout"))
-			IMSS_DEBUG_SCREEN = 1;
-		else if (strstr(aux, "debug"))
-			IMSS_DEBUG_LEVEL = SLOG_DEBUG;
-		else if (strstr(aux, "live"))
-			IMSS_DEBUG_LEVEL = SLOG_LIVE;
-		else if (strstr(aux, "all"))
-		{
-			IMSS_DEBUG_FILE = 1;
-			IMSS_DEBUG_SCREEN = 1;
-			IMSS_DEBUG_LEVEL = SLOG_PANIC;
-		}
-		else if (strstr(aux, "none"))
-		{
-			IMSS_DEBUG_FILE = 0;
-			IMSS_DEBUG_SCREEN = 0;
-			IMSS_DEBUG_LEVEL = SLOG_NONE;
-			unsetenv("IMSS_DEBUG");
-		}
-		else
-		{
-			IMSS_DEBUG_FILE = 1;
-			IMSS_DEBUG_LEVEL = getLevel(aux);
-		}
-	}
-	else
-	{
-		IMSS_DEBUG_FILE = 0;
-		IMSS_DEBUG_SCREEN = 0;
-		IMSS_DEBUG_LEVEL = SLOG_NONE;
-		unsetenv("IMSS_DEBUG");
-	}
-	cfg_free(cfg);
-
-	// IMSS_DEBUG_LEVEL = SLOG_NONE;
-
-	/***************************************************************/
-	/******************** PARSE INPUT ARGUMENTS ********************/
-	/***************************************************************/
-
-	if (getenv("IMSS_THREAD_POOL") != NULL)
-	{
-		args.thread_pool = atol(getenv("IMSS_THREAD_POOL"));
-	}
-
+	// args.logging.hercules_debug_level = SLOG_NONE;
 	IMSS_THREAD_POOL = args.thread_pool;
 
-	char log_path[1000];
+	char log_path[PATH_MAX];
 	slog_debug("Server type=%c\n", args.type);
 	struct tm tm = *localtime(&t);
 	sprintf(log_path, "./%c-server-%d.%02d-%02d-%02d", args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
-	slog_init(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, args.id);
 
-	if (IMSS_DEBUG_FILE > 0)
+	// Initializate logger.
+	slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, args.id);
+
+	if (args.logging.hercules_debug_file > 0)
 	{
 		printf("Log path = %s\n", log_path);
 		fflush(stdout);
@@ -617,11 +399,19 @@ int32_t main(int32_t argc, char **argv)
 	if (args.type == TYPE_DATA_SERVER)
 	{
 		args.stat_host = argv[3];
-		slog_debug("imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_host, args.stat_port, args.num_servers, args.deploy_hostfile, args.block_size, args.storage_size, args.bufsize);
+		slog_debug("imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_host, args.stat_port, args.num_data_servers, args.deploy_hostfile, args.block_size, args.storage_size, args.bufsize);
 		// bind port number.
 		bind_port = args.port;
-
 		init_number_of_server = atoi(argv[4]);
+
+		// int num_active_storages = 0;
+		// num_active_storages = open_imss(IMSS_ROOT);
+		// if (num_active_storages < 0)
+		// {
+		// 	slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+		// 	printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
+		// 	return -1;
+		// }
 	}
 	else
 	{
@@ -634,8 +424,6 @@ int32_t main(int32_t argc, char **argv)
 
 	// buffer size provided
 	buffer_size = args.bufsize;
-	// set up HERCULES uri (default value is already set up in args)
-	imss_uri = (char *)calloc(32, sizeof(char));
 
 	/* Initialize the UCX required objects */
 	slog_info("Before init context");
@@ -678,15 +466,13 @@ int32_t main(int32_t argc, char **argv)
 	// HERCULES server.
 	if (args.type == TYPE_DATA_SERVER)
 	{
-		// HERCULES name.
-		strcpy(imss_uri, args.imss_uri);
 		// machine name where the metadata server is being executed.
 		stat_add = args.stat_host;
 		// port that the metadata server is listening on.
 		stat_port = args.stat_port;
 		// number of servers conforming the HERCULES deployment.
-		num_servers = args.num_servers;
-		// Dinamic number of servers conforming the HERCULES deployment used by malleability.
+		num_servers = args.num_data_servers;
+		// Dynamic number of servers conforming the HERCULES deployment used by malleability.
 		number_active_storage_servers = num_servers;
 		// HERCULES' MPI deployment file.
 		deployfile = args.deploy_hostfile;
@@ -756,7 +542,7 @@ int32_t main(int32_t argc, char **argv)
 		{
 			// Formated HERCULES uri to be sent to the metadata server.
 			char formated_uri[REQUEST_SIZE];
-			sprintf(formated_uri, "%" PRIu32 " GET 0 %s", id, imss_uri);
+			sprintf(formated_uri, "%" PRIu32 " GET 0 %s", id, args.imss_uri);
 			slog_debug("[main] Request - %s", formated_uri);
 			// Send the request.
 			if (send_req(ucp_worker, client_ep, req_addr, req_addr_len, formated_uri) == 0)
@@ -927,7 +713,7 @@ int32_t main(int32_t argc, char **argv)
 		arguments[i].tmp_file_path = tmp_file_path;
 
 		// Add the instance URI to the thread arguments.
-		strcpy(arguments[i].my_uri, imss_uri);
+		strcpy(arguments[i].my_uri, args.imss_uri);
 
 		// Deploy all dispatcher + service threads.
 		if (i == 0)
@@ -1015,7 +801,7 @@ int32_t main(int32_t argc, char **argv)
 		// Metadata structure containing the novel HERCULES info.
 		imss_info my_imss;
 
-		strcpy(my_imss.uri_, imss_uri);
+		strcpy(my_imss.uri_, args.imss_uri);
 		my_imss.ips = (char **)calloc(num_servers, sizeof(char *));
 		my_imss.status = (int *)malloc(num_servers * sizeof(int));					// calloc(num_servers, sizeof(int32_t));
 		my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int)); // calloc(num_servers, sizeof(int32_t));
@@ -1028,7 +814,7 @@ int32_t main(int32_t argc, char **argv)
 
 		if ((svr_nodes = fopen(deployfile, "r+")) == NULL)
 		{
-			char err_msg[512];
+			char err_msg[MAX_ERR_MSG_LEN];
 			sprintf(err_msg, "HERCULES_ERR_DEPLOYFILE_OPEN:%s", deployfile);
 			perror(err_msg);
 			slog_fatal("%s", err_msg);
@@ -1108,7 +894,7 @@ int32_t main(int32_t argc, char **argv)
 		// fix: set real number of metadata servers.
 		// fprintf(stderr, "Connecting to metadata server\n");
 		slog_debug("Connecting to metadata server\n");
-		if (stat_init(META_HOSTFILE, stat_port, 1, args.id) == -1)
+		if (stat_init(args.meta_hostfile, stat_port, 1, args.id) == -1)
 		{
 			// In case of error notify and exit
 			slog_error("Stat init failed, cannot connect to Metadata server.");
@@ -1141,7 +927,6 @@ int32_t main(int32_t argc, char **argv)
 		// save metadata info in disk.
 		// if (metadata_write(metadata_file, buffer, map.get(), arguments, buffer_segment, bytes_written) == -1)
 		// 	return -1;
-		// free(imss_uri);
 
 		// Freeing all resources of the tree structure.
 		g_node_traverse(tree_root, G_PRE_ORDER, G_TRAVERSE_ALL, -1, gnodetraverse, NULL);

@@ -11,14 +11,12 @@
 #include "records.hpp"
 #include "map_server_eps.hpp"
 #include <sys/time.h>
-// #include <inttypes.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <mcheck.h>
-
 #include <fcntl.h>
 
 // Lock dealing when cleaning blocks
@@ -60,7 +58,7 @@ ucp_worker_h *ucp_worker_threads;
 ucp_address_t **local_addr;
 size_t *local_addr_len;
 
-extern int IMSS_THREAD_POOL;
+// extern int IMSS_THREAD_POOL;
 int global_finish_threads = 0;
 int global_server_fd_thread = -1;
 size_t global_offset = 0;
@@ -72,7 +70,7 @@ int ready(char *tmp_file_path, const char *msg)
 {
 	// fprintf(stderr, "Trying to create the file %s with the message %s\n", tmp_file_path, msg);
 	char status[25];
-	char err_msg[132];
+	char err_msg[MAX_ERR_MSG_LEN];
 	FILE *tmp_file; // = tmpfile(); // make the file pointer as temporary file.
 
 	tmp_file = fopen(tmp_file_path, "w");
@@ -112,53 +110,6 @@ int ready(char *tmp_file_path, const char *msg)
 }
 
 
-/**
- * @brief Read the file "hercules_num_act_nodes" from disk, which contains
- * the current number of active data nodes.
- * @return Current number of active data nodes, on error -1 is returned.
- */
-int get_number_of_active_nodes()
-{
-	char buf[10];
-	// Open the "hercules_num_act_nodes" file. This file should be created by the
-	// user application or the malleability manager.
-	int fd = open("./hercules_num_act_nodes", O_RDONLY);
-	if (fd == -1)
-	{
-		perror("ERR_HERCULES_OPEN_NUM_ACTVIES_NODES");
-		return -1;
-	}
-	// Read the content.
-	int ret = read(fd, buf, sizeof(buf) - 1);
-	buf[ret] = '\0';
-
-	// In case of error, the number of active storage servers
-	// is not updated.
-	if (ret == -1)
-	{
-		perror("ERR_HERCULES_READ_NUM_ACTIVES_NODES");
-		ret = close(fd);
-		if (fd == -1)
-		{
-			perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
-		}
-		return -1;
-	}
-	else
-	{
-		number_active_storage_servers = atoi(buf);
-		fprintf(stderr, "[Wake up server] The new number of active data nodes is %s\n", buf);
-		slog_debug("[Wake up server] The new number of active data nodes is %s\n", buf);
-	}
-	// Close the file.
-	ret = close(fd);
-	if (fd == -1)
-	{
-		perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
-	}
-	return number_active_storage_servers;
-}
-
 // if malleability_on = 1, new requests will be not handled and server will
 // respond with a "malleability" string.
 // int malleability_on = 0;
@@ -170,23 +121,12 @@ void handle_signal(int signal)
 	{
 		fprintf(stderr, "*** Received SIGUSR1\n");
 		global_finish_threads = 1;
-		// malleability_on = 1;
 
 		// To dispatcher thread.
 		if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
 		{
 			fprintf(stderr, "Error closing server_fd\n");
 		}
-		// ucs_status_t status;
-		// status = ucp_worker_signal(global_ucp_worker);
-		// if (status != UCS_OK)
-		// {
-		// 	fprintf(stderr, "Failed to signal to UCX worker: %s\n", ucs_status_string(status));
-		// }
-
-		// ucp_listener_destroy(context.listener);
-		// pthread_exit(NULL);
-		// exit(0);
 	}
 }
 

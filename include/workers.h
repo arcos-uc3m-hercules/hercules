@@ -5,7 +5,9 @@
 #include "comms.h"
 #include "records.hpp"
 #include "shared_memory.h"
+#include "hercules.h"
 #include <memory>
+
 
 #define READ_OP			  0
 #define GETDIR			  1
@@ -82,8 +84,6 @@ void * srv_attached_dispatcher (void * th_argv);
 void * dispatcher (void * th_argv);
 
 int ready(char *tmp_file_path, const char *msg);
-
-int get_number_of_active_nodes();
 
 #endif
 

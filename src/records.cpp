@@ -577,18 +577,20 @@ int32_t map_records::memory2disk()
 
 	// We need to check if the block has been copied to disk or if it was updated.
 
-	// TODO: add a new field to the map to know if the block needs to be copy to disk. For example, a field called: status = dirty means there are new information. This can be stablish on the block 0 o by each block.
+	// TODO: add a new field to the map to know if the block needs to be copy to disk. For example, a field called: status = dirty means there are new information. This can be establish on the block 0 o by each block.
 	// As a second solution, we will make an array an each new/updated block
 	// is going to be add to it on write operations. We do not need to store
 	// the block 0.
-	int pos = 0, copy_to_disk = 0, ret = 0, fd = -1, offset = 0, block_number = 0, skip = 0;
+	int pos = 0, copy_to_disk = 0, ret = 0, fd = -1, offset = 0, block_number = 0, skip = 0, number_active_storage_servers = 0;
 	string key, block, file_name, data_uri;
 	char key_block_0[PATH_MAX];
 	void *address_ = NULL;
 	void *address_block_0 = NULL;
 	uint64_t block_size_rtvd = 0, block_0_size = 0;
 	struct stat *stats = NULL;
-	// uint64_t BLOCK_SIZE;
+
+	// get the current number of active data servers.
+	number_active_storage_servers = get_number_of_active_nodes();
 
 	for (const auto &it : buffer_checkpoint)
 	{
@@ -612,7 +614,7 @@ int32_t map_records::memory2disk()
 			// pos = key.find('$');
 			// path = key.substr(0, pos);
 			// pos = key.find('$');
-			pos = key.find('$') + 1;						   // +1 to skip '$' on the block number.
+			pos = key.find('$') + 1; // +1 to skip '$' on the block number.
 			if (pos == std::string::npos)
 			{
 				perror("HERCULES_ERR_MISSFORMAT_KEY");
@@ -626,16 +628,16 @@ int32_t map_records::memory2disk()
 			// file_name = key.substr(strlen("imss://"), pos - skip);
 			// fprintf(stderr, "key=%s,\tfile name=%s,\tblock=%s\n", key.c_str(), file_name.c_str(), block.c_str());
 
-			block = key.substr(pos, key.length() + 1); 		// substract the block number from the key.
+			block = key.substr(pos, key.length() + 1); // substract the block number from the key.
 			if (block.empty())
 			{
 				fprintf(stderr, "Block number is missing in %s\n", key.c_str());
 				continue;
 			}
 			// block_number = std::stoi(block);
-			block_number = stoi(block, 0, 10);				//  string to number.
-			pos -= 1;										// -1 to skip '$' on the data uri.
-			data_uri = key.substr(0, pos);			   		// substract the data uri from the key.
+			block_number = stoi(block, 0, 10); //  string to number.
+			pos -= 1;						   // -1 to skip '$' on the data uri.
+			data_uri = key.substr(0, pos);	   // substract the data uri from the key.
 			file_name = data_uri.substr(strlen("imss://"));
 
 			ret = get(key, &address_, &block_size_rtvd);
@@ -651,10 +653,28 @@ int32_t map_records::memory2disk()
 			ret = get(key_block_0, &address_block_0, &block_0_size);
 			if (ret == 0)
 			{
-				fprintf(stderr, "key %s not found for checkpointing\n", key.c_str());
+				fprintf(stderr, "Block 0 for key %s not found for checkpointing on the local map\n", key.c_str());
 				// continue;
 			}
 			int next_server = find_server(number_active_storage_servers, block_number, data_uri.c_str(), 0);
+
+			if (next_server < 0)
+			{
+				perror("HERCULES_ERR_WRONG_NEXT_SERVER");
+				slog_debug("HERCULES_ERR_WRONG_NEXT_SERVER");
+				continue;
+			}
+
+			// get block 0 from data server.
+			// ret = get_ndata(ds, 0, address_block_0, 0, 0);
+			// if (ret < 0)
+			// {
+			// 	char err_msg[128];
+			// 	sprintf(err_msg, "HERCULES_ERR_REFRESH: %s", path);
+			// 	slog_error("[imss_refresh] %s", err_msg);
+			// 	return -1;
+			// }
+			// stats = (struct stat *)aux;
 
 			stats = (struct stat *)address_block_0;
 			if (stats == NULL)
@@ -671,7 +691,7 @@ int32_t map_records::memory2disk()
 
 			offset = BLOCK_SIZE * block_number; // TODO: block size * block number.
 
-			write_2_disk(file_name.c_str(), address_, block_size_rtvd, offset);
+			// write_2_disk(file_name.c_str(), address_, block_size_rtvd, offset);
 			buffer_checkpoint[key] = 0;
 		}
 	}

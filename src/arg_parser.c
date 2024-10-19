@@ -6,7 +6,7 @@
 static error_t parse_opt(int key, char *arg, struct argp_state *state);
 
 const char *argp_program_version =
-    "IMSS 2.0";
+    "HERCULES 3.0";
 
 /* Program documentation. */
 static char doc[] =
@@ -25,22 +25,22 @@ static struct argp_option options[] = {
 
     {0, 0, 0, 0, "\nOptions:\n"},
     {0, 0, 0, 0, "Common options:"},
-    {"port", PORT, "PORT", 0, "Listening port number"},
+    {"port", PORT_OPT, "PORT", 0, "Listening port number"},
     // TODO: figure out what bufsize ACTUALLY does
-    {"bufsize", BUFSIZE, "BUFFER_SIZE", 0, "Buffer size; max RAM size that can be used; 0 if omitted, which means NO LIMIT"},
-    {"server-id", ID, "ID", 0, "0 if omitted"},
+    {"bufsize", BUFSIZE_OPT, "BUFFER_SIZE", 0, "Buffer size; max RAM size that can be used; 0 if omitted, which means NO LIMIT"},
+    {"server-id", ID_OPT, "ID", 0, "0 if omitted"},
 
     {0, 0, 0, 0, "Data server options (required only if type=d):"},
-    {"imss-uri", IMSS_URI, "IMSS_URI", 0, "IMSS URI (data server); 'imss://' if omitted"},
-    {"stat-host", STAT_HOST, "HOSTNAME", 0, "Metadata server hostname"},
-    {"stat-port", STAT_PORT, "PORT", 0, "Metadata server port number"},
-    {"num-servers", NUM_SERVERS, "NUM_SERVERS", 0, "Number of data servers for this IMSS deployment"},
-    {"deploy-hostfile", DEPLOY_HOSTFILE, "FILE", 0, "IMSS MPI deployment file; contains hostnames of data servers"},
-    {"block-size", BLOCK_SIZE, "BLOCK_SIZE", 0, "Size of each data block in KB"},
-    {"storage-size", STORAGE_SIZE, "STORAGE_SIZE", 0, "Total amount of RAM in GB to be used as storage"},
+    {"imss-uri", IMSS_URI_OPT, "IMSS_URI", 0, "IMSS URI (data server); 'imss://' if omitted"},
+    {"stat-host", STAT_HOST_OPT, "HOSTNAME", 0, "Metadata server hostname"},
+    {"stat-port", STAT_PORT_OPT, "PORT", 0, "Metadata server port number"},
+    {"num-servers", NUM_SERVERS_OPT, "NUM_SERVERS", 0, "Number of data servers for this IMSS deployment"},
+    {"deploy-hostfile", DEPLOY_HOSTFILE_OPT, "FILE", 0, "IMSS MPI deployment file; contains hostnames of data servers"},
+    {"block-size", BLOCK_SIZE_OPT, "BLOCK_SIZE", 0, "Size of each data block in KB"},
+    {"storage-size", STORAGE_SIZE_OPT, "STORAGE_SIZE", 0, "Total amount of RAM in GB to be used as storage"},
 
     {0, 0, 0, 0, "Metadata server options (required only if type=m):"},
-    {"stat-logfile", STAT_LOGFILE, "FILE", 0, "Metadata server logfile"},
+    {"stat-logfile", STAT_LOGFILE_OPT, "FILE", 0, "Metadata server logfile"},
     {0}};
 
 /* Parse a single option. */
@@ -52,37 +52,37 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 
     switch (key)
     {
-    case PORT:
+    case PORT_OPT:
         args->port = (uint16_t)atoi(arg);
         break;
-    case BUFSIZE:
+    case BUFSIZE_OPT:
         args->bufsize = atoi(arg);
         break;
-    case ID:
+    case ID_OPT:
         args->id = atoi(arg);
         break;
-    case IMSS_URI:
+    case IMSS_URI_OPT:
         strcpy(args->imss_uri, arg);
         break;
-    case STAT_HOST:
+    case STAT_HOST_OPT:
         args->stat_host = arg;
         break;
-    case STAT_PORT:
+    case STAT_PORT_OPT:
         args->stat_port = atoi(arg);
         break;
-    case NUM_SERVERS:
-        args->num_servers = atoi(arg);
+    case NUM_SERVERS_OPT:
+        args->num_data_servers = atoi(arg);
         break;
-    case DEPLOY_HOSTFILE:
+    case DEPLOY_HOSTFILE_OPT:
         strcpy(args->deploy_hostfile, arg);
         break;
-    case BLOCK_SIZE:
+    case BLOCK_SIZE_OPT:
         args->block_size = atoi(arg);
         break;
-    case STORAGE_SIZE:
+    case STORAGE_SIZE_OPT:
         args->storage_size = atoi(arg);
         break;
-    case STAT_LOGFILE:
+    case STAT_LOGFILE_OPT:
         strcpy(args->stat_logfile, arg);
         break;
     case ARGP_KEY_ARG:
@@ -110,7 +110,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
             argp_failure(state, 1, 0, "Required options: -p. \nSee --help for more detail");
         }
         if (args->type == TYPE_DATA_SERVER &&
-            (!args->stat_host || !args->stat_port || !args->num_servers ||
+            (!args->stat_host || !args->stat_port || !args->num_data_servers ||
              !args->deploy_hostfile || !args->block_size))
         {
             argp_failure(state, 1, 0, "Required options for data server type: -H, -P, -n, -d, -B, -s. \nSee --help for more detail");
@@ -140,7 +140,7 @@ int parse_args(int argc, char **argv, struct arguments *args)
     args->bufsize = 0;
     strcpy(args->imss_uri, "imss://");
     args->stat_port = 0;
-    args->num_servers = 0;
+    args->num_data_servers = 0;
     args->block_size = 64;  // In KB
     args->storage_size = 8; // In GB
 

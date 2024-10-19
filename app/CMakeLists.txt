@@ -22,6 +22,7 @@ ADD_EXECUTABLE( hercules_server
 		../src/imss.c
 		../src/shared_memory.c
 		../src/policies.c
+		../src/hercules.c
 )
 
 ADD_LIBRARY( imss_static STATIC

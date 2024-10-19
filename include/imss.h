@@ -7,7 +7,6 @@
 // to manage logs.
 #include "slog.h"
 
-
 // Maximum number of bytes assigned to a dataset or IMSS URI.
 #define URI_ 256
 
@@ -21,7 +20,7 @@
 
 // Replication type
 #define SYNC 0	// all replicas are written synchronously
-#define ASYNC 1	// first replica is written synchronously, the rest asynchronously
+#define ASYNC 1 // first replica is written synchronously, the rest asynchronously
 
 // Type of IMSS instance to be deployed.
 #define DETACHED 0
@@ -41,6 +40,10 @@
 #define DATASET 1
 
 #define NO_LINK NULL
+
+// Max length for perror messages.
+#define MAX_ERR_MSG_LEN PATH_MAX + 100
+
 
 extern int32_t IMSS_DEBUG;
 static uint64_t BLOCK_SIZE;
@@ -77,12 +80,12 @@ static uint64_t BLOCK_SIZE;
 		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
 		ret;                                                   \
 	})
-#define TIMING_NO_RETURN(function_to_call, print_comment)          \
+#define TIMING_NO_RETURN(function_to_call, print_comment)      \
 	({                                                         \
 		clock_t t;                                             \
 		double time_taken;                                     \
 		t = clock();                                           \
-		function_to_call;                                \
+		function_to_call;                                      \
 		t = clock() - t;                                       \
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
 		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
@@ -190,8 +193,8 @@ typedef struct
 	char link[256];
 	int is_link;
 
-	int n_open;		  // how many process has the file open.
-	char status[128]; // delete the dataset when "dest" is set.
+	int n_open;						// how many process has the file open.
+	char status[128];				// delete the dataset when "dest" is set.
 	int32_t n_servers_when_created; // Number of active servers when this dataset is created.
 } dataset_info;
 
@@ -461,24 +464,36 @@ The current function does not allocate memory.
 				   int64_t size);
 
 	/**
-	 * @brief Method retrieving a data element associated to a certain dataset starting in an offset.
-	 * @param dataset_id - Number identifying the concerned dataset among the client's session.
-	 * @param data_id    - Data block number identifying the data block to be retrieved.
-	 * @param buffer     - Memory address where the requested block will be received. WARNING: memory must have been allocated.
+	 * @brief Method retrieving a data element associated to a certain dataset 
+	 * starting in an offset.
+	 * @param dataset_id - Number identifying the concerned dataset among the 
+	 * client's session.
+	 * @param data_id    - Data block number identifying the data block to be 
+	 * retrieved.
+	 * @param n_server - Number of data server which holds the data block, 
+	 * passing -1 will auto finding the number of data server.
+	 * @param buffer     - Memory address where the requested block will be 
+	 * received. WARNING: memory must have been allocated.
 	 * @param offset	 - Offset of the requested block.
-	 * @returns 0 if the requested block was successfully retrieved, 0 if the requested block was not find in the remote server,
-	 * or -1 in case of error.
+	 * @returns 0 if the requested block was successfully retrieved, 0 if the 
+	 * requested block was not find in the remote server, or -1 in case of 
+	 * error.
 	 */
-	ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
+	ssize_t get_ndata(int32_t dataset_id, int32_t n_server, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
 
 	/**
-	 * @brief Method used during malleability to retrieving a data element associated to a certain dataset starting in an offset.
-	 * @param dataset_id - Number identifying the concerned dataset among the client's session.
-	 * @param data_id    - Data block number identifying the data block to be retrieved.
-	 * @param buffer     - Memory address where the requested block will be received. WARNING: memory must have been allocated.
+	 * @brief Method used during malleability to retrieving a data element 
+	 * associated to a certain dataset starting in an offset.
+	 * @param dataset_id - Number identifying the concerned dataset among the 
+	 * client's session.
+	 * @param data_id    - Data block number identifying the data block to be 
+	 * retrieved.
+	 * @param buffer     - Memory address where the requested block will be 
+	 * received. WARNING: memory must have been allocated.
 	 * @param offset	 - Offset of the requested block.
-	 * @returns 0 if the requested block was successfully retrieved, 0 if the requested block was not find in the remote server,
-	 * or -1 in case of error.
+	 * @returns 0 if the requested block was successfully retrieved, 0 if the 
+	 * requested block was not find in the remote server, or -1 in case of 
+	 * error.
 	 */
 	size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int32_t num_storages);
 	/* Method storing a specific data element.
@@ -531,6 +546,13 @@ char ** locations = get_dataloc(datasetd, data_id, &num_storages);
 			  uint32_t size);
 
 	char **get_dataloc(const char *dataset, int32_t data_id, int32_t *num_storages);
+
+	/**
+	 * @brief Read the file "hercules_num_act_nodes" from disk, which contains
+	 * the current number of active data nodes.
+	 * @return Current number of active data nodes, on error -1 is returned.
+	 */
+	int get_number_of_active_nodes();
 
 	/* Method specifying the type (DATASET or IMSS INSTANCE) of a provided URI.
 

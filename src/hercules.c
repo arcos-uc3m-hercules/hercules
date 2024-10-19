@@ -11,6 +11,8 @@
 #include "directory.h"
 #include "records.hpp"
 #include "comms.h"
+#include "hercules.h"
+
 
 /***************************************************************************
 *******************************  STRUCTURES  *******************************
@@ -85,8 +87,6 @@ uint16_t connection_port; // FIXME
 uint32_t metadata_server_deployed;
 
 
-int 	IMSS_THREAD_POOL = 1;
-
 /***************************************************************************
 *******************************  FUNCTIONS  ********************************
 ***************************************************************************/
@@ -94,12 +94,6 @@ int 	IMSS_THREAD_POOL = 1;
 // IMSS server process storing information.
 void * imss_server(void *arg_) {
 	server_arg arg;
-
-
-    if (getenv("IMSS_THREAD_POOL") != NULL)
-	{
-		IMSS_THREAD_POOL = atoi(getenv("IMSS_THREAD_POOL"));
-	}
 
 
 	// Notify that the arguments have been copied.
@@ -509,4 +503,225 @@ hercules_release()
 	}
 
 	return 0;
+}
+
+
+int getConfiguration(struct arguments *args)
+{
+	struct cfg_struct *cfg;
+
+	/***************************************************************/
+	/******************* PARSE FILE ARGUMENTS **********************/
+	/***************************************************************/
+	int ret = 0;
+
+	char *conf_path = NULL;
+	char abs_exe_path[PATH_MAX];
+	char *aux = NULL;
+
+	cfg = cfg_init();
+	conf_path = getenv("HERCULES_CONF");
+	if (conf_path != NULL)
+	{
+		ret = cfg_load(cfg, conf_path);
+		if (ret)
+		{
+			fprintf(stderr, "%s has not been loaded\n", conf_path);
+		}
+	}
+	else
+	{
+		ret = 1;
+	}
+
+	if (ret)
+	{
+		char default_paths[3][PATH_MAX] = {
+			"/etc/hercules.conf",
+			"./hercules.conf",
+			"hercules.conf"};
+
+		for (size_t i = 0; i < 3; i++)
+		{
+			// slog_live("Loading %s\n", default_paths[i]);
+			if (cfg_load(cfg, default_paths[i]) == 0)
+			{
+				ret = 0;
+				break;
+			}
+		}
+		if (ret)
+		{
+			if (getcwd(abs_exe_path, sizeof(abs_exe_path)) != NULL)
+			{
+				char rpath[] = "../conf/hercules.conf";
+				conf_path = (char *)malloc(sizeof(char) * (PATH_MAX - strlen(rpath) + 1));
+				sprintf(conf_path, "%s/%s", abs_exe_path, rpath);
+				if (cfg_load(cfg, conf_path) == 0)
+				{
+					ret = 0;
+				}
+			}
+		}
+
+		if (ret)
+		{
+			fprintf(stderr, "[HERCULES CLIENT] Configuration file '%s' not found\n", conf_path);
+			perror("ERRIMSS_CONF_NOT_FOUND");
+			return -1;
+		}
+		free(conf_path);
+	}
+
+	if (getenv("HERCULES_POLICY") != NULL)
+		strcpy(args->policy, getenv("HERCULES_POLICY"));
+	else if (cfg_get(cfg, "POLICY"))
+		strcpy(args->policy, cfg_get(cfg, "POLICY"));
+	else
+	{
+		fprintf(stderr, "Distributiin Policy has not been established. \n Please, add the following line in your configuration file POLICY = RR\n");
+		perror("HERCULES_ERR_POLICY_NOT_FOUND");
+		return -1;
+	}
+
+	if (getenv("HERCULES_URI") != NULL)
+		strcpy(args->imss_uri, getenv("HERCULES_URI"));
+	else if (cfg_get(cfg, "URI"))
+	{
+		strcpy(args->imss_uri, cfg_get(cfg, "URI"));
+	}
+
+	// block size in kilobytes.
+	if (getenv("HERCULES_BLOCK_SIZE") != NULL)
+		args->block_size = atoi(getenv("HERCULES_BLOCK_SIZE"));
+	else if (cfg_get(cfg, "BLOCK_SIZE"))
+		args->block_size = atoi(cfg_get(cfg, "BLOCK_SIZE"));
+
+	if (cfg_get(cfg, "HERCULES_PATH"))
+	{
+		// aux = cfg_get(cfg, "HERCULES_PATH");
+		strcpy(args->hercules_path, cfg_get(cfg, "HERCULES_PATH"));
+	}
+
+	if (getenv("HERCULES_NUM_DATA_SERVERS") != NULL)
+		args->num_data_servers = atoi(getenv("HERCULES_NUM_DATA_SERVERS"));
+	else if (cfg_get(cfg, "NUM_DATA_SERVERS"))
+		args->num_data_servers = atoi(cfg_get(cfg, "NUM_DATA_SERVERS"));
+
+	if (getenv("HERCULES_NUM_META_SERVERS") != NULL)
+		args->num_metadata_servers = atoi(getenv("HERCULES_NUM_META_SERVERS"));
+	else if (cfg_get(cfg, "NUM_META_SERVERS"))
+		args->num_metadata_servers = atoi(cfg_get(cfg, "NUM_META_SERVERS"));
+
+	if (getenv("HERCULES_MALLEABILITY") != NULL)
+		args->malleability = atoi(getenv("HERCULES_MALLEABILITY"));
+	else if (cfg_get(cfg, "MALLEABILITY"))
+		args->malleability = atoi(cfg_get(cfg, "MALLEABILITY"));
+	else
+		args->malleability = 0;
+
+	if (getenv("HERCULES_MALLEABILITY_TYPE") != NULL)
+		args->malleability_type = atoi(getenv("HERCULES_MALLEABILITY_TYPE"));
+	else if (cfg_get(cfg, "MALLEABILITY_TYPE"))
+		args->malleability_type = atoi(cfg_get(cfg, "MALLEABILITY_TYPE"));
+
+	if (getenv("HERCULES_UPPER_BOUND_MALLEABILITY") != NULL)
+		args->upper_bound_servers = atoi(getenv("HERCULES_UPPER_BOUND_MALLEABILITY"));
+	else if (cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"))
+		args->upper_bound_servers = atoi(cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"));
+
+	if (getenv("HERCULES_LOWER_BOUND_MALLEABILITY") != NULL)
+		args->lower_bound_servers = atoi(getenv("HERCULES_LOWER_BOUND_MALLEABILITY"));
+	else if (cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"))
+		args->lower_bound_servers = atoi(cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"));
+
+	if (getenv("HERCULES_REPL_FACTOR") != NULL)
+		args->repl_factor = atoi(getenv("HERCULES_REPL_FACTOR"));
+	else if (cfg_get(cfg, "REPL_FACTOR"))
+		args->repl_factor = atoi(cfg_get(cfg, "REPL_FACTOR"));
+
+	if (getenv("HERCULES_REPL_TYPE") != NULL)
+		args->repl_type = atoi(cfg_get(cfg, "HERCULES_REPL_TYPE"));
+	else if (cfg_get(cfg, "REPL_TYPE"))
+		args->repl_type = atoi(cfg_get(cfg, "REPL_TYPE"));
+
+	if (getenv("HERCULES_BUFF_SIZE") != NULL)
+		args->bufsize = atol(getenv("HERCULES_BUFF_SIZE"));
+
+	if (getenv("HERCULES_METADATA_HOSTFILE") != NULL)
+		strcpy(args->meta_hostfile, getenv("HERCULES_METADATA_HOSTFILE"));
+	else if (cfg_get(cfg, "METADATA_HOSTFILE"))
+	{
+		strcpy(args->meta_hostfile, cfg_get(cfg, "METADATA_HOSTFILE"));
+	}
+
+	if (getenv("HERCULES_DATA_HOSTFILE") != NULL)
+		strcpy(args->data_hostfile, getenv("HERCULES_DATA_HOSTFILE"));
+	else if (cfg_get(cfg, "DATA_HOSTFILE"))
+	{
+		strcpy(args->data_hostfile, cfg_get(cfg, "DATA_HOSTFILE"));
+	}
+
+	if (getenv("HERCULES_THREAD_POOL") != NULL)
+	{
+		args->thread_pool = atol(getenv("HERCULES_THREAD_POOL"));
+	}
+	else if (cfg_get(cfg, "THREAD_POOL"))
+	{
+		args->thread_pool = atol(getenv("THREAD_POOL"));
+	}
+	else
+	{
+		args->thread_pool = 1;
+	}
+
+	if (getenv("HERCULES_DEBUG_LEVEL") != NULL)
+	{
+		aux = getenv("HERCULES_DEBUG_LEVEL");
+	}
+	else if (cfg_get(cfg, "DEBUG_LEVEL"))
+	{
+		aux = cfg_get(cfg, "DEBUG_LEVEL");
+	}
+	else
+	{
+		aux = NULL;
+	}
+
+	if (aux != NULL)
+	{
+		if (strstr(aux, "file"))
+		{
+			args->logging.hercules_debug_file = 1;
+			args->logging.hercules_debug_screen = 0;
+			args->logging.hercules_debug_level = SLOG_LIVE;
+		}
+		else if (strstr(aux, "stdout"))
+			args->logging.hercules_debug_screen = 1;
+		else if (strstr(aux, "debug"))
+			args->logging.hercules_debug_level = SLOG_DEBUG;
+		else if (strstr(aux, "live"))
+			args->logging.hercules_debug_level = SLOG_LIVE;
+		else if (strstr(aux, "all"))
+		{
+			args->logging.hercules_debug_file = 1;
+			args->logging.hercules_debug_screen = 1;
+			args->logging.hercules_debug_level = SLOG_PANIC;
+		}
+		else if (strstr(aux, "none"))
+		{
+			args->logging.hercules_debug_file = 0;
+			args->logging.hercules_debug_screen = 0;
+			args->logging.hercules_debug_level = SLOG_NONE;
+			unsetenv("IMSS_DEBUG");
+		}
+		else
+		{
+			args->logging.hercules_debug_file = 1;
+			args->logging.hercules_debug_level = getLevel(aux);
+		}
+	}
+	cfg_free(cfg);
+
+	return 1;
 }

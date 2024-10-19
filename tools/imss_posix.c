@@ -31,6 +31,7 @@
 // Those are used by reports functions in stat.
 #include <pwd.h>
 #include <sys/sysmacros.h>
+#include <limits.h>
 #undef __USE_GNU
 // #include <poll.h>
 // #include <sys/ptrace.h>
@@ -91,17 +92,13 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 // pthread_mutex_t lock2 = PTHREAD_MUTEX_INITIALIZER;
 // pthread_mutex_t system_lock = PTHREAD_MUTEX_INITIALIZER;
 
-#define MAX_PATH 1024
-// char *aux_refresh;
-// char *imss_path_refresh;
-
 int LD_PRELOAD = 0;
 void *map;
 void *map_prefetch;
-
 char MOUNT_POINT[512];
 char HERCULES_PATH[512];
 void *map_fd;
+struct arguments args;
 
 uint32_t rank = -1;
 static int init = 0;
@@ -114,7 +111,6 @@ pid_t g_pid = -1;
 // prefech.
 char *buf_pref = NULL;
 
-int getConfiguration();
 char *checkHerculesPath(const char *pathname);
 char *convert_path(const char *name);
 int generalOpen(char *new_path, int flags, mode_t mode, int createFd);
@@ -323,7 +319,7 @@ char *checkHerculesPath(const char *pathname)
 {
 	char *new_path = NULL;
 	char *workdir = getenv("PWD");
-	char absolute_pathname[MAX_PATH] = {'\0'};
+	char absolute_pathname[PATH_MAX] = {'\0'};
 	int ret = 0;
 
 	// if (!strncmp(pathname, MOUNT_POINT, strlen(MOUNT_POINT) - 1)) // error when  pathname=/mnt/hercules/data/unet3d and MOUNT_POINT=/mnt/hercules,
@@ -502,7 +498,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	rank = MurmurOAAT32(hostname);
 
 	// fill global variables with the enviroment variables value.
-	ret = getConfiguration();
+	ret = getConfiguration(&args);
 	if (ret == -1)
 	{
 		exit(EXIT_FAILURE);
@@ -520,11 +516,9 @@ __attribute__((constructor)) void imss_posix_init(void)
 		}
 	}
 
-	// sprintf(log_path, "%s/client.%02d-%02d.%d", HERCULES_PATH, tm.tm_hour, tm.tm_min, rank); // originial.
 	// log init.
 	time_t t = time(NULL);
 	struct tm tm = *localtime(&t);
-	// sprintf(log_path, "%s/client-thread-%ld.%02d-%02d.%d", HERCULES_PATH, pthread_self(), tm.tm_hour, tm.tm_min, getpid());
 	sprintf(log_path, "./client-thread-%ld.%02d-%02d.%d", pthread_self(), tm.tm_hour, tm.tm_min, getpid());
 	// {
 	// 	fprintf(stderr, "LOG PATH= %s\n", log_path); // this line raise an exception running a python app with threads.
@@ -570,7 +564,6 @@ __attribute__((constructor)) void imss_posix_init(void)
 		exit(1);
 	}
 
-	// if (DEPLOYMENT == 2 && release == 1)
 	int num_active_storages = 0;
 	if (DEPLOYMENT == 2)
 	{
@@ -579,7 +572,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 		{
 			release = 0;
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-			printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can stablish connections.\n");
+			printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
 			return;
 		}
 	}
@@ -624,277 +617,278 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
 
-int getConfiguration()
-{
-	struct cfg_struct *cfg;
+// int getConfiguration()
+// {
+// 	struct cfg_struct *cfg;
 
-	/***************************************************************/
-	/******************* PARSE FILE ARGUMENTS **********************/
-	/***************************************************************/
-	int ret = 0;
+// 	/***************************************************************/
+// 	/******************* PARSE FILE ARGUMENTS **********************/
+// 	/***************************************************************/
+// 	int ret = 0;
 
-	char *conf_path;
-	char abs_exe_path[1024];
-	char *aux;
+// 	char *conf_path;
+// 	char abs_exe_path[1024];
+// 	char *aux;
 
-	cfg = cfg_init();
-	conf_path = getenv("HERCULES_CONF");
-	if (conf_path != NULL)
-	{
-		// slog_live("Loading %s", conf_path);
-		ret = cfg_load(cfg, conf_path);
-		if (ret)
-		{
-			fprintf(stderr, "%s has not been loaded\n", conf_path);
-		}
-	}
-	else
-	{
-		ret = 1;
-	}
+// 	cfg = cfg_init();
+// 	conf_path = getenv("HERCULES_CONF");
+// 	if (conf_path != NULL)
+// 	{
+// 		// slog_live("Loading %s", conf_path);
+// 		ret = cfg_load(cfg, conf_path);
+// 		if (ret)
+// 		{
+// 			fprintf(stderr, "%s has not been loaded\n", conf_path);
+// 		}
+// 	}
+// 	else
+// 	{
+// 		ret = 1;
+// 	}
 
-	if (ret)
-	{
-		char default_paths[3][PATH_MAX] = {
-			"/etc/hercules.conf",
-			"./hercules.conf",
-			"hercules.conf"};
+// 	if (ret)
+// 	{
+// 		char default_paths[3][PATH_MAX] = {
+// 			"/etc/hercules.conf",
+// 			"./hercules.conf",
+// 			"hercules.conf"};
 
-		for (size_t i = 0; i < 3; i++)
-		{
-			// slog_live("Loading %s\n", default_paths[i]);
-			if (cfg_load(cfg, default_paths[i]) == 0)
-			{
-				ret = 0;
-				break;
-			}
-		}
-		if (ret)
-		{
-			if (getcwd(abs_exe_path, sizeof(abs_exe_path)) != NULL)
-			{
-				conf_path = (char *)malloc(sizeof(char) * PATH_MAX);
-				sprintf(conf_path, "%s/%s", abs_exe_path, "../conf/hercules.conf");
-				if (cfg_load(cfg, conf_path) == 0)
-				{
-					ret = 0;
-				}
-			}
-		}
+// 		for (size_t i = 0; i < 3; i++)
+// 		{
+// 			// slog_live("Loading %s\n", default_paths[i]);
+// 			if (cfg_load(cfg, default_paths[i]) == 0)
+// 			{
+// 				ret = 0;
+// 				break;
+// 			}
+// 		}
+// 		if (ret)
+// 		{
+// 			if (getcwd(abs_exe_path, sizeof(abs_exe_path)) != NULL)
+// 			{
+// 				conf_path = (char *)malloc(sizeof(char) * PATH_MAX);
+// 				sprintf(conf_path, "%s/%s", abs_exe_path, "../conf/hercules.conf");
+// 				if (cfg_load(cfg, conf_path) == 0)
+// 				{
+// 					ret = 0;
+// 				}
+// 			}
+// 		}
 
-		if (ret)
-		{
-			fprintf(stderr, "[HERCULES CLIENT] Configuration file '%s' not found\n", conf_path);
-			perror("ERRIMSS_CONF_NOT_FOUND");
-			return -1;
-		}
-		free(conf_path);
-	}
+// 		if (ret)
+// 		{
+// 			fprintf(stderr, "[HERCULES CLIENT] Configuration file '%s' not found\n", conf_path);
+// 			perror("ERRIMSS_CONF_NOT_FOUND");
+// 			return -1;
+// 		}
+// 		free(conf_path);
+// 	}
 
-	if (cfg_get(cfg, "URI"))
-	{
-		aux = cfg_get(cfg, "URI");
-		strcpy(IMSS_ROOT, aux);
-	}
+// 	if (cfg_get(cfg, "URI"))
+// 	{
+// 		aux = cfg_get(cfg, "URI");
+// 		strcpy(IMSS_ROOT, aux);
+// 	}
 
-	if (cfg_get(cfg, "BLOCK_SIZE"))
-		IMSS_BLKSIZE = atoi(cfg_get(cfg, "BLOCK_SIZE"));
+// 	if (cfg_get(cfg, "BLOCK_SIZE"))
+// 		IMSS_BLKSIZE = atoi(cfg_get(cfg, "BLOCK_SIZE"));
 
-	if (cfg_get(cfg, "MOUNT_POINT"))
-	{
-		aux = cfg_get(cfg, "MOUNT_POINT");
-		strcpy(MOUNT_POINT, aux);
-	}
+// 	if (cfg_get(cfg, "MOUNT_POINT"))
+// 	{
+// 		aux = cfg_get(cfg, "MOUNT_POINT");
+// 		strcpy(MOUNT_POINT, aux);
+// 	}
 
-	if (cfg_get(cfg, "HERCULES_PATH"))
-	{
-		aux = cfg_get(cfg, "HERCULES_PATH");
-		strcpy(HERCULES_PATH, aux);
-	}
+// 	if (cfg_get(cfg, "HERCULES_PATH"))
+// 	{
+// 		aux = cfg_get(cfg, "HERCULES_PATH");
+// 		strcpy(HERCULES_PATH, aux);
+// 	}
 
-	if (cfg_get(cfg, "METADATA_PORT"))
-		METADATA_PORT = atol(cfg_get(cfg, "METADATA_PORT"));
+// 	if (cfg_get(cfg, "METADATA_PORT"))
+// 		METADATA_PORT = atol(cfg_get(cfg, "METADATA_PORT"));
 
-	if (cfg_get(cfg, "DATA_PORT"))
-		IMSS_SRV_PORT = atol(cfg_get(cfg, "DATA_PORT"));
+// 	if (cfg_get(cfg, "DATA_PORT"))
+// 		IMSS_SRV_PORT = atol(cfg_get(cfg, "DATA_PORT"));
 
-	if (cfg_get(cfg, "NUM_DATA_SERVERS"))
-		N_SERVERS = atoi(cfg_get(cfg, "NUM_DATA_SERVERS"));
+// 	if (cfg_get(cfg, "NUM_DATA_SERVERS"))
+// 		N_SERVERS = atoi(cfg_get(cfg, "NUM_DATA_SERVERS"));
 
-	if (cfg_get(cfg, "NUM_META_SERVERS"))
-		N_META_SERVERS = atoi(cfg_get(cfg, "NUM_META_SERVERS"));
+// 	if (cfg_get(cfg, "NUM_META_SERVERS"))
+// 		N_META_SERVERS = atoi(cfg_get(cfg, "NUM_META_SERVERS"));
 
-	if (cfg_get(cfg, "MALLEABILITY"))
-		MALLEABILITY = atoi(cfg_get(cfg, "MALLEABILITY"));
+// 	if (cfg_get(cfg, "MALLEABILITY"))
+// 		MALLEABILITY = atoi(cfg_get(cfg, "MALLEABILITY"));
 
-	if (cfg_get(cfg, "MALLEABILITY_TYPE"))
-		MALLEABILITY_TYPE = atoi(cfg_get(cfg, "MALLEABILITY_TYPE"));
+// 	if (cfg_get(cfg, "MALLEABILITY_TYPE"))
+// 		MALLEABILITY_TYPE = atoi(cfg_get(cfg, "MALLEABILITY_TYPE"));
 
-	if (cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"))
-		UPPER_BOUND_SERVERS = atoi(cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"));
+// 	if (cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"))
+// 		UPPER_BOUND_SERVERS = atoi(cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"));
 
-	if (cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"))
-		LOWER_BOUND_SERVERS = atoi(cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"));
+// 	if (cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"))
+// 		LOWER_BOUND_SERVERS = atoi(cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"));
 
-	if (cfg_get(cfg, "REPL_FACTOR"))
-		REPL_FACTOR = atoi(cfg_get(cfg, "REPL_FACTOR"));
+// 	if (cfg_get(cfg, "REPL_FACTOR"))
+// 		REPL_FACTOR = atoi(cfg_get(cfg, "REPL_FACTOR"));
 
-	if (cfg_get(cfg, "REPL_TYPE"))
-		REPL_TYPE = atoi(cfg_get(cfg, "REPL_TYPE"));
+// 	if (cfg_get(cfg, "REPL_TYPE"))
+// 		REPL_TYPE = atoi(cfg_get(cfg, "REPL_TYPE"));
 
-	if (cfg_get(cfg, "POLICY"))
-		POLICY = cfg_get(cfg, "POLICY");
-	else
-	{
-		fprintf(stderr, "Distributiin Policy has not been stablish. \n Please, add the following line in your configuration file POLICY = RR\n");
-		perror("ERR_HERCULES_POLICY_NOT_FOUND");
-		return -1;
-	}
+// 	if (cfg_get(cfg, "POLICY"))
+// 		POLICY = cfg_get(cfg, "POLICY");
+// 	else
+// 	{
+// 		fprintf(stderr, "Distributiin Policy has not been established. \n Please, add the following line in your configuration file POLICY = RR\n");
+// 		perror("ERR_HERCULES_POLICY_NOT_FOUND");
+// 		return -1;
+// 	}
 
-	if (cfg_get(cfg, "METADATA_HOSTFILE"))
-	{
-		aux = cfg_get(cfg, "METADATA_HOSTFILE");
-		strcpy(META_HOSTFILE, aux);
-	}
+// 	if (cfg_get(cfg, "METADATA_HOSTFILE"))
+// 	{
+// 		aux = cfg_get(cfg, "METADATA_HOSTFILE");
+// 		strcpy(META_HOSTFILE, aux);
+// 	}
 
-	if (cfg_get(cfg, "DATA_HOSTFILE"))
-	{
-		aux = cfg_get(cfg, "DATA_HOSTFILE");
-		strcpy(IMSS_HOSTFILE, aux);
-	}
+// 	if (cfg_get(cfg, "DATA_HOSTFILE"))
+// 	{
+// 		aux = cfg_get(cfg, "DATA_HOSTFILE");
+// 		strcpy(IMSS_HOSTFILE, aux);
+// 	}
 
-	if (cfg_get(cfg, "METADA_PERSISTENCE_FILE"))
-	{
-		aux = cfg_get(cfg, "METADA_PERSISTENCE_FILE");
-		strcpy(METADATA_FILE, aux);
-	}
+// 	if (cfg_get(cfg, "METADA_PERSISTENCE_FILE"))
+// 	{
+// 		aux = cfg_get(cfg, "METADA_PERSISTENCE_FILE");
+// 		strcpy(METADATA_FILE, aux);
+// 	}
 
-	if (getenv("HERCULES_DEBUG_LEVEL") != NULL)
-	{
-		aux = getenv("HERCULES_DEBUG_LEVEL");
-	}
-	else if (cfg_get(cfg, "DEBUG_LEVEL"))
-	{
-		aux = cfg_get(cfg, "DEBUG_LEVEL");
-	}
-	else
-	{
-		aux = NULL;
-	}
+// 	if (getenv("HERCULES_DEBUG_LEVEL") != NULL)
+// 	{
+// 		aux = getenv("HERCULES_DEBUG_LEVEL");
+// 	}
+// 	else if (cfg_get(cfg, "DEBUG_LEVEL"))
+// 	{
+// 		aux = cfg_get(cfg, "DEBUG_LEVEL");
+// 	}
+// 	else
+// 	{
+// 		aux = NULL;
+// 	}
 
-	if (aux != NULL)
-	{
-		if (strstr(aux, "file"))
-		{
-			IMSS_DEBUG_FILE = 1;
-			IMSS_DEBUG_SCREEN = 0;
-			IMSS_DEBUG_LEVEL = SLOG_LIVE;
-		}
-		else if (strstr(aux, "stdout"))
-			IMSS_DEBUG_SCREEN = 1;
-		else if (strstr(aux, "debug"))
-			IMSS_DEBUG_LEVEL = SLOG_DEBUG;
-		else if (strstr(aux, "live"))
-			IMSS_DEBUG_LEVEL = SLOG_LIVE;
-		else if (strstr(aux, "all"))
-		{
-			IMSS_DEBUG_FILE = 1;
-			IMSS_DEBUG_SCREEN = 1;
-			IMSS_DEBUG_LEVEL = SLOG_PANIC;
-		}
-		else if (strstr(aux, "none"))
-		{
-			IMSS_DEBUG_FILE = 0;
-			IMSS_DEBUG_SCREEN = 0;
-			IMSS_DEBUG_LEVEL = SLOG_NONE;
-			unsetenv("IMSS_DEBUG");
-		}
-		else
-		{
-			IMSS_DEBUG_FILE = 1;
-			IMSS_DEBUG_LEVEL = getLevel(aux);
-		}
-	}
+// 	if (aux != NULL)
+// 	{
+// 		if (strstr(aux, "file"))
+// 		{
+// 			IMSS_DEBUG_FILE = 1;
+// 			IMSS_DEBUG_SCREEN = 0;
+// 			IMSS_DEBUG_LEVEL = SLOG_LIVE;
+// 		}
+// 		else if (strstr(aux, "stdout"))
+// 			IMSS_DEBUG_SCREEN = 1;
+// 		else if (strstr(aux, "debug"))
+// 			IMSS_DEBUG_LEVEL = SLOG_DEBUG;
+// 		else if (strstr(aux, "live"))
+// 			IMSS_DEBUG_LEVEL = SLOG_LIVE;
+// 		else if (strstr(aux, "all"))
+// 		{
+// 			IMSS_DEBUG_FILE = 1;
+// 			IMSS_DEBUG_SCREEN = 1;
+// 			IMSS_DEBUG_LEVEL = SLOG_PANIC;
+// 		}
+// 		else if (strstr(aux, "none"))
+// 		{
+// 			IMSS_DEBUG_FILE = 0;
+// 			IMSS_DEBUG_SCREEN = 0;
+// 			IMSS_DEBUG_LEVEL = SLOG_NONE;
+// 			unsetenv("IMSS_DEBUG");
+// 		}
+// 		else
+// 		{
+// 			IMSS_DEBUG_FILE = 1;
+// 			IMSS_DEBUG_LEVEL = getLevel(aux);
+// 		}
+// 	}
 
-	/*************************************************************************/
+// 	/*************************************************************************/
 
-	if (getenv("IMSS_MOUNT_POINT") != NULL)
-	{
-		strcpy(MOUNT_POINT, getenv("IMSS_MOUNT_POINT"));
-	}
+// 	if (getenv("IMSS_MOUNT_POINT") != NULL)
+// 	{
+// 		strcpy(MOUNT_POINT, getenv("IMSS_MOUNT_POINT"));
+// 	}
 
-	if (getenv("IMSS_HOSTFILE") != NULL)
-	{
-		strcpy(IMSS_HOSTFILE, getenv("IMSS_HOSTFILE"));
-	}
+// 	if (getenv("IMSS_HOSTFILE") != NULL)
+// 	{
+// 		strcpy(IMSS_HOSTFILE, getenv("IMSS_HOSTFILE"));
+// 	}
 
-	if (getenv("IMSS_N_SERVERS") != NULL)
-	{
-		N_SERVERS = atoi(getenv("IMSS_N_SERVERS"));
-	}
+// 	if (getenv("IMSS_N_SERVERS") != NULL)
+// 	{
+// 		N_SERVERS = atoi(getenv("IMSS_N_SERVERS"));
+// 	}
 
-	if (getenv("IMSS_SRV_PORT") != NULL)
-	{
-		IMSS_SRV_PORT = atol(getenv("IMSS_SRV_PORT"));
-	}
+// 	if (getenv("IMSS_SRV_PORT") != NULL)
+// 	{
+// 		IMSS_SRV_PORT = atol(getenv("IMSS_SRV_PORT"));
+// 	}
 
-	if (getenv("IMSS_BUFFSIZE") != NULL)
-	{
-		IMSS_BUFFSIZE = atol(getenv("IMSS_BUFFSIZE"));
-	}
+// 	if (getenv("IMSS_BUFFSIZE") != NULL)
+// 	{
+// 		IMSS_BUFFSIZE = atol(getenv("IMSS_BUFFSIZE"));
+// 	}
 
-	if (getenv("IMSS_META_HOSTFILE") != NULL)
-	{
-		strcpy(META_HOSTFILE, getenv("IMSS_META_HOSTFILE"));
-	}
+// 	if (getenv("IMSS_META_HOSTFILE") != NULL)
+// 	{
+// 		strcpy(META_HOSTFILE, getenv("IMSS_META_HOSTFILE"));
+// 	}
 
-	if (getenv("IMSS_META_PORT") != NULL)
-	{
-		METADATA_PORT = atol(getenv("IMSS_META_PORT"));
-	}
+// 	if (getenv("IMSS_META_PORT") != NULL)
+// 	{
+// 		METADATA_PORT = atol(getenv("IMSS_META_PORT"));
+// 	}
 
-	if (getenv("IMSS_META_SERVERS") != NULL)
-	{
-		N_META_SERVERS = atoi(getenv("IMSS_META_SERVERS"));
-	}
+// 	if (getenv("IMSS_META_SERVERS") != NULL)
+// 	{
+// 		N_META_SERVERS = atoi(getenv("IMSS_META_SERVERS"));
+// 	}
 
-	if (getenv("IMSS_BLKSIZE") != NULL)
-	{
-		IMSS_BLKSIZE = atoi(getenv("IMSS_BLKSIZE"));
-	}
+// 	if (getenv("IMSS_BLKSIZE") != NULL)
+// 	{
+// 		IMSS_BLKSIZE = atoi(getenv("IMSS_BLKSIZE"));
+// 	}
 
-	if (getenv("IMSS_STORAGE_SIZE") != NULL)
-	{
-		STORAGE_SIZE = atol(getenv("IMSS_STORAGE_SIZE"));
-	}
+// 	if (getenv("IMSS_STORAGE_SIZE") != NULL)
+// 	{
+// 		STORAGE_SIZE = atol(getenv("IMSS_STORAGE_SIZE"));
+// 	}
 
-	if (getenv("IMSS_METADATA_FILE") != NULL)
-	{
-		strcpy(METADATA_FILE, getenv("IMSS_METADATA_FILE"));
-	}
+// 	if (getenv("IMSS_METADATA_FILE") != NULL)
+// 	{
+// 		strcpy(METADATA_FILE, getenv("IMSS_METADATA_FILE"));
+// 	}
 
-	if (getenv("IMSS_DEPLOYMENT") != NULL)
-	{
-		DEPLOYMENT = atoi(getenv("IMSS_DEPLOYMENT"));
-	}
+// 	if (getenv("IMSS_DEPLOYMENT") != NULL)
+// 	{
+// 		DEPLOYMENT = atoi(getenv("IMSS_DEPLOYMENT"));
+// 	}
 
-	if (getenv("IMSS_MALLEABILITY") != NULL)
-	{
-		MALLEABILITY = atoi(getenv("IMSS_MALLEABILITY"));
-	}
+// 	if (getenv("IMSS_MALLEABILITY") != NULL)
+// 	{
+// 		MALLEABILITY = atoi(getenv("IMSS_MALLEABILITY"));
+// 	}
 
-	if (getenv("IMSS_UPPER_BOUND_MALLEABILITY") != NULL)
-	{
-		UPPER_BOUND_SERVERS = atoi(getenv("IMSS_UPPER_BOUND_MALLEABILITY"));
-	}
+// 	if (getenv("IMSS_UPPER_BOUND_MALLEABILITY") != NULL)
+// 	{
+// 		UPPER_BOUND_SERVERS = atoi(getenv("IMSS_UPPER_BOUND_MALLEABILITY"));
+// 	}
 
-	if (getenv("IMSS_LOWER_BOUND_MALLEABILITY") != NULL)
-	{
-		LOWER_BOUND_SERVERS = atoi(getenv("IMSS_LOWER_BOUND_MALLEABILITY"));
-	}
+// 	if (getenv("IMSS_LOWER_BOUND_MALLEABILITY") != NULL)
+// 	{
+// 		LOWER_BOUND_SERVERS = atoi(getenv("IMSS_LOWER_BOUND_MALLEABILITY"));
+// 	}
+// 	cfg_free(cfg);
 
-	return 1;
-}
+// 	return 1;
+// }
 
 void __attribute__((destructor)) run_me_last()
 {
@@ -1185,34 +1179,11 @@ pid_t fork(void)
 		// Clean UCX.
 		// imss_comm_cleanup();
 
-		// char hostname_[512], hostname[1024];
-		// int ret = gethostname(&hostname_[0], 512);
-		// if (ret == -1)
-		// {
-		// 	perror("gethostname");
-		// }
-		// sprintf(hostname, "%s:%d", hostname_, pid);
-
-		// int new_rank = MurmurOAAT32(hostname);
-
-		// // // fill global variables with the enviroment variables value.
-		// // getConfiguration();
-		// time_t t = time(NULL);
-		// struct tm tm = *localtime(&t);
-		// sprintf(log_path, "%s/client-child.%02d-%02d.%d", HERCULES_PATH, tm.tm_hour, tm.tm_min, new_rank); // original.
-		// sprintf(log_path, "%s/client-child.%02d-%02d.%d", HERCULES_PATH, tm.tm_hour, tm.tm_min, pid); // original.
-
-		// slog_xinit(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, new_rank);
-		// slog_info("[POSIX]. Fork child created, hostname=%s, new rank=%d, log_path=%s, old_log_path=%s, init=%d", hostname, new_rank, log_path, old_log_path, init);
-		// slog_info("[POSIX]. Fork child created, hostname=%s, pid=%d, log_path=%s, old_log_path=%s, init=%d", hostname, pid, log_path, old_log_path, init);
 	}
 	else // parent process.
 	{
 		slog_live("[POSIX] Parent process, pid=%d", pid);
 		release += 1;
-		// release = 0;
-		// slog_info("[POSIX]. Calling fork, rank=%d, log_path=%s, old_log_path=%s", rank, log_path, old_log_path);
-		// slog_info("[POSIX]. Calling fork, child pid=%d, log_path=%s, old_log_path=%s", pid, log_path, old_log_path);
 	}
 
 	return pid;
@@ -2885,7 +2856,7 @@ int openat(int dir_fd, const char *pathname, int flags, ...)
 				// 	return -1;
 				// }
 
-				char absolute_pathname[MAX_PATH];
+				char absolute_pathname[PATH_MAX];
 				char *dirr = pathname_dir + strlen("imss://");
 				sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
 
@@ -4665,7 +4636,7 @@ int __fxstatat(int ver, int dir_fd, const char *pathname, struct stat *stat_buf,
 				// 	return -1;
 				// }
 
-				char absolute_pathname[MAX_PATH];
+				char absolute_pathname[PATH_MAX];
 				char *dirr = pathname_dir + strlen("imss://");
 				sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
 
@@ -4763,7 +4734,7 @@ int __fxstatat64(int ver, int dir_fd, const char *pathname, struct stat64 *stat_
 				// 	return -1;
 				// }
 
-				char absolute_pathname[MAX_PATH];
+				char absolute_pathname[PATH_MAX];
 				char *dirr = pathname_dir + strlen("imss://");
 				sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
 
@@ -4860,7 +4831,7 @@ int faccessat(int dir_fd, const char *pathname, int mode, int flags)
 				// 	return -1;
 				// }
 
-				char absolute_pathname[MAX_PATH];
+				char absolute_pathname[PATH_MAX];
 				char *dirr = pathname_dir + strlen("imss://");
 				sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
 
@@ -4953,7 +4924,7 @@ int unlinkat(int dir_fd, const char *pathname, int flags)
 				// 	return -1;
 				// }
 
-				char absolute_pathname[MAX_PATH];
+				char absolute_pathname[PATH_MAX];
 				char *dirr = pathname_dir + strlen("imss://");
 				sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
 
@@ -5031,7 +5002,7 @@ int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpa
 			else
 			{
 				// // get the pathname of the directory pointed by dir_fd if it is storage in the local map "map_fd".
-				char absolute_pathname[MAX_PATH];
+				char absolute_pathname[PATH_MAX];
 				char *dirr = pathname_dir + strlen("imss://");
 				sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, oldpath);
 
@@ -5268,10 +5239,9 @@ int newfstatat(int __fd, const char *__restrict __file, struct stat *__restrict 
 	if (!init)
 	{
 		return real_newfstatat(__fd, __file, __buf, __flag);
-		// slog_warn("[POSIX][TODO]. Calling Real 'newfstatat', pathname=%s", __file);
 	}
 
-	slog_live("[POSIX][TODO]. Calling Real 'newfstatat', pathname=%s\n", __file);
+	slog_warn("[POSIX][TODO]. Calling Real 'newfstatat', pathname=%s\n", __file);
 	// TODO.
 
 	return real_newfstatat(__fd, __file, __buf, __flag);

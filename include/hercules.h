@@ -5,11 +5,16 @@
 #define GB 1073741824
 
 #include "imss.h"
+#include "arg_parser.h"
+#include "cfg_parse.h"
+#include "hercules.h"
+
+
+static u_int16_t IMSS_THREAD_POOL = 1;
 
 #ifdef __cplusplus
 extern "C"{
 #endif
-
 
 /* Method initializing an instance of the HERCULES in-memory storage system.
 
@@ -33,6 +38,16 @@ int32_t hercules_init(uint32_t rank, uint64_t backend_strg_size, uint16_t server
                 -1 - In case of error.
 */
 int32_t hercules_release();
+
+
+/**
+ * @brief Get the Configuration of the Hercules deployment from enviroment
+ * variables or a configuration file. 
+ * 
+ * @param args structure to store the configuration data.
+ * @return 1 on success. 
+ */
+int getConfiguration(struct arguments *args);
 
 #ifdef __cplusplus
 }

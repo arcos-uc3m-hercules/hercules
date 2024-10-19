@@ -8,7 +8,7 @@
 #include "imss.h"
 #include "directory.h"
 
-extern int  IMSS_THREAD_POOL;
+// extern int  IMSS_THREAD_POOL;
 
 //Method retrieving the set of dataset metadata structures stored in a metadata file.
 char *

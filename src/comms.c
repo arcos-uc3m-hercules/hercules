@@ -1301,7 +1301,7 @@ int connect_common(const char *server, uint64_t server_port, sa_family_t af)
 		sockfd = socket(t->ai_family, t->ai_socktype, t->ai_protocol);
 		if (sockfd < 0)
 		{
-			char err_msg[128] = {"\0"};
+			char err_msg[MAX_ERR_MSG_LEN] = {"\0"};
 			sprintf(err_msg, "HERCULES_ERR_SOCKET_%s", strerror(errno));
 			perror(err_msg);
 			continue;

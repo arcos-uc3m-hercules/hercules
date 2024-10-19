@@ -11,22 +11,19 @@ gcc -Wall imss.c `pkg-config fuse --cflags --libs` -o imss
 #define FUSE_USE_VERSION 26
 #include "map.hpp"
 #include "mapprefetch.hpp"
-// #include "imss.h"
 #include "hercules.h"
+#include "imss_posix_api.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
-// #include <fcntl.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <time.h>
 #include <limits.h>
 #include <math.h>
 #include <sys/time.h>
-
-#include "imss_posix_api.h"
 
 #define KB 1024
 #define GB 1073741824
@@ -253,10 +250,10 @@ int imss_refresh(const char *path)
 	}
 
 	// get block 0 from data server.
-	ret = get_ndata(ds, 0, aux, 0, 0);
+	ret = get_ndata(ds, -1, 0, aux, 0, 0);
 	if (ret < 0)
 	{
-		char err_msg[128];
+		char err_msg[MAX_ERR_MSG_LEN];
 		sprintf(err_msg, "HERCULES_ERR_REFRESH: %s", path);
 		slog_error("[imss_refresh] %s", err_msg);
 		return -1;
@@ -361,7 +358,7 @@ int imss_getattr(const char *path, struct stat *stbuf)
 				void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
 				// void *data = NULL;
 				//  data is allocated in "get data".
-				ret = get_ndata(ds, 0, data, 0, 0);
+				ret = get_ndata(ds, -1, 0, data, 0, 0);
 				if (ret < 0)
 				{
 					slog_error("Error getting data: %s", imss_path);
@@ -582,11 +579,10 @@ int imss_open(char *path, uint64_t *fh)
 
 		// aux = (char *)malloc(IMSS_DATA_BSIZE);
 		void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
-		ret = get_ndata(file_desc, 0, data, 0, 0);
+		ret = get_ndata(file_desc, -1, 0, data, 0, 0);
 		if (ret < 0)
 		{
 			free(data);
-			fprintf(stderr, "get_ndata ret=%d, file_desc=%d\n", ret, file_desc);
 			perror("ERR_HERCULES_IMSS_OPEN_GET_DATA");
 			slog_error("ERR_HERCULES_IMSS_OPEN_GET_DATA");
 			return -1;
@@ -765,25 +761,24 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 		}
 		else
 		{
-			to_read = get_ndata(ds, curr_blk, buf + byte_count, to_read, block_offset);
+			to_read = get_ndata(ds, -1, curr_blk, buf + byte_count, to_read, block_offset);
 		}
-		// TODO: error handling when get_ndata does not found the request data. to_read = 1
+		// Error handling when get_ndata does not found the request data.
 		if (to_read == -1)
 		{
 			return to_read;
 		}
 
 		block_offset = 0;
-		// memcpy(buf + byte_count, aux, to_read);
 
 		++curr_blk;
 		byte_count += to_read;
-		// If eof was found, we end the while bucle to avoid trying to read additional blocks.
+		// If eof was found, we end the while bucle to avoid trying to read
+		// additional blocks.
 		if (eof_found)
 		{
 			break;
 		}
-		
 	}
 
 	total_amount_read += byte_count;
@@ -2235,7 +2230,7 @@ int imss_unlink(const char *path)
 	}
 
 	// Get initial block (0).
-	ret = get_ndata(ds, 0, buff, 0, 0);
+	ret = get_ndata(ds, -1, 0, buff, 0, 0);
 	if (ret < 0)
 	{
 		pthread_mutex_unlock(&lock);
@@ -2341,7 +2336,7 @@ int imss_utimens(const char *path, const struct timespec tv[2])
 
 	// char *buff = malloc(IMSS_DATA_BSIZE);
 	pthread_mutex_lock(&lock);
-	get_ndata(file_desc, 0, buff, 0, 0);
+	get_ndata(file_desc, -1, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
 	memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2408,8 +2403,7 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 				return -1;
 			}
 			aux = (char *)malloc(IMSS_DATA_BSIZE);
-			// void *aux = NULL;
-			ret = get_ndata(file_desc, 0, aux, 0, 0);
+			ret = get_ndata(file_desc, -1, 0, aux, 0, 0);
 			memcpy(&stats, aux, sizeof(struct stat));
 			pthread_mutex_lock(&lock_file);
 			map_put(map, new_path_1, file_desc, stats, aux);
@@ -2554,7 +2548,7 @@ int imss_chmod(const char *path, mode_t mode)
 	}
 
 	pthread_mutex_lock(&lock);
-	get_ndata(file_desc, 0, buff, 0, 0);
+	get_ndata(file_desc, -1, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
 	memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2602,7 +2596,7 @@ int imss_chown(const char *path, uid_t uid, gid_t gid)
 	}
 
 	pthread_mutex_lock(&lock);
-	get_ndata(file_desc, 0, buff, 0, 0);
+	get_ndata(file_desc, -1, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
 	memcpy(&ds_stat, buff, sizeof(struct stat));
