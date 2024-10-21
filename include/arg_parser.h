@@ -40,16 +40,16 @@ struct arguments
 {
     char type;                      /* type arg */
     int id;                         /* server ID arg to -r */
-    uint64_t port;                  /* port arg to '-p' */
+    uint64_t data_port;                  /* port arg to '-p' */
     int64_t bufsize;                /* buffer size arg to '-b' */
     char imss_uri[32];        /* IMSS URI arg to '-i' */
     char *stat_host;                /* Metadata server hostname arg to '-H' */
     int64_t stat_port;              /* Metadata server port number arg to '-P' */
     int64_t num_data_servers;       /* number of data servers arg to '-n' */
     int64_t num_metadata_servers;   /* number of metaa servers */
-    char deploy_hostfile[PATH_MAX]; /* deploy hostfile arg to '-d' */
+    char data_hostfile[PATH_MAX]; /* deploy hostfile arg to '-d' */
     char stat_logfile[PATH_MAX];    /* metadata logfile arg to '-l' */
-    uint64_t block_size;            /* block size in KB arg to -B */
+    size_t block_size;            /* block size in KB arg to -B */
     uint64_t storage_size;          /* total storage size in GB to -s */
     uint64_t thread_pool;           /* thread pool size '-t' */
     char hercules_path[PATH_MAX];   /* hercules path */
@@ -61,9 +61,9 @@ struct arguments
     int32_t repl_type;
     char policy[PATH_MAX];
     char meta_hostfile[PATH_MAX];
-    char data_hostfile[PATH_MAX];
     char debug_level[PATH_MAX];
     struct logging_opts logging;
+    char mount_point[PATH_MAX];
 };
 
 int parse_args(int argc, char **argv, struct arguments *args);

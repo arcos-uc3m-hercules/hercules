@@ -36,10 +36,6 @@ void *stat_mon; // Metadata monitoring socket.
 
 uint32_t NUM_DATA_SERVERS;
 
-int32_t __thread current_dataset;	// Dataset whose policy has been set last.
-dataset_info __thread curr_dataset; // Currently managed dataset.
-imss __thread curr_imss;
-
 GArray *imssd;			// Set of IMSS metadata and connection structures currently used.
 GArray *free_imssd;		// Set of free entries within the 'imssd' vector.
 int32_t imssd_pos;		// Next position within the vextor were a new IMSS will be inserted.
@@ -88,7 +84,6 @@ uint64_t local_data_uid;
 ucp_address_t **stat_addr;
 ucp_ep_h *stat_eps;
 
-// extern int IMSS_THREAD_POOL;
 extern char *POLICY;
 
 pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
@@ -602,183 +597,12 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 
 // Method initializing the required resources to make use of an existing IMSS.
 // return: number of active storage servers.
-int32_t open_imss_temp(char *imss_uri, int num_active_servers)
-{
-	// New IMSS structure storing the entity to be created.
-	imss new_imss;
-	// ucp_config_t *config;
-	ucs_status_t status;
-
-	// if (getenv("IMSS_DEBUG") != NULL)
-	// {
-	// 	IMSS_DEBUG = 1;
-	// }
-
-	// if (IMSS_DEBUG)
-	// {
-	// 	//		status = ucp_config_read(NULL, NULL, &config);
-	// 	//		ucp_config_print(config, stderr, NULL, UCS_CONFIG_PRINT_CONFIG);
-	// 	//		ucp_config_release(config);
-	// }
-
-	int32_t not_initialized = 0;
-
-	slog_live("[IMSS][open_imss] starting function, imss_uri=%s", imss_uri);
-	// Retrieve the actual information from the metadata server.
-	int32_t imss_existance = stat_imss(imss_uri, &new_imss.info);
-	slog_live("[IMSS][open_imss] imss_uri=%s, imss_existance=%d", imss_uri, imss_existance);
-	// Check if the requested IMSS did not exist or was already stored in the local vector.
-	switch (imss_existance)
-	{
-	case 0:
-	{
-		slog_fatal("HERCULES_ERR_OPEN_IMSS_NOT_EXISTS");
-		return -1;
-	}
-	case 2:
-	{
-		imss check_imss = g_array_index(imssd, imss, found_in);
-
-		if (check_imss.conns.matching_server != -2)
-			return -2;
-
-		for (int32_t i = 0; i < check_imss.info.num_storages; i++)
-			free(check_imss.info.ips[i]);
-
-		free(check_imss.info.ips);
-		not_initialized = 1;
-		break;
-	}
-	case -1:
-	{
-		return -1;
-	}
-	}
-	slog_debug("[IMSS][open_imss] new_imss.info.num_storages=%ld", new_imss.info.num_storages);
-
-	new_imss.conns.peer_addr = (ucp_address_t **)malloc(new_imss.info.num_storages * sizeof(ucp_address_t *));
-	new_imss.conns.eps = (ucp_ep_h *)malloc(new_imss.info.num_storages * sizeof(ucp_ep_h));
-	new_imss.conns.id = (uint32_t *)malloc(new_imss.info.num_storages * sizeof(uint32_t));
-	new_imss.conns.matching_server = -1;
-
-	status = ucp_worker_get_address(ucp_worker_data, &local_addr_data, &local_addr_len_data);
-	ucp_worker_address_attr_t attr;
-	attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
-	ucp_worker_address_query(local_addr_data, &attr);
-	local_data_uid = attr.worker_uid;
-
-	int num_down_storages = 0;
-	new_imss.info.num_active_storages = num_active_servers;
-	// fprintf(stderr, "NUM_DATA_SERVERS=%d\n", NUM_DATA_SERVERS);
-	// Connect to the requested IMSS.
-	for (int32_t i = 0; i < new_imss.info.num_storages - num_active_servers; i++)
-	{
-		// fprintf(stderr, "node=%s, status=%d\n", new_imss.info.ips[i], new_imss.info.status[i]);
-		if (new_imss.info.status[i] == 0)
-		{
-			// fprintf(stderr, "Skipping - i=%d - %s:%d, status=%d, num active storages=%d, total storages=%d\n", i, new_imss.info.ips[i], new_imss.info.conn_port, new_imss.info.status[i], new_imss.info.num_active_storages, new_imss.info.num_storages);
-			slog_debug("Skipping - i=%d - %s:%d, status=%d, num active storages=%d, total storages=%d", i, new_imss.info.ips[i], new_imss.info.conn_port, new_imss.info.status[i], new_imss.info.num_active_storages, new_imss.info.num_storages);
-			num_down_storages++;
-			continue;
-		}
-
-		int oob_sock;
-		size_t addr_len;
-		int ret = 0;
-
-		oob_sock = connect_common(new_imss.info.ips[i], new_imss.info.conn_port, AF_INET);
-		if (oob_sock < 0)
-		{
-			char err_msg[MAX_ERR_MSG_LEN];
-			sprintf(err_msg, "HERCULES_ERR_CONNECT_COMMON - i=%d - %s:%d", i, new_imss.info.ips[i], new_imss.info.conn_port);
-			slog_error("%s", err_msg);
-			perror(err_msg);
-			return -1;
-		}
-		// else
-		// {
-		// 	printf("Cliente socket fd=%d\n", oob_sock);
-		// }
-
-		char request[REQUEST_SIZE];
-		sprintf(request, "%" PRIu32 " GET %s", process_rank, "HELLO!JOIN");
-		slog_live("[open_imss] ip_address=%s:%d", new_imss.info.ips[i], new_imss.info.conn_port);
-		// fprintf(stderr, "[open_imss] ip_address=%s:%d\n", new_imss.info.ips[i], new_imss.info.conn_port);
-
-		if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
-		{
-			perror("HERCULES_ERR_STAT_HELLO_1");
-			return -1;
-		}
-
-		ret = recv(oob_sock, &addr_len, sizeof(addr_len), MSG_WAITALL);
-		if (ret < 0)
-		{
-			perror("HERCULES_ERR_RECV_1_HELLO");
-			close(oob_sock);
-			return -1;
-		}
-		new_imss.conns.peer_addr[i] = (ucp_address *)malloc(addr_len);
-		ret = recv(oob_sock, new_imss.conns.peer_addr[i], addr_len, MSG_WAITALL);
-		if (ret < 0)
-		{
-			perror("HERCULES_ERR_RECV_2_HELLO");
-			close(oob_sock);
-			return -1;
-		}
-		close(oob_sock);
-
-		new_imss.conns.id[i] = i;
-
-		// Save the current socket value when the IMSS ip matches the clients' one.
-		if (!strncmp((new_imss.info.ips)[i], client_node, len_client_node) || !strncmp((new_imss.info.ips)[i], client_ip, strlen(new_imss.info.ips[i])))
-		{
-			new_imss.conns.matching_server = i;
-			strcpy(att_deployment, imss_uri);
-		}
-
-		client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], &new_imss.info.status[i]);
-		slog_debug("[IMSS] open_imss: Created endpoint with %s", (new_imss.info.ips)[i]);
-	}
-
-	// new_imss.info.num_storages -= num_down_storages;
-	NUM_DATA_SERVERS = new_imss.info.num_storages;
-
-	// If the struct was found within the vector but uninitialized, once updated, store it in the same position.
-	if (not_initialized)
-	{
-		g_array_remove_index(imssd, found_in);
-		g_array_insert_val(imssd, found_in, new_imss);
-
-		return 0;
-	}
-
-	curr_imss = new_imss;
-
-	// Add the created struture into the underlying IMSSs.
-	GInsert(&imssd_pos, &imssd_max_size, (char *)&new_imss, imssd, free_imssd);
-	// return 0;
-	return new_imss.info.num_active_storages;
-}
-
 int32_t open_imss(char *imss_uri)
 {
 	// New IMSS structure storing the entity to be created.
 	imss new_imss;
 	// ucp_config_t *config;
 	ucs_status_t status;
-
-	// if (getenv("IMSS_DEBUG") != NULL)
-	// {
-	// 	IMSS_DEBUG = 1;
-	// }
-
-	// if (IMSS_DEBUG)
-	// {
-	// 	//		status = ucp_config_read(NULL, NULL, &config);
-	// 	//		ucp_config_print(config, stderr, NULL, UCS_CONFIG_PRINT_CONFIG);
-	// 	//		ucp_config_release(config);
-	// }
 
 	int32_t not_initialized = 0;
 
@@ -1133,7 +957,6 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 	}
 	void *request = malloc(length);
 	ret = recv_dynamic_stream(ucp_worker_meta, ep, request, IMSS_INFO, local_meta_uid, length);
-	// ret = recv_dynamic_stream_opt(ucp_worker_meta, ep, &request, IMSS_INFO, local_meta_uid, length);
 	slog_debug("[IMSS][stat_imss] End, ret=%d", ret);
 	// if (ret < sizeof(imss_info))
 	if (ret == -1)
@@ -1749,14 +1572,8 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 		return -1;
 	}
 
-	// char result[msg_length];
-	// slog_debug("[delete_dataset] before malloc, msg_length=%ld", msg_length);
 	void *result = malloc(msg_length);
-	// void *result = NULL;
-	// slog_debug(" after malloc, msg_length=%lu", msg_length);
-	// slog_debug("[delete_dataset] before recv_data");
 	msg_length = recv_data(ucp_worker_meta, ep, result, msg_length, local_meta_uid, 0);
-	// msg_length = recv_data_opt(ucp_worker_meta, ep, &result, msg_length, local_meta_uid, 0);
 	slog_debug(" after recv_data, msg_length=%lu", msg_length);
 	if (msg_length == 0)
 	{
@@ -2232,7 +2049,7 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 	slog_debug("[IMSS] dataset_id=%d, current_dataset=%d", dataset_id, current_dataset);
 	// fprintf(stderr,"current_dataset=%d, dataset_id=%d\n", current_dataset, dataset_id);
 
-	if (current_dataset != dataset_id) // TO FIX: if a thread does not met the condition, their curr_datset could have the value of the previous thread. curr_dataset is global.
+	// if (current_dataset != dataset_id) // TO FIX: if a thread does not met the condition, their curr_datset could have the value of the previous thread. curr_dataset is global.
 	{
 		// Retrieve the corresponding dataset_info structure and the associated IMSS.
 		curr_dataset = g_array_index(datasetd, dataset_info, dataset_id);
@@ -2244,6 +2061,7 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 		if (set_policy(&curr_dataset) == -1)
 		{
 			perror("HERCULES_ERR_GET_DATA_LOCATION_SET_POLICY");
+			slog_error("HERCULES_ERR_GET_DATA_LOCATION_SET_POLICY");
 			return -1;
 		}
 
@@ -2258,7 +2076,7 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 	{
 		// curr_imss.info.num_storages = atoi(curr_num_data_nodes);
 		stat_imss_info(curr_imss.info.uri_, &curr_imss.info);
-		// fprintf(stderr, "HERCULES_CURR_ACTIVE_DATA_NODES=%d, old_num_storages=%d, num_active_storages=%d, uri=%s\n", curr_num_data_nodes_env, old_num_storages, curr_imss.info.num_active_storages, curr_imss.info.uri_);
+		fprintf(stderr, "HERCULES_CURR_ACTIVE_DATA_NODES=%d, old_num_storages=%d, num_active_storages=%d, uri=%s\n", curr_num_data_nodes_env, old_num_storages, curr_imss.info.num_active_storages, curr_imss.info.uri_);
 		// unsetenv("HERCULES_CURR_ACTIVE_DATA_NODES");
 
 		// for (int i = 0; i < curr_imss.info.num_storages; i++)
@@ -2995,67 +2813,73 @@ int32_t imss_flush_data()
 }
 
 // Method retrieving a data element associated to a certain dataset.
-ssize_t get_ndata(int32_t dataset_id, int32_t n_server, int32_t data_id, void *buffer, ssize_t to_read, off_t offset)
+ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset)
 {
 	slog_debug("[IMSS] dataset_id=%d, data_id=%d", dataset_id, data_id);
+
+	// n_server = -1;
 	int replication_factor = 1;
 	int inf_prov = 0;
 	int32_t curr_imss_storages;
 
 	// if the number of server to be used was not provided, we try to obtain
 	// the data location.
-	if (n_server == -1)
+	// if (n_server == -1)
+	// {
+	// Server containing the corresponding data to be retrieved.
+	if ((n_server = get_data_location(dataset_id, data_id, GET)) == -1)
 	{
-		// Server containing the corresponding data to be retrieved.
-		if ((n_server = get_data_location(dataset_id, data_id, GET)) == -1)
-		{
-			return -2;
-		}
-		replication_factor = curr_dataset.repl_factor;
-		curr_imss_storages = curr_imss.info.num_active_storages; // curr_imss.info.num_storages;
+		return -2;
 	}
-	else
-	{
-		inf_prov = 1;
-	}
+	replication_factor = curr_dataset.repl_factor;
+	curr_imss_storages = curr_imss.info.num_active_storages; // curr_imss.info.num_storages;
+	// }
+	// else
+	// {
+	// 	inf_prov = 1;
+	// }
 
 	// Servers that the data block is going to be requested to.
 	int32_t repl_servers[replication_factor];
 	int32_t session_policy = get_policy();
 
-	switch (inf_prov)
+	// switch (inf_prov)
+	// {
+	// case 0:
+	// {
+	uint32_t n_server_ = 0;
+	int32_t aux_conn = 0;
+	// Retrieve the corresponding connections to the previous servers.
+	for (int32_t i = 0; i < replication_factor; i++)
 	{
-	case 0:
-	{
-		uint32_t n_server_ = 0;
-		int32_t aux_conn = 0;
-		// Retrieve the corresponding connections to the previous servers.
-		for (int32_t i = 0; i < replication_factor; i++)
+		// Server storing the current data block.
+		n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
+		slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset.n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset.n_servers, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
+
+		repl_servers[i] = n_server_;
+
+		// Check if the current connection is the local one (if there is).
+		if (repl_servers[i] == curr_dataset.local_conn)
 		{
-			// Server storing the current data block.
-			n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
-			slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset.n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset.n_servers, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
-
-			repl_servers[i] = n_server_;
-
-			// Check if the current connection is the local one (if there is).
-			if (repl_servers[i] == curr_dataset.local_conn)
-			{
-				// Move the local connection to the first one to be requested.
-				aux_conn = repl_servers[0];
-				repl_servers[0] = repl_servers[i];
-				repl_servers[i] = aux_conn;
-			}
+			// Move the local connection to the first one to be requested.
+			aux_conn = repl_servers[0];
+			repl_servers[0] = repl_servers[i];
+			repl_servers[i] = aux_conn;
 		}
-		break;
 	}
-	case 1:
+	// 	break;
+	// }
+	// case 1:
+	// 	for (int32_t i = 0; i < replication_factor; i++)
+	// 	{
+	// 		// Server storing the current data block.
+	// 		repl_servers[i] = n_server;
+	// 	}
+	// 	break;
 
-		break;
-
-	default:
-		break;
-	}
+	// default:
+	// 	break;
+	// }
 
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
@@ -3971,19 +3795,19 @@ int get_number_of_active_nodes()
 	// is not updated.
 	if (ret == -1)
 	{
-		perror("ERR_HERCULES_READ_NUM_ACTIVES_NODES");
+		perror("HERCULES_ERR_READ_NUM_ACTIVES_NODES");
 		ret = close(fd);
 		if (fd == -1)
 		{
-			perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
+			perror("HERCULES_ERR_CLOSE_NUM_ACTVIES_NODES");
 		}
 		return -1;
 	}
 	else
 	{
 		number_active_storage_servers = atoi(buf);
-		fprintf(stderr, "[Wake up server] The new number of active data nodes is %s\n", buf);
-		slog_debug("[Wake up server] The new number of active data nodes is %s\n", buf);
+		fprintf(stderr, "The new number of active data nodes is %s\n", buf);
+		slog_debug("The new number of active data nodes is %s\n", buf);
 	}
 	// Close the file.
 	ret = close(fd);

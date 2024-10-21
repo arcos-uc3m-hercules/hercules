@@ -138,6 +138,7 @@ int32_t map_records::put_simple(std::string key, int value)
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	// Add a new value to the map.
+	fprintf(stderr, "Inserting %s with value %d\n", key.c_str(), value);
 	buffer_checkpoint.insert({key, value});
 	return 0;
 }
@@ -570,7 +571,7 @@ int write_2_disk(const char *filename, void *buffer, size_t size, size_t offset)
 }
 
 // Used in str_worker threads.
-int32_t map_records::memory2disk()
+int32_t map_records::memory2disk(uint64_t block_size)
 {
 	// Save key value on a vector to know which of them have been copy to diks.
 	std::vector<string> vec;
@@ -588,13 +589,16 @@ int32_t map_records::memory2disk()
 	void *address_block_0 = NULL;
 	uint64_t block_size_rtvd = 0, block_0_size = 0;
 	struct stat *stats = NULL;
+	int32_t file_desc = 0;
 
 	// get the current number of active data servers.
 	number_active_storage_servers = get_number_of_active_nodes();
-
+	fprintf(stderr, "- BLOCK SIZE = %lu -\n", block_size);
 	for (const auto &it : buffer_checkpoint)
 	{
+		fprintf(stderr, "Data found in buffer checkpoint\n");
 		copy_to_disk = it.second;
+		fprintf(stderr, "file %s, copy to disk = %d\n", it.first.c_str(), it.second);
 		if (copy_to_disk == 1)
 		{
 			key = it.first;
@@ -647,15 +651,16 @@ int32_t map_records::memory2disk()
 				continue;
 			}
 			// Expected block 0 uri.
-			sprintf(key_block_0, "imss://%s$0", file_name.c_str());
+			// sprintf(key_block_0, "imss://%s$0", file_name.c_str());
+			sprintf(key_block_0, "imss://%s", file_name.c_str());
 			// Try to get block 0 from local map. If the block is not here
 			// we make a request to the corresponding data server.
-			ret = get(key_block_0, &address_block_0, &block_0_size);
-			if (ret == 0)
-			{
-				fprintf(stderr, "Block 0 for key %s not found for checkpointing on the local map\n", key.c_str());
-				// continue;
-			}
+			// ret = get(key_block_0, &address_block_0, &block_0_size);
+			// if (ret == 0)
+			// {
+			// 	fprintf(stderr, "Block 0 for key %s not found for checkpointing on the local map\n", key.c_str());
+			// 	// continue;
+			// }
 			int next_server = find_server(number_active_storage_servers, block_number, data_uri.c_str(), 0);
 
 			if (next_server < 0)
@@ -666,14 +671,18 @@ int32_t map_records::memory2disk()
 			}
 
 			// get block 0 from data server.
-			// ret = get_ndata(ds, 0, address_block_0, 0, 0);
-			// if (ret < 0)
-			// {
-			// 	char err_msg[128];
-			// 	sprintf(err_msg, "HERCULES_ERR_REFRESH: %s", path);
-			// 	slog_error("[imss_refresh] %s", err_msg);
-			// 	return -1;
-			// }
+			file_desc = open_dataset(key_block_0, 0);
+			fprintf(stderr, "file desc = %d, BLOCK_SIZE=%lu\n", file_desc, block_size);
+			address_block_0 = (void *)malloc(block_size * sizeof(char));
+			ret = get_ndata(file_desc, next_server, 0, address_block_0, 0, 0);
+			if (ret < 0)
+			{
+				char err_msg[MAX_ERR_MSG_LEN];
+				sprintf(err_msg, "HERCULES_ERR_GET_NDATA_CHECKPOINT: %s", key_block_0);
+				slog_error("[imss_refresh] %s", err_msg);
+				perror(err_msg);
+				return -1;
+			}
 			// stats = (struct stat *)aux;
 
 			stats = (struct stat *)address_block_0;
@@ -684,16 +693,22 @@ int32_t map_records::memory2disk()
 				continue;
 			}
 
-			if (stats->st_size < BLOCK_SIZE)
+
+			fprintf(stderr, "file size = %ld\n", stats->st_size);
+
+			if (stats->st_size < block_size)
 			{
 				block_size_rtvd = stats->st_size;
 			}
 
-			offset = BLOCK_SIZE * block_number; // TODO: block size * block number.
+			offset = block_size * block_number; // TODO: block size * block number.
 
-			// write_2_disk(file_name.c_str(), address_, block_size_rtvd, offset);
+			write_2_disk(file_name.c_str(), address_, block_size_rtvd, offset);
 			buffer_checkpoint[key] = 0;
+			free(address_block_0);
+			sleep(5);
 		}
 	}
+	fprintf(stderr, "Ending memory2disk\n");
 	return 0;
 }

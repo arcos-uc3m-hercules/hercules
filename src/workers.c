@@ -64,7 +64,7 @@ int global_server_fd_thread = -1;
 size_t global_offset = 0;
 
 #define GARBAGE_COLLECTOR_PERIOD 120
-#define CKECKPOINT_PERIOD 5
+#define CKECKPOINT_PERIOD 1
 
 int ready(char *tmp_file_path, const char *msg)
 {
@@ -297,7 +297,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
-	std::shared_ptr<map_records> secondary_map = arguments->secondary_map;
+	// std::shared_ptr<map_records> secondary_map = arguments->secondary_map;
 
 	// Resources specifying if the ZMQ_SNDMORE flag was set in the sender.
 	int64_t more;
@@ -1142,7 +1142,14 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding checkpoint thread copy the data to disk.
 				// fprintf(stderr, "Inserting key = %s\n", key.c_str());
 				// buffer_checkpoint.insert({key, 1});
-				secondary_map->put_simple(key, 1);
+				insert_successful = map->put_simple(key, 1);
+				// Include the new record in the tracking structure.
+				if (insert_successful != 0)
+				{
+					perror("ERR_HERCULES_WORKER_SEC_MAP_PUT");
+					slog_error("ERR_HERCULES_WORKER_SEC_MAP_PUT");
+					return -1;
+				}
 
 				// Update the pointer.
 				arguments->pt += block_size_recv;
@@ -1197,7 +1204,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						// TODO: should we update this block's size in the map?
 						// map->update(key, address_, msg_length);
 
-						secondary_map->update_simple(key, 1);
+						map->update_simple(key, 1);
 
 						free(buffer);
 					}
@@ -1291,17 +1298,22 @@ void *garbage_collector(void *th_argv)
 void *checkpoint(void *th_argv)
 {
 	slog_debug("Init checkpoint writter");
+	p_argv *arguments = (p_argv *)th_argv;
+	BLOCK_SIZE = arguments->blocksize * 1024;
+	sleep(1);
 	// Obtain the current map class element from the set of arguments.
-	map_records *map = (map_records *)th_argv;
+	// map_records *map =(map_records *) arguments->map; // (map_records *)th_argv;
+	std::shared_ptr<map_records> map = arguments->map;
 
 	for (;;)
 	{
 		// Gnodetraverse_garbage_collector(map);//Future
 		sleep(CKECKPOINT_PERIOD);
-		fprintf(stderr, "Running Checkpointing\n");
+		fprintf(stderr, "Running Checkpointing, block size = %lu, %lu\n", BLOCK_SIZE, arguments->blocksize);
 		pthread_mutex_lock(&mutex_garbage);
-		map->memory2disk();
+		map->memory2disk(BLOCK_SIZE);
 		pthread_mutex_unlock(&mutex_garbage);
+		fprintf(stderr,"Ending memory2disk\n");
 	}
 	pthread_exit(NULL);
 }

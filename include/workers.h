@@ -42,7 +42,7 @@
 typedef struct {
 	//Pointer to the corresponding type storing key-address couples.
 	std::shared_ptr<map_records> map = NULL;
-	std::shared_ptr<map_records> secondary_map = NULL;
+	// std::shared_ptr<map_records> secondary_map = NULL;
 	//Pointer to the corresponding buffer region assigned to a thread. 
 	char *        pt;
 	//Integer specifying the port that a certain thread will listen to.

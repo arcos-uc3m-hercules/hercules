@@ -75,7 +75,7 @@ public:
 	// Method retrieving the address associated to a certain record.
 	int32_t cleaning();
 	int32_t cleaning_specific(std::string new_key);
-	int32_t memory2disk();
+	int32_t memory2disk(uint64_t block_size);
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.
 	std::map<std::string, std::pair<void *, uint64_t>>::iterator begin()

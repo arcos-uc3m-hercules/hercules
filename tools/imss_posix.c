@@ -51,10 +51,10 @@ uint64_t METADATA_PORT = 1; // Not default, 1 will fail
 int32_t N_SERVERS = 1;		// Default
 int32_t N_BLKS = 1;			// Default 1
 int32_t N_META_SERVERS = 1;
-char METADATA_FILE[512]; // Not default
-char IMSS_HOSTFILE[512]; // Not default
-char IMSS_ROOT[32];
-char META_HOSTFILE[512];
+char *METADATA_FILE; // Not default
+char *IMSS_HOSTFILE; // Not default
+char *IMSS_ROOT;
+char *META_HOSTFILE;
 uint64_t STORAGE_SIZE = 16;	  // In GB
 uint64_t META_BUFFSIZE = 16;  // In GB
 uint64_t IMSS_BLKSIZE = 1024; // In KB
@@ -95,8 +95,9 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 int LD_PRELOAD = 0;
 void *map;
 void *map_prefetch;
-char MOUNT_POINT[512];
-char HERCULES_PATH[512];
+char *MOUNT_POINT;
+
+char *HERCULES_PATH;
 void *map_fd;
 struct arguments args;
 
@@ -505,6 +506,25 @@ __attribute__((constructor)) void imss_posix_init(void)
 	}
 
 	IMSS_DATA_BSIZE = IMSS_BLKSIZE * KB; // block size in bytes.
+	MOUNT_POINT = args.mount_point;
+	IMSS_ROOT = args.imss_uri;
+	IMSS_HOSTFILE = args.data_hostfile;
+	N_SERVERS = args.num_data_servers;
+	IMSS_SRV_PORT = args.data_port;
+	IMSS_BUFFSIZE = args.bufsize;
+	META_HOSTFILE = args.meta_hostfile;
+	METADATA_PORT = args.stat_port;
+	N_META_SERVERS = args.num_metadata_servers;
+	IMSS_BLKSIZE = args.block_size;
+	STORAGE_SIZE = args.storage_size;
+	MALLEABILITY = args.malleability;
+	MALLEABILITY_TYPE = args.malleability_type;
+	UPPER_BOUND_SERVERS = args.upper_bound_servers;
+	LOWER_BOUND_SERVERS = args.lower_bound_servers;
+	REPL_FACTOR = args.repl_factor;
+	REPL_TYPE = args.repl_type;
+	POLICY = args.policy;
+
 	// Hercules init -- Attached deploy
 	if (DEPLOYMENT == 1)
 	{
@@ -523,7 +543,8 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// {
 	// 	fprintf(stderr, "LOG PATH= %s\n", log_path); // this line raise an exception running a python app with threads.
 	// }
-	slog_init(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, rank);
+	slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
+
 	if (IMSS_DEBUG_FILE > 0)
 	{
 		printf("Log path = %s\n", log_path);
@@ -616,279 +637,6 @@ __attribute__((constructor)) void imss_posix_init(void)
 	init = 1;
 	// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
-
-// int getConfiguration()
-// {
-// 	struct cfg_struct *cfg;
-
-// 	/***************************************************************/
-// 	/******************* PARSE FILE ARGUMENTS **********************/
-// 	/***************************************************************/
-// 	int ret = 0;
-
-// 	char *conf_path;
-// 	char abs_exe_path[1024];
-// 	char *aux;
-
-// 	cfg = cfg_init();
-// 	conf_path = getenv("HERCULES_CONF");
-// 	if (conf_path != NULL)
-// 	{
-// 		// slog_live("Loading %s", conf_path);
-// 		ret = cfg_load(cfg, conf_path);
-// 		if (ret)
-// 		{
-// 			fprintf(stderr, "%s has not been loaded\n", conf_path);
-// 		}
-// 	}
-// 	else
-// 	{
-// 		ret = 1;
-// 	}
-
-// 	if (ret)
-// 	{
-// 		char default_paths[3][PATH_MAX] = {
-// 			"/etc/hercules.conf",
-// 			"./hercules.conf",
-// 			"hercules.conf"};
-
-// 		for (size_t i = 0; i < 3; i++)
-// 		{
-// 			// slog_live("Loading %s\n", default_paths[i]);
-// 			if (cfg_load(cfg, default_paths[i]) == 0)
-// 			{
-// 				ret = 0;
-// 				break;
-// 			}
-// 		}
-// 		if (ret)
-// 		{
-// 			if (getcwd(abs_exe_path, sizeof(abs_exe_path)) != NULL)
-// 			{
-// 				conf_path = (char *)malloc(sizeof(char) * PATH_MAX);
-// 				sprintf(conf_path, "%s/%s", abs_exe_path, "../conf/hercules.conf");
-// 				if (cfg_load(cfg, conf_path) == 0)
-// 				{
-// 					ret = 0;
-// 				}
-// 			}
-// 		}
-
-// 		if (ret)
-// 		{
-// 			fprintf(stderr, "[HERCULES CLIENT] Configuration file '%s' not found\n", conf_path);
-// 			perror("ERRIMSS_CONF_NOT_FOUND");
-// 			return -1;
-// 		}
-// 		free(conf_path);
-// 	}
-
-// 	if (cfg_get(cfg, "URI"))
-// 	{
-// 		aux = cfg_get(cfg, "URI");
-// 		strcpy(IMSS_ROOT, aux);
-// 	}
-
-// 	if (cfg_get(cfg, "BLOCK_SIZE"))
-// 		IMSS_BLKSIZE = atoi(cfg_get(cfg, "BLOCK_SIZE"));
-
-// 	if (cfg_get(cfg, "MOUNT_POINT"))
-// 	{
-// 		aux = cfg_get(cfg, "MOUNT_POINT");
-// 		strcpy(MOUNT_POINT, aux);
-// 	}
-
-// 	if (cfg_get(cfg, "HERCULES_PATH"))
-// 	{
-// 		aux = cfg_get(cfg, "HERCULES_PATH");
-// 		strcpy(HERCULES_PATH, aux);
-// 	}
-
-// 	if (cfg_get(cfg, "METADATA_PORT"))
-// 		METADATA_PORT = atol(cfg_get(cfg, "METADATA_PORT"));
-
-// 	if (cfg_get(cfg, "DATA_PORT"))
-// 		IMSS_SRV_PORT = atol(cfg_get(cfg, "DATA_PORT"));
-
-// 	if (cfg_get(cfg, "NUM_DATA_SERVERS"))
-// 		N_SERVERS = atoi(cfg_get(cfg, "NUM_DATA_SERVERS"));
-
-// 	if (cfg_get(cfg, "NUM_META_SERVERS"))
-// 		N_META_SERVERS = atoi(cfg_get(cfg, "NUM_META_SERVERS"));
-
-// 	if (cfg_get(cfg, "MALLEABILITY"))
-// 		MALLEABILITY = atoi(cfg_get(cfg, "MALLEABILITY"));
-
-// 	if (cfg_get(cfg, "MALLEABILITY_TYPE"))
-// 		MALLEABILITY_TYPE = atoi(cfg_get(cfg, "MALLEABILITY_TYPE"));
-
-// 	if (cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"))
-// 		UPPER_BOUND_SERVERS = atoi(cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"));
-
-// 	if (cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"))
-// 		LOWER_BOUND_SERVERS = atoi(cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"));
-
-// 	if (cfg_get(cfg, "REPL_FACTOR"))
-// 		REPL_FACTOR = atoi(cfg_get(cfg, "REPL_FACTOR"));
-
-// 	if (cfg_get(cfg, "REPL_TYPE"))
-// 		REPL_TYPE = atoi(cfg_get(cfg, "REPL_TYPE"));
-
-// 	if (cfg_get(cfg, "POLICY"))
-// 		POLICY = cfg_get(cfg, "POLICY");
-// 	else
-// 	{
-// 		fprintf(stderr, "Distributiin Policy has not been established. \n Please, add the following line in your configuration file POLICY = RR\n");
-// 		perror("ERR_HERCULES_POLICY_NOT_FOUND");
-// 		return -1;
-// 	}
-
-// 	if (cfg_get(cfg, "METADATA_HOSTFILE"))
-// 	{
-// 		aux = cfg_get(cfg, "METADATA_HOSTFILE");
-// 		strcpy(META_HOSTFILE, aux);
-// 	}
-
-// 	if (cfg_get(cfg, "DATA_HOSTFILE"))
-// 	{
-// 		aux = cfg_get(cfg, "DATA_HOSTFILE");
-// 		strcpy(IMSS_HOSTFILE, aux);
-// 	}
-
-// 	if (cfg_get(cfg, "METADA_PERSISTENCE_FILE"))
-// 	{
-// 		aux = cfg_get(cfg, "METADA_PERSISTENCE_FILE");
-// 		strcpy(METADATA_FILE, aux);
-// 	}
-
-// 	if (getenv("HERCULES_DEBUG_LEVEL") != NULL)
-// 	{
-// 		aux = getenv("HERCULES_DEBUG_LEVEL");
-// 	}
-// 	else if (cfg_get(cfg, "DEBUG_LEVEL"))
-// 	{
-// 		aux = cfg_get(cfg, "DEBUG_LEVEL");
-// 	}
-// 	else
-// 	{
-// 		aux = NULL;
-// 	}
-
-// 	if (aux != NULL)
-// 	{
-// 		if (strstr(aux, "file"))
-// 		{
-// 			IMSS_DEBUG_FILE = 1;
-// 			IMSS_DEBUG_SCREEN = 0;
-// 			IMSS_DEBUG_LEVEL = SLOG_LIVE;
-// 		}
-// 		else if (strstr(aux, "stdout"))
-// 			IMSS_DEBUG_SCREEN = 1;
-// 		else if (strstr(aux, "debug"))
-// 			IMSS_DEBUG_LEVEL = SLOG_DEBUG;
-// 		else if (strstr(aux, "live"))
-// 			IMSS_DEBUG_LEVEL = SLOG_LIVE;
-// 		else if (strstr(aux, "all"))
-// 		{
-// 			IMSS_DEBUG_FILE = 1;
-// 			IMSS_DEBUG_SCREEN = 1;
-// 			IMSS_DEBUG_LEVEL = SLOG_PANIC;
-// 		}
-// 		else if (strstr(aux, "none"))
-// 		{
-// 			IMSS_DEBUG_FILE = 0;
-// 			IMSS_DEBUG_SCREEN = 0;
-// 			IMSS_DEBUG_LEVEL = SLOG_NONE;
-// 			unsetenv("IMSS_DEBUG");
-// 		}
-// 		else
-// 		{
-// 			IMSS_DEBUG_FILE = 1;
-// 			IMSS_DEBUG_LEVEL = getLevel(aux);
-// 		}
-// 	}
-
-// 	/*************************************************************************/
-
-// 	if (getenv("IMSS_MOUNT_POINT") != NULL)
-// 	{
-// 		strcpy(MOUNT_POINT, getenv("IMSS_MOUNT_POINT"));
-// 	}
-
-// 	if (getenv("IMSS_HOSTFILE") != NULL)
-// 	{
-// 		strcpy(IMSS_HOSTFILE, getenv("IMSS_HOSTFILE"));
-// 	}
-
-// 	if (getenv("IMSS_N_SERVERS") != NULL)
-// 	{
-// 		N_SERVERS = atoi(getenv("IMSS_N_SERVERS"));
-// 	}
-
-// 	if (getenv("IMSS_SRV_PORT") != NULL)
-// 	{
-// 		IMSS_SRV_PORT = atol(getenv("IMSS_SRV_PORT"));
-// 	}
-
-// 	if (getenv("IMSS_BUFFSIZE") != NULL)
-// 	{
-// 		IMSS_BUFFSIZE = atol(getenv("IMSS_BUFFSIZE"));
-// 	}
-
-// 	if (getenv("IMSS_META_HOSTFILE") != NULL)
-// 	{
-// 		strcpy(META_HOSTFILE, getenv("IMSS_META_HOSTFILE"));
-// 	}
-
-// 	if (getenv("IMSS_META_PORT") != NULL)
-// 	{
-// 		METADATA_PORT = atol(getenv("IMSS_META_PORT"));
-// 	}
-
-// 	if (getenv("IMSS_META_SERVERS") != NULL)
-// 	{
-// 		N_META_SERVERS = atoi(getenv("IMSS_META_SERVERS"));
-// 	}
-
-// 	if (getenv("IMSS_BLKSIZE") != NULL)
-// 	{
-// 		IMSS_BLKSIZE = atoi(getenv("IMSS_BLKSIZE"));
-// 	}
-
-// 	if (getenv("IMSS_STORAGE_SIZE") != NULL)
-// 	{
-// 		STORAGE_SIZE = atol(getenv("IMSS_STORAGE_SIZE"));
-// 	}
-
-// 	if (getenv("IMSS_METADATA_FILE") != NULL)
-// 	{
-// 		strcpy(METADATA_FILE, getenv("IMSS_METADATA_FILE"));
-// 	}
-
-// 	if (getenv("IMSS_DEPLOYMENT") != NULL)
-// 	{
-// 		DEPLOYMENT = atoi(getenv("IMSS_DEPLOYMENT"));
-// 	}
-
-// 	if (getenv("IMSS_MALLEABILITY") != NULL)
-// 	{
-// 		MALLEABILITY = atoi(getenv("IMSS_MALLEABILITY"));
-// 	}
-
-// 	if (getenv("IMSS_UPPER_BOUND_MALLEABILITY") != NULL)
-// 	{
-// 		UPPER_BOUND_SERVERS = atoi(getenv("IMSS_UPPER_BOUND_MALLEABILITY"));
-// 	}
-
-// 	if (getenv("IMSS_LOWER_BOUND_MALLEABILITY") != NULL)
-// 	{
-// 		LOWER_BOUND_SERVERS = atoi(getenv("IMSS_LOWER_BOUND_MALLEABILITY"));
-// 	}
-// 	cfg_free(cfg);
-
-// 	return 1;
-// }
 
 void __attribute__((destructor)) run_me_last()
 {
@@ -1178,7 +926,6 @@ pid_t fork(void)
 
 		// Clean UCX.
 		// imss_comm_cleanup();
-
 	}
 	else // parent process.
 	{
@@ -2580,9 +2327,6 @@ ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size,
 
 int generalOpen(char *new_path, int flags, mode_t mode, int createFd)
 {
-
-	// pthread_mutex_lock(&system_lock);
-
 	int ret = 0;
 	uint64_t ret_ds = 0;
 	unsigned long p = 0;

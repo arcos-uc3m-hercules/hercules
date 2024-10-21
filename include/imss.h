@@ -44,7 +44,6 @@
 // Max length for perror messages.
 #define MAX_ERR_MSG_LEN PATH_MAX + 100
 
-
 extern int32_t IMSS_DEBUG;
 static uint64_t BLOCK_SIZE;
 
@@ -98,11 +97,10 @@ static uint64_t BLOCK_SIZE;
 #endif
 
 int32_t get_data_location(int32_t, int32_t, int32_t);
-int32_t
-find_server(int32_t n_servers,
-			int32_t n_msg,
-			const char *fname,
-			int32_t op_type);
+int32_t find_server(int32_t n_servers,
+					int32_t n_msg,
+					const char *fname,
+					int32_t op_type);
 // typedef enum {
 //     CLIENT_SERVER_SEND_RECV_STREAM  = UCS_BIT(0),
 //     CLIENT_SERVER_SEND_RECV_DEFAULT = CLIENT_SERVER_SEND_RECV_STREAM
@@ -213,6 +211,11 @@ typedef struct
 	int lenght_key;
 } thread_argv;
 
+static int32_t __thread current_dataset;   // Dataset whose policy has been set last.
+static dataset_info __thread curr_dataset; // Currently managed dataset.
+static imss __thread curr_imss;
+
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -279,7 +282,6 @@ RETURNS:	 0 - Resources successfully initialized. Communication channels created
 -1 - In case of error.
 -2 - The imss instance has been already opened or created.
 	 */
-	int32_t open_imss_temp(char *imss_uri, int num_active_servers);
 	int32_t open_imss(char *imss_uri);
 
 	/* Method releasing client-side and/or server-side resources related to a certain IMSS instance.
@@ -464,35 +466,33 @@ The current function does not allocate memory.
 				   int64_t size);
 
 	/**
-	 * @brief Method retrieving a data element associated to a certain dataset 
+	 * @brief Method retrieving a data element associated to a certain dataset
 	 * starting in an offset.
-	 * @param dataset_id - Number identifying the concerned dataset among the 
+	 * @param dataset_id - Number identifying the concerned dataset among the
 	 * client's session.
-	 * @param data_id    - Data block number identifying the data block to be 
+	 * @param data_id    - Data block number identifying the data block to be
 	 * retrieved.
-	 * @param n_server - Number of data server which holds the data block, 
-	 * passing -1 will auto finding the number of data server.
-	 * @param buffer     - Memory address where the requested block will be 
+	 * @param buffer     - Memory address where the requested block will be
 	 * received. WARNING: memory must have been allocated.
 	 * @param offset	 - Offset of the requested block.
-	 * @returns 0 if the requested block was successfully retrieved, 0 if the 
-	 * requested block was not find in the remote server, or -1 in case of 
+	 * @returns 0 if the requested block was successfully retrieved, 0 if the
+	 * requested block was not find in the remote server, or -1 in case of
 	 * error.
 	 */
-	ssize_t get_ndata(int32_t dataset_id, int32_t n_server, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
+	ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
 
 	/**
-	 * @brief Method used during malleability to retrieving a data element 
+	 * @brief Method used during malleability to retrieving a data element
 	 * associated to a certain dataset starting in an offset.
-	 * @param dataset_id - Number identifying the concerned dataset among the 
+	 * @param dataset_id - Number identifying the concerned dataset among the
 	 * client's session.
-	 * @param data_id    - Data block number identifying the data block to be 
+	 * @param data_id    - Data block number identifying the data block to be
 	 * retrieved.
-	 * @param buffer     - Memory address where the requested block will be 
+	 * @param buffer     - Memory address where the requested block will be
 	 * received. WARNING: memory must have been allocated.
 	 * @param offset	 - Offset of the requested block.
-	 * @returns 0 if the requested block was successfully retrieved, 0 if the 
-	 * requested block was not find in the remote server, or -1 in case of 
+	 * @returns 0 if the requested block was successfully retrieved, 0 if the
+	 * requested block was not find in the remote server, or -1 in case of
 	 * error.
 	 */
 	size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int32_t num_storages);

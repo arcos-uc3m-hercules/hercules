@@ -53,7 +53,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     switch (key)
     {
     case PORT_OPT:
-        args->port = (uint16_t)atoi(arg);
+        args->data_port = (uint16_t)atoi(arg);
         break;
     case BUFSIZE_OPT:
         args->bufsize = atoi(arg);
@@ -74,7 +74,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         args->num_data_servers = atoi(arg);
         break;
     case DEPLOY_HOSTFILE_OPT:
-        strcpy(args->deploy_hostfile, arg);
+        strcpy(args->data_hostfile, arg);
         break;
     case BLOCK_SIZE_OPT:
         args->block_size = atoi(arg);
@@ -105,13 +105,13 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         {
             argp_usage(state);
         }
-        if (!args->type || !args->port)
+        if (!args->type || !args->data_port)
         {
             argp_failure(state, 1, 0, "Required options: -p. \nSee --help for more detail");
         }
         if (args->type == TYPE_DATA_SERVER &&
             (!args->stat_host || !args->stat_port || !args->num_data_servers ||
-             !args->deploy_hostfile || !args->block_size))
+             !args->data_hostfile || !args->block_size))
         {
             argp_failure(state, 1, 0, "Required options for data server type: -H, -P, -n, -d, -B, -s. \nSee --help for more detail");
             exit(ARGP_ERR_UNKNOWN);
@@ -136,7 +136,7 @@ int parse_args(int argc, char **argv, struct arguments *args)
     /* Default values */
     args->type = 0;
     args->id = 0;
-    args->port = 0;
+    args->data_port = 0;
     args->bufsize = 0;
     strcpy(args->imss_uri, "imss://");
     args->stat_port = 0;

@@ -60,7 +60,7 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 	// Creates endpoints to all data servers. It is use in case of
 	// malleability to move blocks between data servers.
 	slog_debug("Connecting to data servers\n");
-	open_imss(imss_uri); // open_imss_temp(imss_uri, number_active_storage_servers);
+	open_imss(imss_uri);
 	if (number_active_storage_servers < 0)
 	{
 		slog_fatal("Error creating HERCULES's resources, the process cannot be started");
@@ -323,7 +323,7 @@ int32_t main(int32_t argc, char **argv)
 	size_t addr_len;
 
 	// memory pool stuff
-	uint64_t block_size;   // In KB
+	size_t block_size;	   // In KB
 	uint64_t storage_size; // In GB
 
 	ucs_status_t status;
@@ -379,6 +379,7 @@ int32_t main(int32_t argc, char **argv)
 
 	// args.logging.hercules_debug_level = SLOG_NONE;
 	IMSS_THREAD_POOL = args.thread_pool;
+	POLICY = args.policy;
 
 	char log_path[PATH_MAX];
 	slog_debug("Server type=%c\n", args.type);
@@ -399,19 +400,10 @@ int32_t main(int32_t argc, char **argv)
 	if (args.type == TYPE_DATA_SERVER)
 	{
 		args.stat_host = argv[3];
-		slog_debug("imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_host, args.stat_port, args.num_data_servers, args.deploy_hostfile, args.block_size, args.storage_size, args.bufsize);
+		slog_debug("imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_host, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
 		// bind port number.
-		bind_port = args.port;
+		bind_port = args.data_port;
 		init_number_of_server = atoi(argv[4]);
-
-		// int num_active_storages = 0;
-		// num_active_storages = open_imss(IMSS_ROOT);
-		// if (num_active_storages < 0)
-		// {
-		// 	slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-		// 	printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
-		// 	return -1;
-		// }
 	}
 	else
 	{
@@ -475,7 +467,7 @@ int32_t main(int32_t argc, char **argv)
 		// Dynamic number of servers conforming the HERCULES deployment used by malleability.
 		number_active_storage_servers = num_servers;
 		// HERCULES' MPI deployment file.
-		deployfile = args.deploy_hostfile;
+		deployfile = args.data_hostfile;
 		// data block size
 		block_size = args.block_size; // in kilobytes.
 		// total storage size
@@ -636,7 +628,7 @@ int32_t main(int32_t argc, char **argv)
 
 		if (pthread_mutex_init(&tree_mut, NULL) != 0)
 		{
-			perror("ERR_HERCULES_TREEMUT_INIT");
+			perror("HERCULES_ERR_TREE_MUT_INIT");
 			pthread_exit(NULL);
 		}
 	}
@@ -647,7 +639,7 @@ int32_t main(int32_t argc, char **argv)
 
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(buffer_size * KB));
-	std::shared_ptr<map_records> secondary_map(new map_records(buffer_size * KB));
+	// std::shared_ptr<map_records> secondary_map(new map_records(buffer_size * KB));
 
 	// copy the reference to a global map.
 	g_map = map;
@@ -708,6 +700,7 @@ int32_t main(int32_t argc, char **argv)
 		// Add port number to thread arguments.
 		arguments[i].ucp_context = ucp_context;
 		arguments[i].blocksize = block_size;
+		fprintf(stderr, "block size = %lu\n", arguments[i].blocksize);
 		arguments[i].storage_size = max_storage_size;
 		arguments[i].port = bind_port;
 		arguments[i].tmp_file_path = tmp_file_path;
@@ -733,7 +726,10 @@ int32_t main(int32_t argc, char **argv)
 		{
 			// TO FIX: This thread must be running only by the data server.
 			slog_debug("[SERVER] Creating checkpoint thread.");
-			if (pthread_create(&threads[i], NULL, checkpoint, (void *)g_map.get()) == -1)
+			// Add the reference to the map into the set of thread arguments.
+			arguments[i].map = map;
+			// if (pthread_create(&threads[i], NULL, checkpoint, (void *)g_map.get()) == -1)
+			if (pthread_create(&threads[i], NULL, checkpoint, (void *)&arguments[i]) == -1)
 			{
 				// Notify thread error deployment.
 				ready(tmp_file_path, "ERROR");
@@ -764,7 +760,7 @@ int32_t main(int32_t argc, char **argv)
 
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
-			arguments[i].secondary_map = secondary_map;
+			// arguments[i].secondary_map = secondary_map;
 			// Specify the address used by each thread to write inside the buffer.
 			arguments[i].pt = (char *)(aux_idx * buffer_segment + buffer_address);
 
@@ -894,11 +890,21 @@ int32_t main(int32_t argc, char **argv)
 		// fix: set real number of metadata servers.
 		// fprintf(stderr, "Connecting to metadata server\n");
 		slog_debug("Connecting to metadata server\n");
-		if (stat_init(args.meta_hostfile, stat_port, 1, args.id) == -1)
+		if (stat_init(args.meta_hostfile, stat_port, args.num_metadata_servers, args.id) == -1)
 		{
 			// In case of error notify and exit
 			slog_error("Stat init failed, cannot connect to Metadata server.");
 			perror("Stat init failed, cannot connect to Metadata server.");
+			return -1;
+		}
+
+		int num_active_storages = 0;
+		num_active_storages = open_imss(args.imss_uri);
+		fprintf(stderr, "Hercules = %s", curr_imss.info.uri_);
+		if (num_active_storages < 0)
+		{
+			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+			printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
 			return -1;
 		}
 	}

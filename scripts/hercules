@@ -349,6 +349,8 @@ fi
 
 # echo "+ + + Initial number of data nodes is $INIT_HERCULES_NUM_DATA/$HERCULES_NUM_DATA"
 export HERCULES_INIT_NUM_DATA=$INIT_HERCULES_NUM_DATA
+## Writes the file containing the number of active data nodes.
+echo "$INIT_HERCULES_NUM_DATA" > ./hercules_num_act_nodes
 
 ## \< \> to match exact word.
 
@@ -631,12 +633,6 @@ fi
 start=`date +%s.%N`
 for node in ${data_hosts[@]}
 do
-    # if [ "$i" -lt "$INIT_HERCULES_NUM_DATA" ]; then ## server is started and set as online.
-    #     server_init_status=1
-    # else ## server is started but set as offline.
-    #     server_init_status=0
-    # fi
-
     # echo "[+] Running data server $i in $node..."
     RM="rm /tmp/d-hercules-$i"
     COMMAND="$HERCULES_BUILD_PATH/hercules_server d $i ${meta_hosts[0]} $INIT_HERCULES_NUM_DATA"

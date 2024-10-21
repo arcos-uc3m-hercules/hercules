@@ -250,7 +250,7 @@ int imss_refresh(const char *path)
 	}
 
 	// get block 0 from data server.
-	ret = get_ndata(ds, -1, 0, aux, 0, 0);
+	ret = get_ndata(ds, 0, aux, 0, 0);
 	if (ret < 0)
 	{
 		char err_msg[MAX_ERR_MSG_LEN];
@@ -358,7 +358,7 @@ int imss_getattr(const char *path, struct stat *stbuf)
 				void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
 				// void *data = NULL;
 				//  data is allocated in "get data".
-				ret = get_ndata(ds, -1, 0, data, 0, 0);
+				ret = get_ndata(ds, 0, data, 0, 0);
 				if (ret < 0)
 				{
 					slog_error("Error getting data: %s", imss_path);
@@ -579,7 +579,7 @@ int imss_open(char *path, uint64_t *fh)
 
 		// aux = (char *)malloc(IMSS_DATA_BSIZE);
 		void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
-		ret = get_ndata(file_desc, -1, 0, data, 0, 0);
+		ret = get_ndata(file_desc, 0, data, 0, 0);
 		if (ret < 0)
 		{
 			free(data);
@@ -761,7 +761,7 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 		}
 		else
 		{
-			to_read = get_ndata(ds, -1, curr_blk, buf + byte_count, to_read, block_offset);
+			to_read = get_ndata(ds, curr_blk, buf + byte_count, to_read, block_offset);
 		}
 		// Error handling when get_ndata does not found the request data.
 		if (to_read == -1)
@@ -2230,7 +2230,7 @@ int imss_unlink(const char *path)
 	}
 
 	// Get initial block (0).
-	ret = get_ndata(ds, -1, 0, buff, 0, 0);
+	ret = get_ndata(ds, 0, buff, 0, 0);
 	if (ret < 0)
 	{
 		pthread_mutex_unlock(&lock);
@@ -2336,7 +2336,7 @@ int imss_utimens(const char *path, const struct timespec tv[2])
 
 	// char *buff = malloc(IMSS_DATA_BSIZE);
 	pthread_mutex_lock(&lock);
-	get_ndata(file_desc, -1, 0, buff, 0, 0);
+	get_ndata(file_desc, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
 	memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2403,7 +2403,7 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 				return -1;
 			}
 			aux = (char *)malloc(IMSS_DATA_BSIZE);
-			ret = get_ndata(file_desc, -1, 0, aux, 0, 0);
+			ret = get_ndata(file_desc, 0, aux, 0, 0);
 			memcpy(&stats, aux, sizeof(struct stat));
 			pthread_mutex_lock(&lock_file);
 			map_put(map, new_path_1, file_desc, stats, aux);
@@ -2548,7 +2548,7 @@ int imss_chmod(const char *path, mode_t mode)
 	}
 
 	pthread_mutex_lock(&lock);
-	get_ndata(file_desc, -1, 0, buff, 0, 0);
+	get_ndata(file_desc, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
 	memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2596,7 +2596,7 @@ int imss_chown(const char *path, uid_t uid, gid_t gid)
 	}
 
 	pthread_mutex_lock(&lock);
-	get_ndata(file_desc, -1, 0, buff, 0, 0);
+	get_ndata(file_desc, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
 	memcpy(&ds_stat, buff, sizeof(struct stat));
