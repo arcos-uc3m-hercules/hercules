@@ -211,11 +211,6 @@ typedef struct
 	int lenght_key;
 } thread_argv;
 
-static int32_t __thread current_dataset;   // Dataset whose policy has been set last.
-static dataset_info __thread curr_dataset; // Currently managed dataset.
-static imss __thread curr_imss;
-
-
 #ifdef __cplusplus
 extern "C"
 {
@@ -384,6 +379,8 @@ RETURNS:	 0 - Release operation took place successfully.
 	int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id);
 
 	int32_t close_dataset(const char *dataset_uri, int fd);
+
+	int32_t clear_dataset(const char *dataset_uri);
 
 	/*Method writev various datasets.
 

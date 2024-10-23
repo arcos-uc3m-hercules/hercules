@@ -99,6 +99,7 @@ private:
 	// <key(file uri), <data, lenght>>
 	std::map<std::string, std::pair<void *, uint64_t>> buffer;
 	std::map<std::string, int> buffer_checkpoint;
+	std::map<std::string, int> buffer_fd;
 	// Mutex restricting access to structure.
 	uint64_t total_size;
 	uint64_t quantity_occupied = 0;

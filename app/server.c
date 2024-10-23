@@ -15,6 +15,10 @@
 // Pointer to the tree's root node.
 extern GNode *tree_root;
 extern pthread_mutex_t tree_mut;
+extern int32_t __thread current_dataset;   // Dataset whose policy has been set last.
+extern dataset_info __thread curr_dataset; // Currently managed dataset.
+extern imss __thread curr_imss;
+
 
 // Initial buffer address.
 extern char *buffer_address;
@@ -60,7 +64,7 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 	// Creates endpoints to all data servers. It is use in case of
 	// malleability to move blocks between data servers.
 	slog_debug("Connecting to data servers\n");
-	open_imss(imss_uri);
+	open_imss(imss_uri); // TODO: Check if this is still necessary due we called it on the main function.
 	if (number_active_storage_servers < 0)
 	{
 		slog_fatal("Error creating HERCULES's resources, the process cannot be started");
@@ -156,7 +160,7 @@ int stop_server()
 	slog_debug("[main] Request - %s", key_plus_size);
 	if (send_req(ucp_worker, client_ep, req_addr, req_addr_len, key_plus_size) == 0)
 	{
-		perror("ERR_HERCULES_STOP_SERVER_SEND_REQ");
+		perror("HERCULES_ERR_STOP_SERVER_SEND_REQ");
 		return -1;
 	}
 
@@ -213,7 +217,7 @@ void handle_signal_server(int signal)
 		int fd = open("/tmp/hercules_pkill_operation", O_RDONLY);
 		if (fd == -1)
 		{
-			perror("ERR_HERCULES_OPEN_PKILL_OPERATION");
+			perror("HERCULES_ERR_OPEN_PKILL_OPERATION");
 			return;
 		}
 
@@ -224,7 +228,7 @@ void handle_signal_server(int signal)
 		if (ret == -1)
 		{
 			pkill_operation = 0;
-			perror("ERR_HERCULES_READ_PKILL_OPERATION");
+			perror("HERCULES_ERR_READ_PKILL_OPERATION");
 		}
 		else
 		{
@@ -491,7 +495,7 @@ int32_t main(int32_t argc, char **argv)
 
 		char request[REQUEST_SIZE];
 		sprintf(request, "%" PRIu32 " GET %s", id, "MAIN!QUERRY");
-		slog_debug("[main] Request - %s, errno=%d:%s", request, errno, strerror(errno));
+		slog_debug("Request - %s", request);
 		if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
 		{
 			perror("HERCULES_ERR_STAT_HELLO");
@@ -522,7 +526,6 @@ int32_t main(int32_t argc, char **argv)
 		ucp_worker_attr_t worker_attr;
 		worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
 		status = ucp_worker_query(ucp_worker, &worker_attr);
-		// printf ("Len %ld \n", worker_attr.address_length);
 		req_addr_len = worker_attr.address_length;
 		req_addr = worker_attr.address;
 
@@ -531,11 +534,11 @@ int32_t main(int32_t argc, char **argv)
 		slog_debug("[srv_worker_thread] Server UID %" PRIu64 ".", attr.worker_uid);
 
 		if (!args.id)
-		{
+		{ // Only performs by the data server with ID = 0.
 			// Formated HERCULES uri to be sent to the metadata server.
 			char formated_uri[REQUEST_SIZE];
 			sprintf(formated_uri, "%" PRIu32 " GET 0 %s", id, args.imss_uri);
-			slog_debug("[main] Request - %s", formated_uri);
+			slog_debug("Request - %s", formated_uri);
 			// Send the request.
 			if (send_req(ucp_worker, client_ep, req_addr, req_addr_len, formated_uri) == 0)
 			{
@@ -554,27 +557,42 @@ int32_t main(int32_t argc, char **argv)
 				return -1;
 			}
 			// Receive the associated structure.
-			// void *data = (void *)malloc(length);
-			imss_info imss_info_ = *(imss_info *)malloc(sizeof(imss_info) * length);
-			ret = recv_dynamic_stream(ucp_worker, client_ep, &imss_info_, BUFFER, attr.worker_uid, length);
-
+			imss_info *imss_info_ = (imss_info *)malloc(sizeof(imss_info) * length);
+			ret = recv_dynamic_stream(ucp_worker, client_ep, imss_info_, IMSS_INFO, attr.worker_uid, length);
+			// If another data server has taken the URI, this HERCULES configuration should not be deployed.
+			// Two HERCULES configurations cannot have the same URI.
+			// We check if "recv_dynamic_stream" has successed, if so, there are another HERCULES instance using
+			// the same URI. 
+			// On success, we free memory and stop this instance.
+			int new_id = 0;
 			if (ret != -1)
-			{
-				// fprintf(stderr,"ret > imss_info\n");
+			{ // success "recv_dynamic_stream".
+				// fprintf(stderr, "imss_info_.num_storages=%d, length=%lu\n", imss_info_->num_storages, length);
 				imss_exists = 1;
-				for (int32_t i = 0; i < imss_info_.num_storages; i++)
-					free(imss_info_.ips[i]);
-				free(imss_info_.ips);
+				for (int32_t i = 0; i < imss_info_->num_storages; i++)
+				{
+					// fprintf(stderr,"ip[%d]=%s\n", i, imss_info_->ips[i]);
+					free(imss_info_->ips[i]);
+					new_id++;
+				}
+				free(imss_info_->ips);
 			}
-			// free(imss_info_);
+			free(imss_info_);
+			fprintf(stderr, "Data server with id = %d already in use, changing to %d\n", args.id, new_id);
+			// Set a new id to this server.
+			args.id = new_id;
 		}
 
 		if (imss_exists)
 		{
-			slog_error("HERCULES_ERR_SERVER_URITAKEN, ret=%d", ret);
-			perror("HERCULES_ERR_SERVER_URITAKEN");
-			ready(tmp_file_path, "ERROR");
-			return 0;
+			// Here we need to stop all HERCULES data servers 
+			// related to this configuration, or check if them 
+			// are not running anymore to continue deploying this configuration.
+
+			perror("HERCULES_ERR_SERVER_URI_TAKEN");
+			slog_error("HERCULES_ERR_SERVER_URI_TAKEN, ret=%d", ret);
+			// ready(tmp_file_path, "ERROR");
+			// return 0;
 		}
 
 		// When LOCAL policy is used, the server creates a shared memory region.
@@ -799,8 +817,8 @@ int32_t main(int32_t argc, char **argv)
 
 		strcpy(my_imss.uri_, args.imss_uri);
 		my_imss.ips = (char **)calloc(num_servers, sizeof(char *));
-		my_imss.status = (int *)malloc(num_servers * sizeof(int));					// calloc(num_servers, sizeof(int32_t));
-		my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int)); // calloc(num_servers, sizeof(int32_t));
+		my_imss.status = (int *)malloc(num_servers * sizeof(int));
+		my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int));
 		my_imss.num_storages = num_servers;
 		my_imss.num_active_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
@@ -862,7 +880,6 @@ int32_t main(int32_t argc, char **argv)
 		uint32_t id = CLOSE_EP;
 		// Send the created structure to the metadata server.
 		sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", id, (sizeof(imss_info) + my_imss.num_storages * LINE_LENGTH + my_imss.num_storages * sizeof(int) + my_imss.num_storages * sizeof(int)), my_imss.uri_);
-		// status = ucp_ep_create(ucp_worker, &ep_params, &client_ep);
 		slog_debug("[main] Request - %s", key_plus_size);
 		if (send_req(ucp_worker, client_ep, req_addr, req_addr_len, key_plus_size) == 0)
 		{
@@ -900,7 +917,7 @@ int32_t main(int32_t argc, char **argv)
 
 		int num_active_storages = 0;
 		num_active_storages = open_imss(args.imss_uri);
-		fprintf(stderr, "Hercules = %s", curr_imss.info.uri_);
+		fprintf(stderr, "Hercules = %s\n", curr_imss.info.uri_);
 		if (num_active_storages < 0)
 		{
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");

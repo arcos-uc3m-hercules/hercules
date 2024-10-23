@@ -505,6 +505,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 		exit(EXIT_FAILURE);
 	}
 
+	IMSS_BLKSIZE = args.block_size;
 	IMSS_DATA_BSIZE = IMSS_BLKSIZE * KB; // block size in bytes.
 	MOUNT_POINT = args.mount_point;
 	IMSS_ROOT = args.imss_uri;
@@ -515,7 +516,6 @@ __attribute__((constructor)) void imss_posix_init(void)
 	META_HOSTFILE = args.meta_hostfile;
 	METADATA_PORT = args.stat_port;
 	N_META_SERVERS = args.num_metadata_servers;
-	IMSS_BLKSIZE = args.block_size;
 	STORAGE_SIZE = args.storage_size;
 	MALLEABILITY = args.malleability;
 	MALLEABILITY_TYPE = args.malleability_type;

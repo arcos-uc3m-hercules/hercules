@@ -876,22 +876,18 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
  */
 int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_struct, int32_t data_type, uint64_t dest, size_t length)
 {
-	// size_t length = -1;
-	// char result[BUFFER_SIZE];
-	char *result = NULL; //= (char*)malloc(1024*130);
-	// if (length < 0)
-	// {
-	// 	// get the length of the message to be received.
-	// 	length = get_recv_data_length(ucp_worker, dest);
-	// 	if (length == 0)
-	// 	{
-	// 		perror("HERCULES_ERR_GET_RECV_DATA_LENGTH");
-	// 		return -1;
-	// 	}
-	// }
+	char *result = NULL;
 
 	// reserve memory to the buffer to store the message.
 	result = (char *)malloc(sizeof(char) * length);
+
+	if (result == NULL)
+	{
+		perror("HERCULES_ERR_RECV_STREAM_MEMORY_ALLOC");
+		slog_error("HERCULES_ERR_RECV_STREAM_MEMORY_ALLOC");
+		return -1;
+	}
+	
 
 	slog_info("[COMM] recv_dynamic_stream start, data_type=%d", data_type);
 	// receive the message from the backend.
@@ -899,8 +895,8 @@ int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 	// length = recv_data(ucp_worker, ep, result, length, dest, 0);
 	if (ret == 0)
 	{
-		slog_error("HERCULES_RECV_DATA_DYNAMIC_STREAM");
 		perror("HERCULES_RECV_DATA_DYNAMIC_STREAM");
+		slog_error("HERCULES_RECV_DATA_DYNAMIC_STREAM");
 		free(result);
 		return -1;
 	}
@@ -946,13 +942,6 @@ int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		msg_data += (struct_->num_storages * sizeof(int));
 		struct_->arr_num_active_storages = (int *)malloc(struct_->num_storages * sizeof(int));
 		memcpy(struct_->arr_num_active_storages, msg_data, struct_->num_storages * sizeof(int));
-
-		// msg_data += struct_->num_storages * sizeof(int);
-
-		// memcpy(struct_->num_active_storages, msg_data, sizeof(int));
-
-		// slog_debug("pointer address = %p", &msg_data);
-
 		break;
 	}
 
@@ -986,16 +975,11 @@ int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 	case STRING:
 	case BUFFER:
 	{
-		// if (data_struct == NULL)
-		// {
-		// 	data_struct = (char *)malloc(length);
-		// }
 		slog_info(" \t\t receiving STRING or BUFFER %ld", length);
 		if (!strncmp("$ERRIMSS_NO_KEY_AVAIL$", msg_data, 22))
 		{
 			slog_error("[COMM] recv_dynamic_stream end with error %lu, msg_data=%s", length, msg_data);
 			free(result);
-			// return length;
 			return -1;
 		}
 		memcpy(data_struct, result, length);

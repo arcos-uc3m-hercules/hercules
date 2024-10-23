@@ -270,15 +270,10 @@ int imss_refresh(const char *path)
 int imss_getattr(const char *path, struct stat *stbuf)
 {
 	// Needed variables for the call
-	// slog_debug("[imss_getattr] IMSS_DATA_BSIZE=%ld", IMSS_DATA_BSIZE);
 	char *buffer;
 	char **refs;
-	// char head[IMSS_DATA_BSIZE];
 	int n_ent;
-	// slog_debug("[imss_getattr] before calloc");
-	// char *imss_path = calloc(MAX_PATH, sizeof(char));
 	const char *imss_path = path; // this pointer should no be free.
-	// dataset_info metadata;
 	struct timespec spec;
 	memset(stbuf, 0, sizeof(struct stat));
 	clock_gettime(CLOCK_REALTIME, &spec);
@@ -290,8 +285,6 @@ int imss_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_gid = getgid();
 	stbuf->st_blksize = IMSS_DATA_BSIZE; // block size in bytes.
 
-	// slog_debug("[imss_getattr], IMSS_DATA_BSIZE=%ld, st_blksize=%ld", IMSS_DATA_BSIZE, stbuf->st_blksize);
-	// printf("imss_getattr=%s\n",imss_path);
 	slog_debug("before get_type, imss_path=%s", imss_path);
 	int32_t type = get_type(imss_path);
 	slog_debug("after get_type(%s):%d", imss_path, type);
@@ -2063,8 +2056,13 @@ int imss_close(const char *path, int fd)
 		imss_refresh(path);
 		slog_debug("Ending imss_refresh");
 	}
+	clear_dataset(path);
 	// } else {
 	// delete_dataset(path, ds);
+
+	// Tell data server the file is ready to be copied to disk.
+
+
 	map_erase(map, path);
 
 	// t = clock() - t;

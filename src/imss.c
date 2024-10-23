@@ -28,6 +28,10 @@
 /******************************** GLOBAL VARIABLES ********************************/
 /**********************************************************************************/
 
+int32_t __thread current_dataset;	// Dataset whose policy has been set last.
+dataset_info __thread curr_dataset; // Currently managed dataset.
+imss __thread curr_imss;
+
 uint32_t process_rank; // Process identifier within the deployment.
 
 uint32_t n_stat_servers; // Number of metadata servers available.
@@ -1338,7 +1342,23 @@ int32_t open_dataset(char *dataset_uri, int opened)
 			// return -1;
 			// return 0;
 			errno = EEXIST;
-			return GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
+
+			// Search for the requested dataset in the local vector.
+			dataset_info dataset_info_;
+			int32_t i = 0;
+			for (i = 0; i < datasetd->len; i++)
+			{
+				dataset_info_ = g_array_index(datasetd, dataset_info, i);
+				if (!strcmp(dataset_uri, dataset_info_.uri_))
+				{
+					slog_live("[IMSS] dataset_uri=%s, dataset_info_->uri_=%s", dataset_uri, dataset_info_.uri_);
+					// fprintf(stderr, "[IMSS] dataset_uri=%s, dataset_info_->uri_=%s\n", dataset_uri, dataset_info_.uri_);
+					break;
+				}
+			}
+			curr_dataset = g_array_index(datasetd, dataset_info, i);
+			return i;
+			// return GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
 		}
 		not_initialized = 1;
 
@@ -1351,6 +1371,7 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	}
 
 	// Assign the associated IMSS descriptor to the new dataset structure.
+	// fprintf(stderr, "curr_dataset.imss_d=%d\n", curr_dataset.imss_d);
 	new_dataset.imss_d = curr_dataset.imss_d; // associated_imss_indx;
 	new_dataset.local_conn = associated_imss.conns.matching_server;
 
@@ -1387,6 +1408,10 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	// Add the created struture into the underlying IMSSs.
 	// pthread_mutex_lock(&lock_gtree);
 	int32_t ret = GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
+
+	// curr_dataset = new_dataset;
+	curr_dataset = g_array_index(datasetd, dataset_info, ret);
+
 	// pthread_mutex_unlock(&lock_gtree);
 	return ret;
 }
@@ -1525,6 +1550,29 @@ int32_t release_dataset(int32_t dataset_id)
 	return 0;
 }
 
+int32_t clear_dataset(const char *dataset_uri)
+{
+	// Deletes the dataset from the local "datsetd".
+	// TODO: verify it works when using threads.
+	dataset_info dataset_info_;
+	// fprintf(stderr, "datasetd->len=%d\n", datasetd->len);
+	for (int32_t i = 0; i < datasetd->len; i++)
+	{
+		dataset_info_ = g_array_index(datasetd, dataset_info, i);
+
+		if (!strcmp(dataset_uri, dataset_info_.uri_))
+		// if (strstr(dataset_info_.uri_, old_dir) != NULL)
+		{
+			g_array_remove_index(datasetd, i);
+			g_array_insert_val(datasetd, i, empty_dataset);
+			g_array_append_val(free_datasetd, i);
+			// fprintf(stderr, "after remove %s, datasetd->len=%d\n", dataset_info_.uri_, datasetd->len);
+			// break;
+		}
+	}
+	return 0;
+}
+
 /**
  * @brief Set a dataset as closed on the metadata server.
  * @return 1 if the file was correctly closed,
@@ -1614,26 +1662,25 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	// 		break;
 	// 	}
 	// }
-	// Deletes the dataset from the local "datsetd".
-	// TODO: verify it works when using threads.
-	dataset_info dataset_info_;
-	// fprintf(stderr, "datasetd->len=%d\n", datasetd->len);
-	for (int32_t i = 0; i < datasetd->len; i++)
-	{
-		dataset_info_ = g_array_index(datasetd, dataset_info, i);
+	// // Deletes the dataset from the local "datsetd".
+	// // TODO: verify it works when using threads.
+	// dataset_info dataset_info_;
+	// // fprintf(stderr, "datasetd->len=%d\n", datasetd->len);
+	// for (int32_t i = 0; i < datasetd->len; i++)
+	// {
+	// 	dataset_info_ = g_array_index(datasetd, dataset_info, i);
 
-		if (!strcmp(dataset_uri, dataset_info_.uri_))
-		// if (strstr(dataset_info_.uri_, old_dir) != NULL)
-		{
-			g_array_remove_index(datasetd, i);
-			g_array_insert_val(datasetd, i, empty_dataset);
-			g_array_append_val(free_datasetd, i);
-			// fprintf(stderr, "after remove %s, datasetd->len=%d\n", dataset_info_.uri_, datasetd->len);
-			// break;
-		}
-	}
+	// 	if (!strcmp(dataset_uri, dataset_info_.uri_))
+	// 	// if (strstr(dataset_info_.uri_, old_dir) != NULL)
+	// 	{
+	// 		g_array_remove_index(datasetd, i);
+	// 		g_array_insert_val(datasetd, i, empty_dataset);
+	// 		g_array_append_val(free_datasetd, i);
+	// 		// fprintf(stderr, "after remove %s, datasetd->len=%d\n", dataset_info_.uri_, datasetd->len);
+	// 		// break;
+	// 	}
+	// }
 
-	// return 1;
 	return ret;
 }
 
@@ -2011,10 +2058,7 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 	// Receive the associated structure.
 	// void *data = NULL;
 	void *data = malloc(msg_len * sizeof(char));
-	// ret = recv_dynamic_stream(ucp_worker_meta, ep, (void **)&dataset_info_, DATASET_INFO, local_meta_uid, msg_len);
 	ret = recv_dynamic_stream(ucp_worker_meta, ep, data, DATASET_INFO, local_meta_uid, msg_len);
-	// ret = recv_dynamic_stream_opt(ucp_worker_meta, ep, &data, DATASET_INFO, local_meta_uid, msg_len);
-	//  if (ret < sizeof(dataset_info))
 	if (ret < 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -2817,7 +2861,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 {
 	slog_debug("[IMSS] dataset_id=%d, data_id=%d", dataset_id, data_id);
 
-	// n_server = -1;
+	int n_server = -1;
 	int replication_factor = 1;
 	int inf_prov = 0;
 	int32_t curr_imss_storages;

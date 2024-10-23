@@ -21,6 +21,10 @@ using std::string;
 
 extern StsHeader *mem_pool;
 
+extern int32_t __thread current_dataset;   // Dataset whose policy has been set last.
+extern dataset_info __thread curr_dataset; // Currently managed dataset.
+extern imss __thread curr_imss;
+
 map_records::map_records(const uint64_t nsize)
 {
 	total_size = nsize;
@@ -138,7 +142,7 @@ int32_t map_records::put_simple(std::string key, int value)
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	// Add a new value to the map.
-	fprintf(stderr, "Inserting %s with value %d\n", key.c_str(), value);
+	// fprintf(stderr, "Inserting %s with value %d\n", key.c_str(), value);
 	buffer_checkpoint.insert({key, value});
 	return 0;
 }
@@ -531,42 +535,62 @@ int32_t map_records::cleaning_specific(std::string new_key)
 	return 0;
 }
 
-int write_2_disk(const char *filename, void *buffer, size_t size, size_t offset)
+int open_file(const char *filename)
 {
 	char disk_path[PATH_MAX];
-	int ret = -1;
-	int file_fd = -1;
-
+	int fd = -1;
 	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", filename);
 	fprintf(stderr, "disk path = %s\n", disk_path);
-	file_fd = open(disk_path, O_CREAT | O_WRONLY, 0600);
-	if (file_fd < 0)
+	fd = open(disk_path, O_CREAT | O_WRONLY, 0600);
+	if (fd < 0)
 	{
-		perror("ERR_HERCULES_OPEN_DISK");
-		slog_error("ERR_HERCULES_OPEN_DISK");
+		perror("HERCULES_ERR_OPEN_DISK");
+		slog_error("HERCULES_ERR_OPEN_DISK");
 		return -1;
 	}
-	lseek(file_fd, offset, SEEK_SET);
-	ssize_t bytes = write(file_fd, buffer, size);
+	return fd;
+}
+
+int close_file(int fd)
+{
+	int ret = -1;
+	ret = close(fd);
+	if (ret < 0)
+	{
+		perror("HERCULES_ERR_CLOSE_DISK");
+		slog_error("HERCULES_ERR_CLOSE_DISK");
+		return -1;
+	}
+	return ret;
+}
+
+int write_2_disk(int fd, void *buffer, size_t size, size_t offset)
+{
+	int ret = -1;
+
+	// ret = lseek(fd, offset, SEEK_SET);
+	// if (ret < 0)
+	// {
+	// 	perror("HERCULES_ERR_LSEEK");
+	// 	slog_error("HERCULES_ERR_LSEEK");
+	// 	return -1;
+	// }
+
+	// ssize_t bytes = write(fd, buffer, size);
+	ssize_t bytes = pwrite(fd, buffer, size, offset);
 	if (bytes < 0)
 	{
-		perror("ERR_HERCULES_WRITE_DISK");
-		slog_error("ERR_HERCULES_WRITE_DISK");
-		ret = close(file_fd);
+		perror("HERCULES_ERR_WRITE_DISK");
+		slog_error("HERCULES_ERR_WRITE_DISK");
+		ret = close(fd);
 		if (ret < 0)
 		{
-			perror("ERR_HERCULES_CLOSE_DISK");
-			slog_error("ERR_HERCULES_CLOSE_DISK");
+			perror("HERCULES_ERR_CLOSE_DISK");
+			slog_error("HERCULES_ERR_CLOSE_DISK");
 		}
 		return -1;
 	}
-	ret = close(file_fd);
-	if (ret < 0)
-	{
-		perror("ERR_HERCULES_CLOSE_DISK");
-		slog_error("ERR_HERCULES_CLOSE_DISK");
-		return -1;
-	}
+
 	return 0;
 }
 
@@ -582,42 +606,43 @@ int32_t map_records::memory2disk(uint64_t block_size)
 	// As a second solution, we will make an array an each new/updated block
 	// is going to be add to it on write operations. We do not need to store
 	// the block 0.
-	int pos = 0, copy_to_disk = 0, ret = 0, fd = -1, offset = 0, block_number = 0, skip = 0, number_active_storage_servers = 0;
+	int pos = 0, copy_to_disk = 0, ret = 0, fd = -1, block_number = 0, skip = 0, number_active_storage_servers = 0;
+	size_t offset = 0;
 	string key, block, file_name, data_uri;
 	char key_block_0[PATH_MAX];
+	char expected_uri[PATH_MAX];
+	char old_expected_uri[PATH_MAX];
 	void *address_ = NULL;
 	void *address_block_0 = NULL;
 	uint64_t block_size_rtvd = 0, block_0_size = 0;
 	struct stat *stats = NULL;
 	int32_t file_desc = 0;
+	std::size_t found = 0;
+	size_t iteration = 0;
 
 	// get the current number of active data servers.
-	number_active_storage_servers = get_number_of_active_nodes();
-	fprintf(stderr, "- BLOCK SIZE = %lu -\n", block_size);
-	for (const auto &it : buffer_checkpoint)
+	// number_active_storage_servers = get_number_of_active_nodes();
+	// for (const auto &it : buffer)
 	{
-		fprintf(stderr, "Data found in buffer checkpoint\n");
-		copy_to_disk = it.second;
-		fprintf(stderr, "file %s, copy to disk = %d\n", it.first.c_str(), it.second);
-		if (copy_to_disk == 1)
+		// string block_0_key = it.first;
+		// if (block_0_key.empty())
+		// {
+		// 	fprintf(stderr, "Key in Block 0 is missing\n");
+		// 	continue;
+		// }
+		// Verify if this is a block 0.
+		// std::size_t found  = block_0_key.find("$0");
+
+		fprintf(stderr, "Buffer size = %lu, number of block in primary map=%lu\n", buffer_checkpoint.size(), buffer.size());
+		for (const auto &it : buffer_checkpoint)
 		{
 			key = it.first;
-			fprintf(stderr, "key.c_str(): %s\n", key.c_str());
 			if (key.empty())
 			{
 				fprintf(stderr, "Key is missing\n");
 				continue;
 			}
-
-			std::size_t found = key.find("$0");
-			if (found != std::string::npos)
-			{ // skips block 0.
-				continue;
-			}
-			// slog_debug("key.c_str(): %s", key.c_str());
-			// pos = key.find('$');
-			// path = key.substr(0, pos);
-			// pos = key.find('$');
+			copy_to_disk = it.second;
 			pos = key.find('$') + 1; // +1 to skip '$' on the block number.
 			if (pos == std::string::npos)
 			{
@@ -625,89 +650,153 @@ int32_t map_records::memory2disk(uint64_t block_size)
 				slog_error("HERCULES_ERR_MISSFORMAT_KEY");
 				continue;
 			}
+			// string current_path = key.substr(0, pos);
 
-			// block = key.substr(pos + 1, key.length());
-			// skip = strlen("imss://"); // +strlen(block.c_str());
-			// fprintf(stderr, "pos=%d, skip=%d\n", pos, skip);
-			// file_name = key.substr(strlen("imss://"), pos - skip);
-			// fprintf(stderr, "key=%s,\tfile name=%s,\tblock=%s\n", key.c_str(), file_name.c_str(), block.c_str());
+			// fprintf(stderr, "current_path=%s, block_0_path=%s\n", current_path.c_str(), block_0_path.c_str());
 
-			block = key.substr(pos, key.length() + 1); // substract the block number from the key.
-			if (block.empty())
+			// int found_partner = current_path.compare(block_0_path);
+			// if (found_partner == 0 && copy_to_disk == 1)
+			if (copy_to_disk == 1)
 			{
-				fprintf(stderr, "Block number is missing in %s\n", key.c_str());
-				continue;
+				found = key.find("$0");
+				if (found != std::string::npos)
+				{ // skips block 0.
+					continue;
+				}
+
+				// pos = key.find('$') + 1; // +1 to skip '$' on the block number.
+				// if (pos == std::string::npos)
+				// {
+				// 	perror("HERCULES_ERR_MISSFORMAT_KEY");
+				// 	slog_error("HERCULES_ERR_MISSFORMAT_KEY");
+				// 	continue;
+				// }
+
+				block = key.substr(pos, key.length() + 1); // substract the block number from the key.
+				if (block.empty())
+				{
+					fprintf(stderr, "Block number is missing in %s\n", key.c_str());
+					continue;
+				}
+				// block_number = std::stoi(block);
+				block_number = stoi(block, 0, 10); //  string to number.
+				pos -= 1;						   // -1 to skip '$' on the data uri.
+				data_uri = key.substr(0, pos);	   // substract the data uri from the key.
+				file_name = data_uri.substr(strlen("imss://"));
+
+				// Expected dataset uri.
+				sprintf(expected_uri, "imss://%s", file_name.c_str());
+
+				// if (iteration > 0)
+				// {
+				// 	// if we are on a new dataset, we clear the previous.
+				// 	if (strncmp(old_expected_uri, expected_uri, strlen(old_expected_uri)))
+				// 	{
+				// 		clear_dataset(curr_dataset.uri_);
+				// 	}
+				// }
+
+				// strncpy(old_expected_uri, expected_uri, strlen(expected_uri));
+
+				// get dataset info from the metadata server.
+				file_desc = open_dataset(expected_uri, 0);
+
+				iteration++;
+				// checks if there are still processes with the file opened.
+				if (curr_dataset.n_open > 0)
+				{
+					fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset.uri_, curr_dataset.n_open);
+					slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset.uri_, curr_dataset.n_open);
+					// sleep(1);
+					continue;
+				}
+
+				// Try to get block 0 from local map. If the block is
+				// not here we make a request to the corresponding data
+				// server.
+				// ret = get(key_block_0, &address_block_0, &block_0_size);
+				// if (ret != 0)
+				// {
+				// 	fprintf(stderr, "Block 0 for key %s not found for checkpointing on the local map\n", key.c_str());
+
+				// }
+
+				// get block 0 remotely.
+				// file_desc = open_dataset(key_block_0, 0);
+
+				address_block_0 = (void *)malloc(block_size * sizeof(char));
+				ret = get_ndata(file_desc, 0, address_block_0, 0, 0);
+				if (ret < 0)
+				{
+					char err_msg[MAX_ERR_MSG_LEN];
+					sprintf(err_msg, "HERCULES_ERR_GET_NDATA_CHECKPOINT: %s", key_block_0);
+					slog_error("[imss_refresh] %s", err_msg);
+					perror(err_msg);
+					return -1;
+				}
+
+				stats = (struct stat *)address_block_0;
+				if (stats == NULL)
+				{
+					perror("HERCULES_ERR_BLOCK_0_GET_ERROR");
+					slog_error("HERCULES_ERR_BLOCK_0_GET_ERROR");
+					continue;
+				}
+
+				// fprintf(stderr, "file size = %ld\n", stats->st_size);
+				ret = get(key, &address_, &block_size_rtvd);
+				if (ret == 0)
+				{
+					fprintf(stderr, "key %s not found for checkpointing\n", key.c_str());
+					continue;
+				}
+
+				if (stats->st_size < block_size)
+				{
+					block_size_rtvd = stats->st_size;
+				}
+
+				offset = block_size * (block_number - 1); // -1 due block 0. // TODO: block size * block number.
+
+				fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, stats->st_size=%lu\n", key.c_str(), block_size_rtvd, offset, stats->st_size);
+				slog_debug("key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, stats->st_size=%lu", key.c_str(), block_size_rtvd, offset, stats->st_size);
+
+
+				// Checks if the file was opened.
+				std::map<std::string, int>::iterator it_fd;
+				it_fd = buffer_fd.find(file_name);
+				if (it_fd == buffer_fd.end())
+				{
+					// Open the file if it does not exists.
+					fd = open_file(file_name.c_str());
+					if (fd < 0)
+					{
+						continue;
+					}
+					else
+					{
+						// On success, the fd is inserted on the buffer_fd map.
+						buffer_fd.insert({file_name, fd});
+					}
+				}
+				else
+				{
+					fd = it_fd->second;
+				}
+
+				write_2_disk(fd, address_, block_size_rtvd, offset);
+
+				buffer_checkpoint[key] = 0;
+
+				free(address_block_0);
 			}
-			// block_number = std::stoi(block);
-			block_number = stoi(block, 0, 10); //  string to number.
-			pos -= 1;						   // -1 to skip '$' on the data uri.
-			data_uri = key.substr(0, pos);	   // substract the data uri from the key.
-			file_name = data_uri.substr(strlen("imss://"));
-
-			ret = get(key, &address_, &block_size_rtvd);
-			if (ret == 0)
-			{
-				fprintf(stderr, "key %s not found for checkpointing\n", key.c_str());
-				continue;
-			}
-			// Expected block 0 uri.
-			// sprintf(key_block_0, "imss://%s$0", file_name.c_str());
-			sprintf(key_block_0, "imss://%s", file_name.c_str());
-			// Try to get block 0 from local map. If the block is not here
-			// we make a request to the corresponding data server.
-			// ret = get(key_block_0, &address_block_0, &block_0_size);
-			// if (ret == 0)
-			// {
-			// 	fprintf(stderr, "Block 0 for key %s not found for checkpointing on the local map\n", key.c_str());
-			// 	// continue;
-			// }
-			int next_server = find_server(number_active_storage_servers, block_number, data_uri.c_str(), 0);
-
-			if (next_server < 0)
-			{
-				perror("HERCULES_ERR_WRONG_NEXT_SERVER");
-				slog_debug("HERCULES_ERR_WRONG_NEXT_SERVER");
-				continue;
-			}
-
-			// get block 0 from data server.
-			file_desc = open_dataset(key_block_0, 0);
-			fprintf(stderr, "file desc = %d, BLOCK_SIZE=%lu\n", file_desc, block_size);
-			address_block_0 = (void *)malloc(block_size * sizeof(char));
-			ret = get_ndata(file_desc, next_server, 0, address_block_0, 0, 0);
-			if (ret < 0)
-			{
-				char err_msg[MAX_ERR_MSG_LEN];
-				sprintf(err_msg, "HERCULES_ERR_GET_NDATA_CHECKPOINT: %s", key_block_0);
-				slog_error("[imss_refresh] %s", err_msg);
-				perror(err_msg);
-				return -1;
-			}
-			// stats = (struct stat *)aux;
-
-			stats = (struct stat *)address_block_0;
-			if (stats == NULL)
-			{
-				perror("HERCULES_ERR_BLOCK_0_GET_ERROR");
-				slog_error("HERCULES_ERR_BLOCK_0_GET_ERROR");
-				continue;
-			}
-
-
-			fprintf(stderr, "file size = %ld\n", stats->st_size);
-
-			if (stats->st_size < block_size)
-			{
-				block_size_rtvd = stats->st_size;
-			}
-
-			offset = block_size * block_number; // TODO: block size * block number.
-
-			write_2_disk(file_name.c_str(), address_, block_size_rtvd, offset);
-			buffer_checkpoint[key] = 0;
-			free(address_block_0);
-			sleep(5);
 		}
+		if (fd != -1)
+		{
+			close_file(fd);
+			buffer_fd.erase(file_name);
+		}
+		clear_dataset(curr_dataset.uri_);
 	}
 	fprintf(stderr, "Ending memory2disk\n");
 	return 0;
