@@ -358,7 +358,7 @@ char *checkHerculesPath(const char *pathname)
 				// slog_live("[HERCULES] after resolve path, pathname=%s, real_pathname=%s", pathname, real_pathname);
 				// new_path = convert_path(pathname);
 				ret = ResolvePath(pathname, absolute_pathname);
-				fprintf(stderr, "[IMSS] last option, pathname=%s, absolute_pathname_len=%d, workdir=%s\n", pathname, ret, workdir);
+				// fprintf(stderr, "[IMSS] last option, pathname=%s, absolute_pathname_len=%d, workdir=%s\n", pathname, ret, workdir);
 				if (ret > 0)
 				{
 					// slog_live("[IMSS] absolute_pathname=%s", absolute_pathname);
@@ -425,7 +425,9 @@ prefetch_function(void *th_argv)
 
 char *convert_path(const char *name)
 {
-	char *path = calloc(1024, sizeof(char));
+	char *path = calloc(PATH_MAX, sizeof(char));
+	char *new_path = calloc(PATH_MAX, sizeof(char));
+
 	strcpy(path, name);
 	size_t len = strlen(MOUNT_POINT);
 	// remove MOUNT_POINT prefix from the path.
@@ -438,9 +440,8 @@ char *convert_path(const char *name)
 		}
 	}
 
-	fprintf(stderr, "name=%s, path=%s\n", name, path);
+	// fprintf(stderr, "name=%s, path=%s\n", name, path);
 
-	char *new_path = calloc(1024, sizeof(char));
 
 	// seeks initial slashes "/" in the path.
 	len = strlen(path);
@@ -472,7 +473,7 @@ char *convert_path(const char *name)
 	{
 		strcat(new_path, path);
 	}
-
+	
 	return new_path;
 }
 
@@ -2351,6 +2352,10 @@ int generalOpen(char *new_path, int flags, mode_t mode, int createFd)
 				// errno = -ret;
 				slog_live("[POSIX] 1 - imss_open(%s, %ld), ret=%d", new_path, ret_ds, ret);
 				ret = 0;
+			} else if (err_create < 0)
+			{
+				errno = -err_create;
+				ret = -1;
 			}
 		}
 		else // if O_CREAT flag was not set, the file must exists.

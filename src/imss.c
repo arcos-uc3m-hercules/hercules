@@ -528,7 +528,6 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 		return -1;
 	}
 
-	// char elements[43264];
 	// Get the length of the message to be received.
 	size_t length = 0;
 	length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
@@ -542,13 +541,11 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 	void *elements = malloc(length);
 	//  Retrieve the set of elements within the requested uri.
 	ret = recv_dynamic_stream(ucp_worker_meta, ep, elements, BUFFER, local_meta_uid, length);
-	// ret = recv_dynamic_stream_opt(ucp_worker_meta, ep, &elements, BUFFER, local_meta_uid, length);
 	if (ret < 0)
 	{
 		pthread_mutex_unlock(&lock_network);
 		perror("HERCULES_ERR_GET_DIR_RECV_STREAM");
 		slog_error("HERCULES_ERR_GET_DIR_RECV_STREAM");
-		// fprintf(stderr, "HERCULES_ERR_GET_DIR_RECV_STREAM , getdir_req = %s, ret=%d, length=%lu\n", getdir_req, ret, length);
 		free(elements);
 		return -1;
 	}
@@ -562,18 +559,8 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 	}
 
 	uint32_t elements_size = ret;
-
-	// slog_debug("[IMSS][get_dir] elements_size=%lu - ret = %d", elements_size, ret);
-
-	//*buffer = (char *) malloc(sizeof(char)*elements_size);
-	// memcpy(*buffer, elements, elements_size);
-	// elements = *buffer;
-
 	uint32_t num_elements = elements_size / URI_;
-	// slog_debug("[IMSS][get_dir] num_elements=%lu", num_elements);
-	// *items = (char **)malloc(sizeof(char *) * (num_elements));
 	*items = (char **)calloc(num_elements, sizeof(char *));
-	// slog_debug("[IMSS][get_dir] malloc items");
 
 	// Identify each element within the buffer provided.
 	char *curr = (char *)elements;
@@ -589,7 +576,7 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 		// slog_debug("[IMSS][get_dir] item %d: %s", i, (*items)[i]);
 	}
 
-	// free(elements);
+	free(elements);
 	slog_debug("[IMSS][get_dir] Ending, num_elements=%d", num_elements);
 	pthread_mutex_unlock(&lock_network);
 	return num_elements;
@@ -1067,7 +1054,6 @@ int32_t create_dataset(char *dataset_uri,
 					   char *link,
 					   int opened)
 {
-	// int err = 0;
 	int ret = 0;
 	ucp_ep_h ep;
 
@@ -1096,7 +1082,7 @@ int32_t create_dataset(char *dataset_uri,
 	slog_live("[IMSS] Before imss_check  %s ", dataset_uri);
 	if ((associated_imss_indx = imss_check(dataset_uri)) == -1)
 	{
-		slog_fatal("[IMSS] ERRIMSS_OPENDATA_IMSSNOTFOUND, associated_imss_indx=%d", associated_imss_indx);
+		slog_fatal("[IMSS] HERCULES_ERR_IMSS_CHECK_NOT_FOUND, associated_imss_indx=%d", associated_imss_indx);
 		return -ENOENT;
 	}
 	// else
@@ -1107,6 +1093,38 @@ int32_t create_dataset(char *dataset_uri,
 	// }
 
 	dataset_info new_dataset;
+
+	// Checks if parent directories exists.
+	char *last = dataset_uri + strlen(dataset_uri) - 1;
+	slog_live("last=%s", last);
+	if (last[0] == '/')
+	{
+		last[0] = '\0';
+	}
+	int offset = 0;
+	// Skip the uri "imss://", and iterates the "dataset_uri" to
+	// find the parent directory position.
+	for (int j = strlen("imss://"); j < strlen(dataset_uri); ++j)
+	{
+		slog_live("dataset_uri[%d]=%c", j, dataset_uri[j]);
+		if (dataset_uri[j] == '/')
+		{
+			offset = j;
+		}
+	}
+	// "offset" can be 0 when the dataset is on the HERCULES root,
+	// for example, imss://myfile.txt = /mnt/hercules/myfile.txt.
+	if (offset > 0)
+	{ // "dataset_uri" is not on the HERCULES root.
+		char parent_dir[PATH_MAX];
+		strncpy(parent_dir, dataset_uri, offset);
+		slog_live("parent directory = %s", parent_dir);
+		if ((ret = stat_dataset(parent_dir, &new_dataset, 0)) <= 0)
+		{
+			slog_error("parent directory %s does not exists", parent_dir);
+			return -ENOENT;
+		}
+	}
 
 	// Dataset metadata request. To know if the dataset already exists.
 	if ((ret = stat_dataset(dataset_uri, &new_dataset, opened)) > 0)

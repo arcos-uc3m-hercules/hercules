@@ -19,7 +19,6 @@ extern int32_t __thread current_dataset;   // Dataset whose policy has been set 
 extern dataset_info __thread curr_dataset; // Currently managed dataset.
 extern imss __thread curr_imss;
 
-
 // Initial buffer address.
 extern char *buffer_address;
 // Set of locks dealing with the memory buffer access.
@@ -562,7 +561,7 @@ int32_t main(int32_t argc, char **argv)
 			// If another data server has taken the URI, this HERCULES configuration should not be deployed.
 			// Two HERCULES configurations cannot have the same URI.
 			// We check if "recv_dynamic_stream" has successed, if so, there are another HERCULES instance using
-			// the same URI. 
+			// the same URI.
 			// On success, we free memory and stop this instance.
 			int new_id = 0;
 			if (ret != -1)
@@ -578,15 +577,19 @@ int32_t main(int32_t argc, char **argv)
 				free(imss_info_->ips);
 			}
 			free(imss_info_);
-			fprintf(stderr, "Data server with id = %d already in use, changing to %d\n", args.id, new_id);
-			// Set a new id to this server.
-			args.id = new_id;
+			if (args.id != new_id)
+			{
+				fprintf(stderr, "Data server with id = %d already in use, changing to %d\n", args.id, new_id);
+				// Set a new id to this server.
+				args.id = new_id;
+				/* code */
+			}
 		}
 
 		if (imss_exists)
 		{
-			// Here we need to stop all HERCULES data servers 
-			// related to this configuration, or check if them 
+			// Here we need to stop all HERCULES data servers
+			// related to this configuration, or check if them
 			// are not running anymore to continue deploying this configuration.
 
 			perror("HERCULES_ERR_SERVER_URI_TAKEN");
@@ -718,7 +721,7 @@ int32_t main(int32_t argc, char **argv)
 		// Add port number to thread arguments.
 		arguments[i].ucp_context = ucp_context;
 		arguments[i].blocksize = block_size;
-		fprintf(stderr, "block size = %lu\n", arguments[i].blocksize);
+		// fprintf(stderr, "block size = %lu\n", arguments[i].blocksize);
 		arguments[i].storage_size = max_storage_size;
 		arguments[i].port = bind_port;
 		arguments[i].tmp_file_path = tmp_file_path;
@@ -900,6 +903,7 @@ int32_t main(int32_t argc, char **argv)
 
 	if (args.type == TYPE_DATA_SERVER)
 	{
+		sleep(5);
 		// Init an endpoint to the metadata server, it is use
 		// to notify to the metadata server the status of this server.
 		// e.g., in malleability scenarios, this servers send a
@@ -917,7 +921,7 @@ int32_t main(int32_t argc, char **argv)
 
 		int num_active_storages = 0;
 		num_active_storages = open_imss(args.imss_uri);
-		fprintf(stderr, "Hercules = %s\n", curr_imss.info.uri_);
+		// fprintf(stderr, "Hercules = %s\n", curr_imss.info.uri_);
 		if (num_active_storages < 0)
 		{
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");

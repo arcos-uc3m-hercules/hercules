@@ -2078,7 +2078,6 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 	struct stat ds_stat;
 	// Check if already created!
 	const char *rpath = path;
-	// slog_debug("[imss_create] get_iuri(path:%s, rpath:%s)", path, rpath);
 
 	// Assing file handler and create dataset.
 	int res = 0;
@@ -2086,7 +2085,7 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 	slog_debug("[imss_create] create_dataset((char*)rpath:%s, POLICY:%s,  N_BLKS:%ld, IMSS_BLKSIZE:%d, REPL_FACTOR:%ld, REPL_TYPE:%ld, N_SERVERS:%d), res:%d", (char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, res);
 	if (res < 0)
 	{
-		slog_error("[imss_create] Cannot create new dataset, may already exist.\n");
+		slog_error("[imss_create] Cannot create new dataset.\n");
 		// fprintf(stderr, "[imss_create] Cannot create new dataset %s, may already exist.\n", path);
 		// free(rpath);
 		return res;

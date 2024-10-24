@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SCRIPT_NAME="ior_hercules_slurm.sh"
-FILE_SIZE=$((1024*1024*100))
+FILE_SIZE=$((1024*1024*10))
 
 ATTACHED=1
 
@@ -24,7 +24,7 @@ NODES_FOR_CLIENTS_RANGE=( 16 )
 CLIENTS_PER_NODE_RANGE=( 16 )
 BLOCK_SIZE_RANGE=( 512 )
 
-MAX_ITERATIONS=4
+MAX_ITERATIONS=1
 
 # set -o xtrace
 #set -x
