@@ -109,7 +109,6 @@ int ready(char *tmp_file_path, const char *msg)
 	return 0;
 }
 
-
 // if malleability_on = 1, new requests will be not handled and server will
 // respond with a "malleability" string.
 // int malleability_on = 0;
@@ -1297,11 +1296,21 @@ void *checkpoint(void *th_argv)
 	// map_records *map =(map_records *) arguments->map; // (map_records *)th_argv;
 	std::shared_ptr<map_records> map = arguments->map;
 
+	// fprintf(stderr, "Checkpoint path = %s, len=%lu\n", arguments->args.hercules_checkpoint_path, strlen(arguments->args.hercules_checkpoint_path));
+	if (strlen(arguments->args.hercules_checkpoint_path) == 0)
+	{
+		printf("Checkpointing path has not been provided.\tHERCULES_CHECKPOINT_PATH = /home/user/checkpointing_path/\n");
+		fflush(stdout);
+		pthread_exit(NULL);
+	}
+
+	Make_directory(arguments->args.hercules_checkpoint_path);
+
 	for (;;)
 	{
-		// Gnodetraverse_garbage_collector(map);//Future
 		sleep(CKECKPOINT_PERIOD);
-		fprintf(stderr, "Running Checkpointing, block size = %lu, %lu\n", BLOCK_SIZE, arguments->blocksize);
+		// fprintf(stderr, "Running Checkpointing, block size = %lu, %lu\n", BLOCK_SIZE, arguments->blocksize);
+		fprintf(stderr, "Running Checkpointing\n");
 		pthread_mutex_lock(&mutex_garbage);
 		map->memory2disk(BLOCK_SIZE);
 		pthread_mutex_unlock(&mutex_garbage);

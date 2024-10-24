@@ -609,6 +609,14 @@ RETURNS:	0 - Resources were released successfully.
 
 	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
 
+	/**
+	 * Disk methods.
+	 */
+	int32_t Make_directory(const char *dirname);
+	int32_t Open_file(const char *filename);
+	int32_t Close_file(int fd);
+	int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset);
+
 #ifdef __cplusplus
 }
 #endif

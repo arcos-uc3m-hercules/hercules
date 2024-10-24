@@ -728,6 +728,7 @@ int32_t main(int32_t argc, char **argv)
 
 		// Add the instance URI to the thread arguments.
 		strcpy(arguments[i].my_uri, args.imss_uri);
+		arguments[i].args = args;
 
 		// Deploy all dispatcher + service threads.
 		if (i == 0)
@@ -903,7 +904,6 @@ int32_t main(int32_t argc, char **argv)
 
 	if (args.type == TYPE_DATA_SERVER)
 	{
-		sleep(5);
 		// Init an endpoint to the metadata server, it is use
 		// to notify to the metadata server the status of this server.
 		// e.g., in malleability scenarios, this servers send a
@@ -919,14 +919,20 @@ int32_t main(int32_t argc, char **argv)
 			return -1;
 		}
 
+		sleep(10);
 		int num_active_storages = 0;
-		num_active_storages = open_imss(args.imss_uri);
-		// fprintf(stderr, "Hercules = %s\n", curr_imss.info.uri_);
-		if (num_active_storages < 0)
+		while (true)
 		{
-			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-			printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
-			return -1;
+			num_active_storages = open_imss(args.imss_uri);
+			// fprintf(stderr, "Hercules = %s\n", curr_imss.info.uri_);
+			if (num_active_storages < 0)
+			{
+				// slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+				// printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
+				// return -1;
+				sleep(3);
+			}
+			break;
 		}
 	}
 

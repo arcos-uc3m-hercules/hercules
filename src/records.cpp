@@ -535,80 +535,6 @@ int32_t map_records::cleaning_specific(std::string new_key)
 	return 0;
 }
 
-int Open_file(const char *filename)
-{
-	char disk_path[PATH_MAX];
-	int fd = -1;
-	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", filename);
-	fprintf(stderr, "disk path = %s\n", disk_path);
-	fd = open(disk_path, O_CREAT | O_WRONLY, 0600);
-	if (fd < 0)
-	{
-		perror("HERCULES_ERR_OPEN_DISK");
-		slog_error("HERCULES_ERR_OPEN_DISK");
-		return -1;
-	}
-	return fd;
-}
-
-int Close_file(int fd)
-{
-	int ret = -1;
-	ret = close(fd);
-	if (ret < 0)
-	{
-		perror("HERCULES_ERR_CLOSE_DISK");
-		slog_error("HERCULES_ERR_CLOSE_DISK");
-		return -1;
-	}
-	return ret;
-}
-
-int Write_2_disk(int fd, void *buffer, size_t size, size_t offset)
-{
-	int ret = -1;
-
-	ssize_t bytes = pwrite(fd, buffer, size, offset);
-	if (bytes < 0)
-	{
-		perror("HERCULES_ERR_WRITE_DISK");
-		slog_error("HERCULES_ERR_WRITE_DISK");
-		ret = close(fd);
-		if (ret < 0)
-		{
-			perror("HERCULES_ERR_CLOSE_DISK");
-			slog_error("HERCULES_ERR_CLOSE_DISK");
-		}
-		return -1;
-	}
-
-	return 0;
-}
-
-int Make_directory(const char *dirname)
-{
-	char disk_path[PATH_MAX];
-	int ret = 1;
-	struct stat sb;
-	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", dirname);
-	if (stat(disk_path, &sb) == 0 && S_ISDIR(sb.st_mode))
-	{
-		fprintf(stderr, "directory %s exists\n", disk_path);
-	}
-	else
-	{
-		fprintf(stderr, "directory %s does not exists\n", disk_path);
-		ret = mkdir(disk_path, S_IRWXU | S_IRWXG);
-		if (ret == -1)
-		{
-			perror("HERCULES_ERR_MAKE_DIRECTORY");
-			slog_error("HERCULES_ERR_MAKE_DIRECTORY");
-			return ret;
-		}
-	}
-	return ret;
-}
-
 // Used in str_worker threads.
 int32_t map_records::memory2disk(uint64_t block_size)
 {
@@ -634,6 +560,7 @@ int32_t map_records::memory2disk(uint64_t block_size)
 	int32_t file_desc = 0;
 	std::size_t found = 0;
 	size_t iteration = 0;
+	int to_free = 0;
 
 	// fprintf(stderr, "Buffer size = %lu, number of block in primary map=%lu\n", buffer_checkpoint.size(), buffer.size());
 	for (const auto &it : buffer_checkpoint)
@@ -666,6 +593,7 @@ int32_t map_records::memory2disk(uint64_t block_size)
 			block_number = stoi(block, 0, 10); //  string to number.
 			pos -= 1;						   // -1 to skip '$' on the data uri.
 			data_uri = key.substr(0, pos);	   // substract the data uri from the key.
+			// fprintf(stderr,"data_uri=%s\n", data_uri.c_str());
 			file_name = data_uri.substr(strlen("imss://"));
 			sprintf(expected_uri, "imss://%s", file_name.c_str());
 
@@ -705,32 +633,30 @@ int32_t map_records::memory2disk(uint64_t block_size)
 			{
 				fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset.uri_, curr_dataset.n_open);
 				slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset.uri_, curr_dataset.n_open);
-				// sleep(1);
 				continue;
 			}
 
 			// Try to get block 0 from local map. If the block is
 			// not here we make a request to the corresponding data
 			// server.
-			// ret = get(key_block_0, &address_block_0, &block_0_size);
-			// if (ret != 0)
-			// {
-			// 	fprintf(stderr, "Block 0 for key %s not found for checkpointing on the local map\n", key.c_str());
-
-			// }
-
-			// get block 0 remotely.
-			// file_desc = open_dataset(key_block_0, 0);
-
-			address_block_0 = (void *)malloc(block_size * sizeof(char));
-			ret = get_ndata(file_desc, 0, address_block_0, 0, 0);
-			if (ret < 0)
-			{
-				char err_msg[MAX_ERR_MSG_LEN];
-				sprintf(err_msg, "HERCULES_ERR_GET_NDATA_CHECKPOINT: %s", key_block_0);
-				slog_error("[imss_refresh] %s", err_msg);
-				perror(err_msg);
-				return -1;
+			sprintf(key_block_0, "%s$0", data_uri.c_str());
+			to_free = 0;
+			ret = get(key_block_0, &address_block_0, &block_0_size);
+			// fprintf(stderr, "key_block_0 = %s\n", key_block_0);
+			if (ret == 0)
+			{ // block 0 is not on the local map.
+				// fprintf(stderr, "Block 0 for key %s not found for checkpointing on the local map\n", key.c_str());
+				address_block_0 = (void *)malloc(block_size * sizeof(char));
+				ret = get_ndata(file_desc, 0, address_block_0, 0, 0);
+				if (ret < 0)
+				{
+					char err_msg[MAX_ERR_MSG_LEN];
+					sprintf(err_msg, "HERCULES_ERR_GET_NDATA_CHECKPOINT: %s", key_block_0);
+					slog_error("[imss_refresh] %s", err_msg);
+					perror(err_msg);
+					return -1;
+				}
+				to_free = 1;
 			}
 
 			stats = (struct stat *)address_block_0;
@@ -790,7 +716,8 @@ int32_t map_records::memory2disk(uint64_t block_size)
 			buffer_checkpoint[key] = 0;
 			// buffer_checkpoint.erase(key);
 
-			free(address_block_0);
+			if (to_free)
+				free(address_block_0);
 		}
 	}
 	if (fd != -1)
@@ -800,6 +727,6 @@ int32_t map_records::memory2disk(uint64_t block_size)
 	}
 	clear_dataset(curr_dataset.uri_);
 	// }
-	fprintf(stderr, "Ending memory2disk\n");
+	// fprintf(stderr, "Ending memory2disk\n");
 	return 0;
 }

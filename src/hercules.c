@@ -720,6 +720,29 @@ int getConfiguration(struct arguments *args)
 			args->logging.hercules_debug_level = getLevel(aux);
 		}
 	}
+
+	if (getenv("HERCULES_CHECKPOINT_PATH") != NULL)
+		strcpy(args->hercules_checkpoint_path, getenv("HERCULES_CHECKPOINT_PATH"));
+	else if (cfg_get(cfg, "HERCULES_CHECKPOINT_PATH"))
+		strcpy(args->hercules_checkpoint_path, cfg_get(cfg, "HERCULES_CHECKPOINT_PATH"));
+	else
+		args->hercules_checkpoint_path[0] = '\0';
+
+	if (getenv("CHECKPOINT_PATHS_LIST") != NULL)
+		strcpy(args->checkpoint_paths_list, getenv("CHECKPOINT_PATHS_LIST"));
+	else if (cfg_get(cfg, "CHECKPOINT_PATHS_LIST"))
+		strcpy(args->checkpoint_paths_list, cfg_get(cfg, "CHECKPOINT_PATHS_LIST"));
+	else
+		args->checkpoint_paths_list[0] = '\0';
+	
+
+	if (getenv("IGNORE_PATHS_LIST") != NULL)
+		strcpy(args->ignore_paths_list, getenv("IGNORE_PATHS_LIST"));
+	else if (cfg_get(cfg, "IGNORE_PATHS_LIST"))
+		strcpy(args->ignore_paths_list, cfg_get(cfg, "IGNORE_PATHS_LIST"));
+	else
+		args->ignore_paths_list[0] = '\0';
+
 	cfg_free(cfg);
 
 	return 1;

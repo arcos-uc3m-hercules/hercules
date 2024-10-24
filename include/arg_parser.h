@@ -64,6 +64,9 @@ struct arguments
     char debug_level[PATH_MAX];
     struct logging_opts logging;
     char mount_point[PATH_MAX];
+    char hercules_checkpoint_path[PATH_MAX];
+    char checkpoint_paths_list[PATH_MAX];
+    char ignore_paths_list[PATH_MAX];
 };
 
 int parse_args(int argc, char **argv, struct arguments *args);

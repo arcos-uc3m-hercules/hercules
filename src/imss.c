@@ -3879,3 +3879,77 @@ int get_number_of_active_nodes()
 	}
 	return number_active_storage_servers;
 }
+
+int32_t Open_file(const char *filename)
+{
+	char disk_path[PATH_MAX];
+	int fd = -1;
+	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", filename);
+	fprintf(stderr, "disk path = %s\n", disk_path);
+	fd = open(disk_path, O_CREAT | O_WRONLY, 0600);
+	if (fd < 0)
+	{
+		perror("HERCULES_ERR_OPEN_DISK");
+		slog_error("HERCULES_ERR_OPEN_DISK");
+		return -1;
+	}
+	return fd;
+}
+
+int32_t Close_file(int fd)
+{
+	int ret = -1;
+	ret = close(fd);
+	if (ret < 0)
+	{
+		perror("HERCULES_ERR_CLOSE_DISK");
+		slog_error("HERCULES_ERR_CLOSE_DISK");
+		return -1;
+	}
+	return ret;
+}
+
+int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset)
+{
+	int ret = -1;
+
+	ssize_t bytes = pwrite(fd, buffer, size, offset);
+	if (bytes < 0)
+	{
+		perror("HERCULES_ERR_WRITE_DISK");
+		slog_error("HERCULES_ERR_WRITE_DISK");
+		ret = close(fd);
+		if (ret < 0)
+		{
+			perror("HERCULES_ERR_CLOSE_DISK");
+			slog_error("HERCULES_ERR_CLOSE_DISK");
+		}
+		return -1;
+	}
+
+	return 0;
+}
+
+int32_t Make_directory(const char *dirname)
+{
+	char disk_path[PATH_MAX];
+	int ret = 1;
+	struct stat sb;
+	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", dirname);
+	if (stat(disk_path, &sb) == 0 && S_ISDIR(sb.st_mode))
+	{
+		fprintf(stderr, "directory %s exists\n", disk_path);
+	}
+	else
+	{
+		fprintf(stderr, "directory %s does not exists\n", disk_path);
+		ret = mkdir(disk_path, S_IRWXU | S_IRWXG);
+		if (ret == -1)
+		{
+			perror("HERCULES_ERR_MAKE_DIRECTORY");
+			slog_error("HERCULES_ERR_MAKE_DIRECTORY");
+			return ret;
+		}
+	}
+	return ret;
+}
