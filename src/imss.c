@@ -1352,13 +1352,8 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	{
 		if (new_dataset.local_conn != -2)
 		{
-			// perror("HERCULES_ERR_OPEN_DATASET_ALREADY_STORED");
 			slog_warn("HERCULES_ERR_OPEN_DATASET_ALREADY_STORED");
 			slog_live("new_dataset.local_conn=%d", new_dataset.local_conn);
-			// fprintf(stderr, "HERCULES_ERR_OPEN_DATASET_ALREADY_STORED\n");
-			// return -EEXIST;
-			// return -1;
-			// return 0;
 			errno = EEXIST;
 
 			// Search for the requested dataset in the local vector.
@@ -3880,11 +3875,11 @@ int get_number_of_active_nodes()
 	return number_active_storage_servers;
 }
 
-int32_t Open_file(const char *filename)
+int32_t Open_file(const char *checkpoint_dir, const char *filename)
 {
 	char disk_path[PATH_MAX];
 	int fd = -1;
-	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", filename);
+	sprintf(disk_path, "%s/%s", checkpoint_dir, filename);
 	fprintf(stderr, "disk path = %s\n", disk_path);
 	fd = open(disk_path, O_CREAT | O_WRONLY, 0600);
 	if (fd < 0)
@@ -3932,10 +3927,11 @@ int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset)
 
 int32_t Make_directory(const char *dirname)
 {
-	char disk_path[PATH_MAX];
+	// char disk_path[PATH_MAX];
+	const char *disk_path = dirname;
 	int ret = 1;
 	struct stat sb;
-	sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", dirname);
+	//sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", dirname);
 	if (stat(disk_path, &sb) == 0 && S_ISDIR(sb.st_mode))
 	{
 		fprintf(stderr, "directory %s exists\n", disk_path);

@@ -106,7 +106,7 @@ TRANSFER_SIZE=$FILE_SIZE_PER_CLIENT
 #COMMAND="ls -lh /mnt/hercules"
 #COMMAND="echo \"hola\" > /mnt/hercules/hola.txt"
 
-COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5"
+COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 3"
 
 if [ "$IOR_FILE_PER_PROCESS" -eq 1 ]; then
 ## File-per-process with write and read verification.
@@ -140,6 +140,8 @@ mpiexec $HERCULES_MPI_HOSTFILE_DEF=./hostfile \
 
 ## Waits some seconds to allow Hercules finishing copying all blocks to disk.
 ## TODO: call /hercules/scripts/hercules stop to automatically checks if all data has been copied.
-sleep 120
+#sleep 120
+source /beegfs/home/javier.garciablas/hercules/scripts/hercules stop \
+	   -f "$CONFIG_PATH"
 
 echo "done!"

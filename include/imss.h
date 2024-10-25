@@ -613,7 +613,7 @@ RETURNS:	0 - Resources were released successfully.
 	 * Disk methods.
 	 */
 	int32_t Make_directory(const char *dirname);
-	int32_t Open_file(const char *filename);
+	int32_t Open_file(const char *checkpoint_dir, const char *filename);
 	int32_t Close_file(int fd);
 	int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset);
 

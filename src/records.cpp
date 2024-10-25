@@ -536,7 +536,7 @@ int32_t map_records::cleaning_specific(std::string new_key)
 }
 
 // Used in str_worker threads.
-int32_t map_records::memory2disk(uint64_t block_size)
+int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir)
 {
 	// Save key value on a vector to know which of them have been copy to diks.
 	std::vector<string> vec;
@@ -597,7 +597,13 @@ int32_t map_records::memory2disk(uint64_t block_size)
 			file_name = data_uri.substr(strlen("imss://"));
 			sprintf(expected_uri, "imss://%s", file_name.c_str());
 
+			// We need at least one iteartion to ensure "curr_dataset" is not
+			// empty.
 			if (iteration > 0)
+				// if the expected uri is different from the previous iteration,
+				// we are in a block of another dataset. So, we need to get the
+				// information of this dataset and to check it is ready to be
+				// copied to disk or not.
 				if (!strcmp(curr_dataset.uri_, expected_uri) && curr_dataset.n_open > 0)
 				{
 					// Skip all blocks of this dataset because is not ready.
@@ -623,12 +629,22 @@ int32_t map_records::memory2disk(uint64_t block_size)
 				}
 				continue;
 			}
+
+			// deletes all information related to this uri from the local
+			// arrays. it ensures the dataset information will be updated from
+			// the remote metadata server.
+			clear_dataset(expected_uri);
+
+			// To get dataset info from the metadata server. here
+			// "curr_dataset" is filled.
+			file_desc = open_dataset(expected_uri, 0);
+			if (file_desc < 0)
+			{
+				continue;
+			}
 			iteration++;
 
-			// get dataset info from the metadata server.
-			file_desc = open_dataset(expected_uri, 0);
-
-			// checks if there are still processes with the file opened.
+			// Checks if there are still processes with the file opened.
 			if (curr_dataset.n_open > 0)
 			{
 				fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset.uri_, curr_dataset.n_open);
@@ -695,7 +711,7 @@ int32_t map_records::memory2disk(uint64_t block_size)
 			if (it_fd == buffer_fd.end())
 			{
 				// Open the file if it does not exists.
-				fd = Open_file(file_name.c_str());
+				fd = Open_file(checkpoint_dir, file_name.c_str());
 				if (fd < 0)
 				{
 					continue;
@@ -712,20 +728,31 @@ int32_t map_records::memory2disk(uint64_t block_size)
 			}
 
 			Write_2_disk(fd, address_, block_size_rtvd, offset);
-			// set "copy_to_disk" to 0.
+			// set "copy_to_disk" to 0 to prevent this block to be copy to disk
+			// twice.
 			buffer_checkpoint[key] = 0;
-			// buffer_checkpoint.erase(key);
 
 			if (to_free)
 				free(address_block_0);
 		}
 	}
-	if (fd != -1)
+	// Close all file descriptors.
+	for (const auto &it : buffer_fd)
 	{
+		fd = it.second;
 		Close_file(fd);
-		buffer_fd.erase(file_name);
 	}
-	clear_dataset(curr_dataset.uri_);
+	// To remove all the elements from the file descriptors map.
+	if (buffer_fd.size() > 0)
+	{
+		buffer_fd.clear();
+	}
+
+	// if (fd != -1)
+	// {
+	// 	Close_file(fd);
+	// 	buffer_fd.erase(file_name);
+	// }
 	// }
 	// fprintf(stderr, "Ending memory2disk\n");
 	return 0;

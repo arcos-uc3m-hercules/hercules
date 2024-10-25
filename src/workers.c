@@ -569,6 +569,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						if (ret < 0)
 						{
 							perror("ERRIMSS_WORKER_SENDERR");
+							free(buf);
 							return -1;
 						}
 					} // If was already stored:
@@ -624,8 +625,10 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				{
 					perror("ERR_HERCULES_WORKER_SENDBLOCK");
 					slog_error("ERR_HERCULES_WORKER_SENDBLOCK");
+					free(buf);
 					return -1;
 				}
+				free(buf);
 			}
 			break;
 		}
@@ -728,10 +731,13 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				if (ret == 0)
 				{
 					free(msg);
+					free(buf);
 					perror("ERR_HERCULES_WORKER_SENDBLOCK");
 					slog_error("ERR_HERCULES_WORKER_SENDBLOCK");
 					return -1;
 				}
+				free(msg);
+				free(buf);
 			}
 			break;
 		}
@@ -1297,14 +1303,19 @@ void *checkpoint(void *th_argv)
 	std::shared_ptr<map_records> map = arguments->map;
 
 	// fprintf(stderr, "Checkpoint path = %s, len=%lu\n", arguments->args.hercules_checkpoint_path, strlen(arguments->args.hercules_checkpoint_path));
-	if (strlen(arguments->args.hercules_checkpoint_path) == 0)
+	const char *checkpoint_dir = arguments->args.hercules_checkpoint_path;
+
+	if (strlen(checkpoint_dir) == 0)
 	{
 		printf("Checkpointing path has not been provided.\tHERCULES_CHECKPOINT_PATH = /home/user/checkpointing_path/\n");
 		fflush(stdout);
 		pthread_exit(NULL);
 	}
 
-	Make_directory(arguments->args.hercules_checkpoint_path);
+	if (!arguments->args.id)
+	{ // only one server creates the checkpoint directory.
+		Make_directory(checkpoint_dir);
+	}
 
 	for (;;)
 	{
@@ -1312,7 +1323,7 @@ void *checkpoint(void *th_argv)
 		// fprintf(stderr, "Running Checkpointing, block size = %lu, %lu\n", BLOCK_SIZE, arguments->blocksize);
 		fprintf(stderr, "Running Checkpointing\n");
 		pthread_mutex_lock(&mutex_garbage);
-		map->memory2disk(BLOCK_SIZE);
+		map->memory2disk(BLOCK_SIZE, checkpoint_dir);
 		pthread_mutex_unlock(&mutex_garbage);
 		// fprintf(stderr,"Ending memory2disk\n");
 	}
@@ -1939,6 +1950,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			{
 				slog_error("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
 				perror("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
+				free(buffer);
 				return -1;
 			}
 
@@ -1952,10 +1964,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			{
 				slog_error("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
 				perror("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
+				free(buffer);
 				// perror("ERRIMSS_STATWORKER_GTREEINSERT");
 				return -1;
 			}
-
+			
 			// Update the pointer.
 			arguments->pt += block_size_recv;
 			slog_debug("[STAT WORKER] Dataset %s has been created.", key.c_str());
