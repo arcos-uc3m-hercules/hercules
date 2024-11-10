@@ -31,6 +31,14 @@ map_records::map_records(const uint64_t nsize)
 	mut = new std::mutex();
 }
 
+map_records::~map_records()
+{
+	fprintf(stderr, "Freeing memory\n");
+	freeAllMemory();
+
+	delete mut;
+}
+
 void map_records::set_size(const uint64_t nsize)
 {
 	total_size = nsize;
@@ -138,7 +146,7 @@ int32_t map_records::put(std::string key, void *address, uint64_t length)
 int32_t map_records::put_simple(std::string key, int value)
 {
 	// Construct a pair object storing the couple of values associated to a key.
-	// std::pair<void *, uint64_t> value(address, length);
+	// std::pair<void *, uint64_t> value(to_copy, 0); // second param is for file size.
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	// Add a new value to the map.
@@ -185,11 +193,13 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	return 1;
 }
 
-int32_t map_records::get_simple(std::string key)
+int32_t map_records::get_simple(std::string key, uint64_t *to_copy)
 {
 
 	// Map iterator that will be searching for the key.
 	std::map<std::string, int>::iterator it;
+	// std::map<std::string, std::pair<uint64_t, uint64_t>>::iterator it;
+
 	int value = 0;
 	// Block the access to the map structure.
 	// std::unique_lock<std::mutex> lock(*mut);
@@ -204,10 +214,11 @@ int32_t map_records::get_simple(std::string key)
 	{
 		return 0;
 	}
-	value = it->second;
+	*(to_copy) = it->second;
+	// *(file_size) = it->second.second;
 
 	// Return the value.
-	return value;
+	return 1;
 }
 
 int32_t map_records::update(std::string key, void *add_, uint64_t length)
@@ -433,8 +444,9 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 	return 1;
 }
 
-// Used in str_worker threads
-// Method retrieving the address associated to a certain record.
+/**
+ * Find and set corresponding buffer map memory blocks to be reused.
+ */
 int32_t map_records::cleaning()
 {
 	std::vector<string> vec;
@@ -519,13 +531,19 @@ int32_t map_records::cleaning_specific(std::string new_key)
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string>::iterator i;
-	for (i = vec.begin(); i < vec.end(); i++)
+	for (i = vec.begin(); i != vec.end(); i++)
 	{
 		// std::cout << "Garbage Collector: Deleting " << *i << "\n";
 		auto item = buffer.find(*i);
+		// push the memory pointer of this block inside the mem pool to be reused.
 		StsQueue.push(mem_pool, item->second.first);
+		quantity_occupied = quantity_occupied - item->second.second;
+		// fprintf(stderr, "quantity_occupied = %lu\n", quantity_occupied);
 		// free(item->second.first);
+		// erase the dataset information from the map.
+		// fprintf(stderr, "Erasing element with key %s\n", i);
 		buffer.erase(*i);
+		buffer_checkpoint.erase(*i);
 	}
 
 	/*for(const auto & it : buffer){
@@ -535,19 +553,49 @@ int32_t map_records::cleaning_specific(std::string new_key)
 	return 0;
 }
 
-// Used in str_worker threads.
-int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir)
+/**
+ * Find and set corresponding buffer map memory blocks to be reused.
+ */
+int32_t map_records::freeAllMemory()
 {
-	// Save key value on a vector to know which of them have been copy to diks.
-	std::vector<string> vec;
+	// Block the access to the map structure.
+	std::unique_lock<std::mutex> lock(*mut);
+	ssize_t free_memory_count = 0;
+	for (const auto &it : buffer)
+	{
+		// fprintf(stderr,"Deleting %s\n", it.first.c_str());
+		free(it.second.first);
+		quantity_occupied = quantity_occupied - it.second.second;
+		free_memory_count += it.second.second;
+	}
+	free_memory_count /= (1024 * 1024 * 1024); // Bytes to GiB.
+	printf("Hercules has release %lu GB of memory\n", free_memory_count);
+	buffer.clear();
 
-	// We need to check if the block has been copied to disk or if it was updated.
+	// std::vector<string>::iterator i;
+	// for (i = vec.begin(); i < vec.end(); i++)
+	// {
+	// 	// find the element on all the datasets map.
+	// 	auto item = buffer.find(*i);
+	// 	// push the memory pointer of this block inside the mem pool to be reused.
+	// 	StsQueue.push(mem_pool, item->second.first);
+	// 	// erase the dataset information from the map.
+	// 	buffer.erase(*i);
+	// }
 
-	// TODO: add a new field to the map to know if the block needs to be copy to disk. For example, a field called: status = dirty means there are new information. This can be establish on the block 0 o by each block.
-	// As a second solution, we will make an array an each new/updated block
-	// is going to be add to it on write operations. We do not need to store
-	// the block 0.
-	int pos = 0, copy_to_disk = 0, ret = 0, fd = -1, block_number = 0, skip = 0, number_active_storage_servers = 0;
+	/*for(const auto & it : buffer){
+	  string key = it.first;
+	  std::cout <<"Garbage Collector: Exist " << key << '\n';
+	  }*/
+	return 0;
+}
+
+// Used in str_worker threads.
+int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id, char *data_hostname)
+{
+	clock_t t;
+	double parcial_time_taken = 0.0, total_time_taken = 0.0;
+	int pos = 0, ret = 0, fd = -1, block_number = 0, skip = 0, number_active_storage_servers = 0;
 	size_t offset = 0;
 	string key, inner_key, block, file_name, inner_file_name, data_uri;
 	char key_block_0[PATH_MAX];
@@ -555,12 +603,18 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 	char old_expected_uri[PATH_MAX];
 	void *address_ = NULL;
 	void *address_block_0 = NULL;
-	uint64_t block_size_rtvd = 0, block_0_size = 0;
+	uint64_t copy_to_disk = 0, block_size_rtvd = 0, block_0_size = 0, total_written = 0;
 	struct stat *stats = NULL;
 	int32_t file_desc = 0;
 	std::size_t found = 0;
 	size_t iteration = 0;
 	int to_free = 0;
+	__off_t file_size = 0;
+
+	if (!finish)
+	{
+		return 0;
+	}
 
 	// fprintf(stderr, "Buffer size = %lu, number of block in primary map=%lu\n", buffer_checkpoint.size(), buffer.size());
 	for (const auto &it : buffer_checkpoint)
@@ -573,6 +627,7 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 			continue;
 		}
 		copy_to_disk = it.second;
+
 		pos = key.find('$') + 1; // +1 to skip '$' on the block number.
 		if (pos == std::string::npos)
 		{
@@ -645,41 +700,12 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 			iteration++;
 
 			// Checks if there are still processes with the file opened.
-			if (curr_dataset.n_open > 0)
+			// Also, if "hercules stop" was called, we ignore this condition to
+			// copy the remaining data.
+			if (curr_dataset.n_open > 0 && finish != 1)
 			{
 				fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset.uri_, curr_dataset.n_open);
 				slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset.uri_, curr_dataset.n_open);
-				continue;
-			}
-
-			// Try to get block 0 from local map. If the block is
-			// not here we make a request to the corresponding data
-			// server.
-			sprintf(key_block_0, "%s$0", data_uri.c_str());
-			to_free = 0;
-			ret = get(key_block_0, &address_block_0, &block_0_size);
-			// fprintf(stderr, "key_block_0 = %s\n", key_block_0);
-			if (ret == 0)
-			{ // block 0 is not on the local map.
-				// fprintf(stderr, "Block 0 for key %s not found for checkpointing on the local map\n", key.c_str());
-				address_block_0 = (void *)malloc(block_size * sizeof(char));
-				ret = get_ndata(file_desc, 0, address_block_0, 0, 0);
-				if (ret < 0)
-				{
-					char err_msg[MAX_ERR_MSG_LEN];
-					sprintf(err_msg, "HERCULES_ERR_GET_NDATA_CHECKPOINT: %s", key_block_0);
-					slog_error("[imss_refresh] %s", err_msg);
-					perror(err_msg);
-					return -1;
-				}
-				to_free = 1;
-			}
-
-			stats = (struct stat *)address_block_0;
-			if (stats == NULL)
-			{
-				perror("HERCULES_ERR_BLOCK_0_GET_ERROR");
-				slog_error("HERCULES_ERR_BLOCK_0_GET_ERROR");
 				continue;
 			}
 
@@ -690,23 +716,8 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 				continue;
 			}
 
-			if (stats->st_size < block_size)
-			{
-				block_size_rtvd = stats->st_size;
-			}
-
-			offset = block_size * (block_number - 1); // -1 due block 0.
-
-			if (block_size_rtvd + offset > stats->st_size)
-			{
-				block_size_rtvd = stats->st_size - offset;
-			}
-
-			// fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, stats->st_size=%lu\n", key.c_str(), block_size_rtvd, offset, stats->st_size);
-			slog_debug("key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, stats->st_size=%lu", key.c_str(), block_size_rtvd, offset, stats->st_size);
-
 			// Checks if the file was opened.
-			std::map<std::string, int>::iterator it_fd;
+			std::map<std::string, std::pair<int, __off_t>>::iterator it_fd;
 			it_fd = buffer_fd.find(file_name);
 			if (it_fd == buffer_fd.end())
 			{
@@ -714,32 +725,102 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 				fd = Open_file(checkpoint_dir, file_name.c_str());
 				if (fd < 0)
 				{
+					// On error, we skip this block.
 					continue;
 				}
 				else
 				{
 					// On success, the fd is inserted on the buffer_fd map.
-					buffer_fd.insert({file_name, fd});
+					// We also try to get block 0 from local map to know the
+					// file size. If the block is not here we make a request to
+					// the corresponding data server.
+					sprintf(key_block_0, "%s$0", data_uri.c_str());
+					to_free = 0;
+					ret = get(key_block_0, &address_block_0, &block_0_size);
+					if (ret == 0)
+					{ // block 0 is not on the local map.
+						address_block_0 = (void *)malloc(block_size * sizeof(char));
+						ret = get_ndata(file_desc, 0, address_block_0, 0, 0);
+						to_free = 1;
+					}
+
+					if (ret < 0)
+					{
+						char err_msg[MAX_ERR_MSG_LEN];
+						sprintf(err_msg, "HERCULES_ERR_GET_NDATA_CHECKPOINT: %s", key_block_0);
+						perror(err_msg);
+						slog_error("HERCULES_ERR_GET_NDATA_CHECKPOINT: %s", err_msg);
+						// return -1;
+						// On error, we set the file size as 0
+						// indicating we were not able to retrive
+						// the correct file size, for example due a
+						// network fail.
+						file_size = 0;
+					}
+					stats = (struct stat *)address_block_0;
+					if (stats == NULL)
+					{
+						perror("HERCULES_ERR_BLOCK_0_GET_ERROR");
+						slog_error("HERCULES_ERR_BLOCK_0_GET_ERROR");
+						if (to_free)
+							free(address_block_0);
+						continue;
+					}
+					file_size = stats->st_size;
+					buffer_fd.insert({file_name, {fd, file_size}});
 				}
 			}
 			else
 			{
-				fd = it_fd->second;
+				fd = it_fd->second.first;
+				file_size = it_fd->second.second;
 			}
 
-			Write_2_disk(fd, address_, block_size_rtvd, offset);
+			offset = block_size * (block_number - 1); // -1 due block 0.
+			if (file_size != 0)
+			{
+				// This helps to write files smaller than the block size with
+				// the corresponding size.
+				if (file_size < block_size && file_size != 0)
+				{
+					block_size_rtvd = file_size;
+				}
+
+				// This helps to write the last block with the remaining data
+				// preventing writing the entire block.
+				if (block_size_rtvd + offset > file_size)
+				{
+					block_size_rtvd = file_size - offset;
+				}
+			}
+
+			// fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, stats->st_size=%lu\n", key.c_str(), block_size_rtvd, offset, stats->st_size);
+			slog_debug("key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, file_size=%lu", key.c_str(), block_size_rtvd, offset, file_size);
+			t = clock();
+			block_size_rtvd = Write_2_disk(fd, address_, block_size_rtvd, offset);
+			t = clock() - t;
+			parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
+			total_time_taken += parcial_time_taken;
+			if (block_size_rtvd == -1)
+			{
+				continue;
+			}
+			total_written += block_size_rtvd;
 			// set "copy_to_disk" to 0 to prevent this block to be copy to disk
 			// twice.
 			buffer_checkpoint[key] = 0;
 
 			if (to_free)
+			{
 				free(address_block_0);
+				to_free = 0;
+			}
 		}
 	}
 	// Close all file descriptors.
 	for (const auto &it : buffer_fd)
 	{
-		fd = it.second;
+		fd = it.second.first;
 		Close_file(fd);
 	}
 	// To remove all the elements from the file descriptors map.
@@ -748,12 +829,20 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 		buffer_fd.clear();
 	}
 
-	// if (fd != -1)
-	// {
-	// 	Close_file(fd);
-	// 	buffer_fd.erase(file_name);
-	// }
-	// }
-	// fprintf(stderr, "Ending memory2disk\n");
-	return 0;
+	if (total_time_taken > 0)
+	{
+		slog_time("ServerID,%d,Hostname,%s,Total-writen,%lu B,%f MB,%f GB,Time-taken,%f s,Troughput,%f B/s,%f MB/s,%f GB/s,Blocksize,%lu KB",
+				  server_id,
+				  data_hostname,
+				  total_written,
+				  (double)total_written / 1024 / 1024,
+				  (double)total_written / 1024 / 1024 / 1024,
+				  total_time_taken,
+				  (double)total_written / total_time_taken,
+				  (double)total_written / total_time_taken / 1024 / 1024,
+				  (double)total_written / total_time_taken / 1024 / 1024 / 1024,
+				  block_size);
+	}
+
+	return total_time_taken;
 }

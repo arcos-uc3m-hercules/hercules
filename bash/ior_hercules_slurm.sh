@@ -3,11 +3,11 @@
 #SBATCH --time=01:00:00               # Time limit hrs:min:sec
 #SBATCH --output=logs/hercules/%j.log   # Standard output and error log
 #SBATCH --mem=0
-##SBATCH --oversubscribe
-##SBATCH --exclude=broadwell-[000-002]
-##SBATCH --nodelist=broadwell-[038-043]
+##SBATCH --exclude=broadwell-008,broadwell-010
+##SBATCH --nodelist=broadwell-[012-027]
 ###SBATCH --exclusive=user
 ##SBATCH --overcommit
+##SBATCH --oversubscribe
 
 CONFIG_PATH=$1
 FILE_SIZE_PER_CLIENT=$2
@@ -71,8 +71,10 @@ if [ -z "$CONFIG_PATH" ]; then
    source hercules start
 else
    echo "Configuration file pass $CONFIG_PATH"
+   export HERCULES_DEBUG_LEVEL=SLOG_TIME
    source /beegfs/home/javier.garciablas/hercules/scripts/hercules start \
    -f "$CONFIG_PATH" 
+   unset HERCULES_DEBUG_LEVEL
 fi
 end_=$(date +%s.%N)
 runtime=$(echo "$end_ - $start_" | bc -l)
@@ -106,15 +108,14 @@ TRANSFER_SIZE=$FILE_SIZE_PER_CLIENT
 #COMMAND="ls -lh /mnt/hercules"
 #COMMAND="echo \"hola\" > /mnt/hercules/hola.txt"
 
-COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 3"
+# -W -R for Write and Read verification. 
+# -k to keep the file (do not delete it after test).
+#COMMAND="$IOR_PATH/ior -w -r -k -W -R -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 1"
+COMMAND="$IOR_PATH/ior -w -r -k -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 3"
 
 if [ "$IOR_FILE_PER_PROCESS" -eq 1 ]; then
-## File-per-process with write and read verification.
-#COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -F -o /lustre/scratch/javier.garciablas/ior_output/data.txt"
+## -F for File-per-process.
 COMMAND="$COMMAND -F"
-#else
-## Single-shared-file with write and read verification.
-#COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -o /lustre/scratch/javier.garciablas/ior_output/data.txt"
 fi
 
 if [ "$IOR_AVOID_CACHE" -eq 1 ]; then
@@ -124,6 +125,9 @@ fi
 
 ##  Add the output file path.
 COMMAND="$COMMAND -o /mnt/hercules/data.out"
+
+## Removes the data.out file from the checkpointing folder.
+rm ./HerculesCheckpoint/*
 
 # MPIEXEC="mpiexec"
 set -x
@@ -139,9 +143,15 @@ mpiexec $HERCULES_MPI_HOSTFILE_DEF=./hostfile \
 	ipcrm -a
 
 ## Waits some seconds to allow Hercules finishing copying all blocks to disk.
-## TODO: call /hercules/scripts/hercules stop to automatically checks if all data has been copied.
-#sleep 120
-source /beegfs/home/javier.garciablas/hercules/scripts/hercules stop \
+/beegfs/home/javier.garciablas/hercules/scripts/hercules stop \
 	   -f "$CONFIG_PATH"
+
+## Checksum to the file.
+#HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/data.out
+#HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  md5sum /mnt/hercules/data.out
+#HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  md5sum /mnt/hercules/data.out
+
+#mpiexec -np=8 $HERCULES_MPI_PPN=1 $HERCULES_MPI_HOSTFILE_DEF=./data_hostfile \
+#	cat /tmp/hercules_pkill_operation
 
 echo "done!"

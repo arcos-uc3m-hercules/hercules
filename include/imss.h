@@ -66,6 +66,7 @@ static uint64_t BLOCK_SIZE;
  * char*::print_comment: comment to be concatenated to the elapsed time.
  */
 #define __TIMING__
+
 #ifdef __TIMING__
 #define TIMING(function_to_call, print_comment, type)          \
 	({                                                         \
@@ -79,6 +80,14 @@ static uint64_t BLOCK_SIZE;
 		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
 		ret;                                                   \
 	})
+#else
+#define TIMING(function_to_call, print_comment, type) \
+	({                                                \
+		function_to_call;                             \
+	})
+#endif
+
+#ifdef TIMING_NO_RETURN
 #define TIMING_NO_RETURN(function_to_call, print_comment)      \
 	({                                                         \
 		clock_t t;                                             \
@@ -90,9 +99,29 @@ static uint64_t BLOCK_SIZE;
 		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
 	})
 #else
-#define TIMING(function_to_call, print_comment, type) \
-	({                                                \
-		function_to_call;                             \
+#define TIMING_NO_RETURN(function_to_call, print_comment)      \
+	({                                                         \
+		function_to_call;                                      \
+	})
+#endif
+
+#ifdef NETWORK_TIMING
+#define NETWORK_TIMING(function_to_call, print_comment, type)  \
+	({                                                         \
+		clock_t t;                                             \
+		double time_taken;                                     \
+		type ret;                                              \
+		t = clock();                                           \
+		ret = function_to_call;                                \
+		t = clock() - t;                                       \
+		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
+		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
+		ret;                                                   \
+	})
+#else
+#define NETWORK_TIMING(function_to_call, print_comment, type)      \
+	({                                                         \
+		function_to_call;                                      \
 	})
 #endif
 

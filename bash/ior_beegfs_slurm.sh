@@ -30,7 +30,7 @@ TRANSFER_SIZE=$FILE_SIZE_PER_CLIENT
 # COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -o /beegfs/home/javier.garciablas/hercules/bash/ior_output/data.txt"
 # fi
 
-COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5"
+COMMAND="$IOR_PATH/ior -w -r -W -R -k -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5"
 
 if [ "$IOR_FILE_PER_PROCESS" -eq 1 ]; then
 ## File-per-process with write and read verification.

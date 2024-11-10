@@ -6,15 +6,15 @@ FILE_SIZE=$((1024*1024*10))
 ATTACHED=1
 
 # 0 = Shared single file, 1 = File per process.
-IOR_FILE_PER_PROCESS=0
-# 0 = Do not avoid cache, 1 = Avoid cache (recommend, https://ior.readthedocs.io/en/latest/userDoc/tutorial.html).
-IOR_AVOID_CACHE=1
+IOR_FILE_PER_PROCESS=1
+# 0 = Do not avoid cache, 1 = Avoid cache (recommend by https://ior.readthedocs.io/en/latest/userDoc/tutorial.html).
+IOR_AVOID_CACHE=0
 
 #TEST_TYPE="weak"
 TEST_TYPE="strong"
 TEMPLATE_CONFIG_PATH="../conf/hercules-template.conf"
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
-POLICY="HASH"
+POLICY="LOCAL"
 
 NUM_SERVERS_RANGE=( 16 )
 #NUM_SERVERS_RANGE=( 1 4 8 16 32 )
@@ -68,6 +68,7 @@ do
 					cp $TEMPLATE_CONFIG_PATH $TEMPLATE_CONFIG_PATH."_TEMP"
 					## TODO: .* to match all characters in regulars expression.
 					sed -i "s/^BLOCK_SIZE = [0-9]*/BLOCK_SIZE = $BLOCK_SIZE/g"  "$TEMPLATE_CONFIG_PATH"
+#					sed -i "s/^BLOCK_SIZE = [0-9]*/BLOCK_SIZE = $FILE_SIZE_PER_CLIENT/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_DATA_SERVERS = [0-9]/NUM_DATA_SERVERS = $NUM_SERVERS/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_NODES_FOR_CLIENTS = [0-9]/NUM_NODES_FOR_CLIENTS = $NODES_FOR_CLIENTS/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_CLIENTS_PER_NODE = [0-9]/NUM_CLIENTS_PER_NODE = $CLIENTS_PER_NODE/g"  "$TEMPLATE_CONFIG_PATH"

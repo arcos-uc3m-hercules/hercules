@@ -229,6 +229,12 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
         return;
     }
 
+    if (flag != SLOG_TIME && slg.level == SLOG_TIME)
+    {
+        return;
+    }
+    
+
     char *ld_preload_path = getenv("LD_PRELOAD");
     if (ld_preload_path != NULL)
     {

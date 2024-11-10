@@ -7,18 +7,20 @@
 ## To stop servers.
 StopServers() {
     NAME=$1 # Server type ("metadata" or "data").
-    hosts=$2 # List of hostnames.
-
     # Operation to be apply to the server. 
     # 0 indicates the server will be killed, and 
     # 1 indicates the sever will be suspend 
     # (e.g., Hercules shrink when malleability is enabled).
-    OPERATION=$3
+    shift
+    OPERATION=$1
+    shift
+    hosts=("$@") # List of hostnames.
 
     echo "# Hercules: Stopping $NAME servers in ${hosts[@]}"
     if [[ "$VERBOSE" -eq "1" ]]; then
         echo "# Operation = $OPERATION"
     fi
+    # set -x
     for node in "${hosts[@]}"
     do
         # Set the action to be doing by the servers when they received the pkill signal.
@@ -26,6 +28,7 @@ StopServers() {
         # Kill threads and finish the server.
         ( ssh $node "pkill -SIGUSR1 hercules_server" )
     done
+    # set +x
 }
 
 WakeUpServers() {
@@ -73,6 +76,7 @@ WaitForServers() {
             echo "# Hercules: $ACTION $SERVER_NAME server $SERVER_NUMBER on $node"
         fi
         COMMAND="$HERCULES_BASH_PATH/check-servers.sh $SERVER_TYPE $SERVER_NUMBER $ACTION"
+        echo $COMMAND
         
         ### echo "[+] Running comprobation in $node... $COMMAND"
         # if slurm is not available.
@@ -93,7 +97,6 @@ WaitForServers() {
         ret=$?
         if [ "$ret" -gt 0 ]; then
             echo "[Error: $ret] It has not been possible to "${ACTION}" a $SERVER_NAME server on $node, please verify the configuration file and logs."
-            #StopServers $SERVER_NAME $hosts 1
             exit 1
         fi
         ## Checks if the file exists.
@@ -381,7 +384,7 @@ then
     ## Creates an array with the data servers hostnames.
     readarray -t hosts < $HERCULES_DATA_HOSTFILE
     ## Stop the data servers.
-    StopServers "data" ${hosts[@]} 1
+    StopServers "data" 1 ${hosts[@]}
     
     ## Checks if user wants to wait until all servers are stopped.
     # 1 indicates that this function should check if 
@@ -403,7 +406,7 @@ then
     cat $HERCULES_METADATA_HOSTFILE > data2stop_hostfile
     readarray -t hosts < $HERCULES_METADATA_HOSTFILE
     # echo "meta hosts=$hosts"
-    StopServers "metadata" ${hosts[@]} 1
+    StopServers "metadata" 1 ${hosts[@]}
 
     ## Checks if user wants to wait until all servers are stopped.
     # 1 indicates that this function should check if 
@@ -468,7 +471,7 @@ then
     readarray -t hosts < $HERCULES_DATA_HOSTFILE
     # 1 = Stops some servers synchronously.
     # 0 = Do not kill the process.
-    StopServers "data" ${hosts[@]} 0
+    StopServers "data" 0 ${hosts[@]} 
 
     # For "remove" operations we awalys wait for selected 
     # servers to be removed.

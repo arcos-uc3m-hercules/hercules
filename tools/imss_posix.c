@@ -62,9 +62,6 @@ uint64_t IMSS_BUFFSIZE = 2;	  // In GB
 uint64_t IMSS_DATA_BSIZE;	  // In Bytes.
 int32_t REPL_FACTOR = NONE;	  // Default none
 int32_t REPL_TYPE = ASYNC;	  // Default async
-int32_t IMSS_DEBUG_FILE = 0;
-int32_t IMSS_DEBUG_SCREEN = 0;
-int IMSS_DEBUG_LEVEL = SLOG_FATAL;
 
 extern int32_t MALLEABILITY;
 extern int32_t MALLEABILITY_TYPE;
@@ -442,7 +439,6 @@ char *convert_path(const char *name)
 
 	// fprintf(stderr, "name=%s, path=%s\n", name, path);
 
-
 	// seeks initial slashes "/" in the path.
 	len = strlen(path);
 	size_t desplacements = 0;
@@ -473,7 +469,7 @@ char *convert_path(const char *name)
 	{
 		strcat(new_path, path);
 	}
-	
+
 	return new_path;
 }
 
@@ -546,7 +542,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// }
 	slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
 
-	if (IMSS_DEBUG_FILE > 0)
+	if (args.logging.hercules_debug_file > 0)
 	{
 		printf("Log path = %s\n", log_path);
 		fflush(stdout);
@@ -574,7 +570,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_live(" -- REPL_TYPE: %d", REPL_TYPE);
 	slog_live(" -- POLICY: %s", POLICY);
 	slog_live(" -- RELEASE: %d", release);
-	// fprintf(stderr, " -- POLICY: %s\n", POLICY);
+	fprintf(stderr, " -- POLICY: %s\n", POLICY);
 
 	// Metadata server
 	// if (release == 1)
@@ -658,7 +654,6 @@ void __attribute__((destructor)) run_me_last()
 		//  imss_comm_cleanup();
 		//  t_s = clock() - t_s;
 		//  time_taken = ((double)t_s) / (CLOCKS_PER_SEC);
-		//  sleep(30);
 	}
 	// fprintf(stderr, "End 'run_me_last', pid=%d, release=%d\n", g_pid, release);
 	slog_live("End 'run_me_last', pid=%d, release=%d", g_pid, release);
@@ -708,7 +703,6 @@ int close(int fd)
 	}
 	else
 	{
-		// sleep(1);
 		slog_full("[POSIX]. Calling Real 'close', fd=%d", fd);
 		ret = real_close(fd);
 		slog_full("[POSIX]. Ending Real 'close', ret=%d", ret);
@@ -985,7 +979,6 @@ pid_t fork(void)
 // 		// 	slog_error("[POSIX] Child process has failed, pid=%d", pid);
 // 		// }
 
-// 		// sleep(120);
 // 		// slog_live("[POSIX] Ending '%s'", __func__);
 // 	// }
 
@@ -2114,29 +2107,10 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 		slog_live("[POSIX]. Calling Hercules 'fopen', pathname=%s", pathname);
 		uint64_t ret_ds;
 		unsigned long offset = 0;
-		// mode_t new_mode = 0;
 		int flags = 0, oflags = 0;
 
 		if ((flags = __sflags(mode, &oflags)) == 0)
 			return (NULL);
-
-		// To interpret the mode recived:
-		// Opening a file in append mode (a as the first character of mode)
-		// causes all subsequent write operations to this stream to occur at
-		// end-of-file, as if preceded by the call:
-		//   fseek(stream, 0, SEEK_END);
-
-		// if (strstr(mode, "w"))
-		// {
-		// 	new_mode |= S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
-		// 	flags = O_WRONLY | O_CREAT | O_TRUNC;
-		// }
-
-		// slog_live("[POSIX] Calling Hercules 'fopen', pathname=%s, mode=%s", new_path, mode);
-		// fprintf(stderr, "[POSIX] Calling Hercules 'fopen', pathname=%s, mode=%s\n", new_path, mode);
-
-		// if (strstr(mode, "w"))
-		// 	flags = O_CREAT;
 
 		file = real_fopen("/dev/null", mode);
 		if (file == NULL)
@@ -2157,32 +2131,6 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 			return NULL;
 		}
 
-		// file = (FILE *)malloc(sizeof(FILE));
-
-		// if (file == NULL)
-		// {
-		// 	slog_error("File struct %s was not created\n", pathname);
-		// 	// fprintf(stderr, "Error: File struct %s was not created\n", pathname);
-		// 	return NULL;
-		// }
-
-		// file->_flags2 = IMSS_BLKSIZE * KB;
-		// file->_offset = offset;
-		// file->_flags = flags;
-		// file->_fileno = ret;
-		// file->_flags2 = flags;
-		// file->_mode = mode;
-
-		// if (oflags & O_APPEND)
-		// {
-		// 	// fprintf(stderr,"Calling O_APPEND, fd=%d\n", file->_fileno);
-		// 	ret = fseek(file, 0, SEEK_END);
-		// 	if (ret < 0)
-		// 	{
-		// 		// slog_warn("Error calling fseek inside fopen");
-		// 	}
-		// }
-
 		// fprintf(stderr, "[POSIX] file->_fileno=%d, file->_offset=%ld\n", file->_fileno, file->_offset);
 		// if (file != NULL)
 		// 	fprintf(stderr, "[POSIX] Calling Hercules 'fopen', pathname=%s, mode=%s, file->_fileno=%d, file->_offset=%ld\n", new_path, mode, file->_fileno, file->_offset);
@@ -2190,7 +2138,7 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 		// fprintf(stderr, "Calling Hercules 'fopen', file NULL\n");
 
 		// slog_live("[POSIX] Calling Hercules 'fopen', pathname=%s, mode=%s", new_path, mode);
-		fprintf(stderr, "[POSIX] Ending Hercules 'fopen', new_path=%s, ret=%d, fd=%d\n", new_path, ret, file->_fileno);
+		// fprintf(stderr, "[POSIX] Ending Hercules 'fopen', new_path=%s, ret=%d, fd=%d\n", new_path, ret, file->_fileno);
 		free(new_path);
 	}
 	else /* Do not try to use slog_ here! This function uses 'fopen' internally. */
@@ -2352,7 +2300,8 @@ int generalOpen(char *new_path, int flags, mode_t mode, int createFd)
 				// errno = -ret;
 				slog_live("[POSIX] 1 - imss_open(%s, %ld), ret=%d", new_path, ret_ds, ret);
 				ret = 0;
-			} else if (err_create < 0)
+			}
+			else if (err_create < 0)
 			{
 				errno = -err_create;
 				ret = -1;
@@ -3131,14 +3080,10 @@ ssize_t read(int fd, void *buf, size_t size)
 	char *pathname = map_fd_search_by_val(map_fd, fd);
 	if (pathname != NULL)
 	{
-		// pthread_mutex_lock(&system_lock);
 		if (size <= 0)
 		{
-			// memset(buf, 0, 1);
 			buf = '\0';
-			// pthread_mutex_unlock(&system_lock);
 			return 0;
-			// return size;
 		}
 
 		unsigned long offset = 0;
@@ -3149,62 +3094,26 @@ ssize_t read(int fd, void *buf, size_t size)
 		{
 			errno = EBADF;
 			slog_error("[POSIX] Error in Hercules while reading '%s', %d:%s", pathname, errno, strerror(errno));
-			// pthread_mutex_unlock(&system_lock);
 			return -1;
 		}
 
-		// if (buf == NULL)
-		// {
-		// 	errno = EINVAL;
-		// 	slog_error("[POSIX] Error in Hercules while reading '%s', %d:%s", pathname, errno, strerror(errno));
-		// 	return -1;
-		// }
-
 		map_fd_search(map_fd, pathname, fd, &offset);
-		// struct stat ds_stat_n;
-		// ret = imss_getattr(pathname, &ds_stat_n);
-		// slog_live("[POSIX]. pathname=%s, stat.size=%ld, offset=%lu, ret=%ld", pathname, ds_stat_n.st_size, offset, ret);
-		// if (ret < 0)
-		// {
-		// 	errno = -ret;
-		// 	ret = -1;
-		// 	slog_error("[POSIX] Error in Hercules while reading '%s'", pathname);
-		// }
-		// else if (offset > ds_stat_n.st_size)
-		// {
-		// 	slog_warn("[POSIX] Trying to read %ld bytes in the gap, offset=%ld >= data_size=%ld", size, offset, ds_stat_n.st_size);
-		// 	// fprintf(stderr, "[POSIX] Trying to read %ld bytes in the gap, offset=%ld >= data_size=%ld\n", size, offset, ds_stat_n.st_size);
 
-		// 	// memcpy(buf, '0', size);
-		// 	// memset(buf, '\0', size);
-		// 	// memset(buf, 0, size);
-		// 	buf = '\0';
-		// 	ret = 0;
-		// 	// ret = size;
-		// 	//  if (ret >= 0)
-		// 	//  {
-		// 	//  	offset += ret;
-		// 	//  	slog_live("[POSIX] Updating map_fd, offset=%d", offset);
-		// 	//  	map_fd_update_value(map_fd, pathname, fd, offset);
-		// 	//  }
-		// }
-		// else
+		// fprintf(stderr, "[POSIX] Read Hercules size=%ld, offset=%lu\n", size, offset);
+		// ret = imss_read(pathname, buf, size, offset);
+		ret = imss_sread(pathname, buf, size, offset);
+		if (ret > 0)
 		{
-			// fprintf(stderr, "[POSIX] Read Hercules size=%ld, offset=%lu\n", size, offset);
-			// ret = imss_read(pathname, buf, size, offset);
-			ret = imss_sread(pathname, buf, size, offset);
-			if (ret > 0)
-			{
-				offset += ret;
-				// fprintf(stderr, "[POSIX] Updating map_fd, offset=%lu, data_size=%ld\n", offset, ds_stat_n.st_size);
+			offset += ret;
+			// fprintf(stderr, "[POSIX] Updating map_fd, offset=%lu, data_size=%ld\n", offset, ds_stat_n.st_size);
 
-				// slog_live("[POSIX] Updating map_fd, offset=%lu, data_size=%ld", offset, ds_stat_n.st_size);
-				slog_live("[POSIX] Updating map_fd, offset=%lu", offset);
-				map_fd_update_value(map_fd, pathname, fd, offset);
-			}
-			// fprintf(stderr, "[POSIX] Hercules read, pathname=%s, ret=%ld\n", pathname, ret);
-			// fprintf(stderr, "[POSIX ] READ HERCULES ret=%ld\n", ret);
+			// slog_live("[POSIX] Updating map_fd, offset=%lu, data_size=%ld", offset, ds_stat_n.st_size);
+			slog_live("[POSIX] Updating map_fd, offset=%lu", offset);
+			map_fd_update_value(map_fd, pathname, fd, offset);
 		}
+		// fprintf(stderr, "[POSIX] Hercules read, pathname=%s, ret=%ld\n", pathname, ret);
+		// fprintf(stderr, "[POSIX ] READ HERCULES ret=%ld\n", ret);
+
 		slog_live("[POSIX]. End Hercules 'read', pathname=%s, ret=%zd, size=%ld, fd=%d\n", pathname, ret, size, fd);
 		// fprintf(stderr, "[POSIX]. Hercules 'read', size=%ld, fd=%d, ret=%lu, offset=%lu, errno=%d:%s\n", size, fd, ret, offset, errno, strerror(errno));
 	}
@@ -5194,7 +5103,6 @@ int fsync(int fd)
 		// -1 shall be returned and errno set to indicate the error.
 		// If the fsync() function fails, outstanding I/O operations
 		// are not guaranteed to have been completed.
-		// sleep(10);
 		return 0;
 	}
 	else

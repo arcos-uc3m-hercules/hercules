@@ -38,6 +38,7 @@ public:
 	map_records(const map_records &r);
 	map_records() = delete;
 	map_records(const uint64_t nsize);
+	~map_records();
 	void set_size(const uint64_t nsize);
 	int64_t get_size();
 	void print_map();
@@ -57,7 +58,7 @@ public:
 
 	// Method retrieving the address associated to a certain record.
 	int32_t get(std::string key, void **add_, uint64_t *size_);
-	int32_t get_simple(std::string key);
+	int32_t get_simple(std::string key, uint64_t *to_copy);
 
 	// Method updating a new record.
 	int32_t update(std::string key, void *add_, uint64_t length);
@@ -75,7 +76,10 @@ public:
 	// Method retrieving the address associated to a certain record.
 	int32_t cleaning();
 	int32_t cleaning_specific(std::string new_key);
-	int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir);
+	int32_t freeAllMemory();
+
+	// int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id);
+	int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *);
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.
 	std::map<std::string, std::pair<void *, uint64_t>>::iterator begin()
@@ -99,7 +103,8 @@ private:
 	// <key(file uri), <data, lenght>>
 	std::map<std::string, std::pair<void *, uint64_t>> buffer;
 	std::map<std::string, int> buffer_checkpoint;
-	std::map<std::string, int> buffer_fd;
+	// std::map<std::string, std::pair<uint64_t, uint64_t>> buffer_checkpoint;
+	std::map<std::string, std::pair<int, __off_t>> buffer_fd;
 	// Mutex restricting access to structure.
 	uint64_t total_size;
 	uint64_t quantity_occupied = 0;

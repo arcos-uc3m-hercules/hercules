@@ -49,6 +49,7 @@ pthread_t *threads;
 
 // global variables usted to finish threads.
 extern int global_finish_threads;
+extern int global_finish_checkpoint;
 extern int global_server_fd_thread;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
@@ -240,13 +241,17 @@ void handle_signal_server(int signal)
 			perror("ERR_HERCULES_CLOSE_PKILL_OPERATION");
 		}
 		slog_info("pkill_operation = %d", pkill_operation);
+		// fprintf(stderr, "pkill_operation = %d\n", pkill_operation);
 		switch (pkill_operation)
 		{
 		case 1: // finish data server processes (shutdown).
 			// "global_finish_threads" is a gloabl variable readed by the
 			// dispatcher and workers threads. 1 indicates those threads
 			// must finish their execution.
-			global_finish_threads = 1;
+			if (args.type == TYPE_METADATA_SERVER || global_finish_checkpoint == 1)
+				global_finish_threads = 1;
+			else
+				global_finish_checkpoint = 1;
 			sprintf(action, "stop");
 
 			// Shutdown or close the socket used by the dispatcher pointed
@@ -258,6 +263,11 @@ void handle_signal_server(int signal)
 			break;
 		default: // suspend the data server.
 			sprintf(action, "down");
+			// This file is readed by the hercules script to know if this server
+			// was correctly shutting down.
+			char tmp_file_path[100];
+			sprintf(tmp_file_path, "/tmp/%c-hercules-%d-%s", args.type, args.id, action);
+			ready(tmp_file_path, "OK");
 			// Data servers processes will still running to be reused on
 			// the future. On shrink process, this server won't be used,
 			// but backend processes will be still running.
@@ -277,11 +287,6 @@ void handle_signal_server(int signal)
 				}
 			}
 		}
-		// This file is readed by the hercules script to know if this server
-		// was correctly shutting down.
-		char tmp_file_path[100];
-		sprintf(tmp_file_path, "/tmp/%c-hercules-%d-%s", args.type, args.id, action);
-		ready(tmp_file_path, "OK");
 	}
 	if (signal == SIGUSR2) // wake up this server.
 	{
@@ -404,6 +409,7 @@ int32_t main(int32_t argc, char **argv)
 	{
 		args.stat_host = argv[3];
 		slog_debug("imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_host, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
+		// fprintf(stderr, "imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "\n", args.imss_uri, args.stat_host, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
 		// bind port number.
 		bind_port = args.data_port;
 		init_number_of_server = atoi(argv[4]);
@@ -412,6 +418,7 @@ int32_t main(int32_t argc, char **argv)
 	{
 		slog_debug("[CLI PARAMS] type = %c port = %" PRId64 " bufsize = %" PRId64 "", args.type, args.stat_port, args.bufsize);
 		// fprintf(stderr, "[CLI PARAMS] type = %c port = %" PRId64 " bufsize = %" PRId64 "\n", args.type, args.stat_port, args.bufsize);
+		// fprintf(stderr, "[CLI PARAMS] type = %c port = %" PRId64 " bufsize = %" PRId64 "\n", args.type, args.stat_port, args.bufsize);
 		// slog_debug("stat-logfile = %s", args.stat_logfile);
 		// bind port number.
 		bind_port = args.stat_port;
@@ -419,6 +426,7 @@ int32_t main(int32_t argc, char **argv)
 
 	// buffer size provided
 	buffer_size = args.bufsize;
+	// fprintf(stderr, "buffer_size=%lu\n", buffer_size);
 
 	/* Initialize the UCX required objects */
 	slog_info("Before init context");
@@ -436,13 +444,14 @@ int32_t main(int32_t argc, char **argv)
 	max_system_ram_allowed = (uint64_t)sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGESIZE) * RAM_STORAGE_USE_PCT;
 
 	// make sure we don't use more memory than available
-	if (max_storage_size >= max_system_ram_allowed || max_storage_size <= 0)
+	if (max_storage_size >= max_system_ram_allowed || max_storage_size < 0)
 	{
 		max_storage_size = max_system_ram_allowed;
 	}
 
 	// init memory pool
 	slog_info("[main] before sts queue create");
+	fprintf(stderr, "max_storage_size=%lu\n", max_storage_size);
 	mem_pool = StsQueue.create();
 	// figure out how many blocks we need and allocate them
 	num_blocks = max_storage_size / (args.block_size * KB);
@@ -660,7 +669,6 @@ int32_t main(int32_t argc, char **argv)
 
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(buffer_size * KB));
-	// std::shared_ptr<map_records> secondary_map(new map_records(buffer_size * KB));
 
 	// copy the reference to a global map.
 	g_map = map;
@@ -673,7 +681,7 @@ int32_t main(int32_t argc, char **argv)
 	// Check if the requested data is available in the current node.
 	if ((data_reserved = memalloc(size, &buffer)) == -1)
 		return -1;
-
+	fprintf(stderr, "data_reserved=%lu\n", data_reserved);
 	buffer_address = buffer;
 
 	// Metadata bytes written into the buffer.
@@ -721,7 +729,6 @@ int32_t main(int32_t argc, char **argv)
 		// Add port number to thread arguments.
 		arguments[i].ucp_context = ucp_context;
 		arguments[i].blocksize = block_size;
-		// fprintf(stderr, "block size = %lu\n", arguments[i].blocksize);
 		arguments[i].storage_size = max_storage_size;
 		arguments[i].port = bind_port;
 		arguments[i].tmp_file_path = tmp_file_path;
@@ -887,7 +894,8 @@ int32_t main(int32_t argc, char **argv)
 		slog_debug("[main] Request - %s", key_plus_size);
 		if (send_req(ucp_worker, client_ep, req_addr, req_addr_len, key_plus_size) == 0)
 		{
-			perror("HERCULES_ERR_RLSIMSS_SENDADDR");
+			perror("HERCULES_ERR_SEND_REQ_SET_STR");
+			slog_fatal("HERCULES_ERR_SEND_REQ_SET_STR");
 			return -1;
 		}
 
@@ -950,6 +958,7 @@ int32_t main(int32_t argc, char **argv)
 			perror("HERCULES_ERR_SERVER_THREAD_JOIN");
 			return -1;
 		}
+		fprintf(stderr, "Server %d, ending thread %d/%d\n", args.id, i+1, total_threads);
 		// fprintf(stderr,"Ending %c server %d\n", args.type, args.id);
 		unlink(tmp_file_path);
 	}
@@ -961,19 +970,21 @@ int32_t main(int32_t argc, char **argv)
 		// if (metadata_write(metadata_file, buffer, map.get(), arguments, buffer_segment, bytes_written) == -1)
 		// 	return -1;
 
+		// Send a message to all data servers to shutdown.
+		
+
 		// Freeing all resources of the tree structure.
 		g_node_traverse(tree_root, G_PRE_ORDER, G_TRAVERSE_ALL, -1, gnodetraverse, NULL);
 
 		if (pthread_mutex_destroy(&tree_mut) != 0)
 		{
-			perror("ERRIMSS_TREEMUT_DESTROY");
+			perror("HERCULES_ERR_TREE_MUT_DESTROY");
 			pthread_exit(NULL);
 		}
 		// fprintf(stderr, "Ending metadata server.\n");
 	}
 	else
 	{
-
 		// Destroy the shared memory segment.
 		freeSM(shm_data_id);
 		// Remove the named semaphore.
@@ -985,14 +996,15 @@ int32_t main(int32_t argc, char **argv)
 	// Close publisher socket.
 	// ep_close(ucp_worker, pub_ep, UCP_EP_CLOSE_MODE_FORCE);
 	// ep_close(ucp_worker, client_ep, UCP_EP_CLOSE_MODE_FORCE);
-	ucp_cleanup(ucp_context);
+	// ucp_cleanup(ucp_context);
 
 	sprintf(tmp_file_path, "/tmp/%c-hercules-%d-stop", args.type, args.id);
 	ready(tmp_file_path, "OK");
 
-	// Free the memory buffer.
-	free(buffer);
 	// Free the publisher release address.
 	fprintf(stderr, "Ending %c server\n", args.type);
+
+	// Free the memory buffer.
+	free(buffer);
 	return 0;
 }

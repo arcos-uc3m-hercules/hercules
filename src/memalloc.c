@@ -22,7 +22,7 @@ int64_t memalloc (int64_t req_mem, char ** reference)
 	
 	if (pipe(pp) == -1)
 	{
-		perror("ERR_MEMALLOC_PIPE");
+		perror("HERCULES_ERR_MEMALLOC_PIPE");
 		return -1;
 	}
 
@@ -53,13 +53,13 @@ int64_t memalloc (int64_t req_mem, char ** reference)
 		// Execute the AWK command retrieving the remaining free memory space.
 		if (execl("/usr/bin/awk", "awk", "/MemFree/ { printf $2 }", "/proc/meminfo", NULL) == -1)
 		{
-			perror("ERR_MEMALLOC_EXECL");
+			perror("HERCULES_ERR_MEMALLOC_EXECL");
 			return -1;
 		}
 	}
 	else
 	{
-		perror("ERR_MEMALLOC_FORK");
+		perror("HERCULES_ERR_MEMALLOC_FORK");
 		return -1;
 	}
 

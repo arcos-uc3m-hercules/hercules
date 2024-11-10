@@ -618,8 +618,7 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 {
 	int32_t length = 0;
 	int eof_found = 0;
-	const char *rpath = path; // this pointer should not be free. //(char *)calloc(MAX_PATH, sizeof(char));
-	// get_iuri(path, rpath);
+	const char *rpath = path; // this pointer should not be free.
 
 	size_t curr_blk, num_of_blk, end_blk, start_offset, end_offset, block_offset, i_blk;
 	size_t first = 0;
@@ -669,8 +668,6 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 	{
 
 		slog_warn("[imss_read] returning EOF");
-		// free(rpath);
-		// buf = '\0';
 		return 0;
 	}
 
@@ -2117,7 +2114,7 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 	print_file_type(ds_stat, path);
 
 	// Write initial block
-	void *buff = (void *)malloc(IMSS_DATA_BSIZE); //[IMSS_DATA_BSIZE];
+	void *buff = (void *)malloc(IMSS_DATA_BSIZE);
 	memcpy(buff, &ds_stat, sizeof(struct stat));
 	pthread_mutex_lock(&lock); // lock.
 	// stores block 0.
@@ -2136,7 +2133,6 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 
 	pthread_mutex_lock(&lock_file); // lock.
 	map_put(map, rpath, *fh, ds_stat, buff);
-	// slog_debug("[imss_create] map_put(map, rpath:%s, fh:%ld, ds_stat, buff:%s)", rpath, *fh, buff);
 	slog_debug("[imss_create] map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath, *fh, ds_stat.st_blksize);
 	if (PREFETCH != 0)
 	{

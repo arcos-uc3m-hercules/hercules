@@ -3922,7 +3922,7 @@ int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset)
 		return -1;
 	}
 
-	return 0;
+	return bytes;
 }
 
 int32_t Make_directory(const char *dirname)

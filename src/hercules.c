@@ -721,6 +721,13 @@ int getConfiguration(struct arguments *args)
 		}
 	}
 
+	if (getenv("HERCULES_STORAGE_SIZE") != NULL)
+		args->storage_size = atol(getenv("HERCULES_STORAGE_SIZE"));
+	else if (cfg_get(cfg, "STORAGE_SIZE"))
+		args->storage_size = atol(cfg_get(cfg, "STORAGE_SIZE"));
+	else
+		args->storage_size = 1;
+
 	if (getenv("HERCULES_CHECKPOINT_PATH") != NULL)
 		strcpy(args->hercules_checkpoint_path, getenv("HERCULES_CHECKPOINT_PATH"));
 	else if (cfg_get(cfg, "HERCULES_CHECKPOINT_PATH"))
@@ -734,7 +741,6 @@ int getConfiguration(struct arguments *args)
 		strcpy(args->checkpoint_paths_list, cfg_get(cfg, "CHECKPOINT_PATHS_LIST"));
 	else
 		args->checkpoint_paths_list[0] = '\0';
-	
 
 	if (getenv("IGNORE_PATHS_LIST") != NULL)
 		strcpy(args->ignore_paths_list, getenv("IGNORE_PATHS_LIST"));
@@ -744,6 +750,15 @@ int getConfiguration(struct arguments *args)
 		args->ignore_paths_list[0] = '\0';
 
 	cfg_free(cfg);
+
+	// char hostname_[512];
+	// int ret = gethostname(&hostname_[0], 512);
+	ret = gethostname(&args->data_hostname[0], PATH_MAX);
+	if (ret == -1)
+	{
+		perror("HERCULES_ERR_GETHOSTNAME");
+		args->data_hostname[0] = '\0';
+	}
 
 	return 1;
 }
