@@ -24,9 +24,11 @@ StopServers() {
     for node in "${hosts[@]}"
     do
         # Set the action to be doing by the servers when they received the pkill signal.
-        ( ssh $node  "echo $OPERATION > /tmp/hercules_pkill_operation" )
+        ( ssh $node "echo $OPERATION > /tmp/hercules_pkill_operation" )
         # Kill threads and finish the server.
         ( ssh $node "pkill -SIGUSR1 hercules_server" )
+        # To delete the file.
+        ( ssh $node "rm /tmp/hercules_pkill_operation" )
     done
     # set +x
 }
@@ -70,7 +72,6 @@ WaitForServers() {
     ATTEMPS=1000
     for node in "${hosts[@]}"
     do
-        # FILE="/tmp/$SERVER_TYPE-hercules-$((server_index_arr[$SERVER_ID]-1))-$ACTION"
         SERVER_NUMBER=$((server_index_arr[$SERVER_ID]-1))
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "# Hercules: $ACTION $SERVER_NAME server $SERVER_NUMBER on $node"

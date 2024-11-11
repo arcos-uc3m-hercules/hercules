@@ -1077,8 +1077,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				}
 				else // Data in shared memory.
 				{
-					//  Tell the client to update the shared memory.
-					char answer[RESPONSE_SIZE]; //  = "NEW\0";
+					//  Tell the client this is a new block to be copy in the shared memory with an offset "global_offset".
+					char answer[RESPONSE_SIZE];
 					sprintf(answer, "NEW %ld", global_offset);
 					slog_info("Answer=%s", answer);
 					ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
@@ -1094,23 +1094,22 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					buffer = (void *)calloc(length_number, sizeof(char));
 					if (buffer == NULL)
 					{
-						perror("ERR_HERCULES_MEMORY_ALLOCATION_SHM");
-						slog_error("ERR_HERCULES_MEMORY_ALLOCATION_SHM");
+						perror("HERCULES_ERR_MEMORY_ALLOCATION_SHM");
+						slog_error("HERCULES_ERR_MEMORY_ALLOCATION_SHM");
 						return -1;
 					}
 
-					// When using shared memory, buffer will store the offset.
+					// When using shared memory, "buffer" will store the offset and the block size.
 					ret = snprintf((char *)buffer, length_number, "%lu %d", global_offset, block_size_recv);
 					if (ret < 0)
 					{
-						perror("ERR_HERCULES_ENCODING");
-						slog_error("ERR_HERCULES_ENCODING");
+						perror("HERCULES_ERR_ENCODING");
+						slog_error("HERCULES_ERR_ENCODING");
 						return -1;
 					}
 
 					slog_info("buffer=%s, length_number=%d, global_offset=%lu", buffer, length_number, global_offset);
 
-					// size_asigned_to_block = block_size_recv;
 					size_asigned_to_block = length_number;
 					global_offset += block_size_recv;
 				}
@@ -1311,6 +1310,7 @@ void *checkpoint(void *th_argv)
 	// fprintf(stderr, "Checkpoint path = %s, len=%lu\n", arguments->args.hercules_checkpoint_path, strlen(arguments->args.hercules_checkpoint_path));
 	const char *checkpoint_dir = arguments->args.hercules_checkpoint_path;
 	const int server_id = arguments->args.id;
+	const char *POLICY = arguments->args.policy;
 
 	if (strlen(checkpoint_dir) == 0)
 	{
@@ -1330,7 +1330,7 @@ void *checkpoint(void *th_argv)
 		sleep(CKECKPOINT_PERIOD);
 		// fprintf(stderr, "Running Checkpointing, global_finish_checkpoint=%d\n", global_finish_checkpoint);
 		pthread_mutex_lock(&mutex_garbage);
-		TIMING_NO_RETURN(map->memory2disk(BLOCK_SIZE, checkpoint_dir, global_finish_checkpoint, arguments->args.id, arguments->args.data_hostname),"Memory2Disk");
+		TIMING_NO_RETURN(map->memory2disk(BLOCK_SIZE, checkpoint_dir, global_finish_checkpoint, arguments->args.id, arguments->args.data_hostname, arguments->args), "Memory2Disk");
 		// To stop this thread we will wait for "hercules stop".
 		if (global_finish_checkpoint == 1)
 		{
@@ -1344,7 +1344,6 @@ void *checkpoint(void *th_argv)
 
 	t = clock() - t;
 	time_taken = ((double)t) / (CLOCKS_PER_SEC);
-
 
 	pthread_exit(NULL);
 }

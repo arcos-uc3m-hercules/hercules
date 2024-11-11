@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include "hercules.h"
 
 // Structure storing all information related to a certain IMSS.
 typedef struct
@@ -79,7 +80,7 @@ public:
 	int32_t freeAllMemory();
 
 	// int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id);
-	int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *);
+	int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.
 	std::map<std::string, std::pair<void *, uint64_t>>::iterator begin()

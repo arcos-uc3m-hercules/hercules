@@ -42,7 +42,6 @@ struct arguments
     char data_hostfile[PATH_MAX]; /* deploy hostfile arg to '-d' */
     char stat_logfile[PATH_MAX];    /* metadata logfile arg to '-l' */
     char imss_uri[32];        /* IMSS URI arg to '-i' */
-    char *stat_host;                /* Metadata server hostname arg to '-H' */
     char hercules_path[PATH_MAX];   /* hercules path */
     char policy[PATH_MAX];
     char meta_hostfile[PATH_MAX];
@@ -52,6 +51,8 @@ struct arguments
     char checkpoint_paths_list[PATH_MAX];
     char ignore_paths_list[PATH_MAX];
     char data_hostname[PATH_MAX];
+    char *stat_host;                /* Metadata server hostname arg to '-H' */
+    void *pool_memory;
     uint64_t data_port;                  /* port arg to '-p' */
     uint64_t storage_size;          /* total storage size in GB to -s */
     uint64_t thread_pool;           /* thread pool size '-t' */

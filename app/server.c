@@ -625,14 +625,15 @@ int32_t main(int32_t argc, char **argv)
 				void *pool_memory = createSM(shm_data_id);
 				if (pool_memory == NULL)
 				{ // error creating the shared memory region.
-					perror("ERR_HERCULES_CREATE_SM");
-					// Do not stop the process.
+					perror("HERCULES_ERR_CREATE_SM");
+					slog_error("HERCULES_ERR_CREATE_SM");
+					ready(tmp_file_path, "ERROR");
+					exit(0);
 				}
 				else
 				{
-					// Shared memory has been created, we unlink the segment becuase
-					// this process won't use the shared memory, it is used by the front-end.
-					unlinkSM(pool_memory);
+					// Shared memory has been created.
+					args.pool_memory = pool_memory;
 					// Becasue the shared memory was successfully created, we
 					// initializate a semaphore to sincronize block 0.
 					sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1);
@@ -641,8 +642,8 @@ int32_t main(int32_t argc, char **argv)
 						perror("HERCULES_ERR_SHM_SEM_OPEN");
 						exit(-1);
 					}
-					// Close the semaphore. The semaphore will remain and can be used by
-					// the front-end until unlink is called.
+					// Close the semaphore. The semaphore will remain and can
+					// be used by the front-end until unlink is called.
 					sem_close(sem_shared_memory);
 				}
 			}
@@ -958,7 +959,7 @@ int32_t main(int32_t argc, char **argv)
 			perror("HERCULES_ERR_SERVER_THREAD_JOIN");
 			return -1;
 		}
-		fprintf(stderr, "Server %d, ending thread %d/%d\n", args.id, i+1, total_threads);
+		fprintf(stderr, "Server %d, ending thread %d/%d\n", args.id, i + 1, total_threads);
 		// fprintf(stderr,"Ending %c server %d\n", args.type, args.id);
 		unlink(tmp_file_path);
 	}
@@ -971,7 +972,6 @@ int32_t main(int32_t argc, char **argv)
 		// 	return -1;
 
 		// Send a message to all data servers to shutdown.
-		
 
 		// Freeing all resources of the tree structure.
 		g_node_traverse(tree_root, G_PRE_ORDER, G_TRAVERSE_ALL, -1, gnodetraverse, NULL);

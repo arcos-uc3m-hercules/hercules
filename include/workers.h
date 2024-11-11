@@ -1,11 +1,11 @@
 #ifndef WORKER_H
 #define WORKER_H
 
-#include "imss.h"
+// #include "imss.h"
 #include "comms.h"
 #include "records.hpp"
 #include "shared_memory.h"
-#include "hercules.h"
+// #include "hercules.h"
 #include <memory>
 
 #define READ_OP 0
@@ -40,7 +40,6 @@ typedef struct
 {
 	// Pointer to the corresponding type storing key-address couples.
 	std::shared_ptr<map_records> map = NULL;
-	// std::shared_ptr<map_records> secondary_map = NULL;
 	// Pointer to the corresponding buffer region assigned to a thread.
 	char *pt;
 	// Integer specifying the port that a certain thread will listen to.

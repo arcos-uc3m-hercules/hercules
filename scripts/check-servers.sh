@@ -8,7 +8,7 @@ i=1
 
 FILE="/tmp/$SERVER_TYPE-hercules-$SERVER_NUMBER-$ACTION"
 ## Checks if the file exists.
-until [ -f $FILE ]; do
+until [ -f "$FILE" ]; do
     # echo "Waiting for $FILE, attemp $i"
     i=$(($i + 1))
     ## Waits "attemps" times, then an error is return.
@@ -23,8 +23,9 @@ until [ -f $FILE ]; do
 done
 
 ## Checks if the server was deploy correctly.
-STATUS=$(cat $FILE | grep "STATUS" | awk '{print $3}')
+STATUS=$(cat "$FILE" | grep "STATUS" | awk '{print $3}')
 echo "STATUS=$STATUS"
+rm "$FILE"
 if [ "$STATUS" != "OK" ]; then
     # echo "[X] Error deploying server $SERVER_NUMBER."
     exit 1

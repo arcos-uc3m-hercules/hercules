@@ -591,7 +591,7 @@ int32_t map_records::freeAllMemory()
 }
 
 // Used in str_worker threads.
-int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id, char *data_hostname)
+int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id, char *data_hostname, struct arguments args)
 {
 	clock_t t;
 	double parcial_time_taken = 0.0, total_time_taken = 0.0;
@@ -608,8 +608,17 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 	int32_t file_desc = 0;
 	std::size_t found = 0;
 	size_t iteration = 0;
-	int to_free = 0;
+	int to_free = 0, is_shared_memory = 0;
 	__off_t file_size = 0;
+
+	char *POLICY = args.policy;
+
+	fprintf(stderr, "Memory to disk POLICY: %s\n", POLICY);
+
+	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
+	{
+		is_shared_memory = 1;
+	}
 
 	if (!finish)
 	{
@@ -644,7 +653,6 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 				fprintf(stderr, "Block number is missing in %s\n", key.c_str());
 				continue;
 			}
-			// block_number = std::stoi(block);
 			block_number = stoi(block, 0, 10); //  string to number.
 			pos -= 1;						   // -1 to skip '$' on the data uri.
 			data_uri = key.substr(0, pos);	   // substract the data uri from the key.
@@ -674,7 +682,18 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 					fprintf(stderr, "key %s not found for checkpointing\n", key.c_str());
 					continue;
 				}
-				stats = (struct stat *)address_;
+				if (!is_shared_memory)
+				{
+					stats = (struct stat *)address_;
+				}
+				else
+				{
+					size_t memory_offset = 0;
+					uint32_t stored_block_size = 0;
+					sscanf((const char *)address_, "%lu %d", &memory_offset, &stored_block_size);
+					fprintf(stderr, "memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
+					stats = (struct stat *)((char *)args.pool_memory + memory_offset);
+				}
 				if (S_ISDIR(stats->st_mode)) // directory case.
 				{
 					fprintf(stderr, "%s is a directory\n", key.c_str());
@@ -714,6 +733,21 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 			{
 				fprintf(stderr, "key %s not found for checkpointing\n", key.c_str());
 				continue;
+			}
+
+			void *data_buffer = NULL;
+			if (!is_shared_memory)
+			{
+				data_buffer = address_;
+			}
+			else
+			{
+				size_t memory_offset = 0;
+				uint32_t stored_block_size = 0;
+				sscanf((const char *)address_, "%lu %d", &memory_offset, &stored_block_size);
+				// fprintf(stderr, "memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
+				data_buffer = (char *)args.pool_memory + memory_offset;
+				block_size_rtvd = stored_block_size;
 			}
 
 			// Checks if the file was opened.
@@ -757,7 +791,20 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 						// network fail.
 						file_size = 0;
 					}
-					stats = (struct stat *)address_block_0;
+
+					if (!is_shared_memory)
+					{
+						stats = (struct stat *)address_block_0;
+					}
+					else
+					{
+						size_t memory_offset = 0;
+						uint32_t stored_block_size = 0;
+						sscanf((const char *)address_block_0, "%lu %d", &memory_offset, &stored_block_size);
+						// fprintf(stderr, "memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
+						stats = (struct stat *)((char *)args.pool_memory + memory_offset);
+					}
+
 					if (stats == NULL)
 					{
 						perror("HERCULES_ERR_BLOCK_0_GET_ERROR");
@@ -796,8 +843,10 @@ int32_t map_records::memory2disk(uint64_t block_size, const char *checkpoint_dir
 
 			// fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, stats->st_size=%lu\n", key.c_str(), block_size_rtvd, offset, stats->st_size);
 			slog_debug("key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, file_size=%lu", key.c_str(), block_size_rtvd, offset, file_size);
+			fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, file_size=%lu\n", key.c_str(), block_size_rtvd, offset, file_size);
+
 			t = clock();
-			block_size_rtvd = Write_2_disk(fd, address_, block_size_rtvd, offset);
+			block_size_rtvd = Write_2_disk(fd, data_buffer, block_size_rtvd, offset);
 			t = clock() - t;
 			parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
 			total_time_taken += parcial_time_taken;
