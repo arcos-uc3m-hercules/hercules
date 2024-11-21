@@ -80,7 +80,8 @@ public:
 	int32_t freeAllMemory();
 
 	// int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id);
-	int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
+	int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
+	int32_t Snapshot(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.
 	std::map<std::string, std::pair<void *, uint64_t>>::iterator begin()
@@ -103,8 +104,8 @@ private:
 	// Map structure tracking stored records (by default sorts keys with '<' op).
 	// <key(file uri), <data, lenght>>
 	std::map<std::string, std::pair<void *, uint64_t>> buffer;
-	std::map<std::string, int> buffer_checkpoint;
-	// std::map<std::string, std::pair<uint64_t, uint64_t>> buffer_checkpoint;
+	std::map<std::string, int> buffer_snapshot;
+	// std::map<std::string, std::pair<uint64_t, uint64_t>> buffer_snapshot;
 	std::map<std::string, std::pair<int, __off_t>> buffer_fd;
 	// Mutex restricting access to structure.
 	uint64_t total_size;

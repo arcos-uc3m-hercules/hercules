@@ -48,7 +48,8 @@ struct arguments
     char debug_level[PATH_MAX];
     char mount_point[PATH_MAX];
     char hercules_checkpoint_path[PATH_MAX];
-    char checkpoint_paths_list[PATH_MAX];
+    char hercules_snapshot_path[PATH_MAX];
+    char snapshot_paths_list[PATH_MAX];
     char ignore_paths_list[PATH_MAX];
     char data_hostname[PATH_MAX];
     char *stat_host;                /* Metadata server hostname arg to '-H' */

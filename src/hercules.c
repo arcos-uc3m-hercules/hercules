@@ -735,12 +735,19 @@ int getConfiguration(struct arguments *args)
 	else
 		args->hercules_checkpoint_path[0] = '\0';
 
-	if (getenv("CHECKPOINT_PATHS_LIST") != NULL)
-		strcpy(args->checkpoint_paths_list, getenv("CHECKPOINT_PATHS_LIST"));
-	else if (cfg_get(cfg, "CHECKPOINT_PATHS_LIST"))
-		strcpy(args->checkpoint_paths_list, cfg_get(cfg, "CHECKPOINT_PATHS_LIST"));
+	if (getenv("HERCULES_SNAPSHOT_PATH") != NULL)
+		strcpy(args->hercules_snapshot_path, getenv("HERCULES_SNAPSHOT_PATH"));
+	else if (cfg_get(cfg, "HERCULES_SNAPSHOT_PATH"))
+		strcpy(args->hercules_snapshot_path, cfg_get(cfg, "HERCULES_SNAPSHOT_PATH"));
 	else
-		args->checkpoint_paths_list[0] = '\0';
+		args->hercules_snapshot_path[0] = '\0';
+
+	if (getenv("HERCULES_SNAPSHOT_PATHS_LIST") != NULL)
+		strcpy(args->snapshot_paths_list, getenv("HERCULES_SNAPSHOT_PATHS_LIST"));
+	else if (cfg_get(cfg, "SNAPSHOT_PATHS_LIST"))
+		strcpy(args->snapshot_paths_list, cfg_get(cfg, "SNAPSHOT_PATHS_LIST"));
+	else
+		args->snapshot_paths_list[0] = '\0';
 
 	if (getenv("IGNORE_PATHS_LIST") != NULL)
 		strcpy(args->ignore_paths_list, getenv("IGNORE_PATHS_LIST"));

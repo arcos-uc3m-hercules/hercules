@@ -139,7 +139,7 @@ if [[ $STATUS != "stop" && $STATUS != "start" && $STATUS != "remove" && $STATUS 
 fi
 
 WAIT_SERVERS=1
-VERBOSE=0
+VERBOSE=1
 
 ## Check if user pass arguments.
 while getopts :m:d:o:c:s:f:k:w:V: flag

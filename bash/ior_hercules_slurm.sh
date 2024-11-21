@@ -3,8 +3,8 @@
 #SBATCH --time=01:00:00               # Time limit hrs:min:sec
 #SBATCH --output=logs/hercules/%j.log   # Standard output and error log
 #SBATCH --mem=0
-##SBATCH --exclude=broadwell-008,broadwell-010
-##SBATCH --nodelist=broadwell-[012-027]
+#SBATCH --exclude=broadwell-008,broadwell-010
+#SBATCH --nodelist=broadwell-[012-027]
 ###SBATCH --exclusive=user
 ##SBATCH --overcommit
 ##SBATCH --oversubscribe
@@ -63,8 +63,10 @@ set -x
 #mpiexec -n=1 ucx_info -T
 set +x
 
+echo "temporal dir $TMPDIR"
 
-echo "Starting Hercules"
+
+echo "Starting Hercules with $POLICY policy"
 start_=$(date +%s.%N)
 if [ -z "$CONFIG_PATH" ]; then
    echo "No configuration file"

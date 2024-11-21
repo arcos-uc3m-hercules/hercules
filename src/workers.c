@@ -60,6 +60,7 @@ size_t *local_addr_len;
 
 int global_finish_threads = 0;
 int global_finish_checkpoint = 0;
+int global_finish_snapshot = 0;
 int global_server_fd_thread = -1;
 size_t global_offset = 0;
 
@@ -1140,7 +1141,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				// The following buffer is used for checkpoints.
 				// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding checkpoint thread copy the data to disk.
 				// fprintf(stderr, "Inserting key = %s\n", key.c_str());
-				// buffer_checkpoint.insert({key, 1});
 				insert_successful = map->put_simple(key, 1);
 				// Include the new record in the tracking structure.
 				if (insert_successful != 0)
@@ -1292,7 +1292,7 @@ void *garbage_collector(void *th_argv)
 }
 
 // Thread method to copy datasets from Hercules to Disk.
-void *checkpoint(void *th_argv)
+void *Checkpoint(void *th_argv)
 {
 	slog_debug("Init checkpoint writter");
 
@@ -1320,20 +1320,78 @@ void *checkpoint(void *th_argv)
 		pthread_exit(NULL);
 	}
 
-	if (!arguments->args.id)
-	{ // only one server creates the checkpoint directory.
-		Make_directory(checkpoint_dir);
-	}
+	// if (!arguments->args.id)
+	// { // only one server creates the checkpoint directory.
+	// 	Make_directory(checkpoint_dir);
+	// }
 
 	for (;;)
 	{
 		sleep(CKECKPOINT_PERIOD);
 		// fprintf(stderr, "Running Checkpointing, global_finish_checkpoint=%d\n", global_finish_checkpoint);
 		pthread_mutex_lock(&mutex_garbage);
-		TIMING_NO_RETURN(map->memory2disk(BLOCK_SIZE, checkpoint_dir, global_finish_checkpoint, arguments->args.id, arguments->args.data_hostname, arguments->args), "Memory2Disk");
+		TIMING_NO_RETURN(map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_checkpoint, arguments->args.id, arguments->args.data_hostname, arguments->args), "Checkpoint");
 		// To stop this thread we will wait for "hercules stop".
 		if (global_finish_checkpoint == 1)
 		{
+			// Call a barrier to stop all servers.
+			sleep(30);
+			global_finish_threads = 1;
+			pthread_mutex_unlock(&mutex_garbage);
+			fprintf(stderr, "Ending checkponting thread.\n");
+			break;
+		}
+		pthread_mutex_unlock(&mutex_garbage);
+	}
+
+	t = clock() - t;
+	time_taken = ((double)t) / (CLOCKS_PER_SEC);
+
+	pthread_exit(NULL);
+}
+
+// Thread method to copy datasets from Hercules to Disk.
+void *Snapshot(void *th_argv)
+{
+	slog_debug("Init Snapshot");
+
+	clock_t t;
+	double time_taken;
+	t = clock();
+
+	p_argv *arguments = (p_argv *)th_argv;
+	BLOCK_SIZE = arguments->blocksize * 1024;
+	sleep(1);
+	// Obtain the current map class element from the set of arguments.
+	std::shared_ptr<map_records> map = arguments->map;
+
+	const char *snapshot_dir = arguments->args.hercules_snapshot_path;
+	const int server_id = arguments->args.id;
+	const char *POLICY = arguments->args.policy;
+
+	if (strlen(snapshot_dir) == 0)
+	{
+		printf("Snapshot path has not been provided.\tHERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/\n");
+		fflush(stdout);
+		global_finish_snapshot = 1;
+		pthread_exit(NULL);
+	}
+
+	// if (!arguments->args.id)
+	// { // only one server creates the snapshot directory.
+	// 	Make_directory(snapshot_dir);
+	// }
+
+	for (;;)
+	{
+		sleep(CKECKPOINT_PERIOD);
+		pthread_mutex_lock(&mutex_garbage);
+		TIMING_NO_RETURN(map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot");
+		// To stop this thread we will wait for "hercules stop".
+		if (global_finish_snapshot == 1)
+		{
+			// Call a barrier to stop all servers.
+			sleep(30);
 			global_finish_threads = 1;
 			pthread_mutex_unlock(&mutex_garbage);
 			fprintf(stderr, "Ending checkponting thread.\n");

@@ -570,7 +570,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_live(" -- REPL_TYPE: %d", REPL_TYPE);
 	slog_live(" -- POLICY: %s", POLICY);
 	slog_live(" -- RELEASE: %d", release);
-	fprintf(stderr, " -- POLICY: %s\n", POLICY);
+	// fprintf(stderr, " -- POLICY: %s\n", POLICY);
 
 	// Metadata server
 	// if (release == 1)

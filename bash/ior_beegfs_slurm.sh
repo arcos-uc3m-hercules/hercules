@@ -47,7 +47,8 @@ COMMAND="$COMMAND -C -e"
 fi
 
 ##  Add the output file path.
-COMMAND="$COMMAND -o /beegfs/home/javier.garciablas/hercules/bash/ior_output/data.txt"
+#COMMAND="$COMMAND -o /beegfs/home/javier.garciablas/hercules/bash/ior_output/data.txt"
+COMMAND="$COMMAND -o /tmp/data.txt"
 
 set -x
 
@@ -55,4 +56,5 @@ mpiexec -np $NUMBER_OF_PROCESS -ppn $PROCESS_PER_NODE  $COMMAND
 
 set +x
 
-rm ./ior_output/*
+#rm ./ior_output/*
+rm /tmp/data.txt

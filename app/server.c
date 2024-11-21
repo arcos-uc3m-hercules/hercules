@@ -451,7 +451,7 @@ int32_t main(int32_t argc, char **argv)
 
 	// init memory pool
 	slog_info("[main] before sts queue create");
-	fprintf(stderr, "max_storage_size=%lu\n", max_storage_size);
+	// fprintf(stderr, "max_storage_size=%lu\n", max_storage_size);
 	mem_pool = StsQueue.create();
 	// figure out how many blocks we need and allocate them
 	num_blocks = max_storage_size / (args.block_size * KB);
@@ -682,7 +682,7 @@ int32_t main(int32_t argc, char **argv)
 	// Check if the requested data is available in the current node.
 	if ((data_reserved = memalloc(size, &buffer)) == -1)
 		return -1;
-	fprintf(stderr, "data_reserved=%lu\n", data_reserved);
+	// fprintf(stderr, "data_reserved=%lu\n", data_reserved);
 	buffer_address = buffer;
 
 	// Metadata bytes written into the buffer.
@@ -759,7 +759,7 @@ int32_t main(int32_t argc, char **argv)
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
 			// if (pthread_create(&threads[i], NULL, checkpoint, (void *)g_map.get()) == -1)
-			if (pthread_create(&threads[i], NULL, checkpoint, (void *)&arguments[i]) == -1)
+			if (pthread_create(&threads[i], NULL, Checkpoint, (void *)&arguments[i]) == -1)
 			{
 				// Notify thread error deployment.
 				ready(tmp_file_path, "ERROR");

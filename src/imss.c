@@ -733,7 +733,8 @@ int32_t open_imss(char *imss_uri)
 	{
 		// Open shared memory segment.
 		shared_memory_key = getKeySM();
-		TIMING(shared_memory = getContentSM(shared_memory_key, SHM_SIZE), "Getting content from memory", SharedMemory *);
+		// TIMING(shared_memory = getContentSM(shared_memory_key, SHM_SIZE), "Getting content from memory", SharedMemory *);
+		shared_memory = getContentSM(shared_memory_key, SHM_SIZE);
 		sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1); // Create or open named semaphore.
 		if (sem_shared_memory == SEM_FAILED)
 		{
@@ -3880,7 +3881,7 @@ int32_t Open_file(const char *checkpoint_dir, const char *filename)
 	char disk_path[PATH_MAX];
 	int fd = -1;
 	sprintf(disk_path, "%s/%s", checkpoint_dir, filename);
-	fprintf(stderr, "disk path = %s\n", disk_path);
+	// fprintf(stderr, "disk path = %s\n", disk_path);
 	fd = open(disk_path, O_CREAT | O_WRONLY, 0600);
 	if (fd < 0)
 	{
