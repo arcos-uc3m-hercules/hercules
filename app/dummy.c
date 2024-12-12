@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include "hercules.h"
+#include "hercules.hpp"
 
 #define NUM_DATASETS	1
 

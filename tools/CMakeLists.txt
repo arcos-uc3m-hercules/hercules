@@ -1,5 +1,5 @@
 # set_source_files_properties(./mount.c ../src/hercules.c ../src/slog.c PROPERTIES LANGUAGE CXX)
-set_source_files_properties(../src/hercules.c ../src/slog.c PROPERTIES LANGUAGE CXX)
+set_source_files_properties(../src/hercules.cpp ../src/slog.c PROPERTIES LANGUAGE CXX)
 
 
 # add_executable(mount.hercules

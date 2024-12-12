@@ -2,18 +2,18 @@
 #define MAP_RECORDS
 
 #include <map>
+#include <unordered_map>
 #include <mutex>
 #include <string>
 #include <utility>
 #include <iostream>
 #include <cassert>
-#include <string.h>
 #include <stdio.h>
 #include <vector>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
-#include "hercules.h"
+#include "hercules.hpp"
 
 // Structure storing all information related to a certain IMSS.
 typedef struct
@@ -105,6 +105,7 @@ private:
 	// <key(file uri), <data, lenght>>
 	std::map<std::string, std::pair<void *, uint64_t>> buffer;
 	std::map<std::string, int> buffer_snapshot;
+	std::unordered_map<std::string, int> buffer_broadcast;
 	// std::map<std::string, std::pair<uint64_t, uint64_t>> buffer_snapshot;
 	std::map<std::string, std::pair<int, __off_t>> buffer_fd;
 	// Mutex restricting access to structure.

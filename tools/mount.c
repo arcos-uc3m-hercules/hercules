@@ -24,7 +24,7 @@
 #include<sys/wait.h>
 
 #include "imss.h"
-#include "hercules.h"
+#include "hercules.hpp"
 
 #define MAX_PATH 256
 

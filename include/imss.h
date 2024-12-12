@@ -99,9 +99,9 @@ static uint64_t BLOCK_SIZE;
 		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
 	})
 #else
-#define TIMING_NO_RETURN(function_to_call, print_comment)      \
-	({                                                         \
-		function_to_call;                                      \
+#define TIMING_NO_RETURN(function_to_call, print_comment) \
+	({                                                    \
+		function_to_call;                                 \
 	})
 #endif
 
@@ -119,9 +119,9 @@ static uint64_t BLOCK_SIZE;
 		ret;                                                   \
 	})
 #else
-#define NETWORK_TIMING(function_to_call, print_comment, type)      \
-	({                                                         \
-		function_to_call;                                      \
+#define NETWORK_TIMING(function_to_call, print_comment, type) \
+	({                                                        \
+		function_to_call;                                     \
 	})
 #endif
 
@@ -539,6 +539,8 @@ RETURNS:	 0 - The requested block was successfully stored.
 	int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
 
 	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server);
+
+	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, off_t offset);
 
 	/* Method retrieving the location of a specific data object.
 

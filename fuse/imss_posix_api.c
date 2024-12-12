@@ -11,7 +11,7 @@ gcc -Wall imss.c `pkg-config fuse --cflags --libs` -o imss
 #define FUSE_USE_VERSION 26
 #include "map.hpp"
 #include "mapprefetch.hpp"
-#include "hercules.h"
+#include "hercules.hpp"
 #include "imss_posix_api.h"
 #include <pthread.h>
 #include <stdio.h>

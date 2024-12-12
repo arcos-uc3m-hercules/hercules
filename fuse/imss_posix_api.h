@@ -1,7 +1,7 @@
 #define FUSE_USE_VERSION 26
 #include "map.hpp"
 #include "imss.h"
-#include "hercules.h"
+#include "hercules.hpp"
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>

@@ -1,12 +1,12 @@
-set_source_files_properties( ../src/imss.c ../src/hercules.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX)
+set_source_files_properties( ../src/imss.c ../src/hercules.cpp ../src/shared_memory.c PROPERTIES LANGUAGE CXX)
 
 add_executable(imssfs
     map.cpp
     imssfs.c
     imss_fuse_api.c
     mapprefetch.cpp
-	../src/hercules.c
-	../src/imss.c
+	../src/hercules.cpp
+	../src/imss.c 
     ../src/map_ep.cpp
     )
 

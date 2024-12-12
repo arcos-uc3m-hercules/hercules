@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include "hercules.h"
+#include "hercules.hpp"
 
 int32_t main (int32_t argc, char **argv) 
 {

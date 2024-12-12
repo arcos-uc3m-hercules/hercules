@@ -489,10 +489,8 @@ int32_t stat_release()
 	// Destroy the worker
 	ucp_worker_destroy(ucp_worker_meta);
 
-	// ucp_worker_destroy(ucp_worker_meta);
 	free(stat_eps);
 	pthread_mutex_unlock(&lock_network);
-	// ucp_cleanup(ucp_context_client);
 	return 0;
 }
 
@@ -3416,6 +3414,66 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 	return 1;
 }
 
+int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, off_t offset)
+{
+
+	pthread_mutex_lock(&lock_network);
+	char key_[REQUEST_SIZE];
+	// int32_t curr_imss_storages = curr_imss.info.num_storages;
+	// curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
+
+	// Send the data block to every server implementing redundancy.
+	// for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
+	{
+		ucp_ep_h ep;
+		// Server receiving the current data block.
+		uint32_t n_server_ = to_data_server_id; // (n_server + i * (curr_imss_storages / curr_dataset.repl_factor)) % curr_imss_storages;
+
+		//	gettimeofday(&start, NULL);
+
+		// if (data_id == 0)
+		// 	size = sizeof(struct stat);
+		// else if (size == 0)
+		// 	size = curr_dataset.data_entity_size;
+
+		// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
+		sprintf(key_, "SNAPSET %lu %d %s$%d", size, 0, curr_dataset.uri_, from_data_server_id);
+
+		slog_info("[IMSS] Request to Server %d: %s (%lu)", n_server_, key_, size);
+		
+		ep = curr_imss.conns.eps[n_server_];
+		// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id)
+		// in a dataset (curr_dataset.uri).
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			perror("HERCULES_ERR_SET_REQ_SEND_REQ");
+			slog_error("HERCULES_ERR_SET_REQ_SEND_REQ");
+			// return -1;
+			exit(-1);
+		}
+
+		// send the data to the data server of the current dataset.
+		if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
+			slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
+			return -1;
+		}
+		slog_info("[IMSS][completed] Request sent to server %d: %s (%d)", n_server_, key_, size);
+		/*	gettimeofday(&end, NULL);
+			delta_us = (long) (end.tv_usec - start.tv_usec);
+			printf("[CLIENT] [SWRITE SEND_DATA] delta_us=%6.3f",(delta_us/1000.0F));*/
+	}
+	// t = clock() - t;
+	// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
+
+	// slog_info("[IMSS] [SET DATA] sent data %f s", time_taken);
+	pthread_mutex_unlock(&lock_network);
+	return 1;
+}
+
 // Method storing a specific data element.
 int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages)
 {
@@ -3876,6 +3934,7 @@ int get_number_of_active_nodes()
 	return number_active_storage_servers;
 }
 
+/* Pesistent storage operations. */
 int32_t Open_file(const char *checkpoint_dir, const char *filename)
 {
 	char disk_path[PATH_MAX];
@@ -3950,3 +4009,4 @@ int32_t Make_directory(const char *dirname)
 	}
 	return ret;
 }
+

@@ -5,11 +5,6 @@
 #include <sys/types.h>
 #include <sys/sysinfo.h>
 #include <signal.h>
-#include "imss.h"
-#include "workers.h"
-#include "directory.h"
-#include "records.hpp"
-#include "map_server_eps.hpp"
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -18,6 +13,12 @@
 #include <arpa/inet.h>
 #include <mcheck.h>
 #include <fcntl.h>
+#include <condition_variable>
+#include "imss.h"
+#include "workers.h"
+#include "directory.h"
+#include "records.hpp"
+#include "map_server_eps.hpp"
 
 // Lock dealing when cleaning blocks
 pthread_mutex_t mutex_garbage = PTHREAD_MUTEX_INITIALIZER;
@@ -38,8 +39,6 @@ pthread_mutex_t buff_size_mut;
 pthread_cond_t buff_size_cond;
 int32_t copied;
 
-// extern uint64_t BLOCK_SIZE; // In KB
-
 StsHeader *mem_pool;
 
 // URI of the attached deployment.
@@ -51,7 +50,6 @@ static long iov_cnt = 1;
 void *map_server_eps;
 
 pthread_mutex_t tree_mut = PTHREAD_MUTEX_INITIALIZER;
-
 pthread_mutex_t mp = PTHREAD_MUTEX_INITIALIZER;
 
 ucp_worker_h *ucp_worker_threads;
@@ -63,6 +61,10 @@ int global_finish_checkpoint = 0;
 int global_finish_snapshot = 0;
 int global_server_fd_thread = -1;
 size_t global_offset = 0;
+
+std::mutex mtx;
+std::condition_variable cv;
+int data_ready = 0;
 
 #define GARBAGE_COLLECTOR_PERIOD 120
 #define CKECKPOINT_PERIOD 10
@@ -297,12 +299,11 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
-	// std::shared_ptr<map_records> secondary_map = arguments->secondary_map;
 
 	// Resources specifying if the ZMQ_SNDMORE flag was set in the sender.
 	int64_t more;
 	size_t more_size = sizeof(more);
-	int is_shared_memory = 0;
+	int is_shared_memory = 0, snapshot_op = 0;
 
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
@@ -310,10 +311,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 
 	slog_debug(" Waiting for new request.");
 	// Save the request to be served.
-	// TIMING(ret = recv_data(arguments->ucp_worker, arguments->server_ep, req), " Save the request to be served");
 	slog_debug(" request to be served %s", req);
-
-	// slog_info("********** %d",ret);
 
 	// Elements conforming the request.
 	uint32_t block_size_recv, block_offset;
@@ -339,6 +337,11 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 	{
 		more = SET_OP;
 		is_shared_memory = 1;
+	}
+	if (!strcmp(mode, "SNAPSET"))
+	{
+		more = SET_OP;
+		snapshot_op = 1;
 	}
 
 	slog_debug(" Request - mode '%s', block_size_recv '%" PRIu32 "', block_offset '%" PRIu32 "', uri_ '%s', more %ld", mode, block_size_recv, block_offset, uri_, more);
@@ -412,7 +415,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					{
 						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
 					}
-					// fprintf(stderr,"\tblock_size_rtvd=%ld, address_=%s\n", block_size_rtvd, address_);
 					slog_debug("[READ_OP][READ_OP] send_data, ret_send_data=%lu", ret_send_data);
 					if (ret_send_data == 0)
 					{
@@ -1016,7 +1018,16 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 		{
 			slog_debug("[WRITE_OP] WRITE NORMAL CASE. Size %ld, offset=%ld", block_size_recv, block_offset);
 			// search for the block to know if it was previously stored.
-			int ret = map->get(key, &address_, &block_size_rtvd);
+			int ret = 0;
+			// Checks if it is data for the Snapshot operation or regular data.
+			if (snapshot_op)
+			{
+				
+			}
+			else
+			{
+				ret = map->get(key, &address_, &block_size_rtvd);
+			}
 
 			// if the block was not already stored:
 			if (ret == 0)
@@ -1122,9 +1133,13 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				// fprintf(stderr,"[WRITE_OP] ****[PUT]********* key=%s\n",  key.c_str());
 				slog_debug("[WRITE_OP] ****[PUT, block_size_recv=%ld, BLOCK_SIZE=%lu, msg_length=%lu]********* key=%s", block_size_recv, BLOCK_SIZE, msg_length, key.c_str());
 				// TODO: should this be block_size_recv or a different size? block_size_recv might not be the full block size
-				// insert_successful = map->put(key, buffer, block_size_recv);
-				// insert_successful = map->put(key, buffer, BLOCK_SIZE);
-				insert_successful = map->put(key, buffer, size_asigned_to_block);
+				if (snapshot_op)
+				{
+					// buffer_broadcast[];
+					
+				} else {
+					insert_successful = map->put(key, buffer, size_asigned_to_block);
+				}
 				slog_debug("[WRITE_OP] insert_successful %d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
 				tr = clock() - tr;
 				double time_taken = ((double)tr) / CLOCKS_PER_SEC; // in seconds
@@ -1655,7 +1670,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		{
 		case GETDIR:
 		{
-			// slog_fatal("stat_server GETDIR key=%s",key.c_str());
 			char *buffer;
 			int32_t numelems_indir;
 			// Retrieve all elements inside the requested directory.
@@ -2055,7 +2069,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		{
 			// Follow a certain behavior if the received block was already stored.
 			slog_debug("[STAT WORKER] LOCAL DATASET_UPDATE %ld", block_size_recv);
-			// fprintf(stderr, "[STAT WORKER] LOCAL DATASET_UPDATE %ld, key=%s, req=%s\n", block_size_recv, key.c_str(), req);
 			switch (1) // TO CKECK!
 			{
 			// Update where the blocks of a LOCAL dataset have been stored.
@@ -2153,7 +2166,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					unsigned long num_active_storages = atol(number);
 					int delete_dataserver_indx = operation;
 					slog_debug("[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
-					// fprintf(stderr, "[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
 
 					char *address_aux = (char *)address_;
 					// fprintf(stderr, "block_size_rtvd=%lu\n", block_size_rtvd);
@@ -2210,40 +2222,8 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					free(buffer);
 					slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 				}
-				// address_ += sizeof(int);
-				// memcpy(address_aux, imss_info_->status, imss_info_->num_storages * sizeof(int));
-
-				// memcpy((char*)address_+sizeof(imss_info)+imss_info_->num_storages * LINE_LENGTH, imss_info_->status, imss_info_->num_storages * sizeof(int));
-				// memcpy(address_, address_aux, sizeof(char));
-
-				// free(imss_info_->ips[current_num_storages - 1]);
-				// Get the length of the message to be received.
-				// size_t length = 0;
-				// int32_t ret = -1;
-				// length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-				// if (length == 0)
-				// {
-				// 	slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_UPDATE_DATASET");
-				// 	perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_UPDATE_DATASET");
-				// 	return -1;
-				// }
-				// // Clear the corresponding memory region.
-				// void *buffer = (void *)malloc(length);
-				// // void *buffer = NULL;
-				// // Receive the block into the buffer.
-				// ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
-				// // ret = recv_dynamic_stream_opt(arguments->ucp_worker, arguments->server_ep, &buffer, BUFFER, arguments->worker_uid, length);
-				// if (ret < 0)
-				// {
-				// 	perror("ERR_HERCULES_UPDATING_EXISTING_DATASET");
-				// 	slog_error("ERR_HERCULES_UPDATING_EXISTING_DATASET");
-				// 	free(buffer);
-				// 	return -1;
-				// }
-				// free(buffer);
 
 				slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
-				// fprintf(stderr, "[STAT_WORKER] End Updating existing dataset %s.\n", key.c_str());
 				break;
 			}
 			}
