@@ -1,0 +1,26 @@
+
+# Run test with slurm.
+sbatch -N4 malleability_no_disk.sh
+
+# Run the comissioning test with slurm.
+sbatch -N19 malleability_no_disk_comissioning.sh
+
+# Run the decomissioning test with slurm.
+sbatch -N18 malleability_no_disk_decomissioning.sh
+
+# run servers.
+~/hercules/scripts/hercules start -f ~/hercules/conf/hercules_torino.conf
+
+# get a list of servers to stop.
+tail -n1 /beegfs/home/javier.garciablas/hercules/bash/data_hostfile > data2stop_hostfile
+# to indicate number of active data servers.
+echo 8 > ./hercules_num_act_nodes
+
+# stop some severs but keeps metadata servers.
+~/hercules/scripts/hercules stop -f ~/hercules/conf/hercules_torino.conf -k 1 -d data2stop_hostfile -w 1
+
+# stop all 
+~/hercules/scripts/hercules stop -f ~/hercules/conf/hercules_torino.conf
+
+# to export results.
+cat malleability_test.txt | grep -F "[HS"
