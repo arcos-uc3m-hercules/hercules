@@ -24,11 +24,11 @@ extern "C"
 		return reinterpret_cast<void *>(new Map);
 	}
 
-	int map_fd_put(void *map, const char *pathname, const int fd, unsigned long offset)
+	int map_fd_put(void *map, const char *pathname, const int fd, long offset)
 	{
 		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
-		std::pair<std::string, int> value(pathname, offset);
+		std::pair<std::string, long> value(pathname, offset);
 		std::pair<std::map<int, std::pair<std::string, long>>::iterator, bool> ret;
 		ret = m->insert({fd, value});
 		if(ret.second==false) {

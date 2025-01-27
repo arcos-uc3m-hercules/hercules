@@ -421,7 +421,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 	char **refs;
 	int n_ent = 0;
 
-	char *imss_path = calloc(MAX_PATH, sizeof(char));
+	char *imss_path = (char *)calloc(MAX_PATH, sizeof(char));
 	get_iuri(path, imss_path);
 
 	// Add "/" at the end of the path if it does not have it.
@@ -1355,20 +1355,20 @@ ssize_t imss_read(const char *path, void *buf, size_t size, off_t offset)
 		// MULTIPLE_READ (default 0)
 		if (MULTIPLE_READ == 1)
 		{
-			ret = imss_vread_prefetch(path, buf, size, offset);
+			ret = imss_vread_prefetch(path, (char *)buf, size, offset);
 		}
 		else if (MULTIPLE_READ == 2)
 		{
-			ret = imss_vread_no_prefetch(path, buf, size, offset);
+			ret = imss_vread_no_prefetch(path, (char *)buf, size, offset);
 		}
 		else if (MULTIPLE_READ == 3)
 		{
-			ret = imss_vread_2x(path, buf, size, offset);
+			ret = imss_vread_2x(path, (char *)buf, size, offset);
 		}
 		else if (MULTIPLE_READ == 4)
 		{
 			// printf("ENTER IMSS_SPLIT_READV\n");
-			ret = imss_split_readv(path, buf, size, offset);
+			ret = imss_split_readv(path, (char *)buf, size, offset);
 		}
 		else
 		{
@@ -1385,7 +1385,7 @@ ssize_t imss_read(const char *path, void *buf, size_t size, off_t offset)
 		else
 		{
 			// printf("[BEST_PERFORMANCE_READ] SPLIT_READV\n");
-			ret = imss_split_readv(path, buf, size, offset);
+			ret = imss_split_readv(path, (char *)buf, size, offset);
 		}
 	}
 
@@ -1402,7 +1402,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 	// MULTIPLE_WRITE (default 0: NORMAL WRITE)
 	if (MULTIPLE_WRITE == 2)
 	{
-		ret = imss_split_writev(path, buf, size, off);
+		ret = imss_split_writev(path, (const char *)buf, size, off);
 		return ret;
 	}
 
@@ -1450,7 +1450,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		slog_debug("[imss_write] MULTIPLE_WRITE %d", MULTIPLE_WRITE);
 		if ((end_blk - curr_blk) > 1)
 		{
-			writev_multiple(buf, ds, curr_blk, end_blk, start_offset, end_offset, IMSS_DATA_BSIZE, size);
+			writev_multiple((const char *)buf, ds, curr_blk, end_blk, start_offset, end_offset, IMSS_DATA_BSIZE, size);
 
 			// Update header count if the file has become bigger
 			if (size + off > stats.st_size)
@@ -1596,19 +1596,19 @@ int imss_split_writev(const char *path, const char *buf, size_t size, off_t off)
 
 	int lenght_message = 102400;
 	char **msg; // save block read for each server
-	msg = calloc(N_SERVERS, sizeof(char *));
+	msg = (char **)calloc(N_SERVERS, sizeof(char *));
 	for (int z = 0; z < N_SERVERS; z++)
 	{
-		msg[z] = calloc(lenght_message, sizeof(char));
+		msg[z] = (char *)calloc(lenght_message, sizeof(char));
 	}
 	int amount[N_SERVERS]; // save how many are sent to each server.
 
 	// Preparing message for the server
 	int count;
 
-	char *all_blocks = calloc(lenght_message, sizeof(char));
-	char *block = calloc(64, sizeof(char));
-	char *number = calloc(64, sizeof(char));
+	char *all_blocks = (char *)calloc(lenght_message, sizeof(char));
+	char *block = (char *)calloc(64, sizeof(char));
+	char *number = (char *)calloc(64, sizeof(char));
 	for (int server = 0; server < N_SERVERS; server++)
 	{
 
@@ -1640,11 +1640,11 @@ int imss_split_writev(const char *path, const char *buf, size_t size, off_t off)
 	free(all_blocks);
 
 	char **buffer_servers; // save blocks to write for each server
-	buffer_servers = calloc(N_SERVERS, sizeof(char *));
+	buffer_servers = (char **)calloc(N_SERVERS, sizeof(char *));
 	for (int z = 0; z < N_SERVERS; z++)
 	{
 		// printf("buffer_servers[%d]=%ld\n",z, amount[z]*IMSS_DATA_BSIZE);
-		buffer_servers[z] = calloc(amount[z] * IMSS_DATA_BSIZE, sizeof(char));
+		buffer_servers[z] = (char *)calloc(amount[z] * IMSS_DATA_BSIZE, sizeof(char));
 	}
 
 	for (int server = 0; server < N_SERVERS; server++)
@@ -1775,19 +1775,19 @@ int imss_split_readv(const char *path, char *buf, size_t size, off_t offset)
 
 	int lenght_message = 102400;
 	char **msg; // save block read for each server
-	msg = calloc(N_SERVERS, sizeof(char *));
+	msg = (char **)calloc(N_SERVERS, sizeof(char *));
 	for (int z = 0; z < N_SERVERS; z++)
 	{
-		msg[z] = calloc(lenght_message, sizeof(char));
+		msg[z] = (char *)calloc(lenght_message, sizeof(char));
 	}
 	int amount[N_SERVERS]; // save how many are sent to each server.
 
 	// Preparing message for the server
 	int count;
 
-	char *all_blocks = calloc(lenght_message, sizeof(char));
-	char *block = calloc(64, sizeof(char));
-	char *number = calloc(64, sizeof(char));
+	char *all_blocks = (char *)calloc(lenght_message, sizeof(char));
+	char *block = (char *)calloc(64, sizeof(char));
+	char *number = (char *)calloc(64, sizeof(char));
 	for (int server = 0; server < N_SERVERS; server++)
 	{
 		/*char all_blocks[1024];*/
@@ -1818,10 +1818,10 @@ int imss_split_readv(const char *path, char *buf, size_t size, off_t offset)
 	free(all_blocks);
 
 	char **buffer_servers; // save block read for each server
-	buffer_servers = calloc(N_SERVERS, sizeof(char *));
+	buffer_servers = (char **)calloc(N_SERVERS, sizeof(char *));
 	for (int z = 0; z < N_SERVERS; z++)
 	{
-		buffer_servers[z] = calloc(amount[z] * IMSS_DATA_BSIZE, sizeof(char));
+		buffer_servers[z] = (char *)calloc(amount[z] * IMSS_DATA_BSIZE, sizeof(char));
 	}
 	//*********************Lineal*******************************
 	/*for(int server = 0; server < N_SERVERS; server++){
@@ -2059,7 +2059,6 @@ int imss_close(const char *path, int fd)
 
 	// Tell data server the file is ready to be copied to disk.
 
-
 	map_erase(map, path);
 
 	// t = clock() - t;
@@ -2132,7 +2131,7 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 	// }
 
 	pthread_mutex_lock(&lock_file); // lock.
-	map_put(map, rpath, *fh, ds_stat, buff);
+	map_put(map, rpath, *fh, ds_stat, (char *)buff);
 	slog_debug("[imss_create] map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath, *fh, ds_stat.st_blksize);
 	if (PREFETCH != 0)
 	{

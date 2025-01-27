@@ -1,5 +1,6 @@
 
-set_source_files_properties(../src/comms.c ../src/crc.c ../src/directory.c ../src/hercules.cpp ../src/imss.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX )
+# set_source_files_properties(../src/comms.c ../src/crc.c ../src/directory.c ../src/hercules.cpp ../src/imss.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX )
+set_source_files_properties(../src/comms.c ../src/crc.c ../src/directory.c ../src/imss.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX )
 set_source_files_properties(../src/memalloc.c ../src/policies.c ../src/stat.c ../src/workers.c ../src/arg_parser.c ../src/map_server_eps.cpp PROPERTIES LANGUAGE CXX )
 set_source_files_properties(./server.c ./release_imss.c PROPERTIES LANGUAGE CXX )
 

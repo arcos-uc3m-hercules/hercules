@@ -137,4 +137,5 @@ int try_tempname_len(char *tmpl)
         // else if (errno != EEXIST)
         //     return -1;
     }
+    return 1;
 }

@@ -125,17 +125,17 @@ static int (*real_stat)(const char *pathname, struct stat *buf) = NULL;
 static int (*real_stat64)(const char *__restrict__ pathname, struct stat64 *__restrict__ buf) = NULL;
 static int (*real__lxstat)(int fd, const char *pathname, struct stat *buf) = NULL;
 static int (*real__lxstat64)(int ver, const char *pathname, struct stat64 *buf) = NULL;
-static int (*real_lstat)(const char *restrict pathname, struct stat *restrict buf) = NULL;
+static int (*real_lstat)(const char *pathname, struct stat *buf) = NULL;
 static int (*real_lstat64)(const char *__restrict__ pathname, struct stat64 *__restrict__ buf);
 static int (*real_xstat)(int fd, const char *pathname, struct stat *buf) = NULL;
-static int (*real_statx)(int dirfd, const char *restrict pathname, int flags, unsigned int mask, struct statx *restrict statxbuf) = NULL;
+static int (*real_statx)(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *statxbuf) = NULL;
 static int (*real___xstat)(int ver, const char *pathname, struct stat *stat_buf) = NULL;
 static int (*real__xstat64)(int ver, const char *path, struct stat64 *stat_buf) = NULL;
 static int (*real_fstat)(int fd, struct stat *buf) = NULL;
 static int (*real_fstatat)(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag) = NULL;
 static int (*real_fstatat64)(int __fd, const char *__restrict __file, struct stat64 *__restrict __buf, int __flag) = NULL;
 static int (*real_fstatfs)(int fd, struct statfs *buf) = NULL;
-static int (*real_statfs64)(const char *restrict path, struct statfs64 *restrict buf) = NULL;
+static int (*real_statfs64)(const char *path, struct statfs64 *buf) = NULL;
 static int (*real_newfstatat)(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag) = NULL;
 static int (*real__fxstat64)(int ver, int fd, struct stat64 *buf) = NULL;
 static int (*real__fxstat)(int ver, int fd, struct stat *buf) = NULL;
@@ -148,9 +148,9 @@ static int (*real__open_2)(const char *pathname, int flags, ...) = NULL;
 static int (*real_open64)(const char *pathname, int flags, ...) = NULL;
 static int (*real_open)(const char *pathname, int flags, ...) = NULL;
 static int (*real_creat)(const char *pathname, mode_t mode) = NULL;
-static FILE *(*real_fopen)(const char *restrict pathname, const char *restrict mode) = NULL;
+static FILE *(*real_fopen)(const char *pathname, const char *mode) = NULL;
 static FILE *(*real_fdopen)(int fildes, const char *mode) = NULL;
-// static FILE *(*real_fopen64)(const char *restrict pathname, const char *restrict mode) = NULL;
+// static FILE *(*real_fopen64)(const char * pathname, const char * mode) = NULL;
 static int (*real_access)(const char *pathname, int mode) = NULL;
 static int (*real_mkdir)(const char *path, mode_t mode) = NULL;
 static ssize_t (*real_write)(int fd, const void *buf, size_t size) = NULL;
@@ -158,7 +158,7 @@ static ssize_t (*real_read)(int fd, const void *buf, size_t size) = NULL;
 static int (*real_remove)(const char *name) = NULL;
 static int (*real_unlink)(const char *name) = NULL;
 static int (*real_rmdir)(const char *path) = NULL;
-static int (*real_rename)(const char *old, const char *new) = NULL;
+static int (*real_rename)(const char *old, const char *new_pathname) = NULL;
 static int (*real_fchmodat)(int dir_fd, const char *pathname, mode_t mode, int flags) = NULL;
 static int (*real_fchownat)(int dir_fd, const char *pathname, uid_t owner, gid_t group, int flags) = NULL;
 static DIR *(*real_opendir)(const char *name) = NULL;
@@ -166,11 +166,11 @@ static struct dirent *(*real_readdir)(DIR *dirp) = NULL;
 static struct dirent64 *(*real_readdir64)(DIR *dirp) = NULL;
 // static int (*real_readdir)(unsigned int fd, struct old_linux_dirent *dirp, unsigned int count);
 static int (*real_closedir)(DIR *dirp) = NULL;
-static int (*real_statvfs)(const char *restrict path, struct statvfs *restrict buf) = NULL;
+static int (*real_statvfs)(const char *path, struct statvfs *buf) = NULL;
 static int (*real_fstatvfs)(int fd, struct statvfs *buf) = NULL;
-static int (*real_statvfs64)(const char *restrict path, struct statvfs64 *restrict buf) = NULL;
+static int (*real_statvfs64)(const char *path, struct statvfs64 *buf) = NULL;
 static int (*real_statfs)(const char *path, struct statfs *buf) = NULL;
-static char *(*real_realpath)(const char *restrict path, char *restrict resolved_path) = NULL;
+static char *(*real_realpath)(const char *path, char *resolved_path) = NULL;
 // static int (*real__openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
 static int (*real_openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
 // static int (*real__openat64)(int fd, const char *file, int oflag, ...) = NULL;
@@ -215,7 +215,7 @@ static int (*real_ftruncate)(int fd, off_t length) = NULL;
 static int (*real_flock)(int fd, int operation) = NULL;
 static int (*real_dup2)(int oldfd, int newfd) = NULL;
 static int (*real_dup)(int oldfd) = NULL;
-static int (*real_mkstemp)(char *template) = NULL;
+static int (*real_mkstemp)(char *template_name) = NULL;
 static ssize_t (*real_readv)(int fd, const struct iovec *iov, int iovcnt) = NULL;
 static ssize_t (*real_writev)(int fd, const struct iovec *iov, int iovcnt) = NULL;
 // ssize_t preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset);
@@ -233,16 +233,16 @@ static int (*real_renameat2)(int olddirfd, const char *oldpath, int newdirfd, co
 // static int (*real_fstatat)(int dir_fd, const char *pathname, struct stat *buf, int flags) = NULL;
 // static int (*real_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count) = NULL;
 static int (*real_fsync)(int fd) = NULL;
-// static int (*real_pthread_create)(pthread_t *restrict thread,
-// 								  const pthread_attr_t *restrict attr,
+// static int (*real_pthread_create)(pthread_t * thread,
+// 								  const pthread_attr_t * attr,
 // 								  void *(*start_routine)(void *),
-// 								  void *restrict arg) = NULL;
+// 								  void * arg) = NULL;
 static void (*real_exit)(int status) __attribute__((noreturn)) = NULL;
-// static int (*real_fprintf)(FILE *restrict stream, const char *restrict format, ...);
-static int (*real_fprintf)(FILE *restrict stream, const char *restrict format, va_list) = NULL; // not fully supported.
+// static int (*real_fprintf)(FILE * stream, const char * format, ...);
+static int (*real_fprintf)(FILE *stream, const char *format, va_list) = NULL; // not fully supported.
 
-static ssize_t (*real_readlink)(const char *restrict pathname, char *restrict buf, size_t bufsiz) = NULL;
-static ssize_t (*real_readlinkat)(int dirfd, const char *restrict pathname, char *restrict buf, size_t bufsiz) = NULL;
+static ssize_t (*real_readlink)(const char *pathname, char *buf, size_t bufsiz) = NULL;
+static ssize_t (*real_readlinkat)(int dirfd, const char *pathname, char *buf, size_t bufsiz) = NULL;
 
 void WarnOperationNotSupported(const char *call_name, const char *pathname)
 {
@@ -332,7 +332,7 @@ char *checkHerculesPath(const char *pathname)
 	{
 		slog_live("[HERCULES] pathname=%s, MOUNT_POINT=%s, Success", pathname, MOUNT_POINT);
 		// new_path = calloc(strlen("Success"), sizeof(char));
-		new_path = calloc(strlen("imss://"), sizeof(char) + 1);
+		new_path = (char *)calloc(strlen("imss://"), sizeof(char) + 1);
 		// strcpy(new_path, "Success");
 		strcat(new_path, "imss://");
 	}
@@ -384,7 +384,7 @@ uint32_t MurmurOAAT32(const char *key)
 		h *= 0x5bd1e995;
 		h ^= h >> 15;
 	}
-	return abs(h);
+	return (uint32_t)abs((int)h);
 }
 
 void *
@@ -422,8 +422,8 @@ prefetch_function(void *th_argv)
 
 char *convert_path(const char *name)
 {
-	char *path = calloc(PATH_MAX, sizeof(char));
-	char *new_path = calloc(PATH_MAX, sizeof(char));
+	char *path = (char *)calloc(PATH_MAX, sizeof(char));
+	char *new_path = (char *)calloc(PATH_MAX, sizeof(char));
 
 	strcpy(path, name);
 	size_t len = strlen(MOUNT_POINT);
@@ -675,7 +675,7 @@ int close(int fd)
 {
 
 	if (!real_close)
-		real_close = dlsym(RTLD_NEXT, "close");
+		real_close = (int (*)(int))dlsym(RTLD_NEXT, "close");
 
 	if (!init)
 	{
@@ -713,7 +713,7 @@ int close(int fd)
 int __lxstat(int ver, const char *pathname, struct stat *buf)
 {
 	if (!real__lxstat)
-		real__lxstat = dlsym(RTLD_NEXT, "__lxstat");
+		real__lxstat = (int (*)(int, const char *, struct stat *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -784,7 +784,7 @@ int __lxstat(int ver, const char *pathname, struct stat *buf)
 int __lxstat64(int fd, const char *pathname, struct stat64 *buf)
 {
 	if (!real__lxstat64)
-		real__lxstat64 = dlsym(RTLD_NEXT, "__lxstat64");
+		real__lxstat64 = (int (*)(int, const char *, struct stat64 *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -823,7 +823,7 @@ int __lxstat64(int fd, const char *pathname, struct stat64 *buf)
 int __xstat(int ver, const char *pathname, struct stat *stat_buf)
 {
 	if (!real___xstat)
-		real___xstat = dlsym(RTLD_NEXT, "__xstat");
+		real___xstat = (int (*)(int, const char *, struct stat *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -892,7 +892,7 @@ int __xstat(int ver, const char *pathname, struct stat *stat_buf)
 pid_t fork(void)
 {
 	if (!real_fork)
-		real_fork = dlsym(RTLD_NEXT, "fork");
+		real_fork = (pid_t(*)())dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -988,7 +988,7 @@ pid_t fork(void)
 int lstat64(const char *__restrict__ pathname, struct stat64 *__restrict__ buf)
 {
 	if (!real_lstat64)
-		real_lstat64 = dlsym(RTLD_NEXT, "lstat64");
+		real_lstat64 = (int (*)(const char *, struct stat64 *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1011,10 +1011,10 @@ int lstat64(const char *__restrict__ pathname, struct stat64 *__restrict__ buf)
 	return ret;
 }
 
-int lstat(const char *restrict pathname, struct stat *restrict buf)
+int lstat(const char *pathname, struct stat *buf)
 {
 	if (!real_lstat)
-		real_lstat = dlsym(RTLD_NEXT, "lstat");
+		real_lstat = (int (*)(const char *, struct stat *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1050,7 +1050,7 @@ int lstat(const char *restrict pathname, struct stat *restrict buf)
 int stat(const char *pathname, struct stat *buf)
 {
 	if (!real_stat)
-		real_stat = dlsym(RTLD_NEXT, "stat");
+		real_stat = (int (*)(const char *, struct stat *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1086,7 +1086,7 @@ int stat(const char *pathname, struct stat *buf)
 extern int statvfs(const char *__restrict __file, struct statvfs *__restrict __buf)
 {
 	if (!real_statvfs)
-		real_statvfs = dlsym(RTLD_NEXT, "statvfs");
+		real_statvfs = (int (*)(const char *, struct statvfs *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1117,7 +1117,7 @@ extern int statvfs(const char *__restrict __file, struct statvfs *__restrict __b
 int fstatvfs(int fd, struct statvfs *buf)
 {
 	if (!real_fstatvfs)
-		real_fstatvfs = dlsym(RTLD_NEXT, "fstatvfs");
+		real_fstatvfs = (int (*)(int, struct statvfs *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1141,10 +1141,10 @@ int fstatvfs(int fd, struct statvfs *buf)
 	return ret;
 }
 
-int statvfs64(const char *restrict path, struct statvfs64 *restrict buf)
+int statvfs64(const char *path, struct statvfs64 *buf)
 {
 	if (!real_statvfs64)
-		real_statvfs64 = dlsym(RTLD_NEXT, "statvfs64");
+		real_statvfs64 = (int (*)(const char *, struct statvfs64 *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1172,10 +1172,10 @@ int statvfs64(const char *restrict path, struct statvfs64 *restrict buf)
 	return ret;
 }
 
-int statfs(const char *restrict path, struct statfs *restrict buf)
+int statfs(const char *path, struct statfs *buf)
 {
 	if (!real_statfs)
-		real_statfs = dlsym(RTLD_NEXT, "statfs");
+		real_statfs = (int (*)(const char *, struct statfs *))dlsym(RTLD_NEXT, "statfs");
 
 	if (!init)
 	{
@@ -1205,10 +1205,10 @@ int statfs(const char *restrict path, struct statfs *restrict buf)
 /**
  * Used by MPI_File_open.
  */
-int statfs64(const char *restrict path, struct statfs64 *restrict buf)
+int statfs64(const char *path, struct statfs64 *buf)
 {
 	if (!real_statfs64)
-		real_statfs64 = dlsym(RTLD_NEXT, "statfs64");
+		real_statfs64 = (int (*)(const char*, struct statfs64*))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1240,7 +1240,7 @@ int statfs64(const char *restrict path, struct statfs64 *restrict buf)
 int fstatfs(int fd, struct statfs *buf)
 {
 	if (!real_fstatfs)
-		real_fstatfs = dlsym(RTLD_NEXT, __func__);
+		real_fstatfs = (int (*)(int, struct statfs *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1265,7 +1265,7 @@ int fstatfs(int fd, struct statfs *buf)
 int __xstat64(int ver, const char *pathname, struct stat64 *stat_buf)
 {
 	if (!real__xstat64)
-		real__xstat64 = dlsym(RTLD_NEXT, "__xstat64");
+		real__xstat64 = (int (*)(int, const char *, struct stat64 *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1304,7 +1304,7 @@ int __xstat64(int ver, const char *pathname, struct stat64 *stat_buf)
 char *realpath(const char *pathname, char *resolved_path)
 {
 	if (!real_realpath)
-		real_realpath = dlsym(RTLD_NEXT, "realpath");
+		real_realpath = (char *(*)(const char *, char *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1337,7 +1337,7 @@ int __open_2(const char *pathname, int flags)
 {
 	if (!real__open_2)
 	{
-		real__open_2 = dlsym(RTLD_NEXT, "__open_2");
+		real__open_2 = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, __func__);
 	}
 
 	// // Access additional arguments when O_CREAT flag is set.
@@ -1386,7 +1386,7 @@ int __open_2(const char *pathname, int flags)
 int open64(const char *pathname, int flags, ...)
 {
 	if (!real_open64)
-		real_open64 = dlsym(RTLD_NEXT, "open64");
+		real_open64 = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, __func__);
 
 	// Access additional arguments when O_CREAT flag is set.
 	mode_t mode = 0;
@@ -1431,30 +1431,30 @@ int open64(const char *pathname, int flags, ...)
 	return ret;
 }
 
-int mkstemp(char *template)
+int mkstemp(char *template_name)
 {
 	if (!real_mkstemp)
-		real_mkstemp = dlsym(RTLD_NEXT, "mkstemp");
+		real_mkstemp = (int (*)(char *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
-		return real_mkstemp(template);
+		return real_mkstemp(template_name);
 	}
 
 	errno = 0;
 	int ret;
-	char *new_path = checkHerculesPath(template);
+	char *new_path = checkHerculesPath(template_name);
 	if (new_path != NULL)
 	{
-		slog_live("[POSIX]. Calling Hercules 'mkstemp', new_path=%s, template=%s", new_path, new_path, template);
+		slog_live("[POSIX]. Calling Hercules 'mkstemp', new_path=%s, template_name=%s", new_path, new_path, template_name);
 		char *new_path_by_template;
 		mode_t mode = 0;
 		int flags = 0;
 
 		// Get a unique pathname.
-		try_tempname_len(template);
+		try_tempname_len(template_name);
 		// Get HERCULES uri by using the unique pathname.
-		new_path_by_template = checkHerculesPath(template);
+		new_path_by_template = checkHerculesPath(template_name);
 
 		// Set mode and flags.
 		mode |= S_IRUSR | S_IWUSR;
@@ -1464,15 +1464,15 @@ int mkstemp(char *template)
 		// Creates the file and returns the file descriptor.
 		ret = generalOpen(new_path_by_template, flags, mode, -1);
 
-		slog_live("[POSIX]. Ending Hercules 'mkstemp', new_path=%s, template=%s, fd=%d, new_path_by_template=%s\n", new_path, template, ret, new_path_by_template);
+		slog_live("[POSIX]. Ending Hercules 'mkstemp', new_path=%s, template_name=%s, fd=%d, new_path_by_template=%s\n", new_path, template_name, ret, new_path_by_template);
 		free(new_path_by_template);
 		free(new_path);
 	}
 	else
 	{
-		slog_full("[POSIX]. Calling Real 'mkstemp', pathname=%s", template);
-		ret = real_mkstemp(template);
-		slog_full("[POSIX]. Ending Real 'mkstemp', pathname=%s", template);
+		slog_full("[POSIX]. Calling Real 'mkstemp', pathname=%s", template_name);
+		ret = real_mkstemp(template_name);
+		slog_full("[POSIX]. Ending Real 'mkstemp', pathname=%s", template_name);
 	}
 	return ret;
 }
@@ -1480,7 +1480,7 @@ int mkstemp(char *template)
 int flock(int fd, int operation)
 {
 	if (!real_flock)
-		real_flock = dlsym(RTLD_NEXT, "flock");
+		real_flock = (int (*)(int, int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1508,7 +1508,7 @@ int flock(int fd, int operation)
 int fclose(FILE *fp)
 {
 	if (!real_fclose)
-		real_fclose = dlsym(RTLD_NEXT, "fclose");
+		real_fclose = (int (*)(FILE *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1556,7 +1556,7 @@ int fclose(FILE *fp)
 size_t fwrite(const void *buf, size_t size, size_t count, FILE *fp)
 {
 	if (!real_fwrite)
-		real_fwrite = dlsym(RTLD_NEXT, "fwrite");
+		real_fwrite = (size_t(*)(const void *, size_t, size_t, FILE *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1621,7 +1621,7 @@ size_t fwrite(const void *buf, size_t size, size_t count, FILE *fp)
 ssize_t readv(int fd, const struct iovec *iov, int iovcnt)
 {
 	if (!real_readv)
-		real_readv = dlsym(RTLD_NEXT, "readv");
+		real_readv = (ssize_t(*)(int, const iovec *, int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1695,7 +1695,7 @@ ssize_t readv(int fd, const struct iovec *iov, int iovcnt)
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 {
 	if (!real_writev)
-		real_writev = dlsym(RTLD_NEXT, "writev");
+		real_writev = (ssize_t(*)(int, const struct iovec *, int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1741,7 +1741,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 		for (int i = 0; i < iovcnt; ++i)
 		{
 			size_t copy = MIN(iov[i].iov_len, to_copy);
-			bp = __mempcpy((void *)bp, (void *)iov[i].iov_base, copy);
+			bp = (char *)__mempcpy((void *)bp, (void *)iov[i].iov_base, copy);
 			to_copy -= copy;
 			if (to_copy == 0)
 				break;
@@ -1766,7 +1766,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 {
 	if (!real_pwritev)
-		real_pwritev = dlsym(RTLD_NEXT, "pwritev");
+		real_pwritev = (ssize_t(*)(int, const struct iovec *, int, off_t))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1813,7 +1813,7 @@ ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 		for (int i = 0; i < iovcnt; ++i)
 		{
 			size_t copy = MIN(iov[i].iov_len, to_copy);
-			bp = __mempcpy((void *)bp, (void *)iov[i].iov_base, copy);
+			bp = (char *)__mempcpy((void *)bp, (void *)iov[i].iov_base, copy);
 			to_copy -= copy;
 			if (to_copy == 0)
 				break;
@@ -1837,7 +1837,7 @@ ssize_t pwrite64(int fd, const void *buf, size_t count, off64_t offset)
 {
 
 	if (!real_pwrite64)
-		real_pwrite64 = dlsym(RTLD_NEXT, "pwrite64");
+		real_pwrite64 = (ssize_t(*)(int, const void *, size_t, off64_t))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1927,7 +1927,7 @@ ssize_t pwrite64(int fd, const void *buf, size_t count, off64_t offset)
 void clearerr(FILE *fp)
 {
 	if (!real_clearerr)
-		real_clearerr = dlsym(RTLD_NEXT, "clearerr");
+		real_clearerr = (void (*)(FILE *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1952,7 +1952,7 @@ void clearerr(FILE *fp)
 int ferror(FILE *fp)
 {
 	if (!real_ferror)
-		real_ferror = dlsym(RTLD_NEXT, "ferror");
+		real_ferror = (int (*)(FILE *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -1982,7 +1982,7 @@ int ferror(FILE *fp)
 int feof(FILE *fp)
 {
 	if (!real_feof)
-		real_feof = dlsym(RTLD_NEXT, "feof");
+		real_feof = (int (*)(FILE*))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2020,7 +2020,7 @@ int feof(FILE *fp)
 long int ftell(FILE *fp)
 {
 	if (!real_ftell)
-		real_ftell = dlsym(RTLD_NEXT, "ftell");
+		real_ftell = (long int (*)(FILE *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2064,7 +2064,7 @@ long int ftell(FILE *fp)
 void rewind(FILE *stream)
 {
 	if (!real_rewind)
-		real_rewind = dlsym(RTLD_NEXT, "rewind");
+		real_rewind = (void (*)(FILE *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2088,10 +2088,10 @@ void rewind(FILE *stream)
 	}
 }
 
-FILE *fopen(const char *restrict pathname, const char *restrict mode)
+FILE *fopen(const char *pathname, const char *mode)
 {
 	if (!real_fopen)
-		real_fopen = dlsym(RTLD_NEXT, "fopen");
+		real_fopen = (FILE * (*)(const char *, const char *)) dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2163,7 +2163,7 @@ FILE *fopen(const char *restrict pathname, const char *restrict mode)
 FILE *fdopen(int fildes, const char *mode)
 {
 	if (!real_fdopen)
-		real_fdopen = dlsym(RTLD_NEXT, "fdopen");
+		real_fdopen = (FILE * (*)(int, const char *)) dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2278,7 +2278,7 @@ int generalOpen(char *new_path, int flags, mode_t mode, int createFd)
 {
 	int ret = 0;
 	uint64_t ret_ds = 0;
-	unsigned long p = 0;
+	long p = 0;
 	// Search for the path "new_path" on the map "map_fd".
 	slog_live("[POSIX] Searching for the %s on the map", new_path);
 	int exist = map_fd_search_by_pathname(map_fd, new_path, &ret, &p);
@@ -2384,7 +2384,7 @@ int generalOpen(char *new_path, int flags, mode_t mode, int createFd)
 int open(const char *pathname, int flags, ...)
 {
 	if (!real_open)
-		real_open = dlsym(RTLD_NEXT, "open");
+		real_open = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, __func__);
 
 	// Access additional arguments when O_CREAT flag is set.
 	mode_t mode = 0;
@@ -2466,7 +2466,7 @@ int openat(int dir_fd, const char *pathname, int flags, ...)
 {
 
 	if (!real_openat)
-		real_openat = dlsym(RTLD_NEXT, "openat");
+		real_openat = (int (*)(int, const char *, int, ...))dlsym(RTLD_NEXT, __func__);
 
 	int mode = 0;
 	if (flags & O_CREAT)
@@ -2587,7 +2587,7 @@ int openat(int dir_fd, const char *pathname, int flags, ...)
 int mkdir(const char *path, mode_t mode)
 {
 	if (!real_mkdir)
-		real_mkdir = dlsym(RTLD_NEXT, "mkdir");
+		real_mkdir = (int (*)(const char *, mode_t))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2628,10 +2628,11 @@ int symlink(const char *name1, const char *name2)
 {
 	// TODO.
 	if (!real_symlink)
-		real_symlink = dlsym(RTLD_NEXT, "symlink");
+		real_symlink = (int (*)(const char *, const char *))dlsym(RTLD_NEXT, __func__);
 
 	// fprintf(stderr, "Calling symlink \n ******");
-	slog_warn("[TODO] Calling symlink");
+	// slog_warn("[TODO] Calling symlink");
+	WarnOperationNotSupported(__func__, name1);
 
 	return real_symlink(name1, name2);
 }
@@ -2640,7 +2641,7 @@ int symlinkat(const char *name1, int fd, const char *name2)
 {
 
 	if (!real_symlinkat)
-		real_symlinkat = dlsym(RTLD_NEXT, "symlinkat");
+		real_symlinkat = (int (*)(const char *, int, const char *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2692,7 +2693,7 @@ int symlinkat(const char *name1, int fd, const char *name2)
 off_t lseek(int fd, off_t offset, int whence)
 {
 	if (!real_lseek)
-		real_lseek = dlsym(RTLD_NEXT, "lseek");
+		real_lseek = (off_t(*)(int, off_t, int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2759,7 +2760,7 @@ off_t lseek(int fd, off_t offset, int whence)
 off64_t lseek64(int fd, off64_t offset, int whence)
 {
 	if (!real_lseek64)
-		real_lseek64 = dlsym(RTLD_NEXT, "lseek64");
+		real_lseek64 = (off64_t(*)(int, off64_t, int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2824,7 +2825,7 @@ off64_t lseek64(int fd, off64_t offset, int whence)
 int fseek(FILE *stream, long int offset, int whence)
 {
 	if (!real_fseek)
-		real_fseek = dlsym(RTLD_NEXT, "fseek");
+		real_fseek = (int (*)(FILE *, long int, int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2898,7 +2899,7 @@ int fseek(FILE *stream, long int offset, int whence)
 void seekdir(DIR *dirp, long loc)
 {
 	if (!real_seekdir)
-		real_seekdir = dlsym(RTLD_NEXT, "seekdir");
+		real_seekdir = (void (*)(DIR *, long))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2930,7 +2931,7 @@ void seekdir(DIR *dirp, long loc)
 int truncate(const char *path, off_t length)
 {
 	if (!real_truncate)
-		real_truncate = dlsym(RTLD_NEXT, "truncate");
+		real_truncate = (int (*)(const char *, off_t))dlsym(RTLD_NEXT, __func__);
 
 	if (init)
 	{
@@ -2945,7 +2946,7 @@ int truncate(const char *path, off_t length)
 int ftruncate(int fd, off_t length)
 {
 	if (!real_ftruncate)
-		real_ftruncate = dlsym(RTLD_NEXT, "ftruncate");
+		real_ftruncate = (int (*)(int, off_t))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -2974,7 +2975,7 @@ int ftruncate(int fd, off_t length)
 ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset)
 {
 	if (!real_pwrite)
-		real_pwrite = dlsym(RTLD_NEXT, "pwrite");
+		real_pwrite = (ssize_t(*)(int, const void *, size_t, off_t))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3003,7 +3004,7 @@ ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset)
 ssize_t write(int fd, const void *buf, size_t size)
 {
 	if (!real_write)
-		real_write = dlsym(RTLD_NEXT, "write");
+		real_write = (ssize_t(*)(int, const void *, size_t))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3068,7 +3069,7 @@ ssize_t write(int fd, const void *buf, size_t size)
 ssize_t read(int fd, void *buf, size_t size)
 {
 	if (!real_read)
-		real_read = dlsym(RTLD_NEXT, "read");
+		real_read = (ssize_t(*)(int, const void *, size_t))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3082,7 +3083,7 @@ ssize_t read(int fd, void *buf, size_t size)
 	{
 		if (size <= 0)
 		{
-			buf = '\0';
+			buf = (void *)'\0';
 			return 0;
 		}
 
@@ -3136,7 +3137,7 @@ ssize_t read(int fd, void *buf, size_t size)
 ssize_t pread(int fd, void *buf, size_t count, off_t offset)
 {
 	if (!real_pread)
-		real_pread = dlsym(RTLD_NEXT, "pread");
+		real_pread = (ssize_t(*)(int, void *, size_t, off_t))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3184,7 +3185,7 @@ ssize_t pread(int fd, void *buf, size_t count, off_t offset)
 size_t fread(void *buf, size_t size, size_t count, FILE *fp)
 {
 	if (!real_fread)
-		real_fread = dlsym(RTLD_NEXT, "fread");
+		real_fread = (size_t(*)(void *, size_t, size_t, FILE *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3199,7 +3200,7 @@ size_t fread(void *buf, size_t size, size_t count, FILE *fp)
 	{
 		if (size <= 0)
 		{
-			buf = '\0';
+			buf = (void *)'\0';
 			return 0;
 		}
 
@@ -3282,7 +3283,7 @@ size_t fread(void *buf, size_t size, size_t count, FILE *fp)
 int unlink(const char *name)
 {
 	if (!real_unlink)
-		real_unlink = dlsym(RTLD_NEXT, "unlink");
+		real_unlink = (int (*)(const char *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3367,7 +3368,7 @@ int rmdir(const char *path)
 {
 
 	if (!real_rmdir)
-		real_rmdir = dlsym(RTLD_NEXT, "rmdir");
+		real_rmdir = (int (*)(const char *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3458,7 +3459,7 @@ int rmdir(const char *path)
 int remove(const char *name)
 {
 	if (!real_remove)
-		real_remove = dlsym(RTLD_NEXT, "remove");
+		real_remove = (int (*)(const char *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3527,40 +3528,40 @@ int remove(const char *name)
 	return ret;
 }
 
-int rename(const char *old, const char *new)
+int rename(const char *old, const char *new_pathname)
 {
 
 	if (!real_rename)
-		real_rename = dlsym(RTLD_NEXT, "rename");
+		real_rename = (int (*)(const char *, const char *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
-		return real_rename(old, new);
+		return real_rename(old, new_pathname);
 	}
 
 	errno = 0;
 	int ret;
 	char *old_path = checkHerculesPath(old);
-	char *new_path = checkHerculesPath(new);
+	char *new_path = checkHerculesPath(new_pathname);
 	if (old_path != NULL && new_path != NULL)
 	{ // move from Hercules to Hercules.
-		slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new=%s, old path=%s, new path=%s", old, new, old_path, new_path);
+		slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new_pathname=%s, old path=%s, new_pathname=%s", old, new_pathname, old_path, new_path);
 		ret = imss_rename(old_path, new_path);
-		slog_live("[POSIX]. End Hercules 'rename', old path=%s, new path=%s, ret=%d\n", old_path, new_path, ret);
+		slog_live("[POSIX]. End Hercules 'rename', old path=%s, new_pathname=%s, ret=%d\n", old_path, new_path, ret);
 		free(old_path);
 		free(new_path);
 	}
 	else if (old_path == NULL && new_path != NULL)
 	{ // move from file system to Hercules.
-		slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new=%s, new path=%s", old, new, new_path);
+		slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s", old, new_pathname, new_path);
 
 		// open both files.
 		int fd_old = open(old, O_RDONLY);
-		int fd_new = open(new, O_WRONLY | O_APPEND | O_CREAT, 0644);
+		int fd_new = open(new_pathname, O_WRONLY | O_APPEND | O_CREAT, 0644);
 
 		// get old file stat.
 		struct stat *old_file_stat;
-		old_file_stat = malloc(sizeof(struct stat));
+		old_file_stat = (struct stat *)malloc(sizeof(struct stat));
 		ret = __fxstat(1, fd_old, old_file_stat);
 		// old file size.
 		off_t old_file_size = old_file_stat->st_size;
@@ -3573,7 +3574,7 @@ int rename(const char *old, const char *new)
 
 		ret = write(fd_new, old_file_buffer, ret);
 
-		slog_info("[POSIX]. bytes write to %s = %ld/%ld", new, ret, old_file_size);
+		slog_info("[POSIX]. bytes write to %s = %ld/%ld", new_pathname, ret, old_file_size);
 
 		close(fd_new);
 		close(fd_old);
@@ -3581,9 +3582,9 @@ int rename(const char *old, const char *new)
 	}
 	else
 	{
-		slog_live("[POSIX]. Calling Real 'rename', old path=%s, new path=%s", old, new);
-		ret = real_rename(old, new);
-		slog_live("[POSIX]. End Real 'rename', old path=%s, new path=%s", old, new);
+		slog_live("[POSIX]. Calling Real 'rename', old path=%s, new_pathname=%s", old, new_pathname);
+		ret = real_rename(old, new_pathname);
+		slog_live("[POSIX]. End Real 'rename', old path=%s, new_pathname=%s", old, new_pathname);
 	}
 	return ret;
 }
@@ -3591,7 +3592,7 @@ int rename(const char *old, const char *new)
 int fchmodat(int dir_fd, const char *pathname, mode_t mode, int flags)
 {
 	if (!real_fchmodat)
-		real_fchmodat = dlsym(RTLD_NEXT, "fchmodat");
+		real_fchmodat = (int (*)(int, const char *, mode_t, int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3621,7 +3622,7 @@ int fchmodat(int dir_fd, const char *pathname, mode_t mode, int flags)
 int chmod(const char *pathname, mode_t mode)
 {
 	if (!real_chmod)
-		real_chmod = dlsym(RTLD_NEXT, "chmod");
+		real_chmod = (int (*)(const char *, mode_t))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3700,7 +3701,7 @@ int chmod(const char *pathname, mode_t mode)
 int dup(int oldfd)
 {
 	if (!real_dup)
-		real_dup = dlsym(RTLD_NEXT, "dup");
+		real_dup = (int (*)(int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3757,7 +3758,7 @@ int dup(int oldfd)
 int dup2(int oldfd, int newfd)
 {
 	if (!real_dup2)
-		real_dup2 = dlsym(RTLD_NEXT, "dup2");
+		real_dup2 = (int (*)(int, int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3800,7 +3801,7 @@ int dup2(int oldfd, int newfd)
 int fchmod(int fd, mode_t mode)
 {
 	if (!real_fchmod)
-		real_fchmod = dlsym(RTLD_NEXT, "fchmod");
+		real_fchmod = (int (*)(int, mode_t))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3827,7 +3828,7 @@ int fchmod(int fd, mode_t mode)
 int fchownat(int dir_fd, const char *pathname, uid_t owner, gid_t group, int flags)
 {
 	if (!real_fchownat)
-		real_fchownat = dlsym(RTLD_NEXT, "chown");
+		real_fchownat = (int (*)(int, const char *, uid_t, gid_t, int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3856,7 +3857,7 @@ int fchownat(int dir_fd, const char *pathname, uid_t owner, gid_t group, int fla
 DIR *opendir(const char *name)
 {
 	if (!real_opendir)
-		real_opendir = dlsym(RTLD_NEXT, "opendir");
+		real_opendir = (DIR * (*)(const char *)) dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -3877,7 +3878,7 @@ DIR *opendir(const char *name)
 		int fd = -1;
 		// Search for the path "new_path" on the map "map_fd",
 		// if it exists then a file descriptor "fd" is going to point it.
-		ret = map_fd_search_by_pathname(map_fd, new_path, &fd, &p);
+		ret = map_fd_search_by_pathname(map_fd, new_path, &fd, (long int *)&p);
 		if (ret != -1)
 		{
 			slog_live("[POSIX] map_fd_update_value, new_path=%s, fd=%d, ret=%d", new_path, fd, ret);
@@ -3903,15 +3904,15 @@ DIR *opendir(const char *name)
 
 int myfiller(void *buf, const char *name, const struct stat *stbuf, off_t off)
 {
-	strcat(buf, name);
-	strcat(buf, "$");
+	strcat((char *)buf, name);
+	strcat((char *)buf, "$");
 	return 1;
 }
 
 struct dirent *readdir(DIR *dirp)
 {
 	if (!real_readdir)
-		real_readdir = dlsym(RTLD_NEXT, "readdir");
+		real_readdir = (dirent * (*)(DIR *)) dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -4028,7 +4029,7 @@ struct dirent *readdir(DIR *dirp)
 struct dirent64 *readdir64(DIR *dirp)
 {
 	if (!real_readdir64)
-		real_readdir64 = dlsym(RTLD_NEXT, "readdir64");
+		real_readdir64 = (dirent64 * (*)(DIR *)) dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -4059,7 +4060,7 @@ struct dirent64 *readdir64(DIR *dirp)
 int closedir(DIR *dirp)
 {
 	if (!real_closedir)
-		real_closedir = dlsym(RTLD_NEXT, "closedir");
+		real_closedir = (int (*)(DIR *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -4153,7 +4154,7 @@ int closedir(DIR *dirp)
 int stat64(const char *pathname, struct stat64 *buf)
 {
 	if (!real_stat64)
-		real_stat64 = dlsym(RTLD_NEXT, "stat64");
+		real_stat64 = (int (*)(const char *, struct stat64 *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -4189,7 +4190,7 @@ int stat64(const char *pathname, struct stat64 *buf)
 int fstat(int fd, struct stat *buf)
 {
 	if (!real_fstat)
-		real_fstat = dlsym(RTLD_NEXT, "fstat");
+		real_fstat = (int (*)(int, struct stat *))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
 	{
@@ -4225,10 +4226,9 @@ int fstat(int fd, struct stat *buf)
 
 int __fxstatat(int ver, int dir_fd, const char *pathname, struct stat *stat_buf, int flags)
 {
-	// fprintf(stderr, "[POSIX]. Calling Real '__fxstatat', pathname=%s, dir_fd=%d\n", pathname, dir_fd);
 	if (!real___fxstatat)
 	{
-		real___fxstatat = dlsym(RTLD_NEXT, __func__);
+		real___fxstatat = (int (*)(int, int, const char *, struct stat *, int))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4325,10 +4325,9 @@ int __fxstatat(int ver, int dir_fd, const char *pathname, struct stat *stat_buf,
 
 int __fxstatat64(int ver, int dir_fd, const char *pathname, struct stat64 *stat_buf, int flags)
 {
-	// fprintf(stderr, "[POSIX][TODO]. Calling Real '__fxstatat64', pathname=%s\n", __filename);
 	if (!real___fxstatat64)
 	{
-		real___fxstatat64 = dlsym(RTLD_NEXT, __func__);
+		real___fxstatat64 = (int (*)(int, int, const char *, struct stat64 *, int))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4426,7 +4425,7 @@ int faccessat(int dir_fd, const char *pathname, int mode, int flags)
 {
 	if (!real_faccessat)
 	{
-		real_faccessat = dlsym(RTLD_NEXT, __func__);
+		real_faccessat = (int (*)(int, const char *, int, int))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4521,7 +4520,7 @@ int unlinkat(int dir_fd, const char *pathname, int flags)
 {
 	if (!real_unlinkat)
 	{
-		real_unlinkat = dlsym(RTLD_NEXT, __func__);
+		real_unlinkat = (int (*)(int, const char *, int))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4614,7 +4613,7 @@ int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpa
 {
 	if (!real_renameat2)
 	{
-		real_renameat2 = dlsym(RTLD_NEXT, __func__);
+		real_renameat2 = (int (*)(int, const char *, int, const char *, unsigned int))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4689,7 +4688,7 @@ int __fxstat64(int ver, int fd, struct stat64 *buf)
 {
 	if (!real__fxstat64)
 	{
-		real__fxstat64 = dlsym(RTLD_NEXT, "__fxstat64");
+		real__fxstat64 = (int (*)(int, int, struct stat64 *))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4730,7 +4729,7 @@ int fstatat(int __fd, const char *__restrict __file, struct stat *__restrict __b
 {
 	if (!real_fstatat)
 	{
-		real_fstatat = dlsym(RTLD_NEXT, __func__);
+		real_fstatat = (int (*)(int, const char *, struct stat *, int))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4756,7 +4755,7 @@ int fstatat64(int __fd, const char *__restrict __file, struct stat64 *__restrict
 {
 	if (!real_fstatat64)
 	{
-		real_fstatat64 = dlsym(RTLD_NEXT, __func__);
+		real_fstatat64 = (int (*)(int, const char *, struct stat64 *, int))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4770,11 +4769,11 @@ int fstatat64(int __fd, const char *__restrict __file, struct stat64 *__restrict
 	return real_fstatat64(__fd, __file, __buf, __flag);
 }
 
-int statx(int dirfd, const char *restrict pathname, int flags, unsigned int mask, struct statx *restrict statxbuf)
+int statx(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *statxbuf)
 {
 	if (!real_statx)
 	{
-		real_statx = dlsym(RTLD_NEXT, __func__);
+		real_statx = (int (*)(int, const char *, int, unsigned int, struct statx *))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4786,11 +4785,11 @@ int statx(int dirfd, const char *restrict pathname, int flags, unsigned int mask
 	return real_statx(dirfd, pathname, flags, mask, statxbuf);
 }
 
-ssize_t readlink(const char *restrict pathname, char *restrict buf, size_t bufsiz)
+ssize_t readlink(const char *pathname, char *buf, size_t bufsiz)
 {
 	if (!real_readlink)
 	{
-		real_readlink = dlsym(RTLD_NEXT, __func__);
+		real_readlink = (long int (*)(const char *, char *, size_t))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4814,11 +4813,11 @@ ssize_t readlink(const char *restrict pathname, char *restrict buf, size_t bufsi
 	return ret;
 }
 
-ssize_t readlinkat(int dirfd, const char *restrict pathname, char *restrict buf, size_t bufsiz)
+ssize_t readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz)
 {
 	if (!real_readlinkat)
 	{
-		real_readlinkat = dlsym(RTLD_NEXT, __func__);
+		real_readlinkat = (ssize_t(*)(int, const char *, char *, size_t))dlsym(RTLD_NEXT, __func__);
 	}
 
 	if (!init)
@@ -4892,7 +4891,7 @@ ssize_t readlinkat(int dirfd, const char *restrict pathname, char *restrict buf,
 int newfstatat(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag)
 {
 	if (!real_newfstatat)
-		real_newfstatat = dlsym(RTLD_NEXT, "newfstatat");
+		real_newfstatat = (int (*)(int, const char *, struct stat *, int))dlsym(RTLD_NEXT, "newfstatat");
 
 	if (!init)
 	{
@@ -4966,7 +4965,7 @@ void StatReport(int fd, struct stat sb)
 int __fxstat(int ver, int fd, struct stat *buf)
 {
 	if (!real__fxstat)
-		real__fxstat = dlsym(RTLD_NEXT, "__fxstat");
+		real__fxstat = (int (*)(int, int, struct stat *))dlsym(RTLD_NEXT, "__fxstat");
 
 	if (!init)
 	{
@@ -5014,7 +5013,7 @@ int __fxstat(int ver, int fd, struct stat *buf)
 int access(const char *path, int mode)
 {
 	if (!real_access)
-		real_access = dlsym(RTLD_NEXT, "access");
+		real_access = (int (*)(const char *, int))dlsym(RTLD_NEXT, "access");
 
 	if (!init)
 	{
@@ -5089,7 +5088,11 @@ int access(const char *path, int mode)
 
 int fsync(int fd)
 {
-	real_fsync = dlsym(RTLD_NEXT, __func__);
+	if (!real_fsync)
+	{
+		real_fsync = (int (*)(int))dlsym(RTLD_NEXT, __func__);
+	}
+
 	if (!init)
 	{
 		return real_fsync(fd);
@@ -5160,7 +5163,7 @@ int fsync(int fd)
 // 	return real_fflush(stream);
 // }
 
-// int fprintf(FILE *restrict stream, const char *restrict format, ...)
+// int fprintf(FILE * stream, const char * format, ...)
 // {
 // 	if (!real_fprintf)
 // 	{
@@ -5219,7 +5222,7 @@ int fsync(int fd)
 char *getcwd(char *buf, size_t size)
 {
 	if (!real_getcwd)
-		real_getcwd = dlsym(RTLD_NEXT, "getcwd");
+		real_getcwd = (char *(*)(char *, size_t))dlsym(RTLD_NEXT, "getcwd");
 
 	if (!strncmp(getenv("PWD"), MOUNT_POINT, strlen(MOUNT_POINT)))
 	{
@@ -5241,7 +5244,7 @@ char *getcwd(char *buf, size_t size)
 int chdir(const char *pathname)
 {
 	if (!real_chdir)
-		real_chdir = dlsym(RTLD_NEXT, "chdir");
+		real_chdir = (int (*)(const char *))dlsym(RTLD_NEXT, "chdir");
 
 	if (!init)
 	{
@@ -5272,7 +5275,7 @@ int chdir(const char *pathname)
 int fchdir(int fd)
 {
 	if (!real_fchdir)
-		real_fchdir = dlsym(RTLD_NEXT, "fchdir");
+		real_fchdir = (int (*)(int))dlsym(RTLD_NEXT, "fchdir");
 
 	if (!init)
 	{
@@ -5353,10 +5356,10 @@ int fchdir(int fd)
 // 	return real_ptrace(__request);
 // }
 
-// int pthread_create(pthread_t *restrict thread,
-// 				   const pthread_attr_t *restrict attr,
+// int pthread_create(pthread_t * thread,
+// 				   const pthread_attr_t * attr,
 // 				   void *(*start_routine)(void *),
-// 				   void *restrict arg)
+// 				   void * arg)
 // {
 // 	if (!real_pthread_create)
 // 		real_pthread_create = dlsym(RTLD_NEXT, __func__);
