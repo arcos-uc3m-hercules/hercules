@@ -2256,7 +2256,7 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 
 	// char *curr_num_data_nodes = getenv("HERCULES_CURR_ACTIVE_DATA_NODES");
 	int curr_num_data_nodes_env = atoi(getenv("HERCULES_CURR_ACTIVE_DATA_NODES"));
-
+	// fprintf(stderr, "[++ HERCULES] curr_num_data_nodes_env=%d\n", curr_num_data_nodes_env);
 	int32_t old_num_storages = curr_imss.info.num_active_storages;
 	if (curr_num_data_nodes_env != curr_imss.info.num_active_storages)
 	{

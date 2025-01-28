@@ -106,8 +106,8 @@ int get_number_of_active_nodes()
 	else
 	{
 		number_active_storage_servers = atoi(buf);
-		fprintf(stderr, "[Wake up server] The new number of active data nodes is %s\n", buf);
-		slog_debug("[Wake up server] The new number of active data nodes is %s\n", buf);
+		fprintf(stderr, "[Server] The new number of active data nodes is %s\n", buf);
+		slog_debug("[Server] The new number of active data nodes is %s\n", buf);
 	}
 	// Close the file.
 	ret = close(fd);
@@ -280,7 +280,7 @@ void handle_signal_server(int signal)
 		char buf[10], action[20];
 		;
 		// Get the operation number.
-		int fd = open("/tmp/hercules_pkill_operation", O_RDONLY);
+		int fd = open("./tmp/hercules_pkill_operation", O_RDONLY);
 		if (fd == -1)
 		{
 			perror("ERR_HERCULES_OPEN_PKILL_OPERATION");
@@ -347,7 +347,7 @@ void handle_signal_server(int signal)
 		// This file is readed by the hercules script to know if this server
 		// was correctly shutting down.
 		char tmp_file_path[100];
-		sprintf(tmp_file_path, "/tmp/%c-hercules-%d-%s", args.type, args.id, action);
+		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
 		ready(tmp_file_path, "OK");
 	}
 	if (signal == SIGUSR2) // wake up this server.
@@ -363,7 +363,8 @@ void handle_signal_server(int signal)
 			// This file is readed by the hercules script to know if this server
 			// was correctly waking up.
 			char tmp_file_path[100];
-			sprintf(tmp_file_path, "/tmp/%c-hercules-%d-up", args.type, args.id);
+			sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-up", args.hercules_path, args.type, args.id);
+			fprintf(stderr, "Writting file %s\n", tmp_file_path);
 			ready(tmp_file_path, "OK");
 		}
 	}
@@ -451,7 +452,6 @@ int32_t main(int32_t argc, char **argv)
 		return 0;
 	}
 
-	sprintf(tmp_file_path, "/tmp/%c-hercules-%d-start", args.type, args.id);
 
 	cfg = cfg_init();
 	conf_path = getenv("HERCULES_CONF");
@@ -514,6 +514,12 @@ int32_t main(int32_t argc, char **argv)
 	{
 		// fprintf(stderr, "Configuration file loaded: %s\n", conf_path);
 	}
+
+	if (getenv("HERCULES_PATH") != NULL)
+		strcpy(args.hercules_path, getenv("HERCULES_PATH"));
+	else if (cfg_get(cfg, "HERCULES_PATH"))
+		strcpy(args.hercules_path, cfg_get(cfg, "HERCULES_PATH"));
+
 
 	if (cfg_get(cfg, "URI"))
 	{
@@ -624,6 +630,7 @@ int32_t main(int32_t argc, char **argv)
 		}
 	}
 	// IMSS_DEBUG_LEVEL = SLOG_NONE;
+	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-start", args.hercules_path, args.type, args.id);
 
 	/***************************************************************/
 	/******************** PARSE INPUT ARGUMENTS ********************/
@@ -640,7 +647,6 @@ int32_t main(int32_t argc, char **argv)
 	slog_debug("Server type=%c\n", args.type);
 	struct tm tm = *localtime(&t);
 	sprintf(log_path, "./%c-server-%d.%02d-%02d-%02d", args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
-	// sprintf(log_path, "./%c-server", args.type);
 	slog_init(log_path, IMSS_DEBUG_LEVEL, IMSS_DEBUG_FILE, IMSS_DEBUG_SCREEN, 1, 1, 1, args.id);
 
 	if (IMSS_DEBUG_FILE > 0)
@@ -1202,7 +1208,7 @@ int32_t main(int32_t argc, char **argv)
 		// sleep(1);
 
 		// char tmp_file_path[100];
-		// sprintf(tmp_file_path, "/tmp/%c-hercules-%d-down", args.type, args.id);
+		// sprintf(tmp_file_path, "./tmp/%c-hercules-%d-down", args.type, args.id);
 
 		// stop_server();
 		// move_blocks_2_server(args.stat_port, args.id, imss_uri, g_map);
@@ -1226,7 +1232,7 @@ int32_t main(int32_t argc, char **argv)
 	// ep_close(ucp_worker, pub_ep, UCP_EP_CLOSE_MODE_FORCE);
 	// ep_close(ucp_worker, client_ep, UCP_EP_CLOSE_MODE_FORCE);
 
-	sprintf(tmp_file_path, "/tmp/%c-hercules-%d-stop", args.type, args.id);
+	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-stop", args.hercules_path, args.type, args.id);
 	ready(tmp_file_path, "OK");
 
 	// Free the memory buffer.
