@@ -21,14 +21,15 @@ StopServers() {
     if [[ "$VERBOSE" -eq "1" ]]; then
         echo "# Operation = ${OPERATION}"
     fi
+    echo ${OPERATION} > "${HERCULES_PATH}/tmp/hercules_pkill_operation"
     for node in "${hosts[@]}"
     do
         # Set the action to be doing by the servers when they received the pkill signal.
         # ( ssh $node  "echo $OPERATION > ./tmp/hercules_pkill_operation" )
-        echo ${OPERATION} > "${HERCULES_PATH}/tmp/hercules_pkill_operation"
         # Kill threads and finish the server.
         ( ssh ${node} "pkill -SIGUSR1 hercules_server" )
     done
+    rm "${HERCULES_PATH}/tmp/hercules_pkill_operation"
 }
 
 WakeUpServers() {
@@ -75,7 +76,7 @@ WaitForServers() {
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "# Hercules: ${ACTION} ${SERVER_NAME} server ${SERVER_NUMBER} on ${node}"
         fi
-        COMMAND="${HERCULES_BASH_PATH}/check-servers.sh ${SERVER_TYPE} ${SERVER_NUMBER} ${ACTION}"
+        COMMAND="${HERCULES_BASH_PATH}/check-servers.sh ${SERVER_TYPE} ${SERVER_NUMBER} ${ACTION} ${HERCULES_PATH}"
         
         # if slurm is not available.
         if [[ "$SLURM" -eq "0" ]]; then
@@ -323,6 +324,7 @@ fi
 
 # set -x
 if [[ "$SLURM" -eq "1" ]]; then
+    echo "[+] Slurm is active."
     ## If slurm is enabled, we concat the job id to the configuration file to create a new one.
     CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
     cp $FILE $CURR_HERCULES_CONF_FILE
@@ -360,7 +362,7 @@ then
     ## the hercules "remove" option to stop only some
     ## data servers. "stop" option will stop all running
     ## data servers.
-    cat $HERCULES_DATA_HOSTFILE > "data2stop_hostfile_$SLURM_JOB_ID"
+    cat $HERCULES_DATA_HOSTFILE > "${HERCULES_PATH}/tmp/data2stop_hostfile_$SLURM_JOB_ID"
 
     ## Creates an array with the data servers hostnames.
     readarray -t hosts < $HERCULES_DATA_HOSTFILE
@@ -384,7 +386,7 @@ then
         exit 0
     fi
     # Stop metadata servers.
-    cat $HERCULES_METADATA_HOSTFILE > "data2stop_hostfile_$SLURM_JOB_ID"
+    cat $HERCULES_METADATA_HOSTFILE > "${HERCULES_PATH}/tmp/data2stop_hostfile_$SLURM_JOB_ID"
     readarray -t hosts < $HERCULES_METADATA_HOSTFILE
     # echo "meta hosts=$hosts"
     StopServers "metadata" 1 ${hosts[@]} 
