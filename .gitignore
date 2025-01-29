@@ -26,3 +26,5 @@ prev_CMakes
 hostfiles
 .vscode
 .log
+tmp/*
+!tmp/.emptyfile

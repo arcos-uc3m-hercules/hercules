@@ -19,15 +19,15 @@ StopServers() {
 
     echo "# Hercules: Stopping $NAME servers in ${hosts[@]}"
     if [[ "$VERBOSE" -eq "1" ]]; then
-        echo "# Operation = $OPERATION"
+        echo "# Operation = ${OPERATION}"
     fi
     for node in "${hosts[@]}"
     do
         # Set the action to be doing by the servers when they received the pkill signal.
         # ( ssh $node  "echo $OPERATION > ./tmp/hercules_pkill_operation" )
-        echo $OPERATION > "${HERCULES_PATH}/tmp/hercules_pkill_operation"
+        echo ${OPERATION} > "${HERCULES_PATH}/tmp/hercules_pkill_operation"
         # Kill threads and finish the server.
-        ( ssh $node "pkill -SIGUSR1 hercules_server" )
+        ( ssh ${node} "pkill -SIGUSR1 hercules_server" )
     done
 }
 
@@ -66,16 +66,16 @@ WaitForServers() {
     shift
     hosts=("$@")
 
-    file_name="${HERCULES_PATH}/tmp/data2${ACTION}_index_$SLURM_JOB_ID"
-    readarray -t server_index_arr < $file_name #data2start_index-<SLURM-JOD-ID>
+    file_name="${HERCULES_PATH}/tmp/data2${ACTION}_index_${SLURM_JOB_ID}"
+    readarray -t server_index_arr < ${file_name} #data2start_index-<SLURM-JOD-ID>
     
     for node in "${hosts[@]}"
     do
         SERVER_NUMBER=$((server_index_arr[$SERVER_ID]-1))
         if [[ "$VERBOSE" -eq "1" ]]; then
-            echo "# Hercules: $ACTION $SERVER_NAME server $SERVER_NUMBER on $node"
+            echo "# Hercules: ${ACTION} ${SERVER_NAME} server ${SERVER_NUMBER} on ${node}"
         fi
-        COMMAND="$HERCULES_BASH_PATH/check-servers.sh $SERVER_TYPE $SERVER_NUMBER $ACTION"
+        COMMAND="${HERCULES_BASH_PATH}/check-servers.sh ${SERVER_TYPE} ${SERVER_NUMBER} ${ACTION}"
         
         # if slurm is not available.
         if [[ "$SLURM" -eq "0" ]]; then
@@ -91,18 +91,18 @@ WaitForServers() {
             fi
         else # if slurm is available.
         set -x
-            ret=$(srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $COMMAND)
+            ret=$(srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
         set +x
         fi
         ret=$?
         if [ "$ret" -gt 0 ]; then
-            echo "[Error: $ret] It has not been possible to "${ACTION}" a $SERVER_NAME server on $node, please verify the configuration file and logs."
+            echo "[Error: $ret] It has not been possible to "${ACTION}" a ${SERVER_NAME} server on ${node}, please verify the configuration file and logs."
             exit 1
         fi
         
         SERVER_ID=$((SERVER_ID+1))
         if [[ "$VERBOSE" -eq "1" ]]; then
-            echo "[OK] $SERVER_NAME $i server running in $node"
+            echo "[OK] ${SERVER_NAME} ${i} server ${ACTION} in ${node}"
         fi        
     done
 }
@@ -572,7 +572,7 @@ start=`date +%s.%N`
 for node in ${meta_hosts[@]}
 do    
     RM="rm ${HERCULES_PATH}/tmp/m-hercules-$i"
-    COMMAND="$HERCULES_BUILD_PATH/hercules_server m $i"
+    COMMAND="${HERCULES_BUILD_PATH}/hercules_server m $i"
     ## If slurm is not being used, we deploy the service by connecting
     ## to the node via ssh.
     if [[ "$SLURM" -eq "0" ]]; then
@@ -601,7 +601,7 @@ done
 
 
 ## Wait until all metadata servers are up.
-awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' "$HERCULES_METADATA_HOSTFILE" "$HERCULES_METADATA_HOSTFILE" > "${HERCULES_PATH}/tmp/data2start_index_$SLURM_JOB_ID"
+awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' "${HERCULES_METADATA_HOSTFILE}" "${HERCULES_METADATA_HOSTFILE}" > "${HERCULES_PATH}/tmp/data2start_index_${SLURM_JOB_ID}"
 WaitForServers "metadata" "m" "start" ${meta_hosts[@]}
 end=`date +%s.%N`
 runtime=$( echo "$end - $start" | bc -l )
@@ -679,7 +679,7 @@ do
 done
 
 ## Wait until all data servers are up.
-awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' $HERCULES_DATA_HOSTFILE $HERCULES_DATA_HOSTFILE > "${HERCULES_PATH}/tmp/data2start_index_$SLURM_JOB_ID"
+awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' ${HERCULES_DATA_HOSTFILE} ${HERCULES_DATA_HOSTFILE} > "${HERCULES_PATH}/tmp/data2start_index_${SLURM_JOB_ID}"
 WaitForServers "data" "d" "start" ${data_hosts[@]}
 end=`date +%s.%N`
 runtime=$( echo "$end - $start" | bc -l )

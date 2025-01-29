@@ -277,13 +277,18 @@ void handle_signal_server(int signal)
 	{
 		slog_info("SIGUSR1 received");
 		int pkill_operation = 0, ret = 0;
-		char buf[10], action[20];
-		;
+		char buf[10], action[20], temporal_path[PATH_MAX];
+
+		sprintf(temporal_path,"%s/tmp/hercules_pkill_operation", args.hercules_path);
+			// fprintf(stderr,"Temporal path: %s\n", temporal_path);
+		
 		// Get the operation number.
-		int fd = open("./tmp/hercules_pkill_operation", O_RDONLY);
+		int fd = open(temporal_path, O_RDONLY);
 		if (fd == -1)
 		{
-			perror("ERR_HERCULES_OPEN_PKILL_OPERATION");
+			char err_msg[PATH_MAX];
+			sprintf(err_msg, "ERR_HERCULES_OPEN_PKILL_OPERATION:%s", temporal_path);
+			perror(err_msg);
 			return;
 		}
 

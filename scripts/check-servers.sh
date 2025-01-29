@@ -6,6 +6,8 @@ ACTION=$3 # expected string action, e.g., down when servers are stopped.
 ATTEMPS=10
 i=1
 
+echo "-- Hercules path: ${HERCULES_PATH}"
+
 FILE="./tmp/$SERVER_TYPE-hercules-$SERVER_NUMBER-$ACTION"
 ## Checks if the file exists.
 until [ -f $FILE ]; do
