@@ -72,6 +72,7 @@ struct arguments
     struct logging_opts logging;
 };
 
+
 int parse_args(int argc, char **argv, struct arguments *args);
 
 #endif

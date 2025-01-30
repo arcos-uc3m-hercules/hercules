@@ -1,0 +1,239 @@
+2024.04.16-13:07:07.63 - [[32mINFO[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	,Time(msec), Comment, RetCode
+2024.04.16-13:07:07.63 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_MOUNT_POINT: /mnt/hercules/
+2024.04.16-13:07:07.63 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_ROOT: imss://
+2024.04.16-13:07:07.63 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_HOSTFILE: /beegfs/home/javier.garciablas/gsanchez/Cachemire/hercules/data_hostfile
+2024.04.16-13:07:07.63 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_N_SERVERS: 1
+2024.04.16-13:07:07.63 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_SRV_PORT: 85000
+2024.04.16-13:07:07.63 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_BUFFSIZE: 2
+2024.04.16-13:07:07.64 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- META_HOSTFILE: /beegfs/home/javier.garciablas/gsanchez/Cachemire/hercules/meta_hostfile
+2024.04.16-13:07:07.64 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_META_PORT: 75000
+2024.04.16-13:07:07.64 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_META_SERVERS: 1
+2024.04.16-13:07:07.64 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_BLKSIZE: 512 kB
+2024.04.16-13:07:07.64 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_STORAGE_SIZE: 16 GB
+2024.04.16-13:07:07.64 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_METADATA_FILE: 
+2024.04.16-13:07:07.64 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_DEPLOYMENT: 2
+2024.04.16-13:07:07.64 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- HERCULES_MALLEABILITY: 0
+2024.04.16-13:07:07.64 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- UPPER_BOUND_SERVERS: 0
+2024.04.16-13:07:07.64 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- LOWER_BOUND_SERVERS: 0
+2024.04.16-13:07:07.65 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- REPL_FACTOR: 1
+2024.04.16-13:07:07.65 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- POLICY: RR
+2024.04.16-13:07:07.65 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][imss_posix_init]	>	 -- RELEASE: 1
+2024.04.16-13:07:07.65 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][stat_init]	>	[IMSS] Calling stat_init.
+2024.04.16-13:07:07.65 - [[32mINFO[0m] [1587000][140737342465920][0:Success][init_context]	>	Before memset
+2024.04.16-13:07:07.65 - [[32mINFO[0m] [1587000][140737342465920][0:Success][init_context]	>	After memset
+2024.04.16-13:07:07.65 - [[32mINFO[0m] [1587000][140737342465920][0:Success][init_context]	>	Before ucp_config_read
+2024.04.16-13:07:07.65 - [[32mINFO[0m] [1587000][140737342465920][0:Success][init_context]	>	After ucp_config_read, status=Success
+2024.04.16-13:07:07.65 - [[32mINFO[0m] [1587000][140737342465920][0:Success][init_context]	>	Before ucp_init
+2024.04.16-13:07:07.05 - [[32mINFO[0m] [1587000][140737342465920][12:Cannot allocate memory][init_context]	>	After ucp_init, status=Success
+2024.04.16-13:07:07.39 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][stat_init]	>	[IMSS][stat_int] i=0, stat_node=broadwell-000, port=75000, rank=1311558675
+2024.04.16-13:07:07.39 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][stat_init]	>	[IMSS][stat_int] Contacting stat dispatcher at broadwell-000:75000
+2024.04.16-13:07:07.39 - [[34mDEBUG[0m] [1587000][140737342465920][0:Success][stat_init]	>	[IMSS][stat_int] request=1311558675 GET HELLO!
+2024.04.16-13:07:07.41 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][client_create_ep]	>	[COMM] Created client endpoint
+2024.04.16-13:07:07.41 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][stat_init]	>	[IMSS][stat_init] created ep with broadwell-000:75000
+2024.04.16-13:07:07.42 - [[0mLIVE[0m] [1587000][140737342465920][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] starting function, imss_uri=imss://
+2024.04.16-13:07:07.42 - [[0mLIVE[0m] [1587000][140737342465920][12:Cannot allocate memory][find_imss]	>	imssd->len=0
+2024.04.16-13:07:07.42 - [[32mINFO[0m] [1587000][140737342465920][12:Cannot allocate memory][stat_imss]	>	[IMSS][stat_imss] Request - '4159770928 GET 0 imss://'
+2024.04.16-13:07:07.43 - [[32mINFO[0m] [1587000][140737342465920][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream start, data_type=0
+2024.04.16-13:07:07.43 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][recv_data_opt]	>	[COMM] Waiting message  as  16308868797742001031.
+2024.04.16-13:07:07.44 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][recv_data_opt]	>	[COMM] Probe tag (792 bytes)
+2024.04.16-13:07:07.44 - [[32mINFO[0m] [1587000][140737342465920][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	 		 receiving IMSS_INFO 792
+2024.04.16-13:07:07.44 - [[32mINFO[0m] [1587000][140737342465920][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	 		 msg_data=imss://
+2024.04.16-13:07:07.44 - [[0mLIVE[0m] [1587000][140737342465920][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	struct_->num_storages=1
+2024.04.16-13:07:07.44 - [[32mINFO[0m] [1587000][140737342465920][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream end 792
+2024.04.16-13:07:07.44 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][stat_imss]	>	[IMSS][stat_imss] End, ret=792
+2024.04.16-13:07:07.44 - [[0mLIVE[0m] [1587000][140737342465920][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] imss_uri=imss://, imss_existance=1
+2024.04.16-13:07:07.44 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] new_imss.info.num_storages=1
+2024.04.16-13:07:07.44 - [[0mLIVE[0m] [1587000][140737342465920][0:Success][open_imss]	>	[open_imss] ip_address=broadwell-001:19464
+2024.04.16-13:07:07.46 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][client_create_ep]	>	[COMM] Created client endpoint
+2024.04.16-13:07:08.73 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][open_imss]	>	[IMSS] open_imss: Created endpoint with broadwell-001
+2024.04.16-13:07:08.73 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][GInsert]	>	[IMSS][GTree] inserted_pos=0
+2024.04.16-13:07:08.73 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][imss_posix_init]	>	[CLIENT 1311558675] ready!
+
+2024.04.16-13:07:08.73 - [[0mLIVE[0m] [1587000][140737342465920][12:Cannot allocate memory][imss_check]	>	[imss_check] imssd->len=1
+2024.04.16-13:07:08.74 - [[0mLIVE[0m] [1587000][140737342465920][12:Cannot allocate memory][imss_check]	>	[imss_check] data_uri=imss://, imss_.info.uri_=imss://, imss_uri_len=7
+2024.04.16-13:07:08.74 - [[34mDEBUG[0m] [1587000][140737342465920][12:Cannot allocate memory][imss_posix_init]	>	IMSS EXIST=0
+2024.04.16-13:07:11.77 - [[32mINFO[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	,Time(msec), Comment, RetCode
+2024.04.16-13:07:11.77 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_MOUNT_POINT: /mnt/hercules/
+2024.04.16-13:07:11.77 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_ROOT: imss://
+2024.04.16-13:07:11.77 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_HOSTFILE: /beegfs/home/javier.garciablas/gsanchez/Cachemire/hercules/data_hostfile
+2024.04.16-13:07:11.77 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_N_SERVERS: 1
+2024.04.16-13:07:11.78 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_SRV_PORT: 85000
+2024.04.16-13:07:11.78 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_BUFFSIZE: 2
+2024.04.16-13:07:11.78 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- META_HOSTFILE: /beegfs/home/javier.garciablas/gsanchez/Cachemire/hercules/meta_hostfile
+2024.04.16-13:07:11.78 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_META_PORT: 75000
+2024.04.16-13:07:11.78 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_META_SERVERS: 1
+2024.04.16-13:07:11.78 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_BLKSIZE: 512 kB
+2024.04.16-13:07:11.78 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_STORAGE_SIZE: 16 GB
+2024.04.16-13:07:11.78 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_METADATA_FILE: 
+2024.04.16-13:07:11.78 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_DEPLOYMENT: 2
+2024.04.16-13:07:11.78 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_MALLEABILITY: 0
+2024.04.16-13:07:11.79 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- UPPER_BOUND_SERVERS: 0
+2024.04.16-13:07:11.79 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- LOWER_BOUND_SERVERS: 0
+2024.04.16-13:07:11.79 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- REPL_FACTOR: 1
+2024.04.16-13:07:11.79 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- POLICY: RR
+2024.04.16-13:07:11.79 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- RELEASE: 1
+2024.04.16-13:07:11.79 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS] Calling stat_init.
+2024.04.16-13:07:11.79 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	Before memset
+2024.04.16-13:07:11.79 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	After memset
+2024.04.16-13:07:11.79 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	Before ucp_config_read
+2024.04.16-13:07:11.80 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	After ucp_config_read, status=Success
+2024.04.16-13:07:11.80 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	Before ucp_init
+2024.04.16-13:07:14.80 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][init_context]	>	After ucp_init, status=Success
+2024.04.16-13:07:14.84 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS][stat_int] i=0, stat_node=broadwell-000, port=75000, rank=1311558675
+2024.04.16-13:07:14.84 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS][stat_int] Contacting stat dispatcher at broadwell-000:75000
+2024.04.16-13:07:14.84 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS][stat_int] request=1311558675 GET HELLO!
+2024.04.16-13:07:14.87 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][client_create_ep]	>	[COMM] Created client endpoint
+2024.04.16-13:07:14.87 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][stat_init]	>	[IMSS][stat_init] created ep with broadwell-000:75000
+2024.04.16-13:07:14.87 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] starting function, imss_uri=imss://
+2024.04.16-13:07:14.87 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][find_imss]	>	imssd->len=0
+2024.04.16-13:07:14.87 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][stat_imss]	>	[IMSS][stat_imss] Request - '4159992112 GET 0 imss://'
+2024.04.16-13:07:14.06 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream start, data_type=0
+2024.04.16-13:07:14.45 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_data_opt]	>	[COMM] Waiting message  as  109686056165750402.
+2024.04.16-13:07:14.46 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_data_opt]	>	[COMM] Probe tag (792 bytes)
+2024.04.16-13:07:14.46 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	 		 receiving IMSS_INFO 792
+2024.04.16-13:07:14.46 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	 		 msg_data=imss://
+2024.04.16-13:07:14.46 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	struct_->num_storages=1
+2024.04.16-13:07:14.47 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream end 792
+2024.04.16-13:07:14.47 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][stat_imss]	>	[IMSS][stat_imss] End, ret=792
+2024.04.16-13:07:14.47 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] imss_uri=imss://, imss_existance=1
+2024.04.16-13:07:14.47 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] new_imss.info.num_storages=1
+2024.04.16-13:07:14.47 - [[0mLIVE[0m] [1587000][140737342662528][0:Success][open_imss]	>	[open_imss] ip_address=broadwell-001:19464
+2024.04.16-13:07:14.49 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][client_create_ep]	>	[COMM] Created client endpoint
+2024.04.16-13:07:14.49 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS] open_imss: Created endpoint with broadwell-001
+2024.04.16-13:07:14.49 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][GInsert]	>	[IMSS][GTree] inserted_pos=0
+2024.04.16-13:07:14.50 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_posix_init]	>	[CLIENT 1311558675] ready!
+
+2024.04.16-13:07:14.50 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_check]	>	[imss_check] imssd->len=1
+2024.04.16-13:07:14.50 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_check]	>	[imss_check] data_uri=imss://, imss_.info.uri_=imss://, imss_uri_len=7
+2024.04.16-13:07:14.50 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_posix_init]	>	IMSS EXIST=0
+2024.04.16-13:07:19.71 - [[32mINFO[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	,Time(msec), Comment, RetCode
+2024.04.16-13:07:19.71 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_MOUNT_POINT: /mnt/hercules/
+2024.04.16-13:07:19.71 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_ROOT: imss://
+2024.04.16-13:07:19.71 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_HOSTFILE: /beegfs/home/javier.garciablas/gsanchez/Cachemire/hercules/data_hostfile
+2024.04.16-13:07:19.71 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_N_SERVERS: 1
+2024.04.16-13:07:19.71 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_SRV_PORT: 85000
+2024.04.16-13:07:19.71 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_BUFFSIZE: 2
+2024.04.16-13:07:19.71 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- META_HOSTFILE: /beegfs/home/javier.garciablas/gsanchez/Cachemire/hercules/meta_hostfile
+2024.04.16-13:07:19.71 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_META_PORT: 75000
+2024.04.16-13:07:19.71 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_META_SERVERS: 1
+2024.04.16-13:07:19.72 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_BLKSIZE: 512 kB
+2024.04.16-13:07:19.72 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_STORAGE_SIZE: 16 GB
+2024.04.16-13:07:19.72 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_METADATA_FILE: 
+2024.04.16-13:07:19.72 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_DEPLOYMENT: 2
+2024.04.16-13:07:19.72 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_MALLEABILITY: 0
+2024.04.16-13:07:19.72 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- UPPER_BOUND_SERVERS: 0
+2024.04.16-13:07:19.72 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- LOWER_BOUND_SERVERS: 0
+2024.04.16-13:07:19.72 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- REPL_FACTOR: 1
+2024.04.16-13:07:19.72 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- POLICY: RR
+2024.04.16-13:07:19.72 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- RELEASE: 1
+2024.04.16-13:07:19.73 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS] Calling stat_init.
+2024.04.16-13:07:19.73 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	Before memset
+2024.04.16-13:07:19.73 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	After memset
+2024.04.16-13:07:19.73 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	Before ucp_config_read
+2024.04.16-13:07:19.73 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	After ucp_config_read, status=Success
+2024.04.16-13:07:19.73 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	Before ucp_init
+2024.04.16-13:07:21.29 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][init_context]	>	After ucp_init, status=Success
+2024.04.16-13:07:21.36 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS][stat_int] i=0, stat_node=broadwell-000, port=75000, rank=1311558675
+2024.04.16-13:07:21.36 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS][stat_int] Contacting stat dispatcher at broadwell-000:75000
+2024.04.16-13:07:22.58 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS][stat_int] request=1311558675 GET HELLO!
+2024.04.16-13:07:22.60 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][client_create_ep]	>	[COMM] Created client endpoint
+2024.04.16-13:07:22.60 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][stat_init]	>	[IMSS][stat_init] created ep with broadwell-000:75000
+2024.04.16-13:07:22.60 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] starting function, imss_uri=imss://
+2024.04.16-13:07:22.60 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][find_imss]	>	imssd->len=0
+2024.04.16-13:07:22.61 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][stat_imss]	>	[IMSS][stat_imss] Request - '4159992112 GET 0 imss://'
+2024.04.16-13:07:22.62 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream start, data_type=0
+2024.04.16-13:07:22.62 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_data_opt]	>	[COMM] Waiting message  as  4841397271383284068.
+2024.04.16-13:07:22.62 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_data_opt]	>	[COMM] Probe tag (792 bytes)
+2024.04.16-13:07:22.62 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	 		 receiving IMSS_INFO 792
+2024.04.16-13:07:22.63 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	 		 msg_data=imss://
+2024.04.16-13:07:22.63 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	struct_->num_storages=1
+2024.04.16-13:07:22.63 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream end 792
+2024.04.16-13:07:22.63 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][stat_imss]	>	[IMSS][stat_imss] End, ret=792
+2024.04.16-13:07:22.63 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] imss_uri=imss://, imss_existance=1
+2024.04.16-13:07:22.63 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] new_imss.info.num_storages=1
+2024.04.16-13:07:22.63 - [[0mLIVE[0m] [1587000][140737342662528][0:Success][open_imss]	>	[open_imss] ip_address=broadwell-001:19464
+2024.04.16-13:07:22.65 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][client_create_ep]	>	[COMM] Created client endpoint
+2024.04.16-13:07:22.65 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS] open_imss: Created endpoint with broadwell-001
+2024.04.16-13:07:22.65 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][GInsert]	>	[IMSS][GTree] inserted_pos=0
+2024.04.16-13:07:22.65 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_posix_init]	>	[CLIENT 1311558675] ready!
+
+2024.04.16-13:07:22.65 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_check]	>	[imss_check] imssd->len=1
+2024.04.16-13:07:22.65 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_check]	>	[imss_check] data_uri=imss://, imss_.info.uri_=imss://, imss_uri_len=7
+2024.04.16-13:07:22.65 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_posix_init]	>	IMSS EXIST=0
+2024.04.16-13:07:27.63 - [[32mINFO[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	,Time(msec), Comment, RetCode
+2024.04.16-13:07:27.63 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_MOUNT_POINT: /mnt/hercules/
+2024.04.16-13:07:27.63 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_ROOT: imss://
+2024.04.16-13:07:27.63 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_HOSTFILE: /beegfs/home/javier.garciablas/gsanchez/Cachemire/hercules/data_hostfile
+2024.04.16-13:07:27.63 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_N_SERVERS: 1
+2024.04.16-13:07:27.63 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_SRV_PORT: 85000
+2024.04.16-13:07:27.64 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_BUFFSIZE: 2
+2024.04.16-13:07:27.64 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- META_HOSTFILE: /beegfs/home/javier.garciablas/gsanchez/Cachemire/hercules/meta_hostfile
+2024.04.16-13:07:27.64 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_META_PORT: 75000
+2024.04.16-13:07:27.64 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_META_SERVERS: 1
+2024.04.16-13:07:27.64 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_BLKSIZE: 512 kB
+2024.04.16-13:07:27.64 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_STORAGE_SIZE: 16 GB
+2024.04.16-13:07:27.64 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_METADATA_FILE: 
+2024.04.16-13:07:27.64 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_DEPLOYMENT: 2
+2024.04.16-13:07:27.64 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- HERCULES_MALLEABILITY: 0
+2024.04.16-13:07:27.64 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- UPPER_BOUND_SERVERS: 0
+2024.04.16-13:07:27.65 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- LOWER_BOUND_SERVERS: 0
+2024.04.16-13:07:27.28 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- REPL_FACTOR: 1
+2024.04.16-13:07:27.28 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- POLICY: RR
+2024.04.16-13:07:27.28 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_posix_init]	>	 -- RELEASE: 1
+2024.04.16-13:07:27.28 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS] Calling stat_init.
+2024.04.16-13:07:27.28 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	Before memset
+2024.04.16-13:07:27.28 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	After memset
+2024.04.16-13:07:27.29 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	Before ucp_config_read
+2024.04.16-13:07:27.29 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	After ucp_config_read, status=Success
+2024.04.16-13:07:27.29 - [[32mINFO[0m] [1587000][140737342662528][0:Success][init_context]	>	Before ucp_init
+2024.04.16-13:07:31.07 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][init_context]	>	After ucp_init, status=Success
+2024.04.16-13:07:32.89 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS][stat_int] i=0, stat_node=broadwell-000, port=75000, rank=1311558675
+2024.04.16-13:07:32.89 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS][stat_int] Contacting stat dispatcher at broadwell-000:75000
+2024.04.16-13:07:32.89 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][stat_init]	>	[IMSS][stat_int] request=1311558675 GET HELLO!
+2024.04.16-13:07:32.91 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][client_create_ep]	>	[COMM] Created client endpoint
+2024.04.16-13:07:32.91 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][stat_init]	>	[IMSS][stat_init] created ep with broadwell-000:75000
+2024.04.16-13:07:32.91 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] starting function, imss_uri=imss://
+2024.04.16-13:07:32.91 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][find_imss]	>	imssd->len=0
+2024.04.16-13:07:32.91 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][stat_imss]	>	[IMSS][stat_imss] Request - '4159848752 GET 0 imss://'
+2024.04.16-13:07:32.92 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream start, data_type=0
+2024.04.16-13:07:32.92 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_data_opt]	>	[COMM] Waiting message  as  6397760909689753362.
+2024.04.16-13:07:32.93 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_data_opt]	>	[COMM] Probe tag (792 bytes)
+2024.04.16-13:07:32.93 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	 		 receiving IMSS_INFO 792
+2024.04.16-13:07:32.93 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	 		 msg_data=imss://
+2024.04.16-13:07:32.93 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	struct_->num_storages=1
+2024.04.16-13:07:32.93 - [[32mINFO[0m] [1587000][140737342662528][12:Cannot allocate memory][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream end 792
+2024.04.16-13:07:32.94 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][stat_imss]	>	[IMSS][stat_imss] End, ret=792
+2024.04.16-13:07:32.94 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] imss_uri=imss://, imss_existance=1
+2024.04.16-13:07:32.94 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS][open_imss] new_imss.info.num_storages=1
+2024.04.16-13:07:32.94 - [[0mLIVE[0m] [1587000][140737342662528][0:Success][open_imss]	>	[open_imss] ip_address=broadwell-001:19464
+2024.04.16-13:07:32.32 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][client_create_ep]	>	[COMM] Created client endpoint
+2024.04.16-13:07:32.32 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][open_imss]	>	[IMSS] open_imss: Created endpoint with broadwell-001
+2024.04.16-13:07:32.33 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][GInsert]	>	[IMSS][GTree] inserted_pos=0
+2024.04.16-13:07:32.33 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_posix_init]	>	[CLIENT 1311558675] ready!
+
+2024.04.16-13:07:32.33 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_check]	>	[imss_check] imssd->len=1
+2024.04.16-13:07:32.33 - [[0mLIVE[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_check]	>	[imss_check] data_uri=imss://, imss_.info.uri_=imss://, imss_uri_len=7
+2024.04.16-13:07:32.33 - [[34mDEBUG[0m] [1587000][140737342662528][12:Cannot allocate memory][imss_posix_init]	>	IMSS EXIST=0
+2024.04.16-13:07:32.33 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][__xstat]	>	[POSIX] Calling Hercules '__xstat', pathname=/mnt/hercules/, ver=1, new_path=imss://
+2024.04.16-13:07:32.33 - [[33mWARN[0m] [1587000][140737342662528][0:Success][fd_lookup]	>	</beegfs/home/javier.garciablas/hercules/fuse/imss_posix_api.c:141> -- [imss_posix_api][fd_lookup] file not found, imss://
+2024.04.16-13:07:32.33 - [[0mLIVE[0m] [1587000][140737342662528][0:Success][fd_lookup]	>	[imss_posix_api] path=imss://, found=-1, fd=-1
+2024.04.16-13:07:32.33 - [[33mWARN[0m] [1587000][140737342662528][0:Success][imss_refresh]	>	</beegfs/home/javier.garciablas/hercules/fuse/imss_posix_api.c:211> -- [imss_refresh] No such file or directory
+2024.04.16-13:07:32.34 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][imss_getattr]	>	before get_type, imss_path=imss://
+2024.04.16-13:07:32.34 - [[32mINFO[0m] [1587000][140737342662528][0:Success][get_type]	>	[IMSS][get_type] Request - '0 GET 0 imss://'
+2024.04.16-13:07:32.34 - [[32mINFO[0m] [1587000][140737342662528][0:Success][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream start, data_type=4
+2024.04.16-13:07:32.34 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][recv_data_opt]	>	[COMM] Waiting message  as  6397760909689753362.
+2024.04.16-13:07:32.34 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][recv_data_opt]	>	[COMM] Probe tag (792 bytes)
+2024.04.16-13:07:32.35 - [[32mINFO[0m] [1587000][140737342662528][0:Success][recv_dynamic_stream_opt]	>	 		 receiving STRING or BUFFER 792
+2024.04.16-13:07:32.35 - [[32mINFO[0m] [1587000][140737342662528][0:Success][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream end 792
+2024.04.16-13:07:32.35 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][get_type]	>	[IMSS][get_type] after recv_dynamic_stream ret=792
+2024.04.16-13:07:32.35 - [[0mLIVE[0m] [1587000][140737342662528][0:Success][imss_getattr]	>	after get_type(imss://):1
+2024.04.16-13:07:32.35 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][get_dir]	>	[IMSS][get_dir] Request - 4159848752 GET 1 imss://
+2024.04.16-13:07:32.35 - [[32mINFO[0m] [1587000][140737342662528][0:Success][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream start, data_type=4
+2024.04.16-13:07:33.99 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][recv_data_opt]	>	[COMM] Waiting message  as  6397760909689753362.
+2024.04.16-13:07:33.00 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][recv_data_opt]	>	[COMM] Probe tag (512 bytes)
+2024.04.16-13:07:33.00 - [[32mINFO[0m] [1587000][140737342662528][0:Success][recv_dynamic_stream_opt]	>	 		 receiving STRING or BUFFER 512
+2024.04.16-13:07:33.00 - [[32mINFO[0m] [1587000][140737342662528][0:Success][recv_dynamic_stream_opt]	>	[COMM] recv_dynamic_stream end 512
+2024.04.16-13:07:33.01 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][get_dir]	>	[IMSS][get_dir] Ending, num_elements=2
+2024.04.16-13:07:33.01 - [[0mLIVE[0m] [1587000][140737342662528][0:Success][imss_getattr]	>	[imss_getattr] n_ent=2
+2024.04.16-13:07:33.01 - [[34mDEBUG[0m] [1587000][140737342662528][0:Success][__xstat]	>	[POSIX] End Hercules '__xstat', pathname=/mnt/hercules/, ver=1, new_path=imss://, ret=0, filesize=4
+

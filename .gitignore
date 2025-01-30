@@ -27,3 +27,5 @@ hostfiles
 .vscode
 .log
 bash/tests/data
+tmp/*
+!tmp/.emptyfile

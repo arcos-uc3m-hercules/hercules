@@ -632,7 +632,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	elapsed = seconds + useconds / 1e6;
 
 	init = 1;
-	// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
+	fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
 
 void __attribute__((destructor)) run_me_last()
@@ -696,10 +696,10 @@ int close(int fd)
 			ret = 0;
 		}
 		slog_live("[POSIX]. Ending Hercules 'close', pathname=%s, ret=%d\n", pathname, ret);
-		// fprintf(stderr, "[POSIX]. Ending Hercules 'close', pathname=%s, ret=%d\n", pathname, ret);
 		// Set offset to 0.
 		// map_fd_update_value(map_fd, pathname, fd, 0);
 		map_fd_erase(map_fd, fd);
+		real_close(fd);
 	}
 	else
 	{

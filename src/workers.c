@@ -74,12 +74,17 @@ int ready(char *tmp_file_path, const char *msg)
 	// fprintf(stderr, "Trying to create the file %s with the message %s\n", tmp_file_path, msg);
 	char status[25];
 	char err_msg[MAX_ERR_MSG_LEN];
+	char cwd[PATH_MAX];
 	FILE *tmp_file; // = tmpfile(); // make the file pointer as temporary file.
+
+	if(getcwd(cwd, sizeof(cwd)) == NULL) {
+		perror("Error getting the current working directory.");
+	}
 
 	tmp_file = fopen(tmp_file_path, "w");
 	if (tmp_file == NULL)
 	{
-		sprintf(err_msg, "Error in creating the temporary file %s\n", tmp_file_path);
+		sprintf(err_msg, "Error in creating the temporary file %s, current directory is %s\n", tmp_file_path, cwd);
 		perror(err_msg);
 		return -1;
 	}

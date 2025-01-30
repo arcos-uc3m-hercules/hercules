@@ -55,6 +55,53 @@ extern int global_server_fd_thread;
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
 /**
+ * @brief Read the file "hercules_num_act_nodes" from disk, which contains
+ * the current number of active data nodes.
+ * @return Current number of active data nodes, on error -1 is returned.
+ */
+int get_number_of_active_nodes()
+{
+	char buf[10];
+	// Open the "hercules_num_act_nodes" file. This file should be created by the
+	// user application or the malleability manager.
+	int fd = open("./hercules_num_act_nodes", O_RDONLY);
+	if (fd == -1)
+	{
+		perror("ERR_HERCULES_OPEN_NUM_ACTVIES_NODES");
+		return -1;
+	}
+	// Read the content.
+	int ret = read(fd, buf, sizeof(buf) - 1);
+	buf[ret] = '\0';
+
+	// In case of error, the number of active storage servers
+	// is not updated.
+	if (ret == -1)
+	{
+		perror("ERR_HERCULES_READ_NUM_ACTIVES_NODES");
+		ret = close(fd);
+		if (fd == -1)
+		{
+			perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
+		}
+		return -1;
+	}
+	else
+	{
+		number_active_storage_servers = atoi(buf);
+		fprintf(stderr, "[Server] The new number of active data nodes is %s\n", buf);
+		slog_debug("[Server] The new number of active data nodes is %s\n", buf);
+	}
+	// Close the file.
+	ret = close(fd);
+	if (fd == -1)
+	{
+		perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
+	}
+	return number_active_storage_servers;
+}
+
+/**
  * @brief Re-distribute the blocks of this server to another servers
  * following the distribution policy choose by the user.
  * @return 0 on success, on error -1 is returned.
@@ -211,13 +258,18 @@ void handle_signal_server(int signal)
 	{
 		slog_info("SIGUSR1 received");
 		int pkill_operation = 0, ret = 0;
-		char buf[10], action[20];
-		;
+		char buf[10], action[20], temporal_path[PATH_MAX];
+
+		sprintf(temporal_path,"%s/tmp/hercules_pkill_operation", args.hercules_path);
+			// fprintf(stderr,"Temporal path: %s\n", temporal_path);
+		
 		// Get the operation number.
-		int fd = open("/tmp/hercules_pkill_operation", O_RDONLY);
+		int fd = open(temporal_path, O_RDONLY);
 		if (fd == -1)
 		{
-			perror("HERCULES_ERR_OPEN_PKILL_OPERATION");
+			char err_msg[PATH_MAX];
+			sprintf(err_msg, "ERR_HERCULES_OPEN_PKILL_OPERATION:%s", temporal_path);
+			perror(err_msg);
 			return;
 		}
 
@@ -262,12 +314,7 @@ void handle_signal_server(int signal)
 			}
 			break;
 		default: // suspend the data server.
-			sprintf(action, "down");
-			// This file is readed by the hercules script to know if this server
-			// was correctly shutting down.
-			char tmp_file_path[100];
-			sprintf(tmp_file_path, "/tmp/%c-hercules-%d-%s", args.type, args.id, action);
-			ready(tmp_file_path, "OK");
+			sprintf(action, "remove");
 			// Data servers processes will still running to be reused on
 			// the future. On shrink process, this server won't be used,
 			// but backend processes will be still running.
@@ -287,6 +334,11 @@ void handle_signal_server(int signal)
 				}
 			}
 		}
+		// This file is readed by the hercules script to know if this server
+		// was correctly shutting down.
+		char tmp_file_path[100];
+		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
+		ready(tmp_file_path, "OK");
 	}
 	if (signal == SIGUSR2) // wake up this server.
 	{
@@ -301,7 +353,8 @@ void handle_signal_server(int signal)
 			// This file is readed by the hercules script to know if this server
 			// was correctly waking up.
 			char tmp_file_path[100];
-			sprintf(tmp_file_path, "/tmp/%c-hercules-%d-up", args.type, args.id);
+			sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-up", args.hercules_path, args.type, args.id);
+			fprintf(stderr, "Writting file %s\n", tmp_file_path);
 			ready(tmp_file_path, "OK");
 		}
 	}
@@ -376,7 +429,6 @@ int32_t main(int32_t argc, char **argv)
 		return 0;
 	}
 
-	sprintf(tmp_file_path, "/tmp/%c-hercules-%d-start", args.type, args.id);
 
 	// Fill the args struct with the enviroment variables or config file values.
 	ret = getConfiguration(&args);
@@ -998,7 +1050,7 @@ int32_t main(int32_t argc, char **argv)
 	// ep_close(ucp_worker, client_ep, UCP_EP_CLOSE_MODE_FORCE);
 	// ucp_cleanup(ucp_context);
 
-	sprintf(tmp_file_path, "/tmp/%c-hercules-%d-stop", args.type, args.id);
+	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-stop", args.hercules_path, args.type, args.id);
 	ready(tmp_file_path, "OK");
 
 	// Free the publisher release address.
