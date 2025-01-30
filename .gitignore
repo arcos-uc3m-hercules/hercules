@@ -26,3 +26,4 @@ prev_CMakes
 hostfiles
 .vscode
 .log
+bash/tests/data
