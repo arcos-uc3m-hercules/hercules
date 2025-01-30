@@ -329,7 +329,7 @@ void handle_signal_server(int signal)
 			}
 			break;
 		default: // suspend the data server.
-			sprintf(action, "down");
+			sprintf(action, "remove");
 			// Data servers processes will still running to be reused on
 			// the future. On shrink process, this server won't be used,
 			// but backend processes will be still running.

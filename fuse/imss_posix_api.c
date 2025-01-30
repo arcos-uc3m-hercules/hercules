@@ -754,16 +754,16 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 		}
 
 		// get data from the data server.
-		if (MALLEABILITY)
-		{
-			int32_t num_storages = 0;
-			num_storages = get_number_of_data_servers(i_blk, num_of_blk);
-			slog_debug("[imss_read] i_blk=%ld, num_storages=%ld, N_SERVERS=%ld", i_blk, num_storages, N_SERVERS);
+		// if (MALLEABILITY)
+		// {
+		// 	int32_t num_storages = 0;
+		// 	num_storages = get_number_of_data_servers(i_blk, num_of_blk);
+		// 	slog_debug("[imss_read] i_blk=%ld, num_storages=%ld, N_SERVERS=%ld", i_blk, num_storages, N_SERVERS);
 
-			to_read = get_data_mall(ds, curr_blk, buf + byte_count, to_read, block_offset, num_storages);
-			i_blk++;
-		}
-		else
+		// 	to_read = get_data_mall(ds, curr_blk, buf + byte_count, to_read, block_offset, num_storages);
+		// 	i_blk++;
+		// }
+		// else
 		{
 			to_read = get_ndata(ds, curr_blk, buf + byte_count, to_read, block_offset);
 		}
@@ -1515,21 +1515,21 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		slog_debug("writting %" PRIu64 " kilobytes (%" PRIu64 " bytes) with an offset of %" PRIu64 " kilobytes (%" PRIu64 " bytes)", bytes_to_copy / 1024, bytes_to_copy, block_offset / 1024, block_offset);
 
 		// Send data to data server.
-		if (MALLEABILITY)
-		{
+		// if (MALLEABILITY)
+		// {
 
-			int32_t num_storages = 0;
-			num_storages = get_number_of_data_servers(i_blk, num_of_blk);
-			slog_debug("[imss_write] i_blk=%ld, num_storages=%ld, N_SERVERS=%ld", i_blk, num_storages, N_SERVERS);
-			if (set_data_mall(ds, curr_blk, data_pointer, bytes_to_copy, block_offset, num_storages) < 0)
-			{
-				slog_error("[IMSS-FUSE]	Error writing to imss.\n");
-				error_print = -ENOENT;
-				return -ENOENT;
-			}
-			i_blk++;
-		}
-		else
+		// 	int32_t num_storages = 0;
+		// 	num_storages = get_number_of_data_servers(i_blk, num_of_blk);
+		// 	slog_debug("[imss_write] i_blk=%ld, num_storages=%ld, N_SERVERS=%ld", i_blk, num_storages, N_SERVERS);
+		// 	if (set_data_mall(ds, curr_blk, data_pointer, bytes_to_copy, block_offset, num_storages) < 0)
+		// 	{
+		// 		slog_error("[IMSS-FUSE]	Error writing to imss.\n");
+		// 		error_print = -ENOENT;
+		// 		return -ENOENT;
+		// 	}
+		// 	i_blk++;
+		// }
+		// else
 		{
 			if (set_data(ds, curr_blk, data_pointer, bytes_to_copy, block_offset) < 0)
 			{

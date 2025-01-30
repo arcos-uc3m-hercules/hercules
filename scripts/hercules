@@ -44,9 +44,9 @@ WakeUpServers() {
         ### echo "ssh $node pkill hercules_server"
         ( ssh $node "pkill -SIGUSR2 hercules_server" )
     done
-    set -x
+    #set -x
     awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' ${HERCULES_DATA_HOSTFILE} ${HERCULES_DATA_HOSTFILE_PROV} > ${HERCULES_PATH}/tmp/data2up_index_$SLURM_JOB_ID
-    set +x
+    #set +x
     WaitForServers "data" "d" "up" ${hosts[@]}    
 }
 
@@ -73,6 +73,7 @@ WaitForServers() {
     for node in "${hosts[@]}"
     do
         SERVER_NUMBER=$((server_index_arr[$SERVER_ID]-1))
+        echo "# Hercules: ${ACTION} ${SERVER_NAME} server ${SERVER_NUMBER} on ${node}"
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "# Hercules: ${ACTION} ${SERVER_NAME} server ${SERVER_NUMBER} on ${node}"
         fi
@@ -137,7 +138,7 @@ do
     esac
 done
 
-echo "Wait servers = "$WAIT_SERVERS
+# echo "Wait servers = "$WAIT_SERVERS
 #exit 0
 
 SLURM=-1
@@ -374,7 +375,9 @@ then
     # all servers have stopped correctly (synchronous).
     # 0 in other case (asynchronous).
     if [[ "$WAIT_SERVERS" -eq "1" ]]; then
+        set -x
         awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' ${HERCULES_DATA_HOSTFILE} ${HERCULES_DATA_HOSTFILE} > "${HERCULES_PATH}/tmp/data2${STATUS}_index_$SLURM_JOB_ID"
+        set +x
         WaitForServers "data" "d" "${STATUS}" ${hosts[@]}
     else
         echo "No waiting for data servers to be stopped."
@@ -396,7 +399,9 @@ then
     # all servers have stopped correctly (synchronous).
     # 0 in other case (asynchronous).
     if [[ "$WAIT_SERVERS" -eq "1" ]]; then
-        awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' ${HERCULES_METADATA_HOSTFILE} ${HERCULES_METADATA_HOSTFILE} > "${HERCULES_PATH}/tmp/data2${STATUS}_index"
+        set -x
+        awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' ${HERCULES_METADATA_HOSTFILE} ${DATA_SERVER_FILE} > "${HERCULES_PATH}/tmp/data2${STATUS}_index"
+        set +x
         WaitForServers "metadata" "m" "${STATUS}" ${hosts[@]}
     else
         echo "No waiting for data servers to be stopped."
@@ -446,19 +451,19 @@ then
             echo "Data server file " $DATA_SERVER_FILE " does not exists"
             exit 0
         fi
-        HERCULES_DATA_HOSTFILE=$DATA_SERVER_FILE
+        # HERCULES_DATA_HOSTFILE=$DATA_SERVER_FILE
     else
         echo "Data server file is nedeed, -f <data_server_file_path>"
         exit 0
     fi
-    readarray -t hosts < $HERCULES_DATA_HOSTFILE
+    readarray -t hosts < ${DATA_SERVER_FILE}
     # 1 = Stops some servers synchronously.
     # 0 = Do not kill the process.
     StopServers "data" 0 ${hosts[@]} 
 
     # For "remove" operations we awalys wait for selected 
     # servers to be removed.
-    awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' $HERCULES_DATA_HOSTFILE $HERCULES_DATA_HOSTFILE > "${HERCULES_PATH}/tmp/data2${STATUS}_index_$SLURM_JOB_ID"
+    awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' ${HERCULES_DATA_HOSTFILE} ${DATA_SERVER_FILE} > "${HERCULES_PATH}/tmp/data2${STATUS}_index_$SLURM_JOB_ID"
     
     WaitForServers "data" "d" "${STATUS}" ${hosts[@]}
 
