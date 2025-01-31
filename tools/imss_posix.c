@@ -42,6 +42,10 @@
 // #define FCNTL_ADJUST_CMD(__cmd) __cmd
 // #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define KB 1024
 #define GB 1073741824
 uint32_t DEPLOYMENT = 2; // Default 1=ATACHED, 0=DETACHED ONLY METADATA SERVER 2=DETACHED METADATA AND DATA SERVERS
@@ -5579,3 +5583,7 @@ int fchdir(int fd)
 
 // 	return ret;
 // }
+
+#ifdef __cplusplus
+}
+#endif
