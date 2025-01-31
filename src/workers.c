@@ -79,12 +79,13 @@ int ready(char *tmp_file_path, const char *msg)
 
 	if(getcwd(cwd, sizeof(cwd)) == NULL) {
 		perror("Error getting the current working directory.");
+		return -1;
 	}
 
 	tmp_file = fopen(tmp_file_path, "w");
 	if (tmp_file == NULL)
 	{
-		sprintf(err_msg, "Error in creating the temporary file %s, current directory is %s\n", tmp_file_path, cwd);
+		sprintf(err_msg, "Error in creating the temporary file: %s, current directory is: %s\n", tmp_file_path, cwd);
 		perror(err_msg);
 		return -1;
 	}
@@ -107,6 +108,8 @@ int ready(char *tmp_file_path, const char *msg)
 		perror(err_msg);
 		return -1;
 	}
+
+	// fprintf(stderr, "Writting status file in: %s\n", tmp_file_path);
 
 	// if there was an error in the initialization of the server,
 	// we kill the process.

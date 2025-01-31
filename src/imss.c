@@ -88,7 +88,7 @@ uint64_t local_data_uid;
 ucp_address_t **stat_addr;
 ucp_ep_h *stat_eps;
 
-extern char *POLICY;
+extern char POLICY[MAX_POLICY_LEN];
 
 pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
 // To synchronize network operations.
@@ -215,7 +215,7 @@ int32_t imss_check(char *dataset_uri)
 }
 
 // Method searching for a certain IMSS in the vector.
-int32_t find_imss(char *imss_uri, imss *imss_)
+int32_t find_imss(const char *imss_uri, imss *imss_)
 {
 	// Search for a certain IMSS within the vector.
 	slog_live("imssd->len=%d", imssd->len);
@@ -770,7 +770,7 @@ void ucx_cleanup()
 }
 
 // Method releasing client-side and/or server-side resources related to a certain IMSS instance.
-int32_t release_imss(char *imss_uri, uint32_t release_op)
+int32_t release_imss(const char *imss_uri, uint32_t release_op)
 {
 	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
 	{

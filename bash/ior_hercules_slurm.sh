@@ -141,8 +141,8 @@ mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_H
 #LD_PRELOAD=$HERCULES_POSIX_PRELOAD ls -lth /mnt/hercules/
 
 ## Deletes all shared memory segments.
-mpiexec $HERCULES_MPI_HOSTFILE_DEF=./hostfile \
-	ipcrm -a
+# mpiexec $HERCULES_MPI_HOSTFILE_DEF=${HERCULES_FULL_HOSTFILE} \
+# 	ipcrm -a
 
 ## Waits some seconds to allow Hercules finishing copying all blocks to disk.
 /beegfs/home/javier.garciablas/hercules/scripts/hercules stop \

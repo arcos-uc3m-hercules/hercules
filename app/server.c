@@ -25,7 +25,7 @@ extern char *buffer_address;
 extern pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
 extern uint64_t buffer_segment;
-char *POLICY = NULL;
+char POLICY[MAX_POLICY_LEN];
 
 extern ucp_worker_h *ucp_worker_threads;
 extern ucp_address_t **local_addr;
@@ -53,53 +53,6 @@ extern int global_finish_checkpoint;
 extern int global_server_fd_thread;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
-
-/**
- * @brief Read the file "hercules_num_act_nodes" from disk, which contains
- * the current number of active data nodes.
- * @return Current number of active data nodes, on error -1 is returned.
- */
-int get_number_of_active_nodes()
-{
-	char buf[10];
-	// Open the "hercules_num_act_nodes" file. This file should be created by the
-	// user application or the malleability manager.
-	int fd = open("./hercules_num_act_nodes", O_RDONLY);
-	if (fd == -1)
-	{
-		perror("ERR_HERCULES_OPEN_NUM_ACTVIES_NODES");
-		return -1;
-	}
-	// Read the content.
-	int ret = read(fd, buf, sizeof(buf) - 1);
-	buf[ret] = '\0';
-
-	// In case of error, the number of active storage servers
-	// is not updated.
-	if (ret == -1)
-	{
-		perror("ERR_HERCULES_READ_NUM_ACTIVES_NODES");
-		ret = close(fd);
-		if (fd == -1)
-		{
-			perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
-		}
-		return -1;
-	}
-	else
-	{
-		number_active_storage_servers = atoi(buf);
-		fprintf(stderr, "[Server] The new number of active data nodes is %s\n", buf);
-		slog_debug("[Server] The new number of active data nodes is %s\n", buf);
-	}
-	// Close the file.
-	ret = close(fd);
-	if (fd == -1)
-	{
-		perror("ERR_HERCULES_CLOSE_NUM_ACTVIES_NODES");
-	}
-	return number_active_storage_servers;
-}
 
 /**
  * @brief Re-distribute the blocks of this server to another servers
@@ -267,7 +220,7 @@ void handle_signal_server(int signal)
 		int fd = open(temporal_path, O_RDONLY);
 		if (fd == -1)
 		{
-			char err_msg[PATH_MAX];
+			char err_msg[MAX_ERR_MSG_LEN];
 			sprintf(err_msg, "ERR_HERCULES_OPEN_PKILL_OPERATION:%s", temporal_path);
 			perror(err_msg);
 			return;
@@ -336,7 +289,7 @@ void handle_signal_server(int signal)
 		}
 		// This file is readed by the hercules script to know if this server
 		// was correctly shutting down.
-		char tmp_file_path[100];
+		char tmp_file_path[PATH_MAX];
 		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
 		ready(tmp_file_path, "OK");
 	}
@@ -352,7 +305,7 @@ void handle_signal_server(int signal)
 
 			// This file is readed by the hercules script to know if this server
 			// was correctly waking up.
-			char tmp_file_path[100];
+			char tmp_file_path[PATH_MAX];
 			sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-up", args.hercules_path, args.type, args.id);
 			fprintf(stderr, "Writting file %s\n", tmp_file_path);
 			ready(tmp_file_path, "OK");
@@ -429,7 +382,6 @@ int32_t main(int32_t argc, char **argv)
 		return 0;
 	}
 
-
 	// Fill the args struct with the enviroment variables or config file values.
 	ret = getConfiguration(&args);
 	if (ret == -1)
@@ -437,9 +389,12 @@ int32_t main(int32_t argc, char **argv)
 		return 0;
 	}
 
+	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-start", args.hercules_path, args.type, args.id);
+
 	// args.logging.hercules_debug_level = SLOG_NONE;
 	IMSS_THREAD_POOL = args.thread_pool;
-	POLICY = args.policy;
+	// POLICY = args.policy;
+	strncpy(POLICY, args.policy, sizeof(POLICY));
 
 	char log_path[PATH_MAX];
 	slog_debug("Server type=%c\n", args.type);

@@ -1,6 +1,10 @@
 #ifndef H_MAP_PREFETCH
 #define H_MAP_PREFETCH
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // #include <sys/stat.h>
 //structura con int, stat y char * malloc
 void* map_create_prefetch();
@@ -10,5 +14,10 @@ void map_release_prefetch(void* map, const char * path);
 void map_init_prefetch(void* map, const char * path, char * buff);
 int map_rename_prefetch(void* map, const char * oldname, const char * newname);
 int map_rename_dir_dir_prefetch(void* map, const char * old_dir, const char * rdir_dest);
+
+#ifdef __cplusplus
+}
 #endif
+
+#endif // H_MAP_PREFETCH
 

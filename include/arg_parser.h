@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <argp.h>
 #include <limits.h>
+#include "comms.h"
 
 /********** argp options **********/
 /* common options */
@@ -42,8 +43,8 @@ struct arguments
     char data_hostfile[PATH_MAX]; /* deploy hostfile arg to '-d' */
     char stat_logfile[PATH_MAX];    /* metadata logfile arg to '-l' */
     char imss_uri[32];        /* IMSS URI arg to '-i' */
-    char hercules_path[PATH_MAX];   /* hercules path */
-    char policy[PATH_MAX];
+    char hercules_path[PATH_MAX-100];   /* hercules path */
+    char policy[MAX_POLICY_LEN];
     char meta_hostfile[PATH_MAX];
     char debug_level[PATH_MAX];
     char mount_point[PATH_MAX];

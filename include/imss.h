@@ -41,9 +41,6 @@
 
 #define NO_LINK NULL
 
-// Max length for perror messages.
-#define MAX_ERR_MSG_LEN PATH_MAX + 100
-
 extern int32_t IMSS_DEBUG;
 static uint64_t BLOCK_SIZE;
 
@@ -189,7 +186,7 @@ typedef struct
 	// L = Local, D = Distributed.
 	char type; // = 'D';
 	// Policy that was followed in order to write the dataset.
-	char policy[8];
+	char policy[MAX_POLICY_LEN];
 	// Number of data elements conforming the dataset entity.
 	int32_t num_data_elem;
 	// Size of each data element (in KB).
@@ -296,7 +293,7 @@ binary_path - Path to the 'server.c' binary. It must be provided if the 'deploym
 RETURNS:	 0 - Initialization procedure was successfully performed.
 -1 - In case of error.
 	 */
-	int32_t init_imss(char *imss_uri, char *hostfile, char *meta_hostfile, int32_t n_servers, uint16_t conn_port, uint64_t buff_size, uint32_t deployment, char *binary_path, uint16_t meta_port);
+	// int32_t init_imss(char *imss_uri, char *hostfile, char *meta_hostfile, int32_t n_servers, uint16_t conn_port, uint64_t buff_size, uint32_t deployment, const char *binary_path, uint16_t meta_port);
 
 	/* Method initializing the required resources to make use of an existing IMSS.
 
@@ -320,7 +317,7 @@ release_op - Specifies if the client will tear down or just disconnect from from
 RETURNS:	 0 - Release operation successfully performed.
 -1 - In case of error.
 	 */
-	int32_t release_imss(char *imss_uri, uint32_t release_op);
+	int32_t release_imss(const char *imss_uri, uint32_t release_op);
 
 	/* Method retrieving information related to a certain IMSS instance.
 

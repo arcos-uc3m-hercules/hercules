@@ -1,4 +1,6 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 
 #include "map.hpp"
 #include "mapfd.hpp"
@@ -43,9 +45,7 @@
 #define KB 1024
 #define GB 1073741824
 uint32_t DEPLOYMENT = 2; // Default 1=ATACHED, 0=DETACHED ONLY METADATA SERVER 2=DETACHED METADATA AND DATA SERVERS
-char *POLICY = "RR";	 // Default RR
-// char *POLICY = "LOCAL";
-// char *POLICY = "HASH";
+char POLICY[MAX_POLICY_LEN];
 uint64_t IMSS_SRV_PORT = 1; // Not default, 1 will fail
 uint64_t METADATA_PORT = 1; // Not default, 1 will fail
 int32_t N_SERVERS = 1;		// Default
@@ -520,7 +520,8 @@ __attribute__((constructor)) void imss_posix_init(void)
 	LOWER_BOUND_SERVERS = args.lower_bound_servers;
 	REPL_FACTOR = args.repl_factor;
 	REPL_TYPE = args.repl_type;
-	POLICY = args.policy;
+	// POLICY = args.policy;
+	strncpy(POLICY, args.policy, sizeof(POLICY));
 
 	// Hercules init -- Attached deploy
 	if (DEPLOYMENT == 1)
@@ -570,7 +571,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_live(" -- REPL_TYPE: %d", REPL_TYPE);
 	slog_live(" -- POLICY: %s", POLICY);
 	slog_live(" -- RELEASE: %d", release);
-	// fprintf(stderr, " -- POLICY: %s\n", POLICY);
+	fprintf(stderr, " -- POLICY: %s\n", POLICY);
 
 	// Metadata server
 	// if (release == 1)
@@ -595,14 +596,14 @@ __attribute__((constructor)) void imss_posix_init(void)
 		}
 	}
 
-	if (DEPLOYMENT != 2)
-	{
-		// Initialize the IMSS servers
-		if (init_imss(IMSS_ROOT, IMSS_HOSTFILE, META_HOSTFILE, N_SERVERS, IMSS_SRV_PORT, IMSS_BUFFSIZE, DEPLOYMENT, "hercules_server", METADATA_PORT) < 0)
-		{
-			slog_fatal("[IMSS-FUSE]	IMSS init failed, cannot create servers.\n");
-		}
-	}
+	// if (DEPLOYMENT != 2)
+	// {
+	// 	// Initialize the IMSS servers
+	// 	if (init_imss(IMSS_ROOT, IMSS_HOSTFILE, META_HOSTFILE, N_SERVERS, IMSS_SRV_PORT, IMSS_BUFFSIZE, DEPLOYMENT, "hercules_server", METADATA_PORT) < 0)
+	// 	{
+	// 		slog_fatal("[IMSS-FUSE]	IMSS init failed, cannot create servers.\n");
+	// 	}
+	// }
 
 	map_prefetch = map_create_prefetch();
 	map = map_create();
@@ -632,7 +633,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	elapsed = seconds + useconds / 1e6;
 
 	init = 1;
-	fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
+	// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
 
 void __attribute__((destructor)) run_me_last()

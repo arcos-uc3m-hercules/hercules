@@ -65,6 +65,7 @@ WaitForServers() {
     # get the action type.
     ACTION=$1
     shift
+    # get the host list.
     hosts=("$@")
 
     file_name="${HERCULES_PATH}/tmp/data2${ACTION}_index_${SLURM_JOB_ID}"
@@ -73,7 +74,6 @@ WaitForServers() {
     for node in "${hosts[@]}"
     do
         SERVER_NUMBER=$((server_index_arr[$SERVER_ID]-1))
-        echo "# Hercules: ${ACTION} ${SERVER_NAME} server ${SERVER_NUMBER} on ${node}"
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "# Hercules: ${ACTION} ${SERVER_NAME} server ${SERVER_NUMBER} on ${node}"
         fi
@@ -233,7 +233,7 @@ fi
 
 ## Checks if a configuration file was set.
 if [ -z "$FILE" ]; then
-    ## get current directory has project path.
+    ## get current directory as project path.
     HERCULES_PATH=$(dirname `pwd`)
 else
     ## get the project path from the configuration file.
@@ -495,7 +495,7 @@ if [ ! -z "$HERCULES_DATA_HOSTFILE" ]; then
 fi
 
 ## Creates the initial "hercules_num_act_nodes" file.
-echo $HERCULES_INIT_NUM_DATA > hercules_num_act_nodes
+echo ${HERCULES_INIT_NUM_DATA} > hercules_num_act_nodes
 
 ## Set the name that will be used to create the 
 if [[ "$SLURM" -eq "1" ]]; then
@@ -510,14 +510,14 @@ if [[ "$VERBOSE" -eq "1" ]]; then
 fi
 if [[ $SERVERS_HOSTFILES_OPTION -eq "0" ]]; then
     #srun -pernode hostname |sort > hostfile
-    scontrol show hostnames "$SLURM_JOB_NODELIST" > $FULL_HOSTFILE
+    scontrol show hostnames "${SLURM_JOB_NODELIST}" > ${FULL_HOSTFILE}
     # scontrol show hostnames "$SLURM_JOB_NODELIST"
 fi
 
-echo HERCULES_MOUNT_POINT - "$HERCULES_MOUNT_POINT" - HERCULES_BLOCK_SIZE - "$HERCULES_BLOCK_SIZE"
+echo HERCULES_MOUNT_POINT - "${HERCULES_MOUNT_POINT}" - HERCULES_BLOCK_SIZE - "${HERCULES_BLOCK_SIZE}"
 
 # If a client hostfile was not provided we set a default path.
-if [ -z "$HERCULES_MPI_HOSTFILE_NAME" ]; then
+if [ -z "${HERCULES_MPI_HOSTFILE_NAME}" ]; then
     ## Warning if slurm is not being used and no client hostfile was defined.
     if [[ $SLURM -eq "0" ]]; then
     # if [[ $HOSTFILES_OPTION -eq "-1" ]]; then
@@ -579,7 +579,7 @@ start=`date +%s.%N`
 for node in ${meta_hosts[@]}
 do    
     RM="rm ${HERCULES_PATH}/tmp/m-hercules-$i"
-    COMMAND="${HERCULES_BUILD_PATH}/hercules_server m $i"
+    COMMAND="${HERCULES_BUILD_PATH}/hercules_server m ${i}"
     ## If slurm is not being used, we deploy the service by connecting
     ## to the node via ssh.
     if [[ "$SLURM" -eq "0" ]]; then
@@ -596,12 +596,12 @@ do
     else
         ## Deletes the file that we use to make sure that the server has started.
         if [[ "$VERBOSE" -eq "1" ]]; then
-            echo "[+] Removing temporal files on $node"
+            echo "[+] Removing temporal files on ${node}"
         fi
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node $RM 2> /dev/null
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} ${RM} 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         echo "[+] Starting metadata server $i on $node..."
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=80G -w $node $COMMAND &
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=80G -w ${node} ${COMMAND} &
     fi
     i=$(($i+1))
 done
@@ -731,6 +731,7 @@ export "HERCULES_NCPN=${NUM_CLIENTS_PER_NODE}"
 export "HERCULES_NNFC=${NUM_NODES_FOR_CLIENTS}"
 # data hostfile name.
 export "HERCULES_DATA_HOSTFILE=${HERCULES_DATA_HOSTFILE}"
+export "HERCULES_FULL_HOSTFILE=${FULL_HOSTFILE}"
 
 unset META_PORT
 unset DATA_PORT

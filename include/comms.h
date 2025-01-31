@@ -33,6 +33,11 @@
 #define IP_STRING_LEN 50
 #define PORT_STRING_LEN 8
 
+// Max length for perror messages.
+#define MAX_ERR_MSG_LEN PATH_MAX + 100
+// Max lenght for POLICY name.
+#define MAX_POLICY_LEN 16
+
 static const ucp_tag_t tag_req = 0x1337a880u;
 static const ucp_tag_t tag_data = 0x2337a880u;
 static const ucp_tag_t tag_reply = 0x3337a880u;

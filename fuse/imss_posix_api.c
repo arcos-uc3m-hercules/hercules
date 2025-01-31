@@ -39,7 +39,7 @@ extern int32_t REPL_TYPE;
 
 extern int32_t N_SERVERS;
 extern int32_t N_BLKS;
-extern char *POLICY;
+extern char POLICY[MAX_POLICY_LEN];
 extern uint64_t IMSS_BLKSIZE;
 extern uint64_t IMSS_DATA_BSIZE;
 extern void *map;
@@ -751,7 +751,7 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 		// }
 		// else
 		{
-			to_read = get_ndata(ds, curr_blk, buf + byte_count, to_read, block_offset);
+			to_read = get_ndata(ds, curr_blk, (char *)buf + byte_count, to_read, block_offset);
 		}
 		// Error handling when get_ndata does not found the request data.
 		if (to_read == -1)
@@ -1525,7 +1525,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		}
 
 		bytes_stored += bytes_to_copy;
-		data_pointer += bytes_to_copy;
+		data_pointer = (char *) data_pointer + bytes_to_copy;
 		block_offset = 0; // first block has been stored, next blocks don't have an offset
 		++curr_blk;
 	}

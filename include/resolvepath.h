@@ -35,6 +35,11 @@
 #include <string.h>
 #include <unistd.h>
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * int ResolvePath(const char *path_, char *resolved)
  *
@@ -42,3 +47,7 @@
  * Returns the size of the resolved path.
  */
 int ResolvePath(const char *path_, char *resolved);
+
+#ifdef __cplusplus
+}
+#endif
