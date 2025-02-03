@@ -15,7 +15,8 @@ StopServers() {
     OPERATION=$1
     shift
     hosts=("$@") # List of hostnames.
-
+ 
+    unset LD_PRELOAD
 
     echo "# Hercules: Stopping $NAME servers in ${hosts[@]}"
     if [[ "$VERBOSE" -eq "1" ]]; then

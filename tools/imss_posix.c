@@ -248,6 +248,45 @@ static int (*real_fprintf)(FILE *stream, const char *format, va_list) = NULL; //
 static ssize_t (*real_readlink)(const char *pathname, char *buf, size_t bufsiz) = NULL;
 static ssize_t (*real_readlinkat)(int dirfd, const char *pathname, char *buf, size_t bufsiz) = NULL;
 
+
+void copy_stat_to_statx(const struct stat *src, struct statx *dest) {
+    if (!src || !dest) {
+        return; // Handle null pointers
+    }
+
+    memset(dest, 0, sizeof(struct statx)); // Initialize to zero
+
+    dest->stx_mask = STATX_BASIC_STATS; // Indicates which fields are valid
+    dest->stx_blksize = src->st_blksize;
+    dest->stx_attributes = 0; // stat does not provide equivalent attributes
+
+    dest->stx_dev_major = major(src->st_dev);
+    dest->stx_dev_minor = minor(src->st_dev);
+    dest->stx_rdev_major = major(src->st_rdev);
+    dest->stx_rdev_minor = minor(src->st_rdev);
+
+    dest->stx_mode = src->st_mode;
+    dest->stx_uid = src->st_uid;
+    dest->stx_gid = src->st_gid;
+    dest->stx_ino = src->st_ino;
+    dest->stx_size = src->st_size;
+    dest->stx_blocks = src->st_blocks;
+    dest->stx_nlink = src->st_nlink;
+
+    // Convert timestamps
+    dest->stx_atime.tv_sec = src->st_atime;
+    dest->stx_mtime.tv_sec = src->st_mtime;
+    dest->stx_ctime.tv_sec = src->st_ctime;
+#ifdef _STATX_BTIME
+    dest->stx_btime.tv_sec = src->st_ctime;
+#endif
+
+}
+
+
+int __fxstat(int ver, int fd, struct stat *buf);
+
+
 void WarnOperationNotSupported(const char *call_name, const char *pathname)
 {
 	slog_warn("[POSIX] '%s' not currently supported, using real '%s' for pathname=%s\n", call_name, call_name, pathname);
@@ -4786,8 +4825,33 @@ int statx(int dirfd, const char *pathname, int flags, unsigned int mask, struct 
 		return real_statx(dirfd, pathname, flags, mask, statxbuf);
 	}
 
-	fprintf(stderr, "[POSIX][TODO] Calling statx, pathname=%s\n", pathname);
-	return real_statx(dirfd, pathname, flags, mask, statxbuf);
+	errno = 0;
+	int ret;
+	struct stat buf;
+	char *new_path = checkHerculesPath(pathname);
+	if (new_path != NULL)
+	{
+		slog_live("[POSIX]. Calling Hercules 'statx', new_path=%s.", new_path);
+		imss_refresh(new_path);
+		ret = imss_getattr(new_path, &buf);
+		copy_stat_to_statx(&buf, statxbuf);
+		if (ret < 0)
+		{
+			errno = -ret;
+			ret = -1;
+		}
+		slog_live("[POSIX]. Ending Hercules 'statx', new_path=%s, ret=%d\n", new_path, ret);
+		free(new_path);
+	}
+	else
+	{
+		slog_live("[POSIX]. Calling Real 'statx', pathname=%s.", pathname);
+		ret = real_statx(dirfd, pathname, flags, mask, statxbuf);
+		slog_live("[POSIX]. Ending Real 'statx', pathname=%s.", pathname);
+	}
+
+	return ret;
+
 }
 
 ssize_t readlink(const char *pathname, char *buf, size_t bufsiz)
