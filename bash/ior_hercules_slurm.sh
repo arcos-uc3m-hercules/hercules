@@ -3,8 +3,8 @@
 #SBATCH --time=01:00:00               # Time limit hrs:min:sec
 #SBATCH --output=logs/hercules/%j.log   # Standard output and error log
 #SBATCH --mem=0
-##SBATCH --exclude=broadwell-008,broadwell-010
-##SBATCH --nodelist=broadwell-[012-027]
+#SBATCH --exclude=broadwell-008,broadwell-010
+#SBATCH --nodelist=broadwell-[012-027]
 ###SBATCH --exclusive=user
 ##SBATCH --overcommit
 ##SBATCH --oversubscribe

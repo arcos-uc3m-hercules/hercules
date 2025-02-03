@@ -4807,10 +4807,20 @@ int fstatat64(int __fd, const char *__restrict __file, struct stat64 *__restrict
 		return real_fstatat64(__fd, __file, __buf, __flag);
 	}
 
-	slog_live("[POSIX][TODO] Calling fstatat64, pathname=%s", __file);
-	fprintf(stderr, "[POSIX][TODO] Calling fstatat64, pathname=%s\n", __file);
+	int ret = 0;
+	char *pathname = map_fd_search_by_val(map_fd, __fd);
+	if (pathname != NULL)
+	{
+		WarnOperationNotSupported(__func__, pathname);
+		// Write here the HERCULES implementation for this system call.
+	}
+	// Uncomment the following line.
+	// else 
+	{
+		ret = real_fstatat64(__fd, __file, __buf, __flag);
+	}
 
-	return real_fstatat64(__fd, __file, __buf, __flag);
+	return ret;
 }
 
 int statx(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *statxbuf)
@@ -4834,11 +4844,12 @@ int statx(int dirfd, const char *pathname, int flags, unsigned int mask, struct 
 		slog_live("[POSIX]. Calling Hercules 'statx', new_path=%s.", new_path);
 		imss_refresh(new_path);
 		ret = imss_getattr(new_path, &buf);
-		copy_stat_to_statx(&buf, statxbuf);
 		if (ret < 0)
 		{
 			errno = -ret;
 			ret = -1;
+		} else {
+			copy_stat_to_statx(&buf, statxbuf);
 		}
 		slog_live("[POSIX]. Ending Hercules 'statx', new_path=%s, ret=%d\n", new_path, ret);
 		free(new_path);
