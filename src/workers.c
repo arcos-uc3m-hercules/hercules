@@ -14,6 +14,7 @@
 #include <mcheck.h>
 #include <fcntl.h>
 #include <condition_variable>
+#include <hiredis.h>
 #include "imss.h"
 #include "workers.h"
 #include "directory.h"
@@ -48,6 +49,10 @@ static long iov_cnt = 1;
 
 // Map that stores server side endpoints
 void *map_server_eps;
+
+// Connection info for hiredis
+char *redis_host;
+int redis_port;
 
 pthread_mutex_t tree_mut = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mp = PTHREAD_MUTEX_INITIALIZER;
@@ -1456,6 +1461,23 @@ void *stat_worker(void *th_argv)
 						   UCP_EP_PARAM_FIELD_USER_DATA;
 	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
 	ep_params.err_handler.cb = err_cb_server;
+
+	// Create and connect to hiredis server
+	redis_host = "127.0.0.1";
+	redis_port = 6379;
+	redisContext *redisContext = redisConnect(redis_host, redis_port);
+	if (redisContext == NULL || redisContext->err) {
+		if (redisContext) {
+			slog_debug("HERCULES_ERR_STAT_WORKER_REDIS_CONNECTION_ERROR");
+			perror("HERCULES_ERR_STAT_WORKER_REDIS_CONNECTION_ERROR");
+			return -1;
+		} else {
+			slog_debug("HERCULES_ERR_STAT_WORKER_REDIS_CANT_ALLOCATE_CONTEXT");
+			printf("HERCULES_ERR_STAT_WORKER_REDIS_CANT_ALLOCATE_CONTEXT");
+			return -1;
+		}
+	}
+	perror("REDIS OK");
 
 	for (;;)
 	{
