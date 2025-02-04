@@ -14,7 +14,7 @@
 #include <mcheck.h>
 #include <fcntl.h>
 #include <condition_variable>
-#include <hiredis.h>
+#include <hiredis/hiredis.h>
 #include "imss.h"
 #include "workers.h"
 #include "directory.h"
@@ -1470,11 +1470,11 @@ void *stat_worker(void *th_argv)
 		if (redisContext) {
 			slog_debug("HERCULES_ERR_STAT_WORKER_REDIS_CONNECTION_ERROR");
 			perror("HERCULES_ERR_STAT_WORKER_REDIS_CONNECTION_ERROR");
-			return -1;
+			return NULL;
 		} else {
 			slog_debug("HERCULES_ERR_STAT_WORKER_REDIS_CANT_ALLOCATE_CONTEXT");
 			printf("HERCULES_ERR_STAT_WORKER_REDIS_CANT_ALLOCATE_CONTEXT");
-			return -1;
+			return NULL;
 		}
 	}
 	perror("REDIS OK");

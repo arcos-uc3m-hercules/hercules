@@ -1,0 +1,23 @@
+Checking configuration file -  /etc/hercules.conf
+Checking configuration file -  ./hercules.conf
+Reading configuration from ./hercules.conf
+Hercules path - /home/gortega/hercules
+INIT_HERCULES_NUM_DATA = 1
+[+] Slurm is active.
+SERVERS_HOSTFILES_OPTION=0
+HERCULES_MOUNT_POINT - /mnt/hercules/ - HERCULES_BLOCK_SIZE - 512
+[+] Metadata server file not specified, getting information from slurm.
+[+] Hercules: Starting metadata servers on compute-2-3
+[+] Removing temporal files on compute-2-3
+[+] Starting metadata server 0 on compute-2-3...
+# Hercules: start metadata server 0 on compute-2-3
+++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w compute-2-3 -- /home/gortega/hercules/scripts/check-servers.sh m 0 start /home/gortega/hercules
+Server 0 is ready
+srun: Job 1347 step creation temporarily disabled, retrying (Requested nodes are busy)
+srun: got SIGCONT
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+slurmstepd: error: *** JOB 1347 ON compute-2-3 CANCELLED AT 2025-02-03T15:20:11 ***
+slurmstepd: error: *** STEP 1347.1 ON compute-2-3 CANCELLED AT 2025-02-03T15:20:11 ***
+srun: forcing job termination
+srun: Cancelled pending job step with signal 15
+srun: error: Unable to create step for job 1347: Job/step already completing or completed
