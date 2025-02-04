@@ -278,7 +278,7 @@ void copy_stat_to_statx(const struct stat *src, struct statx *dest) {
     dest->stx_mtime.tv_sec = src->st_mtime;
     dest->stx_ctime.tv_sec = src->st_ctime;
 #ifdef _STATX_BTIME
-    dest->stx_btime.tv_sec = src->st_ctime;
+    dest->stx_btime.tv_sec = 0;
 #endif
 
 }
