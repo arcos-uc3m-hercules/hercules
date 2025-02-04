@@ -236,7 +236,7 @@ int imss_refresh(const char *path)
 	uint32_t ds = 0;
 	int fd = -1;
 	void *aux = NULL;
-	const char *imss_path = path; // calloc(MAX_PATH, sizeof(char)); // this pointer should not be free.
+	const char *imss_path = path; // this pointer should not be free.
 
 	fd_lookup(imss_path, &fd, &old_stats, (char **)&aux);
 	if (fd >= 0)
@@ -1432,7 +1432,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 	char *aux;
 	// char *data_pointer = (char *)buf; // points to the buffer containing all bytes to be stored
 	const void *data_pointer = buf; // points to the buffer containing all bytes to be stored
-	const char *rpath = path;		// this pointer should not be free. //(char *)calloc(MAX_PATH, sizeof(char));
+	const char *rpath = path;		// this pointer should not be free.
 	int middle = 0;
 
 	int fd = -1;
@@ -1988,7 +1988,7 @@ int imss_release(const char *path)
 	// Update dates
 	int ds = 0;
 	int fd = 0;
-	const char *rpath = path; // this pointer should not be free. //(char *)calloc(MAX_PATH, sizeof(char));
+	const char *rpath = path; // this pointer should not be free.
 
 	struct stat stats;
 	char *aux = NULL;
@@ -2173,13 +2173,8 @@ int imss_rmdir(const char *path)
 	char *buffer;
 	char **refs;
 	int n_ent = 0;
-	const char *imss_path = path; // This pointer should not be free. // (char *)calloc(MAX_PATH, sizeof(char));
-	// get_iuri(path, imss_path);
-
-	// if (imss_path[strlen(imss_path) - 1] != '/')
-	// {
-	// 	strcat(imss_path, "/");
-	// }
+	const char *imss_path = path; // This pointer should not be free. 
+	
 
 	if ((n_ent = get_dir((char *)imss_path, &buffer, &refs)) > 0)
 	{
@@ -2202,7 +2197,7 @@ int imss_rmdir(const char *path)
 
 int imss_unlink(const char *path)
 {
-	const char *imss_path = path; // (char *)calloc(MAX_PATH, sizeof(char)); // this pointer should not be free.
+	const char *imss_path = path; // this pointer should not be free.
 	slog_info("path=%s, imss_path=%s", path, imss_path);
 
 	uint32_t ds = -1;
