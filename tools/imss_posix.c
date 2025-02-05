@@ -412,7 +412,7 @@ extern "C"
 		// To check if "pathname" is the root of HERCULES.
 		if (!strncmp(pathname, MOUNT_POINT, compare_len))
 		{
-			fprintf(stderr, "root path\n");
+			// fprintf(stderr, "root path\n");
 			slog_live("[HERCULES] pathname=%s, MOUNT_POINT=%s, pathname=%s, Success", pathname, MOUNT_POINT, pathname);
 			new_path = (char *)calloc(strlen("imss://") + 1, sizeof(char));
 			if (!new_path)
@@ -2591,7 +2591,7 @@ extern "C"
 
 		if (pathname_dir != NULL || new_path != NULL)
 		{
-			slog_live("[POSIX] Calling Hercules 'openat' flags=%d, mode=%o, dir_fd=%d, pathname_dir=%s, pathname=%s, errno=%d:%s", flags, mode, dir_fd, pathname_dir, pathname, errno, strerror(errno));
+			slog_live("[POSIX] Calling Hercules 'openat' flags=%d, mode=%o, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, mode, dir_fd, pathname_dir, pathname);
 			// checkOpenFlags(pathname, flags);
 
 			int is_absolute_path = IsAbsolutePath(pathname);
@@ -4884,7 +4884,7 @@ extern "C"
 		char *new_path = checkHerculesPath(pathname);
 		if (new_path != NULL)
 		{
-			slog_live("[POSIX]. Calling Hercules 'statx', new_path=%s.", new_path);
+			slog_live("[POSIX]. Calling Hercules 'statx', new_path=%s", new_path);
 			imss_refresh(new_path);
 			ret = imss_getattr(new_path, &buf);
 			if (ret < 0)

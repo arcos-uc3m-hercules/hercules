@@ -3944,8 +3944,10 @@ int32_t Open_file(const char *checkpoint_dir, const char *filename)
 	fd = open(disk_path, O_CREAT | O_WRONLY, 0600);
 	if (fd < 0)
 	{
-		perror("HERCULES_ERR_OPEN_DISK");
-		slog_error("HERCULES_ERR_OPEN_DISK");
+		char err_msg[MAX_ERR_MSG_LEN];
+		sprintf(err_msg,"HERCULES_ERR_OPEN_DISK: path=%s", disk_path);
+		perror(err_msg);
+		slog_error("%s", err_msg);
 		return -1;
 	}
 	return fd;

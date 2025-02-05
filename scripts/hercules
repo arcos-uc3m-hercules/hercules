@@ -105,7 +105,7 @@ WaitForServers() {
         
         SERVER_ID=$((SERVER_ID+1))
         if [[ "$VERBOSE" -eq "1" ]]; then
-            echo "[OK] ${SERVER_NAME} ${i} server ${ACTION} in ${node}"
+            echo "[OK] ${SERVER_NAME} server ${SERVER_ID} ${ACTION} in ${node}"
         fi        
     done
 }
@@ -369,6 +369,8 @@ then
     ## Creates an array with the data servers hostnames.
     readarray -t hosts < $HERCULES_DATA_HOSTFILE
     ## Stop the data servers.
+    ## TODO: check if the servers are running on the remote node
+    ## before to try stop them.
     StopServers "data" 1 ${hosts[@]}
     
     ## Checks if user wants to wait until all servers are stopped.

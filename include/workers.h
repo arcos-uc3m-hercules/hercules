@@ -63,6 +63,7 @@ typedef struct
 void *srv_worker(void *th_argv);
 int srv_worker_helper(p_argv *arguments, const char *req);
 void *Checkpoint(void *th_argv);
+void *Snapshot(void *th_argv);
 
 // Thread method searching and cleaning nodes with st_nlink=0
 void *garbage_collector(void *th_argv);

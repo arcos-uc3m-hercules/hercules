@@ -77,7 +77,8 @@ int ready(char *tmp_file_path, const char *msg)
 	char cwd[PATH_MAX];
 	FILE *tmp_file; // = tmpfile(); // make the file pointer as temporary file.
 
-	if(getcwd(cwd, sizeof(cwd)) == NULL) {
+	if (getcwd(cwd, sizeof(cwd)) == NULL)
+	{
 		perror("Error getting the current working directory.");
 		return -1;
 	}
@@ -1030,7 +1031,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			// Checks if it is data for the Snapshot operation or regular data.
 			if (snapshot_op)
 			{
-				
+				// Nothing to do.
 			}
 			else
 			{
@@ -1143,12 +1144,22 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				// TODO: should this be block_size_recv or a different size? block_size_recv might not be the full block size
 				if (snapshot_op)
 				{
+					// Get the origin data server id from the received key.
+					// int origin_server_id = 0;
+					// std::string data_uri;
+					// std::string file_name;
+					// getBlockInformation(key, &origin_server_id, &data_uri, &file_name);
+					// slog_debug("key: %s, origin_server_id: %d, data_uri: %s, file_name: %s", key.c_str(), origin_server_id, data_uri.c_str(), file_name.c_str());
+					// Fill buffer_broadcast with the data received from the other servers.
 					// buffer_broadcast[];
-					
-				} else {
+					slog_debug("Snapshot opration, origin server=%s", key.c_str());
+					insert_successful = map->put_broadcast(key, buffer, size_asigned_to_block);
+				}
+				else
+				{
 					insert_successful = map->put(key, buffer, size_asigned_to_block);
 				}
-				slog_debug("[WRITE_OP] insert_successful %d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
+				slog_debug("[WRITE_OP] insert_successful=%d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
 				tr = clock() - tr;
 				double time_taken = ((double)tr) / CLOCKS_PER_SEC; // in seconds
 
@@ -1161,20 +1172,23 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					return -1;
 				}
 
-				// The following buffer is used for checkpoints.
-				// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding checkpoint thread copy the data to disk.
-				// fprintf(stderr, "Inserting key = %s\n", key.c_str());
-				insert_successful = map->put_simple(key, 1);
-				// Include the new record in the tracking structure.
-				if (insert_successful != 0)
+				// Only when there is not a snapshot operation.
+				if (!snapshot_op)
 				{
-					perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-					slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-					return -1;
+					// The following buffer is used for checkpoints.
+					// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding checkpoint thread copy the data to disk.
+					// fprintf(stderr, "Inserting key = %s\n", key.c_str());
+					insert_successful = map->put_snapshot(key, 1);
+					// Include the new record in the tracking structure.
+					if (insert_successful != 0)
+					{
+						perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+						slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+						return -1;
+					}
+					// Update the pointer.
+					arguments->pt += block_size_recv;
 				}
-
-				// Update the pointer.
-				arguments->pt += block_size_recv;
 			}
 			// if the block was already stored:
 			else
@@ -1404,16 +1418,17 @@ void *Snapshot(void *th_argv)
 	// { // only one server creates the snapshot directory.
 	// 	Make_directory(snapshot_dir);
 	// }
-
+	fprintf(stderr, "Running Snapshot in %s\n", snapshot_dir);
 	for (;;)
 	{
 		sleep(CKECKPOINT_PERIOD);
+		slog_debug("Running Snapshot in %s", snapshot_dir);
 		pthread_mutex_lock(&mutex_garbage);
 		TIMING_NO_RETURN(map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot");
 		// To stop this thread we will wait for "hercules stop".
 		if (global_finish_snapshot == 1)
 		{
-			// Call a barrier to stop all servers.
+			// TODO: Call a barrier to stop all servers.
 			sleep(30);
 			global_finish_threads = 1;
 			pthread_mutex_unlock(&mutex_garbage);
@@ -2424,7 +2439,6 @@ void *dispatcher(void *th_argv)
 	struct sockaddr_in server_addr;
 	socklen_t addrlen = sizeof(server_addr);
 	int ret;
-	// int server_fd = -1;
 	int listenfd = -1;
 	int optval = 1;
 	// char service[8];
@@ -2480,7 +2494,7 @@ void *dispatcher(void *th_argv)
 		ucs_status_t status;
 		char mode[MODE_SIZE];
 
-		slog_debug("[DISPATCHER] Waiting for connection requests.");
+		// slog_debug("[DISPATCHER] Waiting for connection requests.");
 		// fprintf(stderr, "[DISPATCHER] Waiting for connection requests.\n");
 		new_socket = accept(global_server_fd_thread, (struct sockaddr *)&server_addr, &addrlen);
 
@@ -2492,7 +2506,8 @@ void *dispatcher(void *th_argv)
 
 		if (new_socket < 0)
 		{
-			slog_error("ERR_HERCULES_DISPATCHER_ACCEPT");
+			// slog_error("ERR_HERCULES_DISPATCHER_ACCEPT");
+			continue;
 		}
 		ret = recv(new_socket, req, REQUEST_SIZE, MSG_WAITALL);
 		if (ret < 0)

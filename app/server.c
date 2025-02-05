@@ -50,6 +50,7 @@ pthread_t *threads;
 // global variables usted to finish threads.
 extern int global_finish_threads;
 extern int global_finish_checkpoint;
+extern int global_finish_snapshot;
 extern int global_server_fd_thread;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
@@ -255,8 +256,10 @@ void handle_signal_server(int signal)
 			// must finish their execution.
 			if (args.type == TYPE_METADATA_SERVER || global_finish_checkpoint == 1)
 				global_finish_threads = 1;
-			else
+			else {
 				global_finish_checkpoint = 1;
+				global_finish_snapshot = 1;
+				}
 			sprintf(action, "stop");
 
 			// Shutdown or close the socket used by the dispatcher pointed
@@ -765,8 +768,8 @@ int32_t main(int32_t argc, char **argv)
 			slog_debug("[SERVER] Creating checkpoint thread.");
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
-			// if (pthread_create(&threads[i], NULL, checkpoint, (void *)g_map.get()) == -1)
-			if (pthread_create(&threads[i], NULL, Checkpoint, (void *)&arguments[i]) == -1)
+			// if (pthread_create(&threads[i], NULL, Checkpoint, (void *)&arguments[i]) == -1)
+			if (pthread_create(&threads[i], NULL, Snapshot, (void *)&arguments[i]) == -1)
 			{
 				// Notify thread error deployment.
 				ready(tmp_file_path, "ERROR");

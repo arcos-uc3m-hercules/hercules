@@ -55,11 +55,13 @@ public:
 
 	// Method storing a new record.
 	int32_t put(std::string key, void *address, uint64_t length);
-	int32_t put_simple(std::string key, int value);
+	int32_t put_snapshot(std::string key, int value);
+	int32_t put_broadcast(std::string key, void *address, uint64_t length);
 
 	// Method retrieving the address associated to a certain record.
 	int32_t get(std::string key, void **add_, uint64_t *size_);
-	int32_t get_simple(std::string key, uint64_t *to_copy);
+	int32_t get_snapshot(std::string key, uint64_t *to_copy);
+	int32_t get_broadcast(std::string key, void **add_, uint64_t *size_);
 
 	// Method updating a new record.
 	int32_t update(std::string key, void *add_, uint64_t length);
@@ -74,10 +76,11 @@ public:
 	// Method renaming from stat_worker
 	int32_t rename_metadata_dir_stat_worker(std::string old_dir, std::string rdir_dest);
 	// Used in str_worker threads
-	// Method retrieving the address associated to a certain record.
+	// Method deleting the address associated to a certain record.
 	int32_t cleaning();
 	int32_t cleaning_specific(std::string new_key);
 	int32_t freeAllMemory();
+	int32_t erase_broadcast_element(std::string key);
 
 	// int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id);
 	int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
@@ -105,7 +108,8 @@ private:
 	// <key(file uri), <data, lenght>>
 	std::map<std::string, std::pair<void *, uint64_t>> buffer;
 	std::map<std::string, int> buffer_snapshot;
-	std::unordered_map<std::string, int> buffer_broadcast;
+	// std::unordered_map<std::string, int> buffer_broadcast;
+	std::map<std::string, std::pair<void *, uint64_t>> buffer_broadcast;
 	// std::map<std::string, std::pair<uint64_t, uint64_t>> buffer_snapshot;
 	std::map<std::string, std::pair<int, __off_t>> buffer_fd;
 	// Mutex restricting access to structure.

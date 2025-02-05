@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <inttypes.h>
 #include "records.hpp"
 #include <condition_variable>
 #include "imss.h"
@@ -65,7 +66,7 @@ std::string map_records::get_head_element()
 	return key;
 }
 
-// Method retrieving the address associated to a certain record.
+// Method deleting the address associated to a certain record.
 int32_t map_records::erase_head_element()
 {
 
@@ -98,6 +99,26 @@ int32_t map_records::erase_head_element()
 	buffer.erase(buffer.begin());
 
 	// Return the address associated to the record.
+	return 1;
+}
+
+int32_t map_records::erase_broadcast_element(std::string key)
+{
+
+	// Map iterator that will be searching for the key.
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+
+	// // Search for the address related to the key.
+	it = buffer_broadcast.find(key);
+	// // Check if the value did exist within the map.
+	if (it == buffer.end())
+	{
+		return 0;
+	}
+
+	// Erase the element.
+	buffer_broadcast.erase(it);
+
 	return 1;
 }
 
@@ -146,7 +167,7 @@ int32_t map_records::put(std::string key, void *address, uint64_t length)
 }
 
 // Method storing a new record.
-int32_t map_records::put_simple(std::string key, int value)
+int32_t map_records::put_snapshot(std::string key, int value)
 {
 	// Construct a pair object storing the couple of values associated to a key.
 	// std::pair<void *, uint64_t> value(to_copy, 0); // second param is for file size.
@@ -155,6 +176,17 @@ int32_t map_records::put_simple(std::string key, int value)
 	// Add a new value to the map.
 	// fprintf(stderr, "Inserting %s with value %d\n", key.c_str(), value);
 	buffer_snapshot.insert({key, value});
+	return 0;
+}
+
+int32_t map_records::put_broadcast(std::string key, void *address, uint64_t length)
+{
+	// Construct a pair object storing the couple of values associated to a key.
+	std::pair<void *, uint64_t> value(address, length);
+	// Block the access to the map structure.
+	std::unique_lock<std::mutex> lock(*mut);
+	// Add a new couple to the map.
+	buffer_broadcast.insert({key, value});
 	return 0;
 }
 
@@ -196,7 +228,7 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	return 1;
 }
 
-int32_t map_records::get_simple(std::string key, uint64_t *to_copy)
+int32_t map_records::get_snapshot(std::string key, uint64_t *to_copy)
 {
 
 	// Map iterator that will be searching for the key.
@@ -223,6 +255,59 @@ int32_t map_records::get_simple(std::string key, uint64_t *to_copy)
 	// Return the value.
 	return 1;
 }
+
+int32_t map_records::get_broadcast(std::string key, void **add_, uint64_t *size_)
+{
+	// Map iterator that will be searching for the key.
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	// Block the access to the map structure.
+	std::unique_lock<std::mutex> lock(*mut);
+
+	if (buffer_broadcast.empty())
+		return 0;
+
+	// Search for the address related to the key.
+	it = buffer_broadcast.find(key);
+	// Check if the value did exist within the map.
+	if (it == buffer_broadcast.end())
+	{
+		return 0;
+	}
+
+	// Assign the values obtained to the provided references.
+	*(add_) = it->second.first;
+	*(size_) = it->second.second;
+
+	return 1;
+}
+
+// int32_t map_records::get_broadcast(std::string key, uint64_t *to_copy)
+// {
+
+// 	// Map iterator that will be searching for the key.
+// 	std::map<std::string, int>::iterator it;
+// 	// std::map<std::string, std::pair<uint64_t, uint64_t>>::iterator it;
+
+// 	int value = 0;
+// 	// Block the access to the map structure.
+// 	// std::unique_lock<std::mutex> lock(*mut);
+
+// 	if (buffer_broadcast.empty())
+// 		return 0;
+
+// 	// Search for the address related to the key.
+// 	it = buffer_broadcast.find(key);
+// 	// Check if the value did exist within the map.
+// 	if (it == buffer_broadcast.end())
+// 	{
+// 		return 0;
+// 	}
+// 	*(to_copy) = it->second;
+// 	// *(file_size) = it->second.second;
+
+// 	// Return the value.
+// 	return 1;
+// }
 
 int32_t map_records::update(std::string key, void *add_, uint64_t length)
 {
@@ -740,7 +825,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 
 			if (!is_shared_memory)
 			{
-				// data_buffer = address_;
+				data_buffer = address_;
 			}
 			else
 			{
@@ -875,6 +960,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 	string key, inner_key, block, file_name, inner_file_name, data_uri;
 	char key_block_0[PATH_MAX];
 	char expected_uri[PATH_MAX];
+	char expected_key_format[PATH_MAX];
 	char old_expected_uri[PATH_MAX];
 	void *address_ = NULL;
 	void *address_block_0 = NULL;
@@ -888,18 +974,22 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 	void *data_buffer = NULL;
 
 	char *POLICY = args.policy;
+	// TODO: it is better to use "number_active_storage_servers"
+	// to avoid issues when malleability is actived.
+	const int64_t number_of_data_servers = args.num_data_servers;
+
 
 	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
 	{
 		is_shared_memory = 1;
 	}
-
-	if (!finish)
-	{
-		return 0;
-	}
-	fprintf(stderr, "Running snapshot\n");
-	data_buffer = (void *)malloc(quantity_occupied * sizeof(char *));
+	// Allows to do the snapshot only when Hercules is stopping.
+	// if (!finish)
+	// {
+	// 	return 0;
+	// }
+	// fprintf(stderr, "Running snapshot\n");
+	data_buffer = (void *)malloc(quantity_occupied * sizeof(char *)); // do not forget to free this pointer.
 	for (const auto &it : buffer_snapshot)
 	{
 		key = it.first;
@@ -917,7 +1007,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 			slog_error("HERCULES_ERR_MISSFORMAT_KEY");
 			continue;
 		}
-
+		slog_debug("key=%s, copy_to_disk=%d, iteration=%d", key.c_str(), copy_to_disk, iteration);
 		if (copy_to_disk == 1)
 		{
 			block = key.substr(pos, key.length() + 1); // substract the block number from the key.
@@ -935,19 +1025,24 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 			// We need at least one iteartion to ensure "curr_dataset" is not
 			// empty.
 			if (iteration > 0)
+			{
 				// if the expected uri is different from the previous iteration,
 				// we are in a block of another dataset. So, we need to get the
 				// information of this dataset and to check it is ready to be
 				// copied to disk or not.
 				if (!strcmp(curr_dataset.uri_, expected_uri) && curr_dataset.n_open > 0)
 				{
+					slog_debug("current_dataset.uri=%s, expecred_uri=%s, n_open=%d", curr_dataset.uri_, expected_uri, curr_dataset.n_open);
 					// Skip all blocks of this dataset because is not ready.
 					continue;
 				}
+			}
 
+			// To check if this is a block 0.
 			found = key.find("$0");
 			if (found != std::string::npos)
 			{ // checks if block 0 is for regular file or directory.
+				slog_debug("Block 0 for key %s", key.c_str());
 				ret = get(key, &address_, &block_size_rtvd);
 				if (ret == 0)
 				{
@@ -959,7 +1054,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 					stats = (struct stat *)address_;
 				}
 				else
-				{
+				{ // get block 0 from shared memory.
 					size_t memory_offset = 0;
 					uint32_t stored_block_size = 0;
 					sscanf((const char *)address_, "%lu %d", &memory_offset, &stored_block_size);
@@ -999,25 +1094,25 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 				slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset.uri_, curr_dataset.n_open);
 				continue;
 			}
-
+			// Get the data from the local map.
 			ret = get(key, &address_, &block_size_rtvd);
 			if (ret == 0)
 			{
-				fprintf(stderr, "key %s not found for checkpointing\n", key.c_str());
+				fprintf(stderr, "key %s not found for Snapshot\n", key.c_str());
 				continue;
 			}
 
-			void *data_buffer = NULL;
+			// void *data_buffer = NULL;
 			if (!is_shared_memory)
 			{
-				data_buffer = address_;
+				// data_buffer = address_;
 			}
 			else
-			{
+			{ // get data from shared memory.
 				size_t memory_offset = 0;
 				uint32_t stored_block_size = 0;
 				sscanf((const char *)address_, "%lu %d", &memory_offset, &stored_block_size);
-				// fprintf(stderr, "memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
+				slog_debug("Memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
 				data_buffer = (char *)args.pool_memory + memory_offset;
 				block_size_rtvd = stored_block_size;
 			}
@@ -1054,11 +1149,11 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 				stats = (struct stat *)address_block_0;
 			}
 			else
-			{
+			{ // get stats from shared memory.
 				size_t memory_offset = 0;
 				uint32_t stored_block_size = 0;
 				sscanf((const char *)address_block_0, "%lu %d", &memory_offset, &stored_block_size);
-				// fprintf(stderr, "memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
+				slog_debug("Memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
 				stats = (struct stat *)((char *)args.pool_memory + memory_offset);
 			}
 
@@ -1071,85 +1166,138 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 				continue;
 			}
 			file_size = stats->st_size;
-		}
 
-		offset = block_size * (block_number - 1); // -1 due block 0.
-		if (file_size != 0)
-		{
-			// This helps to write files smaller than the block size with
-			// the corresponding size.
-			if (file_size < block_size && file_size != 0)
+			offset = block_size * (block_number - 1); // -1 due we skip block 0.
+			if (file_size != 0)
 			{
-				block_size_rtvd = file_size;
+				// This helps to write files smaller than the block size with
+				// the corresponding size.
+				if (file_size < block_size && file_size != 0)
+				{
+					block_size_rtvd = file_size;
+				}
+
+				// This helps to write the last block with the remaining data
+				// preventing writing the entire block.
+				if (block_size_rtvd + offset > file_size)
+				{
+					block_size_rtvd = file_size - offset;
+				}
 			}
 
-			// This helps to write the last block with the remaining data
-			// preventing writing the entire block.
-			if (block_size_rtvd + offset > file_size)
+			// fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, stats->st_size=%lu\n", key.c_str(), block_size_rtvd, offset, stats->st_size);
+			slog_debug("key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, file_size=%lu", key.c_str(), block_size_rtvd, offset, file_size);
+			// fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, file_size=%lu\n", key.c_str(), block_size_rtvd, offset, file_size);
+			memcpy((char *)data_buffer + total_written, address_, block_size_rtvd);
+			t = clock();
+			// block_size_rtvd = Write_2_disk(fd, data_buffer, block_size_rtvd, offset);
+
+			t = clock() - t;
+			parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
+			total_time_taken += parcial_time_taken;
+			if (block_size_rtvd == -1)
 			{
-				block_size_rtvd = file_size - offset;
+				continue;
+			}
+			total_written += block_size_rtvd;
+			// set "copy_to_disk" to 0 to prevent this block to be copy to disk
+			// twice.
+			buffer_snapshot[key] = 0;
+
+			if (to_free)
+			{
+				free(address_block_0);
+				to_free = 0;
 			}
 		}
-
-		// fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, stats->st_size=%lu\n", key.c_str(), block_size_rtvd, offset, stats->st_size);
-		slog_debug("key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, file_size=%lu", key.c_str(), block_size_rtvd, offset, file_size);
-		// fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, file_size=%lu\n", key.c_str(), block_size_rtvd, offset, file_size);
-		memcpy((char *)data_buffer + total_written, address_, block_size_rtvd);
-		t = clock();
-		// block_size_rtvd = Write_2_disk(fd, data_buffer, block_size_rtvd, offset);
-
-		t = clock() - t;
-		parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
-		total_time_taken += parcial_time_taken;
-		if (block_size_rtvd == -1)
-		{
-			continue;
-		}
-		total_written += block_size_rtvd;
-		// set "copy_to_disk" to 0 to prevent this block to be copy to disk
-		// twice.
-		buffer_snapshot[key] = 0;
-
-		if (to_free)
-		{
-			free(address_block_0);
-			to_free = 0;
-		}
 	}
+	if (total_written > 0)
+	{
+		char **pointer_of_buffers = (char **)malloc((number_of_data_servers-1)*sizeof(char*));
+		if (!args.id)
+		{ // Only server 0 performs the I/O.
+			sleep(10);
 
-	if (!args.id)
-	{ // Only server 0 performs the I/O.
-		// Get data.
-		// Block until this server receives all data.
-		std::unique_lock<std::mutex> lock(mtx);
+			// Get data.
+			// Block until this server receives all data.
+			// std::unique_lock<std::mutex> lock(mtx);
 
-		cv.wait(lock, []
-				{ return data_ready; });
+			// cv.wait(lock, []
+			// 		{ return data_ready; });
+			// To iterate buffer broadcast and copy the content to the final
+			// buffer. The "key" must be the server id and it should be
+			// an incremental sequencial number. So if server 1 is not ready,
+			// we must to wait for it before to continue.
+			// TODO: change the key for the server id in workers.c
+			// for (const auto &it : buffer_broadcast) {
+			// 	it.get_broadcast();
+			// }
+			// Skip data server 0.
+			int32_t find = 0;
+			for (int64_t server_number = 1; server_number < number_of_data_servers; server_number++)
+			{
+				void *buffer_address = NULL;
+				uint64_t storage_buffer_size = 0;
 
-		fd = Open_file(checkpoint_dir, data_hostname);
-		t = clock();
-		block_size_rtvd = Write_2_disk(fd, data_buffer, total_written, offset);
-		t = clock() - t;
-		parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
-		total_time_taken += parcial_time_taken;
-		Close_file(fd);
-	}
-	else
-	{ // All servers send their data.
-		char key_[REQUEST_SIZE];
-		int n_server_ = 0;
-		// ucp_ep_h ep;
+				// std::string expected_key = std::format("{}${}", file_name, server_number);
+				sprintf(expected_key_format, "imss://%s$%" PRId64, file_name.c_str(), server_number);
+				std::string expected_key = expected_key_format;
 
-		// sprintf(key_, "SNAPSET %lu %d %s$%d", total_written, 0, curr_dataset.uri_, server_id);
+				// int origin_server_id = 0;
+				// std::string data_uri;
+				// std::string file_name;
+				// getBlockInformation(key, &origin_server_id, &data_uri, &file_name);
+				// slog_debug("key: %s, origin_server_id: %d, data_uri: %s, file_name: %s", key.c_str(), origin_server_id, data_uri.c_str(), file_name.c_str());
+				// sprintf(expected_key.c_str(), "%s$%d", file_name.c_str(), server_number);
+				find = get_broadcast(expected_key, &buffer_address, &storage_buffer_size);
+				pointer_of_buffers[server_number-1] = buffer_address;
+				// TODO: save the storage_buffer_size.
+				if (find == 0)
+				{
+					slog_debug("key %s has not been find", expected_key.c_str());
+					continue;
+				}
+				else
+				{
+					slog_debug("key %s has been find", expected_key.c_str());
+				}
+				find = erase_broadcast_element(expected_key);
+				if (find == 0)
+				{
+					slog_debug("key %s comming from server %d has not been find to be deleted", expected_key.c_str(), server_number);
+					continue;
+				}
+				else
+				{
+					slog_debug("key %s commig from server %d has been deleted", expected_key.c_str(), server_number);
+				}
+			}
+			// break;
+			fd = Open_file(checkpoint_dir, data_hostname);
+			t = clock();
+			block_size_rtvd = Write_2_disk(fd, data_buffer, total_written, offset);
+			t = clock() - t;
+			parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
+			total_time_taken += parcial_time_taken;
+			Close_file(fd);
+		}
+		else
+		{ // All servers send their data.
+			char key_[REQUEST_SIZE];
+			int n_server_ = 0;
+			// ucp_ep_h ep;
 
-		// TODO: Implement SNAPSET on workers.c
-		// buffer_broadcast
-		
-		if (set_data_server_reduce(server_id, 0, data_buffer, total_written, n_server_) < 0)
-		{
-			perror("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
-			slog_error("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
-			return -1;
+			// sprintf(key_, "SNAPSET %lu %d %s$%d", total_written, 0, curr_dataset.uri_, server_id);
+
+			// TODO: Implement SNAPSET on workers.c
+			// buffer_broadcast
+
+			if (set_data_server_reduce(server_id, 0, data_buffer, total_written, n_server_) < 0)
+			{
+				perror("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
+				slog_error("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
+				return -1;
+			}
 		}
 	}
 
@@ -1170,4 +1318,3 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 
 	return total_time_taken;
 }
-
