@@ -54,7 +54,7 @@ void *map_server_eps;
 char *redis_host;
 int redis_port;
 
-pthread_mutex_t tree_mut = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t hiredis_mut = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mp = PTHREAD_MUTEX_INITIALIZER;
 
 ucp_worker_h *ucp_worker_threads;
@@ -1465,19 +1465,18 @@ void *stat_worker(void *th_argv)
 	// Create and connect to hiredis server
 	redis_host = "127.0.0.1";
 	redis_port = 6379;
-	redisContext *redisContext = redisConnect(redis_host, redis_port);
-	if (redisContext == NULL || redisContext->err) {
-		if (redisContext) {
+	redisContext *hiredis_context = redisConnect(redis_host, redis_port);
+	if (hiredis_context == NULL || hiredis_context->err) {
+		if (hiredis_context) {
 			slog_debug("HERCULES_ERR_STAT_WORKER_REDIS_CONNECTION_ERROR");
 			perror("HERCULES_ERR_STAT_WORKER_REDIS_CONNECTION_ERROR");
 			return NULL;
 		} else {
-			slog_debug("HERCULES_ERR_STAT_WORKER_REDIS_CANT_ALLOCATE_CONTEXT");
-			printf("HERCULES_ERR_STAT_WORKER_REDIS_CANT_ALLOCATE_CONTEXT");
+			slog_debug("HERCULES_ERR_STAT_WORKER_REDIS_CANNOT_ALLOCATE_CONTEXT");
+			perror("HERCULES_ERR_STAT_WORKER_REDIS_CANT_ALLOCATE_CONTEXT");
 			return NULL;
 		}
 	}
-	perror("REDIS OK");
 
 	for (;;)
 	{
@@ -1598,6 +1597,7 @@ void *stat_worker(void *th_argv)
 		arguments->peer_address = peer_addr;
 		arguments->server_ep = ep;
 		arguments->worker_uid = attr.worker_uid;
+		arguments->hiredis_context = hiredis_context;
 		muntrace();
 
 		// arguments->worker_uid = attr.worker_uid;
@@ -1618,6 +1618,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
+
+	// Obtain the redis context from the set of arguments.
+	redisContext *hiredis_context = arguments->hiredis_context;
 
 	uint16_t current_offset = 0;
 
@@ -1703,11 +1706,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			char *buffer;
 			int32_t numelems_indir;
 			// Retrieve all elements inside the requested directory.
-			pthread_mutex_lock(&tree_mut);
+			pthread_mutex_lock(&hiredis_mut);
 			slog_info("[workers][stat_worker_helper] Calling GTree_getdir, key=%s", key.c_str());
 			buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
 			slog_info("[workers][stat_worker_helper] Ending GTree_getdir, key=%s, numelems_indir=%d", key.c_str(), numelems_indir);
-			pthread_mutex_unlock(&tree_mut);
+			pthread_mutex_unlock(&hiredis_mut);
 			if (buffer == NULL)
 			{
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
@@ -2076,10 +2079,10 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			}
 
 			// Insert the received uri into the directory tree.
-			pthread_mutex_lock(&tree_mut);
+			pthread_mutex_lock(&hiredis_mut);
 			// slog_debug("[STAT WORKER] Inserting %s into directory tree", key.c_str());
 			insert_successful = GTree_insert((char *)key.c_str());
-			pthread_mutex_unlock(&tree_mut);
+			pthread_mutex_unlock(&hiredis_mut);
 
 			if (insert_successful == -1)
 			{

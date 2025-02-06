@@ -7,6 +7,7 @@
 #include "shared_memory.h"
 // #include "hercules.hpp"
 #include <memory>
+#include <hiredis/hiredis.h>
 
 #define READ_OP 0
 #define GETDIR 1
@@ -46,6 +47,8 @@ typedef struct
 	uint64_t port;
 	// URI assigned to the current IMSS instance.
 	char my_uri[URI_];
+	// Pointer to the current thread's hiredis context.
+	redisContext *hiredis_context;
 	int64_t total_size;
 	ucp_context_h ucp_context;
 	ucp_worker_h ucp_worker;
