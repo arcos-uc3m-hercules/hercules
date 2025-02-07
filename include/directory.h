@@ -19,10 +19,6 @@ int32_t GTree_rename(char * old_desired_data,char * new_desired_data);
 int32_t
 serialize_dir(GNode * 	visited_node,uint32_t 	num_nodes,char ** 	buffer);
 
-//Method serializing the number of childrens within a directory into a buffer.
-int32_t
-serialize_dir_childrens(GNode * 	visited_node,uint32_t 	num_children,char ** 	buffer);
-
 //Method renaming dir to dir.
 int32_t
 GTree_rename_dir_dir(char * old_dir,char * rdir_dest);
