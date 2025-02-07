@@ -12,12 +12,12 @@ redisContext* redis_init(const char *hostname, int port)
     {
         if (context)
         {
-            fprintf(stderr, "Error: %s\n", context->errstr);
+            slog_error("Error: %s\n", context->errstr);
             return NULL;
         }
         else
         {
-            fprintf(stderr, "Error: Cannot allocate context\n");
+            slog_error("Error: Cannot allocate context\n");
             return NULL;
         }
     }
@@ -85,4 +85,22 @@ static char* get_path_last_part(const char* path) {
 
     // Return the substring that follows the last '/'
     return strdup(last_slash + 1);
+}
+
+int32_t redis_delete_data(redisContext *context, const char *desired_data) {
+    char *parent_dir = get_parent_dir(desired_data);
+    char *file = get_path_last_part(desired_data); // This can be either a file or a dir
+
+    redisReply *reply = (redisReply *)redisCommand(context, "SREM %s %s", parent_dir, file);
+
+    if (reply == NULL)
+    {
+        slog_error("Error: %s\n", context->errstr);
+        return -1;
+    }
+    int exit_code = reply->integer;
+    freeReplyObject(reply);
+    free(parent_dir);
+    free(file);
+    return exit_code;
 }
