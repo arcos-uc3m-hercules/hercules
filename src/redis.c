@@ -87,10 +87,12 @@ static char* get_path_last_part(const char* path) {
     return strdup(last_slash + 1);
 }
 
+// Method deleting a new path.
 int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     char *parent_dir = get_parent_dir(desired_data);
     char *file = get_path_last_part(desired_data); // This can be either a file or a dir
 
+    // First, remove the file from the parent directory
     redisReply *reply = (redisReply *)redisCommand(context, "SREM %s %s", parent_dir, file);
 
     if (reply == NULL)
@@ -98,9 +100,40 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
         slog_error("Error: %s\n", context->errstr);
         return -1;
     }
+    // This will be the return value of the function
     int exit_code = reply->integer;
+
+    // Now check for subdirectories and delete them
+    if (exit_code == 1) {
+        
+    }
+
     freeReplyObject(reply);
     free(parent_dir);
     free(file);
     return exit_code;
+}
+
+// Helper method for deleting all subdirectories of a directory
+static void delete_subdirectories(redisContext *context, const char* parent_dir) {
+    // Get all the subdirectories of the parent directory
+    redisReply *reply = (redisReply *)redisCommand(context, "SMEMBERS %s", parent_dir);
+    if (reply == NULL) {
+        slog_error("Error: %s\n", context->errstr);
+        return;
+    }
+
+    // Iterate over the subdirectories and delete them recursively
+    for (size_t i = 0; i < reply->elements; i++) {
+        const char* sub_dir = reply->element[i]->str;
+        // Recursively delete the subdirectory. If the subdir is actually a file or is empty, this will do nothing
+        delete_subdirectories(context, sub_dir);
+        redisReply *del_reply = (redisReply *)redisCommand(context, "DEL %s", sub_dir);
+        if (del_reply == NULL) {
+            slog_error("Error: %s\n", context->errstr);
+        }
+        freeReplyObject(del_reply);
+    }
+
+    freeReplyObject(reply);
 }
