@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include "imss.h"
 
 
 // Method initializing the Redis connection.
@@ -103,10 +104,8 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     // This will be the return value of the function
     int exit_code = reply->integer;
 
-    // Now check for subdirectories and delete them
-    if (exit_code == 1) {
-        
-    }
+    // If the file was a directory, delete all its subdirectories
+    delete_subdirectories(context, desired_data);
 
     freeReplyObject(reply);
     free(parent_dir);
@@ -133,6 +132,61 @@ static void delete_subdirectories(redisContext *context, const char* parent_dir)
             slog_error("Error: %s\n", context->errstr);
         }
         freeReplyObject(del_reply);
+    }
+
+    freeReplyObject(reply);
+}
+
+// Function to get the directory contents from Redis
+char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems) {
+    // Retrieve the contents of the directory
+    redisReply *reply = (redisReply *)redisCommand(context, "SMEMBERS %s", desired_dir);
+    if (reply == NULL || reply->type != REDIS_REPLY_ARRAY) {
+        slog_error("Error: %s\n", context->errstr);
+        return NULL;
+    }
+
+    // Number of elements contained by the directory
+    uint32_t num_children = reply->elements;
+    *numdir_elems = num_children + 1; // +1 for the actual directory + children
+    slog_info("[redis_getdir] num_children=%d", num_children);
+
+    // Buffer containing the whole set of elements within a certain directory
+    char *dir_elements = (char *)malloc((num_children + 1) * URI_);
+    if (dir_elements == NULL) {
+        slog_error("Memory allocation error\n");
+        freeReplyObject(reply);
+        return NULL;
+    }
+    // Serialize the directory children into the buffer
+    for (size_t i = 0; i < reply->elements; i++) {
+        const char *child = reply->element[i]->str;
+        size_t len = strlen(child);
+        memcpy(dir_elements, child, len);
+        dir_elements += len;
+        *dir_elements = '\0'; // Null-terminate the string
+        dir_elements++;
+    }
+
+    freeReplyObject(reply);
+    return dir_elements;
+}
+
+// Helper function to serialize directory children into a buffer
+static void serialize_dir_childrens(redisContext *context, const char *dir, char **buffer) {
+    redisReply *reply = (redisReply *)redisCommand(context, "SMEMBERS %s", dir);
+    if (reply == NULL || reply->type != REDIS_REPLY_ARRAY) {
+        fprintf(stderr, "Error: %s\n", context->errstr);
+        return;
+    }
+
+    for (size_t i = 0; i < reply->elements; i++) {
+        const char *child = reply->element[i]->str;
+        size_t len = strlen(child);
+        memcpy(*buffer, child, len);
+        *buffer += len;
+        **buffer = '\0'; // Null-terminate the string
+        (*buffer)++;
     }
 
     freeReplyObject(reply);
