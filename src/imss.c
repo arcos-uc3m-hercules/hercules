@@ -3970,7 +3970,9 @@ int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset)
 {
 	int ret = -1;
 
-	ssize_t bytes = pwrite(fd, buffer, size, offset);
+	// ssize_t bytes = pwrite(fd, buffer, size, offset);
+	ssize_t bytes = write(fd, buffer, size);
+
 	if (bytes < 0)
 	{
 		perror("HERCULES_ERR_WRITE_DISK");

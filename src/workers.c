@@ -1153,7 +1153,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					// Fill buffer_broadcast with the data received from the other servers.
 					// buffer_broadcast[];
 					slog_debug("Snapshot opration, origin server=%s", key.c_str());
-					insert_successful = map->put_broadcast(key, buffer, size_asigned_to_block);
+					insert_successful = map->put_broadcast(key, buffer, msg_length);
 				}
 				else
 				{
@@ -1175,8 +1175,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				// Only when there is not a snapshot operation.
 				if (!snapshot_op)
 				{
-					// The following buffer is used for checkpoints.
-					// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding checkpoint thread copy the data to disk.
+					// The following buffer is used for Sanpshot.
+					// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding Snapshot thread copy the data to disk.
 					// fprintf(stderr, "Inserting key = %s\n", key.c_str());
 					insert_successful = map->put_snapshot(key, 1);
 					// Include the new record in the tracking structure.

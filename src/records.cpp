@@ -971,13 +971,12 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 	size_t iteration = 0;
 	int to_free = 0, is_shared_memory = 0;
 	__off_t file_size = 0;
-	void *data_buffer = NULL;
+	char *data_buffer = NULL;
 
 	char *POLICY = args.policy;
 	// TODO: it is better to use "number_active_storage_servers"
 	// to avoid issues when malleability is actived.
 	const int64_t number_of_data_servers = args.num_data_servers;
-
 
 	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
 	{
@@ -989,9 +988,23 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 	// 	return 0;
 	// }
 	// fprintf(stderr, "Running snapshot\n");
-	data_buffer = (void *)malloc(quantity_occupied * sizeof(char *)); // do not forget to free this pointer.
+	data_buffer = (char *)malloc((quantity_occupied + 1024) * sizeof(char *)); // do not forget to free this pointer.
+	char *reconstructed_data_file = NULL;
+	off_t block_offset = 0;
+
+	// TODO: in order to avoid locks and syncronizations: 
+	// server 0 checks for a file to be snapshoting.
+	// server 0 sends a signal to all servers to find and "reduce" all its
+	// data about this file.
+	// all servers sends its data to server 0.
+	// Server 0 find and "reduce" all its data about the file.
+	// Server 0 collects and re-structure all the data comming from others servers and write the final file.
+	
+	// server 0 will check  if there is data on buffer_broadcast.
 	for (const auto &it : buffer_snapshot)
 	{
+		// TODO: use the function getBlockInformation().
+
 		key = it.first;
 		if (key.empty())
 		{
@@ -1068,6 +1081,9 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 					// set "copy_to_disk" to 0.
 					buffer_snapshot[key] = 0;
 				}
+				// Send a message to all servers telling this servers needs the information..
+				// Checks if there are still processes with the file opened.
+				
 				continue;
 			}
 
@@ -1185,10 +1201,42 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 				}
 			}
 
+			// if (data_buffer == NULL && args.id == 0)
+			// {
+			// 	data_buffer = (void *)malloc(quantity_occupied * sizeof(char *)); // do not forget to free this pointer.
+			// }
+			// else if (data_buffer == NULL && args.id != 0)
+			// {
+			// 	data_buffer = (void *)malloc(quantity_occupied * sizeof(char *)); // do not forget to free this pointer.
+			// }
+
 			// fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, stats->st_size=%lu\n", key.c_str(), block_size_rtvd, offset, stats->st_size);
 			slog_debug("key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, file_size=%lu", key.c_str(), block_size_rtvd, offset, file_size);
 			// fprintf(stderr, "key.c_str(): %s, block_size_rtvd=%lu, offset=%lu, file_size=%lu\n", key.c_str(), block_size_rtvd, offset, file_size);
-			memcpy((char *)data_buffer + total_written, address_, block_size_rtvd);
+			if (args.id == 0)
+			{
+				// block_offset = (block_number - 1) * args.block_size;
+				// slog_debug("block number=%d", block_number);
+				if (reconstructed_data_file != NULL)
+				{
+					free(reconstructed_data_file);
+				}
+				reconstructed_data_file = (char *)malloc(file_size * sizeof(char *));
+				if (reconstructed_data_file == NULL)
+				{
+					perror("HERCULES_ERR_RECONSTRUCTED_DATA_FILE_MEM_FAILED");
+					slog_error("HERCULES_ERR_RECONSTRUCTED_DATA_FILE_MEM_FAILED");
+					return -1;
+				}
+
+				memcpy((char *)reconstructed_data_file + offset, address_, block_size_rtvd);
+			}
+			else
+			{
+				slog_debug("block number added to the buffer=%d, block_size_rtvd=%d", block_number, block_size_rtvd);
+				memcpy((char *)data_buffer + total_written, &block_number, sizeof(block_number));
+				memcpy((char *)data_buffer + total_written + sizeof(block_number), address_, block_size_rtvd);
+			}
 			t = clock();
 			// block_size_rtvd = Write_2_disk(fd, data_buffer, block_size_rtvd, offset);
 
@@ -1199,7 +1247,14 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 			{
 				continue;
 			}
-			total_written += block_size_rtvd;
+			if (args.id == 0)
+			{
+				total_written = total_written + block_size_rtvd;
+			}
+			else
+			{
+				total_written = total_written + block_size_rtvd + sizeof(block_number);
+			}
 			// set "copy_to_disk" to 0 to prevent this block to be copy to disk
 			// twice.
 			buffer_snapshot[key] = 0;
@@ -1213,11 +1268,12 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 	}
 	if (total_written > 0)
 	{
-		char **pointer_of_buffers = (char **)malloc((number_of_data_servers-1)*sizeof(char*));
+		// char *pointer_of_buffers = (char *)malloc(1024 * sizeof(char*));
+
+		// int buffer_sizes[number_of_data_servers - 1];
 		if (!args.id)
 		{ // Only server 0 performs the I/O.
 			sleep(10);
-
 			// Get data.
 			// Block until this server receives all data.
 			// std::unique_lock<std::mutex> lock(mtx);
@@ -1232,11 +1288,20 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 			// for (const auto &it : buffer_broadcast) {
 			// 	it.get_broadcast();
 			// }
+
+			fd = Open_file(checkpoint_dir, data_hostname);
+			// Server 0 writres its data.
+			// t = clock();
+			// block_size_rtvd = Write_2_disk(fd, data_buffer, total_written, 0);
+			// t = clock() - t;
+			// parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
+			// total_time_taken += parcial_time_taken;
+
 			// Skip data server 0.
 			int32_t find = 0;
 			for (int64_t server_number = 1; server_number < number_of_data_servers; server_number++)
 			{
-				void *buffer_address = NULL;
+				char *buffer_address = NULL;
 				uint64_t storage_buffer_size = 0;
 
 				// std::string expected_key = std::format("{}${}", file_name, server_number);
@@ -1249,9 +1314,10 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 				// getBlockInformation(key, &origin_server_id, &data_uri, &file_name);
 				// slog_debug("key: %s, origin_server_id: %d, data_uri: %s, file_name: %s", key.c_str(), origin_server_id, data_uri.c_str(), file_name.c_str());
 				// sprintf(expected_key.c_str(), "%s$%d", file_name.c_str(), server_number);
-				find = get_broadcast(expected_key, &buffer_address, &storage_buffer_size);
-				pointer_of_buffers[server_number-1] = buffer_address;
-				// TODO: save the storage_buffer_size.
+				find = get_broadcast(expected_key, (void **)&buffer_address, &storage_buffer_size);
+				// Store the address and the buffer size in two arrays.
+				// pointer_of_buffers[server_number - 1] = (char *)buffer_address;
+				// buffer_sizes[server_number - 1] = storage_buffer_size;
 				if (find == 0)
 				{
 					slog_debug("key %s has not been find", expected_key.c_str());
@@ -1260,6 +1326,40 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 				else
 				{
 					slog_debug("key %s has been find", expected_key.c_str());
+					// iterate the buffer to get the blocks data.
+					// t = clock();
+					int block_number = -1;
+					while (*buffer_address != '\0')
+					{
+						// Each block number has been added to the data string.
+						// TODO: block number should be a unsigned long integer.
+						memcpy(&block_number, buffer_address, sizeof(int));
+						block_offset = (block_number - 1) * block_size;
+						slog_debug("block number=%d, block_offset=%d, block_size=%d", block_number, block_offset, block_size);
+						if (block_number > 100000) // TODO: delete this condition.
+						{
+							perror("HERCULES_ERR_RETREIVING_THE_BLOCK_NUMBER");
+							return -1;
+						}
+
+						// This helps to write the last block with the remaining data
+						// preventing writing the entire block.
+						if (block_size + block_offset > file_size)
+						{
+							block_size_rtvd = file_size - block_offset;
+						} else {
+							block_size_rtvd = block_size;
+						}
+
+						memcpy((char *)reconstructed_data_file + block_offset, buffer_address + sizeof(int), block_size_rtvd);
+						// Move the pointer by the data size copied plus the int size.
+						buffer_address = buffer_address + block_size_rtvd + sizeof(int);
+						total_written += block_size_rtvd;
+					}
+					// block_size_rtvd = Write_2_disk(fd, buffer_address, storage_buffer_size, 0);
+					// t = clock() - t;
+					// parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
+					// total_time_taken += parcial_time_taken;
 				}
 				find = erase_broadcast_element(expected_key);
 				if (find == 0)
@@ -1272,13 +1372,20 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 					slog_debug("key %s commig from server %d has been deleted", expected_key.c_str(), server_number);
 				}
 			}
-			// break;
-			fd = Open_file(checkpoint_dir, data_hostname);
+
+			// while (*data_buffer != '\0')
+			// {
+			// 	block_offset = (block_number - 1) * args.block_size;
+			// 	memcpy((char *)reconstructed_data_file + block_offset, data_buffer, args.block_size);
+			// 	data_buffer = data_buffer + args.block_size;
+			// }
+
 			t = clock();
-			block_size_rtvd = Write_2_disk(fd, data_buffer, total_written, offset);
+			block_size_rtvd = Write_2_disk(fd, reconstructed_data_file, total_written, 0);
 			t = clock() - t;
 			parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
 			total_time_taken += parcial_time_taken;
+
 			Close_file(fd);
 		}
 		else
@@ -1300,6 +1407,8 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 			}
 		}
 	}
+
+	free(data_buffer);
 
 	if (total_time_taken > 0)
 	{
