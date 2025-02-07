@@ -82,6 +82,9 @@ public:
 	int32_t freeAllMemory();
 	int32_t erase_broadcast_element(std::string key);
 
+
+	int32_t get_broadcast_size();
+
 	// int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id);
 	int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
 	int32_t Snapshot(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);

@@ -539,36 +539,38 @@ RETURNS:	 0 - The requested block was successfully stored.
 
 	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, off_t offset);
 
-	/* Method retrieving the location of a specific data object.
+	int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const void *request);
 
-RECEIVES:	dataset      - Dataset URI whose blocks location are to be retrieved.
-data_id      - ID identifying the data block whose location shall be retrieved.
-num_storages - Reference to an int32_t variable where the number of storages containing the concerned data block is stored.
+		/* Method retrieving the location of a specific data object.
 
-RETURNS:	char ** - List of IPs or DNSs where the concerned block is stored.
-NULL    - The requested data block did not existed.
+	RECEIVES:	dataset      - Dataset URI whose blocks location are to be retrieved.
+	data_id      - ID identifying the data block whose location shall be retrieved.
+	num_storages - Reference to an int32_t variable where the number of storages containing the concerned data block is stored.
 
-WARNING:	The get_dataloc function allocates memory (performs malloc operations).
+	RETURNS:	char ** - List of IPs or DNSs where the concerned block is stored.
+	NULL    - The requested data block did not existed.
 
-Therefore, the next steps must be followed in order to free the reserved memory:
+	WARNING:	The get_dataloc function allocates memory (performs malloc operations).
 
-char ** locations = get_dataloc(datasetd, data_id, &num_storages);
+	Therefore, the next steps must be followed in order to free the reserved memory:
 
-...
+	char ** locations = get_dataloc(datasetd, data_id, &num_storages);
 
-	//FREE RESOURCES.
-	for (int32_t i = 0; i < num_storages; i++)
+	...
 
-	free(locations[i]);
+		//FREE RESOURCES.
+		for (int32_t i = 0; i < num_storages; i++)
 
-	free(locations);
-	 */
+		free(locations[i]);
 
-	int32_t
-	set_ndata(int32_t dataset_id,
-			  int32_t data_id,
-			  char *buffer,
-			  uint32_t size);
+		free(locations);
+		 */
+
+		int32_t
+		set_ndata(int32_t dataset_id,
+				  int32_t data_id,
+				  char *buffer,
+				  uint32_t size);
 
 	char **get_dataloc(const char *dataset, int32_t data_id, int32_t *num_storages);
 

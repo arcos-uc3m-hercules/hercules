@@ -3474,6 +3474,53 @@ int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, c
 	return 1;
 }
 
+int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const void *request)
+{
+
+	pthread_mutex_lock(&lock_network);
+	// char key_[REQUEST_SIZE];
+	// int32_t curr_imss_storages = curr_imss.info.num_storages;
+	// curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
+
+	// Send the request to each server .
+	for (int32_t i = 0; i < num_of_servers; i++)
+	{
+		ucp_ep_h ep;
+		// Server receiving the current data block.
+		uint32_t n_server_ = i;
+
+		// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
+		// sprintf(key_, "SNAPSET %lu %d %s$%d", size, 0, curr_dataset.uri_, from_data_server_id);
+
+		slog_info("[IMSS] Request to Server %d: %s", n_server_, request);
+		
+		ep = curr_imss.conns.eps[n_server_];
+
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, request) == 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			perror("HERCULES_ERR_BROADCAST_SET_REQ_SEND_REQ");
+			slog_error("HERCULES_ERR_BROADCAST_SET_REQ_SEND_REQ");
+			return -1;
+			// exit(-1);
+		}
+
+		// // send the data to the data server of the current dataset.
+		// if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+		// {
+		// 	pthread_mutex_unlock(&lock_network);
+		// 	perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
+		// 	slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
+		// 	return -1;
+		// }
+		slog_info("[IMSS][completed] Request sent to server %d: %s", n_server_, key_);
+
+	}
+
+	pthread_mutex_unlock(&lock_network);
+	return 1;
+}
+
 // Method storing a specific data element.
 int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages)
 {

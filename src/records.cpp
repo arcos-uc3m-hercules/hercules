@@ -281,6 +281,10 @@ int32_t map_records::get_broadcast(std::string key, void **add_, uint64_t *size_
 	return 1;
 }
 
+int32_t map_records::get_broadcast_size() {
+	return buffer_broadcast.size();
+}
+
 // int32_t map_records::get_broadcast(std::string key, uint64_t *to_copy)
 // {
 
@@ -977,6 +981,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 	// TODO: it is better to use "number_active_storage_servers"
 	// to avoid issues when malleability is actived.
 	const int64_t number_of_data_servers = args.num_data_servers;
+	number_active_storage_servers = get_number_of_active_nodes();
 
 	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
 	{
@@ -992,15 +997,14 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 	char *reconstructed_data_file = NULL;
 	off_t block_offset = 0;
 
-	// TODO: in order to avoid locks and syncronizations: 
+	// TODO: in order to avoid locks and syncronizations:
 	// server 0 checks for a file to be snapshoting.
 	// server 0 sends a signal to all servers to find and "reduce" all its
 	// data about this file.
 	// all servers sends its data to server 0.
 	// Server 0 find and "reduce" all its data about the file.
 	// Server 0 collects and re-structure all the data comming from others servers and write the final file.
-	
-	// server 0 will check  if there is data on buffer_broadcast.
+
 	for (const auto &it : buffer_snapshot)
 	{
 		// TODO: use the function getBlockInformation().
@@ -1081,35 +1085,99 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 					// set "copy_to_disk" to 0.
 					buffer_snapshot[key] = 0;
 				}
-				// Send a message to all servers telling this servers needs the information..
+				// Send a message to all servers telling this servers needs the information.
+
+				// Deletes all information related to this uri from the local arrays. it ensures the dataset information will be updated from the remote metadata server.
+				clear_dataset(expected_uri);
+
+				// To get dataset info from the metadata server. here
+				// "curr_dataset" is filled.
+				file_desc = open_dataset(expected_uri, 0);
+				if (file_desc < 0)
+				{
+					continue;
+				}
+				iteration++;
+
 				// Checks if there are still processes with the file opened.
-				
-				continue;
+				// Also, if "hercules stop" was called, we ignore this condition to copy the remaining data.
+				// if (curr_dataset.n_open > 0 && finish != 1)
+				if (curr_dataset.n_open > 0)
+				{
+					fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset.uri_, curr_dataset.n_open);
+					slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset.uri_, curr_dataset.n_open);
+					continue;
+				}
+
+				// Send the message to all servers.
+				char broadcast_request[REQUEST_SIZE];
+				sprintf(broadcast_request, "BROADCAST %s", file_name);
+				SendBroadcastMessage(broadcast_request);
+
+				// continue;
+				to_free = 0;
+				ret = get(key, &address_block_0, &block_0_size);
+				if (ret <= 0)
+				{ // block 0 is not on the local map.
+					// address_block_0 = (void *)malloc(block_size * sizeof(char));
+					// ret = get_ndata(file_desc, 0, address_block_0, 0, 0);
+					// to_free = 1;
+					char err_msg[MAX_ERR_MSG_LEN];
+					sprintf(err_msg, "HERCULES_ERR_INCONSISTENCY_BLOCK_0_NOT_FOUND: %s", key_block_0);
+					perror(err_msg);
+					slog_error("%s", err_msg);
+					buffer_snapshot[key] = 0;
+					// return -1;
+					continue;
+				}
+
+				if (!is_shared_memory)
+				{
+					stats = (struct stat *)address_block_0;
+				}
+				else
+				{ // get stats from shared memory.
+					size_t memory_offset = 0;
+					uint32_t stored_block_size = 0;
+					sscanf((const char *)address_block_0, "%lu %d", &memory_offset, &stored_block_size);
+					slog_debug("Memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
+					stats = (struct stat *)((char *)args.pool_memory + memory_offset);
+				}
+
+				if (stats == NULL)
+				{
+					perror("HERCULES_ERR_BLOCK_0_GET_ERROR");
+					slog_error("HERCULES_ERR_BLOCK_0_GET_ERROR");
+					// if (to_free)
+					// 	free(address_block_0);
+					continue;
+				}
+				file_size = stats->st_size;
+
+				offset = block_size * (block_number - 1); // -1 due we skip block 0.
+				if (file_size != 0)
+				{
+					// This helps to write files smaller than the block size with
+					// the corresponding size.
+					if (file_size < block_size && file_size != 0)
+					{
+						block_size_rtvd = file_size;
+					}
+
+					// This helps to write the last block with the remaining data
+					// preventing writing the entire block.
+					if (block_size_rtvd + offset > file_size)
+					{
+						block_size_rtvd = file_size - offset;
+					}
+				}
 			}
-
-			// deletes all information related to this uri from the local
-			// arrays. it ensures the dataset information will be updated from
-			// the remote metadata server.
-			clear_dataset(expected_uri);
-
-			// To get dataset info from the metadata server. here
-			// "curr_dataset" is filled.
-			file_desc = open_dataset(expected_uri, 0);
-			if (file_desc < 0)
+			else
 			{
+				// Skip other blocks differents to 0.
 				continue;
 			}
-			iteration++;
 
-			// Checks if there are still processes with the file opened.
-			// Also, if "hercules stop" was called, we ignore this condition to
-			// copy the remaining data.
-			if (curr_dataset.n_open > 0 && finish != 1)
-			{
-				fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset.uri_, curr_dataset.n_open);
-				slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset.uri_, curr_dataset.n_open);
-				continue;
-			}
 			// Get the data from the local map.
 			ret = get(key, &address_, &block_size_rtvd);
 			if (ret == 0)
@@ -1133,73 +1201,10 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 				block_size_rtvd = stored_block_size;
 			}
 
-			// We also try to get block 0 from local map to know the
-			// file size. If the block is not here we make a request to
-			// the corresponding data server.
-			sprintf(key_block_0, "%s$0", data_uri.c_str());
-			to_free = 0;
-			ret = get(key_block_0, &address_block_0, &block_0_size);
-			if (ret == 0)
-			{ // block 0 is not on the local map.
-				address_block_0 = (void *)malloc(block_size * sizeof(char));
-				ret = get_ndata(file_desc, 0, address_block_0, 0, 0);
-				to_free = 1;
-			}
-
-			if (ret < 0)
-			{
-				char err_msg[MAX_ERR_MSG_LEN];
-				sprintf(err_msg, "HERCULES_ERR_GET_NDATA_CHECKPOINT: %s", key_block_0);
-				perror(err_msg);
-				slog_error("HERCULES_ERR_GET_NDATA_CHECKPOINT: %s", err_msg);
-				return -1;
-				// On error, we set the file size as 0
-				// indicating we were not able to retrive
-				// the correct file size, for example due a
-				// network fail.
-				// file_size = 0;
-			}
-
-			if (!is_shared_memory)
-			{
-				stats = (struct stat *)address_block_0;
-			}
-			else
-			{ // get stats from shared memory.
-				size_t memory_offset = 0;
-				uint32_t stored_block_size = 0;
-				sscanf((const char *)address_block_0, "%lu %d", &memory_offset, &stored_block_size);
-				slog_debug("Memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
-				stats = (struct stat *)((char *)args.pool_memory + memory_offset);
-			}
-
-			if (stats == NULL)
-			{
-				perror("HERCULES_ERR_BLOCK_0_GET_ERROR");
-				slog_error("HERCULES_ERR_BLOCK_0_GET_ERROR");
-				if (to_free)
-					free(address_block_0);
-				continue;
-			}
-			file_size = stats->st_size;
-
-			offset = block_size * (block_number - 1); // -1 due we skip block 0.
-			if (file_size != 0)
-			{
-				// This helps to write files smaller than the block size with
-				// the corresponding size.
-				if (file_size < block_size && file_size != 0)
-				{
-					block_size_rtvd = file_size;
-				}
-
-				// This helps to write the last block with the remaining data
-				// preventing writing the entire block.
-				if (block_size_rtvd + offset > file_size)
-				{
-					block_size_rtvd = file_size - offset;
-				}
-			}
+			// // We also try to get block 0 from local map to know the
+			// // file size. If the block is not here we make a request to
+			// // the corresponding data server.
+			// sprintf(key_block_0, "%s$0", data_uri.c_str());
 
 			// if (data_buffer == NULL && args.id == 0)
 			// {
@@ -1347,7 +1352,9 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 						if (block_size + block_offset > file_size)
 						{
 							block_size_rtvd = file_size - block_offset;
-						} else {
+						}
+						else
+						{
 							block_size_rtvd = block_size;
 						}
 

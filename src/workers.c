@@ -318,7 +318,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 	char mode[MODE_SIZE];
 
-	slog_debug(" Waiting for new request.");
+	// slog_debug(" Waiting for new request.");
 	// Save the request to be served.
 	slog_debug(" request to be served %s", req);
 
@@ -327,30 +327,37 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 	char uri_[URI_];
 	size_t to_read = 0;
 
-	sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read);
+	sscanf(req, "%s %" PRIu32 "", mode);
 
-	if (!strcmp(mode, "GET"))
+	if (!strcmp(mode, "BROADCAST"))
 	{
-		more = GET_OP;
 	}
-	if (!strcmp(mode, "SET"))
+	else
 	{
-		more = SET_OP;
-	}
-	if (!strcmp(mode, "LOCALGET"))
-	{
-		more = GET_OP;
-		is_shared_memory = 1;
-	}
-	if (!strcmp(mode, "LOCALSET"))
-	{
-		more = SET_OP;
-		is_shared_memory = 1;
-	}
-	if (!strcmp(mode, "SNAPSET"))
-	{
-		more = SET_OP;
-		snapshot_op = 1;
+		sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read);
+		if (!strcmp(mode, "GET"))
+		{
+			more = GET_OP;
+		}
+		if (!strcmp(mode, "SET"))
+		{
+			more = SET_OP;
+		}
+		if (!strcmp(mode, "LOCALGET"))
+		{
+			more = GET_OP;
+			is_shared_memory = 1;
+		}
+		if (!strcmp(mode, "LOCALSET"))
+		{
+			more = SET_OP;
+			is_shared_memory = 1;
+		}
+		if (!strcmp(mode, "SNAPSET"))
+		{
+			more = SET_OP;
+			snapshot_op = 1;
+		}
 	}
 
 	slog_debug(" Request - mode '%s', block_size_recv '%" PRIu32 "', block_offset '%" PRIu32 "', uri_ '%s', more %ld", mode, block_size_recv, block_offset, uri_, more);
@@ -1178,6 +1185,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					// The following buffer is used for Sanpshot.
 					// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding Snapshot thread copy the data to disk.
 					// fprintf(stderr, "Inserting key = %s\n", key.c_str());
+
+					// TODO: to save only block 0?
 					insert_successful = map->put_snapshot(key, 1);
 					// Include the new record in the tracking structure.
 					if (insert_successful != 0)
