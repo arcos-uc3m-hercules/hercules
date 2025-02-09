@@ -22,6 +22,9 @@ redisContext* redis_init(const char *hostname, int port)
             return NULL;
         }
     }
+
+    // Create the root directory
+    redisReply *reply = (redisReply *)redisCommand(context, "SADD / \"\""); // The root directory contains an empty string
     return context;
 }
 
@@ -37,6 +40,27 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
     char *parent_dir = get_parent_dir(desired_data);
     char *file = get_path_last_part(desired_data); // This can be either a file or a dir
 
+    // Check if the parent directory exists
+    char *grandparent_dir = get_parent_dir(parent_dir);
+    redisReply *reply = (redisReply *)redisCommand(context, "SISMEMBER %s %s", grandparent_dir, parent_dir);
+    free(grandparent_dir);
+    if (reply == NULL)
+    {
+        slog_error("Error: %s\n", context->errstr);
+        free(parent_dir);
+        free(file);
+        return -1;
+    }
+    if (reply->integer == 0)
+    {
+        slog_error("Error: Parent directory does not exist\n");
+        freeReplyObject(reply);
+        free(parent_dir);
+        free(file);
+        return -1;
+    }
+
+    // Insert the file into the parent directory
     redisReply *reply = (redisReply *)redisCommand(context, "SADD %s %s", parent_dir, file);
     if (reply == NULL)
     {
@@ -170,24 +194,4 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
 
     freeReplyObject(reply);
     return dir_elements;
-}
-
-// Helper function to serialize directory children into a buffer
-static void serialize_dir_childrens(redisContext *context, const char *dir, char **buffer) {
-    redisReply *reply = (redisReply *)redisCommand(context, "SMEMBERS %s", dir);
-    if (reply == NULL || reply->type != REDIS_REPLY_ARRAY) {
-        fprintf(stderr, "Error: %s\n", context->errstr);
-        return;
-    }
-
-    for (size_t i = 0; i < reply->elements; i++) {
-        const char *child = reply->element[i]->str;
-        size_t len = strlen(child);
-        memcpy(*buffer, child, len);
-        *buffer += len;
-        **buffer = '\0'; // Null-terminate the string
-        (*buffer)++;
-    }
-
-    freeReplyObject(reply);
 }
