@@ -498,7 +498,7 @@ if [ ! -z "$HERCULES_DATA_HOSTFILE" ]; then
 fi
 
 ## Creates the initial "hercules_num_act_nodes" file.
-echo ${HERCULES_INIT_NUM_DATA} > hercules_num_act_nodes
+echo ${HERCULES_INIT_NUM_DATA} > ${HERCULES_PATH}/tmp/hercules_num_act_nodes
 
 ## Set the name that will be used to create the 
 if [[ "$SLURM" -eq "1" ]]; then

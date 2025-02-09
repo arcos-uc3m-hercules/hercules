@@ -539,38 +539,38 @@ RETURNS:	 0 - The requested block was successfully stored.
 
 	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, off_t offset);
 
-	int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const void *request);
+	int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const char *request);
 
-		/* Method retrieving the location of a specific data object.
+	/* Method retrieving the location of a specific data object.
 
-	RECEIVES:	dataset      - Dataset URI whose blocks location are to be retrieved.
-	data_id      - ID identifying the data block whose location shall be retrieved.
-	num_storages - Reference to an int32_t variable where the number of storages containing the concerned data block is stored.
+RECEIVES:	dataset      - Dataset URI whose blocks location are to be retrieved.
+data_id      - ID identifying the data block whose location shall be retrieved.
+num_storages - Reference to an int32_t variable where the number of storages containing the concerned data block is stored.
 
-	RETURNS:	char ** - List of IPs or DNSs where the concerned block is stored.
-	NULL    - The requested data block did not existed.
+RETURNS:	char ** - List of IPs or DNSs where the concerned block is stored.
+NULL    - The requested data block did not existed.
 
-	WARNING:	The get_dataloc function allocates memory (performs malloc operations).
+WARNING:	The get_dataloc function allocates memory (performs malloc operations).
 
-	Therefore, the next steps must be followed in order to free the reserved memory:
+Therefore, the next steps must be followed in order to free the reserved memory:
 
-	char ** locations = get_dataloc(datasetd, data_id, &num_storages);
+char ** locations = get_dataloc(datasetd, data_id, &num_storages);
 
-	...
+...
 
-		//FREE RESOURCES.
-		for (int32_t i = 0; i < num_storages; i++)
+	//FREE RESOURCES.
+	for (int32_t i = 0; i < num_storages; i++)
 
-		free(locations[i]);
+	free(locations[i]);
 
-		free(locations);
-		 */
+	free(locations);
+	 */
 
-		int32_t
-		set_ndata(int32_t dataset_id,
-				  int32_t data_id,
-				  char *buffer,
-				  uint32_t size);
+	int32_t
+	set_ndata(int32_t dataset_id,
+			  int32_t data_id,
+			  char *buffer,
+			  uint32_t size);
 
 	char **get_dataloc(const char *dataset, int32_t data_id, int32_t *num_storages);
 
@@ -579,7 +579,7 @@ RETURNS:	 0 - The requested block was successfully stored.
 	 * the current number of active data nodes.
 	 * @return Current number of active data nodes, on error -1 is returned.
 	 */
-	int get_number_of_active_nodes();
+	int get_number_of_active_nodes(char *hercules_path);
 
 	/* Method specifying the type (DATASET or IMSS INSTANCE) of a provided URI.
 

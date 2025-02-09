@@ -60,8 +60,12 @@ public:
 
 	// Method retrieving the address associated to a certain record.
 	int32_t get(std::string key, void **add_, uint64_t *size_);
-	int32_t get_snapshot(std::string key, uint64_t *to_copy);
+	int32_t get_snapshot(std::string key, int *to_copy);
 	int32_t get_broadcast(std::string key, void **add_, uint64_t *size_);
+
+	char* getDataFromFile(std::string file_name);
+
+	//char* getDataFromFile(std::string file_name);
 
 	// Method updating a new record.
 	int32_t update(std::string key, void *add_, uint64_t length);
@@ -86,7 +90,7 @@ public:
 	int32_t get_broadcast_size();
 
 	// int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id);
-	int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
+	// int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
 	int32_t Snapshot(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.
@@ -113,7 +117,6 @@ private:
 	std::map<std::string, int> buffer_snapshot;
 	// std::unordered_map<std::string, int> buffer_broadcast;
 	std::map<std::string, std::pair<void *, uint64_t>> buffer_broadcast;
-	// std::map<std::string, std::pair<uint64_t, uint64_t>> buffer_snapshot;
 	std::map<std::string, std::pair<int, __off_t>> buffer_fd;
 	// Mutex restricting access to structure.
 	uint64_t total_size;

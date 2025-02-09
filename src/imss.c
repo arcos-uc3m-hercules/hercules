@@ -3474,17 +3474,24 @@ int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, c
 	return 1;
 }
 
-int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const void *request)
+int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const char *request)
 {
 
 	pthread_mutex_lock(&lock_network);
 	// char key_[REQUEST_SIZE];
 	// int32_t curr_imss_storages = curr_imss.info.num_storages;
-	// curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
+	curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
 
 	// Send the request to each server .
 	for (int32_t i = 0; i < num_of_servers; i++)
 	{
+		if (i == from_data_server_id)
+		{
+			// Skip current server.
+			continue;
+		}
+		
+		
 		ucp_ep_h ep;
 		// Server receiving the current data block.
 		uint32_t n_server_ = i;
@@ -3492,11 +3499,11 @@ int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, c
 		// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
 		// sprintf(key_, "SNAPSET %lu %d %s$%d", size, 0, curr_dataset.uri_, from_data_server_id);
 
+		slog_info("[IMSS] num_active_storages from curr_imss=%d", curr_imss.info.num_active_storages);
+		ep = curr_imss.conns.eps[n_server_];
 		slog_info("[IMSS] Request to Server %d: %s", n_server_, request);
 		
-		ep = curr_imss.conns.eps[n_server_];
-
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, request) == 0)
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, (char *)request) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("HERCULES_ERR_BROADCAST_SET_REQ_SEND_REQ");
@@ -3513,7 +3520,7 @@ int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, c
 		// 	slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
 		// 	return -1;
 		// }
-		slog_info("[IMSS][completed] Request sent to server %d: %s", n_server_, key_);
+		slog_info("[IMSS][completed] Request sent to server %d: %s", n_server_, request);
 
 	}
 
@@ -3938,16 +3945,20 @@ int32_t free_dataset(dataset_info *dataset_info_)
  * the current number of active data nodes.
  * @return Current number of active data nodes, on error -1 is returned.
  */
-int get_number_of_active_nodes()
+int get_number_of_active_nodes(char *hercules_path)
 {
 	int number_active_storage_servers = 0;
-	char buf[10];
+	char buf[10], absolute_path[PATH_MAX];
+	sprintf(absolute_path,"%s/tmp/hercules_num_act_nodes", hercules_path);
+
 	// Open the "hercules_num_act_nodes" file. This file should be created by
 	// the user application or the malleability manager.
-	int fd = open("./hercules_num_act_nodes", O_RDONLY);
+	int fd = open(absolute_path, O_RDONLY);
 	if (fd == -1)
 	{
-		perror("ERR_HERCULES_OPEN_NUM_ACTVIES_NODES");
+		char err_msg[MAX_ERR_MSG_LEN];
+		sprintf(err_msg,"ERR_HERCULES_OPEN_NUM_ACTVIES_NODES:%s", absolute_path);
+		perror(err_msg);
 		return -1;
 	}
 	// Read the content.
@@ -3969,7 +3980,7 @@ int get_number_of_active_nodes()
 	else
 	{
 		number_active_storage_servers = atoi(buf);
-		fprintf(stderr, "The new number of active data nodes is %s\n", buf);
+		// fprintf(stderr, "The new number of active data nodes is %s\n", buf);
 		slog_debug("The new number of active data nodes is %s\n", buf);
 	}
 	// Close the file.

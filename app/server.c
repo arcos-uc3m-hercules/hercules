@@ -146,7 +146,7 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 int stop_server()
 {
 	// Get the current number of active nodes.
-	number_active_storage_servers = get_number_of_active_nodes();
+	number_active_storage_servers = get_number_of_active_nodes(args.hercules_path);
 
 	if (number_active_storage_servers < 0)
 	{
@@ -177,7 +177,7 @@ int stop_server()
 int wakeup_server()
 {
 	// Get the current number of active nodes.
-	number_active_storage_servers = get_number_of_active_nodes();
+	number_active_storage_servers = get_number_of_active_nodes(args.hercules_path);
 
 	if (number_active_storage_servers < 0)
 	{

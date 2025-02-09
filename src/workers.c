@@ -326,38 +326,42 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 	uint32_t block_size_recv, block_offset;
 	char uri_[URI_];
 	size_t to_read = 0;
+	int sender = 0;
 
-	sscanf(req, "%s %" PRIu32 "", mode);
+	sscanf(req, "%s", mode);
 
 	if (!strcmp(mode, "BROADCAST"))
 	{
+		sscanf(req, "%s %s %d", mode, uri_, &sender);
+		slog_debug("BROADCAST condition, req=%s, mode=%s, uri_=%s, sender=%d", req, mode, uri_, sender);
+		map->put_snapshot(uri_, sender);
+		// nothing else to do.
+		return 0;
 	}
-	else
+
+	sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read);
+	if (!strcmp(mode, "GET"))
 	{
-		sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read);
-		if (!strcmp(mode, "GET"))
-		{
-			more = GET_OP;
-		}
-		if (!strcmp(mode, "SET"))
-		{
-			more = SET_OP;
-		}
-		if (!strcmp(mode, "LOCALGET"))
-		{
-			more = GET_OP;
-			is_shared_memory = 1;
-		}
-		if (!strcmp(mode, "LOCALSET"))
-		{
-			more = SET_OP;
-			is_shared_memory = 1;
-		}
-		if (!strcmp(mode, "SNAPSET"))
-		{
-			more = SET_OP;
-			snapshot_op = 1;
-		}
+		more = GET_OP;
+	}
+	if (!strcmp(mode, "SET"))
+	{
+		more = SET_OP;
+	}
+	if (!strcmp(mode, "LOCALGET"))
+	{
+		more = GET_OP;
+		is_shared_memory = 1;
+	}
+	if (!strcmp(mode, "LOCALSET"))
+	{
+		more = SET_OP;
+		is_shared_memory = 1;
+	}
+	if (!strcmp(mode, "SNAPSET"))
+	{
+		more = SET_OP;
+		snapshot_op = 1;
 	}
 
 	slog_debug(" Request - mode '%s', block_size_recv '%" PRIu32 "', block_offset '%" PRIu32 "', uri_ '%s', more %ld", mode, block_size_recv, block_offset, uri_, more);
@@ -1179,25 +1183,29 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					return -1;
 				}
 
-				// Only when there is not a snapshot operation.
-				if (!snapshot_op)
-				{
-					// The following buffer is used for Sanpshot.
-					// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding Snapshot thread copy the data to disk.
-					// fprintf(stderr, "Inserting key = %s\n", key.c_str());
+				// // Only when there is not a snapshot operation.
+				// if (!snapshot_op)
+				// {
+				// 	// The following buffer is used for Sanpshot.
+				// 	// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding Snapshot thread copy the data to disk.
+				// 	// fprintf(stderr, "Inserting key = %s\n", key.c_str());
 
-					// TODO: to save only block 0?
-					insert_successful = map->put_snapshot(key, 1);
-					// Include the new record in the tracking structure.
-					if (insert_successful != 0)
-					{
-						perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-						slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-						return -1;
-					}
-					// Update the pointer.
-					arguments->pt += block_size_recv;
+				std::size_t found = key.find("$0");
+				if (found != std::string::npos) // block 0.
+				{
+						insert_successful = map->put_snapshot(key, -1);
+						// Include the new record in the tracking structure.
+						if (insert_successful != 0)
+						{
+							perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+							slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+							return -1;
+						}
 				}
+
+				// Update the pointer.
+				arguments->pt += block_size_recv;
+				// }
 			}
 			// if the block was already stored:
 			else
@@ -1244,7 +1252,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						// TODO: should we update this block's size in the map?
 						// map->update(key, address_, msg_length);
 						// Updates the second map to update the data in disk.
-						map->update_simple(key, 1);
+						// map->update_simple(key, 1);
 
 						free(buffer);
 					}
@@ -1376,7 +1384,7 @@ void *Checkpoint(void *th_argv)
 		sleep(CKECKPOINT_PERIOD);
 		// fprintf(stderr, "Running Checkpointing, global_finish_checkpoint=%d\n", global_finish_checkpoint);
 		pthread_mutex_lock(&mutex_garbage);
-		TIMING_NO_RETURN(map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_checkpoint, arguments->args.id, arguments->args.data_hostname, arguments->args), "Checkpoint");
+		// TIMING_NO_RETURN(map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_checkpoint, arguments->args.id, arguments->args.data_hostname, arguments->args), "Checkpoint");
 		// To stop this thread we will wait for "hercules stop".
 		if (global_finish_checkpoint == 1)
 		{
