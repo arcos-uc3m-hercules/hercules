@@ -23,8 +23,6 @@ redisContext* redis_init(const char *hostname, int port)
         }
     }
 
-    // Create the root directory
-    redisReply *reply = (redisReply *)redisCommand(context, "SADD / \"\""); // The root directory contains an empty string
     return context;
 }
 
@@ -61,7 +59,7 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
     }
 
     // Insert the file into the parent directory
-    redisReply *reply = (redisReply *)redisCommand(context, "SADD %s %s", parent_dir, file);
+    reply = (redisReply *)redisCommand(context, "SADD %s %s", parent_dir, file);
     if (reply == NULL)
     {
         slog_error("Error: %s\n", context->errstr);
@@ -173,7 +171,7 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     // Number of elements contained by the directory
     uint32_t num_children = reply->elements;
     *numdir_elems = num_children + 1; // +1 for the actual directory + children
-    slog_info("[redis_getdir] num_children=%d", num_children);
+    slog_debug("[redis_getdir] num_children=%d\n", num_children);
 
     // Buffer containing the whole set of elements within a certain directory
     char *dir_elements = (char *)malloc((num_children + 1) * URI_);
@@ -183,14 +181,17 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
         return NULL;
     }
     // Serialize the directory children into the buffer
-    for (size_t i = 0; i < reply->elements; i++) {
-        const char *child = reply->element[i]->str;
-        size_t len = strlen(child);
-        memcpy(dir_elements, child, len);
-        dir_elements += len;
-        *dir_elements = '\0'; // Null-terminate the string
-        dir_elements++;
+    char *aux_dir_elements = dir_elements;
+    memcpy(aux_dir_elements, desired_dir, URI_);
+    *aux_dir_elements += URI_;
+
+    for (size_t i = 0; i < reply->elements - 1; i++) {
+        const char* sub_dir = reply->element[i]->str;
+        printf("Subdir: %s\n", sub_dir);
+        memcpy(aux_dir_elements, sub_dir, URI_);
+        *aux_dir_elements += URI_;
     }
+
 
     freeReplyObject(reply);
     return dir_elements;
