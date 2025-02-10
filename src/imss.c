@@ -3414,7 +3414,7 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 	return 1;
 }
 
-int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, off_t offset)
+int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size)
 {
 
 	pthread_mutex_lock(&lock_network);

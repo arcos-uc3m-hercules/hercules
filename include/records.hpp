@@ -63,9 +63,10 @@ public:
 	int32_t get_snapshot(std::string key, int *to_copy);
 	int32_t get_broadcast(std::string key, void **add_, uint64_t *size_);
 
-	char* getDataFromFile(std::string file_name);
+	char *GetDataFromFile(std::string file_name, uint64_t *file_size_occupied);
+	char *MergeData(uint32_t num_of_data_servers, std::string file_name, __off_t file_size, uint64_t block_size);
 
-	//char* getDataFromFile(std::string file_name);
+	// char* getDataFromFile(std::string file_name);
 
 	// Method updating a new record.
 	int32_t update(std::string key, void *add_, uint64_t length);
@@ -85,7 +86,6 @@ public:
 	int32_t cleaning_specific(std::string new_key);
 	int32_t freeAllMemory();
 	int32_t erase_broadcast_element(std::string key);
-
 
 	int32_t get_broadcast_size();
 
