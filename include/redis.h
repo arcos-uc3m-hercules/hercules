@@ -13,7 +13,7 @@ void redis_close(redisContext *context);
 int32_t redis_insert_data(redisContext *context, const char *desired_data);
 
 // Method deleting a new path.
-int32_t redis_delete_data(redisContext *context, const char *key);
+int32_t redis_delete_data(redisContext *context, const char *desired_data);
 
 // Method retrieving a buffer with all the files within a directory.
 int32_t redis_get_dir_content(redisContext *context, const char *key, char **buffer, int32_t *num_elems);
