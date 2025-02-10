@@ -231,3 +231,17 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     freeReplyObject(reply);
     return dir_elements;
 }
+
+
+int32_t redis_rename(redisContext *context, const char *old_path, const char *new_path) {
+    int32_t delete_result = redis_delete_data(context, old_path);
+    if (delete_result == -1) {
+        slog_error("Error deleting old path\n");
+        return -1;
+    }
+    int32_t insert_result = redis_insert_data(context, new_path);
+    if (insert_result == -1) {
+        slog_error("Error inserting new path\n");
+        return -1;
+    }
+}
