@@ -120,7 +120,7 @@ int parent_dir_exists(redisContext *context, const char *parent_dir) {
     free(grandparent_dir);
     if (reply == NULL)
     {
-        printf("Error: %s\n", context->errstr);
+        slog_error("Error: %s\n", context->errstr);
         return -1;
     }
     int exists = reply->integer;
@@ -138,49 +138,62 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
 
     if (reply == NULL)
     {
-        printf("Error: %s\n", context->errstr);
+        slog_error("Error: %s\n", context->errstr);
         return -1;
     }
-    // This will be the return value of the function
-    int exit_code = reply->integer;
 
-    // If the file was a directory, delete all its subdirectories
-    delete_subdirectories(context, desired_data);
+    // If the file was not found in the parent directory, end execution
+    if (reply->integer == 0) {
+        freeReplyObject(reply);
+        free(parent_dir);
+        free(file);
+        return 0;
+    }
+
+    // In case the file was a directory, delete it and all its subdirectories
+    reply = (redisReply *)redisCommand(context, "DEL %s", desired_data);
+    if (reply == NULL)
+    {
+        slog_error("Error: %s\n", context->errstr);
+        return -1;
+    }
+    // If the deleted element was a dir, the return value will be 1, so delete all subdirs
+    if (reply->integer == 1) {
+        delete_subdirectories(context, desired_data);
+    }
 
     freeReplyObject(reply);
     free(parent_dir);
     free(file);
-    return exit_code;
+    return 1;
 }
 
 // Helper method for deleting all subdirectories of a directory
 static void delete_subdirectories(redisContext *context, const char* parent_dir) {
     // Get all the subdirectories of the parent directory
-    redisReply *reply = (redisReply *)redisCommand(context, "SMEMBERS %s", parent_dir);
-    if (reply == NULL) {
-        slog_error("Error: %s\n", context->errstr);
-        return;
-    }
-
-    // Iterate over the subdirectories and delete them recursively
-    for (size_t i = 0; i < reply->elements; i++) {
-        const char* sub_dir = reply->element[i]->str;
-        char* sub_dir_name = malloc(strlen(sub_dir) + strlen(parent_dir) + 2); // +1 for the '/' and +1 for the null terminator
-        if (sub_dir_name == NULL) {
-            slog_error("Memory allocation error\n");
-            freeReplyObject(reply);
+    redisReply *reply = NULL;
+    long cursor = 0;
+    do {
+        reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s/*", cursor, parent_dir);
+        if (reply == NULL) {
+            slog_error("Error: %s\n", context->errstr);
             return;
         }
-        // Recursively delete the subdirectory. If the subdir is actually a file or is empty, this will do nothing
-        delete_subdirectories(context, sub_dir_name);
-        free(sub_dir_name);
-    }
-
-    // Delete the parent directory itself
-    redisReply *de_reply = (redisReply *)redisCommand(context, "DEL %s", parent_dir);
-
+        // Update the cursor
+        cursor = strtol(reply->element[0]->str, NULL, 10);
+        // Iterate over the subdirectories and delete them
+        for (size_t i = 0; i < reply->element[1]->elements; i++) {
+            const char* key = reply->element[1]->element[i]->str;
+            redisReply *del_reply = (redisReply *)redisCommand(context, "DEL %s", key);
+            if (del_reply == NULL) {
+                slog_error("Error: %s\n", context->errstr);
+                freeReplyObject(reply);
+                return;
+            }
+            freeReplyObject(del_reply);
+        }
+    } while (cursor != 0);
     freeReplyObject(reply);
-    freeReplyObject(de_reply);
 }
 
 // Function to get the directory contents from Redis
