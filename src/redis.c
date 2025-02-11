@@ -1,4 +1,5 @@
 #include "include/redis.h"
+#include <imss.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -210,7 +211,7 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     *numdir_elems = num_children + 1; // +1 for the actual directory + children
 
     // Buffer containing the whole set of elements within a certain directory
-    char *dir_elements = (char *)malloc((num_children + 1) * 256);
+    char *dir_elements = (char *)malloc((num_children + 1) * URI_);
     if (dir_elements == NULL) {
         slog_error("Memory allocation error\n");
         freeReplyObject(reply);
@@ -218,13 +219,13 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     }
     // Serialize the directory children into the buffer
     char *aux_dir_elements = dir_elements;
-    memcpy(aux_dir_elements, desired_dir, 256);
-    *aux_dir_elements += 256;
+    memcpy(aux_dir_elements, desired_dir, URI_);
+    *aux_dir_elements += URI_;
 
     for (size_t i = 0; i < reply->elements; i++) {
         const char* sub_dir = reply->element[i]->str;
-        memcpy(aux_dir_elements, sub_dir, 256);
-        *aux_dir_elements += 256;
+        memcpy(aux_dir_elements, sub_dir, URI_);
+        *aux_dir_elements += URI_;
     }
 
 
@@ -244,4 +245,73 @@ int32_t redis_rename(redisContext *context, const char *old_path, const char *ne
         slog_error("Error inserting new path\n");
         return -1;
     }
+}
+
+// Function to rename a directory and all its subdirectories in Redis
+int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir) {
+    char new_parent_dir[URI_];
+    char *filename = get_path_last_part(old_dir); // This can be either a file or a dir
+    // Construct the new parent directory path
+    snprintf(new_parent_dir, sizeof(new_parent_dir), "%s/%s", new_dir, filename); 
+    // Rename the parent directory first
+    if (rename_key(context, old_dir, new_dir) != 0) {
+        return -1;
+    }
+
+    // Rename all its subdirectories
+    if (rename_subdirectories(context, old_dir, new_dir) != 0) {
+        return -1;
+    }
+
+    // Insert the file/dir in the new parent directory key
+    if (redis_insert_data(context, filename) != 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+// Helper function to rename a single key
+static int rename_key(redisContext *context, const char *old_key, const char *new_key) {
+    redisReply *reply = (redisReply *)redisCommand(context, "RENAME %s %s", old_key, new_key);
+    if (reply == NULL) {
+        slog_error("Error: %s\n", context->errstr);
+        return -1;
+    }
+    freeReplyObject(reply);
+    return 0;
+}
+
+// Helper function to recursively rename directories
+static int rename_subdirectories(redisContext *context, const char *old_dir, const char *new_dir) {
+    long cursor = 0;
+    do {
+        redisReply *reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s/*", cursor, old_dir);
+        if (reply == NULL) {
+            slog_error("Error: %s\n", context->errstr);
+            return -1;
+        }
+
+        // Update the cursor
+        cursor = strtol(reply->element[0]->str, NULL, 10);
+
+        // Iterate over the keys and rename them
+        for (size_t i = 0; i < reply->element[1]->elements; i++) {
+            const char *old_key = reply->element[1]->element[i]->str;
+            char new_key[URI_];
+
+            // Construct the new key by replacing the old directory prefix with the new one
+            snprintf(new_key, sizeof(new_key), "%s%s", new_dir, old_key + strlen(old_dir));
+
+            // Rename the key
+            if (rename_key(context, old_key, new_key) != 0) {
+                freeReplyObject(reply);
+                return -1;
+            }
+        }
+
+        freeReplyObject(reply);
+    } while (cursor != 0);
+
+    return 0;
 }
