@@ -73,9 +73,9 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
 static char* get_parent_dir(const char* path) {
     // Find the last occurrence of '/'
     const char* last_slash = strrchr(path, '/');
-    if (last_slash == NULL || last_slash == path) {
+    if (last_slash == NULL || last_slash == path + strlen("imss:/")) {
         // If no '/' is found or the path is the root '/', return "/"
-        return strdup("/");
+        return strdup("imss://");
     }
 
     // Calculate the length of the parent directory path
@@ -110,9 +110,8 @@ static char* get_path_last_part(const char* path) {
 
 int parent_dir_exists(redisContext *context, const char *parent_dir) {
     // If the parent directory is the root, it exists
-    if (strcmp(parent_dir, "/") == 0)
+    if (strcmp(parent_dir, "imss://") == 0)
     {
-        slog_error("Parent directory is root\n");
         return 1;
     }
     char *grandparent_dir = get_parent_dir(parent_dir);

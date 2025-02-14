@@ -46,10 +46,12 @@ void redis_close(redisContext *context)
 static char* get_parent_dir(const char* path) {
     // Find the last occurrence of '/'
     const char* last_slash = strrchr(path, '/');
-    if (last_slash == NULL || last_slash == path) {
-        // If no '/' is found or the path is the root '/', return "/"
-        return strdup("/");
+    // If no / or the path is the root, return the root
+    if (last_slash == NULL || last_slash == path + strlen("imss:/")) {
+        return strdup("imss://");
     }
+
+    printf("Last slash: %s\n", last_slash);
 
     // Calculate the length of the parent directory path
     size_t parent_len = last_slash - path;
@@ -83,7 +85,7 @@ static char* get_path_last_part(const char* path) {
 
 int parent_dir_exists(redisContext *context, const char *parent_dir) {
     // If the parent directory is the root, it exists
-    if (strcmp(parent_dir, "/") == 0)
+    if (strcmp(parent_dir, "imss://") == 0)
     {
         printf("Parent directory is root\n");
         return 1;
@@ -107,6 +109,8 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
 {
     char *parent_dir = get_parent_dir(desired_data);
     char *file = get_path_last_part(desired_data); // This can be either a file or a dir
+    printf("Parent directory: %s\n", parent_dir);
+    printf("File: %s\n", file);
 
     // Check if the parent directory exists
     if (!parent_dir_exists(context, parent_dir))
@@ -329,14 +333,14 @@ int main() {
     }
 
     // redis_insert_data(context, "/home/user1/dir1/file1.txt");
-    redis_insert_data(context, "/home");
-    redis_insert_data(context, "/tmp");
-    redis_insert_data(context, "/home/user1");
-    redis_insert_data(context, "/home/user2");
-    redis_insert_data(context, "/home/user2/file");
-    redis_insert_data(context, "/home/user2/file/file2");
-    redis_insert_data(context, "/home/user2/file/file3");
-    redis_rename_dir_dir(context, "/home", "/tmp");
+    redis_insert_data(context, "imss://home");
+    redis_insert_data(context, "imss://tmp");
+    redis_insert_data(context, "imss://home/user1");
+    redis_insert_data(context, "imss://home/user2");
+    redis_insert_data(context, "imss://home/user2/file");
+    redis_insert_data(context, "imss://home/user2/file/file2");
+    redis_insert_data(context, "imss://home/user2/file/file3");
+    redis_rename_dir_dir(context, "imss://home", "imss://tmp");
     //  redis_delete_data(context, "/tmp");
     // redis_insert_data(context, "/home/user1/dir1");
     // int32_t numdir_elems;

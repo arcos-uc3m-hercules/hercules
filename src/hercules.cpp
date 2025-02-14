@@ -7,7 +7,7 @@
 #include "imss.h"
 #include "workers.h"
 #include "hercules.hpp"
-#include "directory.h"
+#include "redis.h"
 #include "records.hpp"
 #include "comms.h"
 // #include "hercules.hpp"
@@ -68,9 +68,8 @@ extern pthread_mutex_t buff_size_mut;
 extern pthread_cond_t buff_size_cond;
 extern int32_t copied;
 
-// Pointer to the tree's root node.
-extern GNode *tree_root;
-extern pthread_mutex_t tree_mut;
+// Mutex for the hiredis connection.
+extern pthread_mutex_t hiredis_mut;
 
 // Number of bytes assigned to the IMSS backend storage (in KB).
 uint64_t backend_buffer_size;
@@ -261,17 +260,18 @@ imss_metadata(void *arg_)
 
 	pt_met = (char *)malloc(sizeof(char) * data_reserved);
 
-	if (pthread_mutex_init(&tree_mut, NULL) != 0)
+	if (pthread_mutex_init(&hiredis_mut, NULL) != 0)
 	{
-		perror("HERCULES_ERR_TREEMUT_INIT");
+		perror("HERCULES_ERR_HIREDISMUT_INIT");
 		pthread_exit(NULL);
 	}
 
-	// Create the tree_root node.
-	char *root_data = (char *)malloc(8);
-	strcpy(root_data, "imss://");
-	tree_root = g_node_new((void *)root_data);
-
+	redisContext *hiredis_context = redis_init();
+	if (hiredis_context == NULL)
+	{
+		perror("HERCULES_ERR_HIREDIS_INIT");
+		pthread_exit(NULL);
+	}
 	// Address pointing to the end of the last metadata record.
 	char *offset = pt_met;
 
@@ -297,6 +297,8 @@ imss_metadata(void *arg_)
 	{
 		// Add port number to set of thread arguments.
 		arguments[i].port = (arg.port)++;
+
+		arguments[i].hiredis_context = hiredis_context;
 
 		// Deploy all dispatcher + service threads.
 		if (!i)
@@ -338,12 +340,12 @@ imss_metadata(void *arg_)
 	if (metadata_write(arg.metadata_file, pt_met, metadata_map.get(), arguments, buffer_segment_, bytes_written) == -1)
 		pthread_exit(NULL);
 
-	// Freeing all resources of the tree structure.
-	g_node_traverse(tree_root, G_PRE_ORDER, G_TRAVERSE_ALL, -1, gnodetraverse, NULL);
+	// Freeing all resources of the redis server.
+	redis_close();
 
-	if (pthread_mutex_destroy(&tree_mut) != 0)
+	if (pthread_mutex_destroy(&hiredis_mut) != 0)
 	{
-		perror("HERCULES_ERR_TREEMUT_DESTROY");
+		perror("HERCULES_ERR_HIREDIS_DESTROY");
 		pthread_exit(NULL);
 	}
 
