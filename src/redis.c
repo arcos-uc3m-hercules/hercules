@@ -249,12 +249,12 @@ int32_t redis_rename(redisContext *context, const char *old_path, const char *ne
 
 // Function to rename a directory and all its subdirectories in Redis
 int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir) {
-    char new_parent_dir[URI_];
+    char new_parent_dir[256];
     char *filename = get_path_last_part(old_dir); // This can be either a file or a dir
     // Construct the new parent directory path
     snprintf(new_parent_dir, sizeof(new_parent_dir), "%s/%s", new_dir, filename); 
     // Rename the parent directory first
-    if (rename_key(context, old_dir, new_dir) != 0) {
+    if (rename_key(context, old_dir, new_parent_dir) < 0) {
         return -1;
     }
 
@@ -264,7 +264,7 @@ int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const c
     }
 
     // Insert the file/dir in the new parent directory key
-    if (redis_insert_data(context, filename) != 0) {
+    if (redis_insert_data(context, new_parent_dir) != 0) {
         return -1;
     }
 
@@ -285,10 +285,11 @@ static int rename_key(redisContext *context, const char *old_key, const char *ne
 // Helper function to recursively rename directories
 static int rename_subdirectories(redisContext *context, const char *old_dir, const char *new_dir) {
     long cursor = 0;
+    char *old_dir_last_part = get_path_last_part(old_dir);
     do {
         redisReply *reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s/*", cursor, old_dir);
         if (reply == NULL) {
-            slog_error("Error: %s\n", context->errstr);
+            printf("Error: %s\n", context->errstr);
             return -1;
         }
 
@@ -298,11 +299,10 @@ static int rename_subdirectories(redisContext *context, const char *old_dir, con
         // Iterate over the keys and rename them
         for (size_t i = 0; i < reply->element[1]->elements; i++) {
             const char *old_key = reply->element[1]->element[i]->str;
-            char new_key[URI_];
+            char new_key[256];
 
             // Construct the new key by replacing the old directory prefix with the new one
-            snprintf(new_key, sizeof(new_key), "%s%s", new_dir, old_key + strlen(old_dir));
-
+            snprintf(new_key, sizeof(new_key), "%s/%s%s", new_dir, old_dir_last_part, old_key + strlen(old_dir));
             // Rename the key
             if (rename_key(context, old_key, new_key) != 0) {
                 freeReplyObject(reply);

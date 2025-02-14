@@ -39,6 +39,9 @@ void redis_close(redisContext *context)
     }
     redisFree(context);
 }
+
+
+
 // Helper method to get the parent directory of a path
 static char* get_parent_dir(const char* path) {
     // Find the last occurrence of '/'
@@ -87,7 +90,6 @@ int parent_dir_exists(redisContext *context, const char *parent_dir) {
     }
     char *grandparent_dir = get_parent_dir(parent_dir);
     char *parent_dir_name = get_path_last_part(parent_dir);
-    printf("Grandparent dir: %s\n", grandparent_dir);
     redisReply *reply = (redisReply *)redisCommand(context, "SISMEMBER %s %s", grandparent_dir, parent_dir_name);
     free(grandparent_dir);
     if (reply == NULL)
@@ -97,29 +99,23 @@ int parent_dir_exists(redisContext *context, const char *parent_dir) {
     }
     int exists = reply->integer;
     freeReplyObject(reply);
-    printf("Parent directory exists: %d\n", exists);
     return exists;
 }
 
 // Method inserting a new path.
 int32_t redis_insert_data(redisContext *context, const char *desired_data)
 {
-    printf("Inserting data: %s\n", desired_data);
     char *parent_dir = get_parent_dir(desired_data);
     char *file = get_path_last_part(desired_data); // This can be either a file or a dir
-    printf("Parent dir: %s\n", parent_dir);
 
     // Check if the parent directory exists
     if (!parent_dir_exists(context, parent_dir))
     {
         printf("Error: Parent directory does not exist\n");
-        printf("\n");
-
         free(parent_dir);
         free(file);
         return -1;
     }
-    printf("\n");
 
     // Insert the file into the parent directory
     redisReply *reply = (redisReply *)redisCommand(context, "SADD %s %s", parent_dir, file);
@@ -184,8 +180,6 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
         return 0;
     }
 
-
-    
     // In case the file was a directory, delete it and all its subdirectories
     reply = (redisReply *)redisCommand(context, "DEL %s", desired_data);
     if (reply == NULL)
@@ -206,8 +200,6 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
 
 
 
-
-
 // Function to get the directory contents from Redis
 char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems) {
     // Retrieve the contents of the directory
@@ -220,7 +212,6 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     // Number of elements contained by the directory
     uint32_t num_children = reply->elements;
     *numdir_elems = num_children + 1; // +1 for the actual directory + children
-    printf("[redis_getdir] num_children=%d\n", num_children);
 
     // Buffer containing the whole set of elements within a certain directory
     char *dir_elements = (char *)malloc((num_children + 1) * 256);
@@ -236,7 +227,6 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
 
     for (size_t i = 0; i < reply->elements; i++) {
         const char* sub_dir = reply->element[i]->str;
-        printf("Subdir: %s\n", sub_dir);
         memcpy(aux_dir_elements, sub_dir, 256);
         *aux_dir_elements += 256;
     }
@@ -244,6 +234,20 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
 
     freeReplyObject(reply);
     return dir_elements;
+}
+
+
+int32_t redis_rename(redisContext *context, const char *old_path, const char *new_path) {
+    int32_t delete_result = redis_delete_data(context, old_path);
+    if (delete_result == -1) {
+        printf("Error deleting old path\n");
+        return -1;
+    }
+    int32_t insert_result = redis_insert_data(context, new_path);
+    if (insert_result == -1) {
+        printf("Error inserting new path\n");
+        return -1;
+    }
 }
 
 
@@ -255,14 +259,14 @@ static int rename_key(redisContext *context, const char *old_key, const char *ne
         printf("Error: %s\n", context->errstr);
         return -1;
     }
-    int result = reply->type == REDIS_REPLY_STATUS && strcmp(reply->str, "OK") == 0;
     freeReplyObject(reply);
-    return result;
+    return 0;
 }
 
 // Helper function to recursively rename directories
 static int rename_subdirectories(redisContext *context, const char *old_dir, const char *new_dir) {
     long cursor = 0;
+    char *old_dir_last_part = get_path_last_part(old_dir);
     do {
         redisReply *reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s/*", cursor, old_dir);
         if (reply == NULL) {
@@ -279,8 +283,7 @@ static int rename_subdirectories(redisContext *context, const char *old_dir, con
             char new_key[256];
 
             // Construct the new key by replacing the old directory prefix with the new one
-            snprintf(new_key, sizeof(new_key), "%s%s", new_dir, old_key + strlen(old_dir));
-
+            snprintf(new_key, sizeof(new_key), "%s/%s%s", new_dir, old_dir_last_part, old_key + strlen(old_dir));
             // Rename the key
             if (rename_key(context, old_key, new_key) != 0) {
                 freeReplyObject(reply);
@@ -294,27 +297,25 @@ static int rename_subdirectories(redisContext *context, const char *old_dir, con
     return 0;
 }
 
+
 // Function to rename a directory and all its subdirectories in Redis
 int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir) {
     char new_parent_dir[256];
     char *filename = get_path_last_part(old_dir); // This can be either a file or a dir
     // Construct the new parent directory path
     snprintf(new_parent_dir, sizeof(new_parent_dir), "%s/%s", new_dir, filename); 
-    printf("New parent dir: %s\n", new_parent_dir);
-
-    // Insert the file/dir in the new parent directory key
-    if (redis_insert_data(context, new_parent_dir) != 0) {
+    // Rename the parent directory first
+    if (rename_key(context, old_dir, new_parent_dir) < 0) {
         return -1;
     }
 
-    // Rename the parent directory if it exists
-    int rename_result = rename_key(context, old_dir, new_parent_dir); 
-    if (rename_result != 0) {
-        return rename_result;
+    // Rename all its subdirectories
+    if (rename_subdirectories(context, old_dir, new_dir) != 0) {
+        return -1;
     }
 
-    // Rename all its subdirectories
-    if (rename_subdirectories(context, old_dir, new_parent_dir) != 0) {
+    // Insert the file/dir in the new parent directory key
+    if (redis_insert_data(context, new_parent_dir) != 0) {
         return -1;
     }
 
