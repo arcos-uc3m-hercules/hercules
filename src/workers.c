@@ -14,7 +14,7 @@
 #include <mcheck.h>
 #include <fcntl.h>
 #include <condition_variable>
-#include <hiredis/hiredis.h>
+#include "redis.h"
 #include "imss.h"
 #include "workers.h"
 #include "directory.h"
@@ -1465,17 +1465,12 @@ void *stat_worker(void *th_argv)
 	// Create and connect to hiredis server
 	redis_host = "127.0.0.1";
 	redis_port = 6379;
-	redisContext *hiredis_context = redisConnect(redis_host, redis_port);
-	if (hiredis_context == NULL || hiredis_context->err) {
-		if (hiredis_context) {
-			slog_debug("HERCULES_ERR_STAT_WORKER_REDIS_CONNECTION_ERROR");
-			perror("HERCULES_ERR_STAT_WORKER_REDIS_CONNECTION_ERROR");
-			return NULL;
-		} else {
-			slog_debug("HERCULES_ERR_STAT_WORKER_REDIS_CANNOT_ALLOCATE_CONTEXT");
-			perror("HERCULES_ERR_STAT_WORKER_REDIS_CANT_ALLOCATE_CONTEXT");
-			return NULL;
-		}
+	redisContext *hiredis_context = redis_init(redis_host, redis_port);
+	if (hiredis_context == NULL)
+	{
+		perror("ERR_HERCULES_REDIS_INIT");
+		slog_debug("ERR_HERCULES_REDIS_INIT");
+		return -1;
 	}
 
 	for (;;)
@@ -1707,9 +1702,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			int32_t numelems_indir;
 			// Retrieve all elements inside the requested directory.
 			pthread_mutex_lock(&hiredis_mut);
-			slog_info("[workers][stat_worker_helper] Calling GTree_getdir, key=%s", key.c_str());
-			buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
-			slog_info("[workers][stat_worker_helper] Ending GTree_getdir, key=%s, numelems_indir=%d", key.c_str(), numelems_indir);
+			slog_info("[workers][stat_worker_helper] Calling redis_getdir, key=%s", key.c_str());
+			buffer = redis_getdir(hiredis_context, (char *)key.c_str(), &numelems_indir);
+			slog_info("[workers][stat_worker_helper] Ending redis_getdir, key=%s, numelems_indir=%d", key.c_str(), numelems_indir);
 			pthread_mutex_unlock(&hiredis_mut);
 			if (buffer == NULL)
 			{
@@ -1840,7 +1835,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				{
 					int32_t result = map->delete_metadata_stat_worker(key);
 					slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
-					GTree_delete((char *)key.c_str());
+					redis_delete_data(hiredis_context, (char *)key.c_str());
 					strncpy(release_msg, "DELETE\0", strlen("DELETE\0") + 1);
 				}
 				else
@@ -1879,9 +1874,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					break;
 				}
 
-				// RENAME TREE
-				int ret = GTree_rename((char *)old_key.c_str(), (char *)new_key.c_str());
-				slog_debug("[stat_worker_helper][RENAME] GTree_rename=%d", ret);
+				// RENAME REDIS
+				int ret = redis_rename(hiredis_context, (char *)old_key.c_str(), (char *)new_key.c_str());
+				slog_debug("[stat_worker_helper][RENAME] redis_rename=%d", ret);
 			}
 
 			char release_msg[] = "RENAME\0";
@@ -1905,8 +1900,8 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				// RENAME MAP
 				map->rename_metadata_dir_stat_worker(old_dir, rdir_dest);
 
-				// RENAME TREE
-				GTree_rename_dir_dir((char *)old_dir.c_str(), (char *)rdir_dest.c_str());
+				// RENAME REDIS
+				redis_rename_dir_dir(hiredis_context, (char *)old_dir.c_str(), (char *)rdir_dest.c_str());
 			}
 
 			char release_msg[] = "RENAME\0";
@@ -1954,7 +1949,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					slog_debug("Deleting %s", key.c_str());
 					int32_t result = map->delete_metadata_stat_worker(key);
 					slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
-					GTree_delete((char *)key.c_str());
+					redis_delete_data(hiredis_context, (char *)key.c_str());
 					strcpy(release_msg, "DELETE\0");
 				}
 				else
@@ -2078,16 +2073,16 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				return -1;
 			}
 
-			// Insert the received uri into the directory tree.
+			// Insert the received uri into the redis server.
 			pthread_mutex_lock(&hiredis_mut);
-			// slog_debug("[STAT WORKER] Inserting %s into directory tree", key.c_str());
-			insert_successful = GTree_insert((char *)key.c_str());
+			// slog_debug("[STAT WORKER] Inserting %s into directory redis server", key.c_str());
+			insert_successful = redis_insert_data(hiredis_context, (char *)key.c_str());
 			pthread_mutex_unlock(&hiredis_mut);
 
 			if (insert_successful == -1)
 			{
-				slog_error("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
-				perror("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
+				slog_error("HERCULES_ERR_METADATA_WORKER_REDIS_INSERT_SET_OP");
+				perror("HERCULES_ERR_METADATA_WORKER_REDIS_INSERT_SET_OP");
 				free(buffer);
 				// perror("ERRIMSS_STATWORKER_GTREEINSERT");
 				return -1;
