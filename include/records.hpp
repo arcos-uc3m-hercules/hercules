@@ -64,7 +64,7 @@ public:
 	int32_t get_broadcast(std::string key, void **add_, uint64_t *size_);
 
 	char *GetDataFromFile(std::string file_name, uint64_t *file_size_occupied);
-	char *MergeData(uint32_t num_of_data_servers, std::string file_name, __off_t file_size, uint64_t block_size);
+	char *MergeData(__off_t *size_of_data, uint32_t num_of_data_servers, std::string file_name, __off_t file_size, uint64_t block_size);
 
 	// char* getDataFromFile(std::string file_name);
 
@@ -86,6 +86,7 @@ public:
 	int32_t cleaning_specific(std::string new_key);
 	int32_t freeAllMemory();
 	int32_t erase_broadcast_element(std::string key);
+	int32_t erase_snapshot_element(std::string key);
 
 	int32_t get_broadcast_size();
 
