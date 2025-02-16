@@ -1462,16 +1462,6 @@ void *stat_worker(void *th_argv)
 	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
 	ep_params.err_handler.cb = err_cb_server;
 
-	// Create and connect to hiredis server
-	redis_host = "127.0.0.1";
-	redis_port = 6379;
-	redisContext *hiredis_context = redis_init(redis_host, redis_port);
-	if (hiredis_context == NULL)
-	{
-		perror("ERR_HERCULES_REDIS_INIT");
-		slog_debug("ERR_HERCULES_REDIS_INIT");
-		return -1;
-	}
 
 	for (;;)
 	{
