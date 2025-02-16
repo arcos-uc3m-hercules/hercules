@@ -298,6 +298,7 @@ imss_metadata(void *arg_)
 		// Add port number to set of thread arguments.
 		arguments[i].port = (arg.port)++;
 
+		// Add redis server context to set of thread arguments.
 		arguments[i].hiredis_context = hiredis_context;
 
 		// Deploy all dispatcher + service threads.
