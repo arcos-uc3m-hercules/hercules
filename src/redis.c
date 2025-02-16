@@ -9,7 +9,7 @@
 static char* get_parent_dir(const char* path);
 static char* get_path_last_part(const char* path);
 static int parent_dir_exists(redisContext *context, const char *parent_dir);
-static void delete_subdirectories(redisContext *context, const char* parent_dir)
+static void delete_subdirectories(redisContext *context, const char* parent_dir);
 static int rename_key(redisContext *context, const char *old_key, const char *new_key);
 static int rename_subdirectories(redisContext *context, const char *old_dir, const char *new_dir);
 
