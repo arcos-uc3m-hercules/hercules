@@ -14,7 +14,7 @@
 #include <mcheck.h>
 #include <fcntl.h>
 #include <condition_variable>
-#include "redis.h"
+#include "../include/redis.h"
 #include "imss.h"
 #include "workers.h"
 #include "directory.h"
