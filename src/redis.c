@@ -5,6 +5,13 @@
 #include <stdlib.h>
 
 
+// Helper functions
+static char* get_parent_dir(const char* path);
+static char* get_path_last_part(const char* path);
+static int parent_dir_exists(redisContext *context, const char *parent_dir);
+static int rename_key(redisContext *context, const char *old_key, const char *new_key);
+static int rename_subdirectories(redisContext *context, const char *old_dir, const char *new_dir);
+
 // Method initializing the Redis connection.
 redisContext* redis_init(const char *hostname, int port)
 {
@@ -33,7 +40,7 @@ void redis_close(redisContext *context)
         // Flush all data from all databases
         redisReply *reply = (redisReply *)redisCommand(context, "FLUSHALL");
         if (reply == NULL) {
-            fslog_error(stderr, "Error: %s\n", context->errstr);
+            slog_error(stderr, "Error: %s\n", context->errstr);
         } else {
             freeReplyObject(reply);
         }
@@ -108,7 +115,7 @@ static char* get_path_last_part(const char* path) {
     return strdup(last_slash + 1);
 }
 
-int parent_dir_exists(redisContext *context, const char *parent_dir) {
+static int parent_dir_exists(redisContext *context, const char *parent_dir) {
     // If the parent directory is the root, it exists
     if (strcmp(parent_dir, "imss://") == 0)
     {
