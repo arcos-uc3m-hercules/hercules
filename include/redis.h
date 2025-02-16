@@ -16,7 +16,7 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data);
 int32_t redis_delete_data(redisContext *context, const char *desired_data);
 
 // Method retrieving a buffer with all the files within a directory.
-int32_t redis_getdir(redisContext *context, const char *key, char **buffer, int32_t *num_elems);
+char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems);
 
 // Method renaming a new path.
 int32_t redis_rename(redisContext *context, const char *old_key, const char *new_key);
