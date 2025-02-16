@@ -1604,9 +1604,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
 
-	// Obtain the redis context from the set of arguments.
-	redisContext *hiredis_context = arguments->hiredis_context;
-
 	uint16_t current_offset = 0;
 
 	// Resources specifying if the ZMQ_SNDMORE flag was set in the sender.
