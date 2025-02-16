@@ -1582,7 +1582,6 @@ void *stat_worker(void *th_argv)
 		arguments->peer_address = peer_addr;
 		arguments->server_ep = ep;
 		arguments->worker_uid = attr.worker_uid;
-		arguments->hiredis_context = hiredis_context;
 		muntrace();
 
 		// arguments->worker_uid = attr.worker_uid;
@@ -1603,6 +1602,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
+
+	// Obtain the redis server context from the set of arguments.
+	redisContext *hiredis_context = arguments->hiredis_context;
 
 	uint16_t current_offset = 0;
 
