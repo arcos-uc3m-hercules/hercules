@@ -24,6 +24,7 @@ ADD_EXECUTABLE( hercules_server
 		../src/shared_memory.c
 		../src/policies.c
 		../src/hercules.cpp
+		../src/redis.c
 )
 
 ADD_LIBRARY( imss_static STATIC
@@ -41,6 +42,7 @@ ADD_LIBRARY( imss_static STATIC
 		../src/slog.c
 		../src/map_server_eps.cpp
 		../src/shared_memory.c
+		../src/redis.c
 )
 
 ADD_LIBRARY( imss_shared SHARED
@@ -58,6 +60,7 @@ ADD_LIBRARY( imss_shared SHARED
 		../src/slog.c
 		../src/map_server_eps.cpp
 		../src/shared_memory.c
+		../src/redis.c
 )
 
 SET(IMSS_INC "-I${CMAKE_SOURCE_DIR}/include")
