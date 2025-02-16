@@ -50,10 +50,6 @@ static long iov_cnt = 1;
 // Map that stores server side endpoints
 void *map_server_eps;
 
-// Connection info for hiredis
-const char *redis_host;
-int redis_port;
-
 pthread_mutex_t hiredis_mut = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mp = PTHREAD_MUTEX_INITIALIZER;
 
