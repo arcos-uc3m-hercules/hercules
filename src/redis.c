@@ -40,7 +40,7 @@ void redis_close(redisContext *context)
         // Flush all data from all databases
         redisReply *reply = (redisReply *)redisCommand(context, "FLUSHALL");
         if (reply == NULL) {
-            slog_error(stderr, "Error: %s\n", context->errstr);
+            slog_error("Error: %s\n", context->errstr);
         } else {
             freeReplyObject(reply);
         }
@@ -91,7 +91,7 @@ static char* get_parent_dir(const char* path) {
     // Allocate memory for the parent directory path
     char* parent_dir = (char*)malloc(parent_len + 1);
     if (parent_dir == NULL) {
-        slog_error("Memory allocation error\n");
+        slog_error("Memory allocation error");
         return NULL;
     }
 
