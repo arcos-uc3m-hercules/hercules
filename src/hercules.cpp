@@ -68,10 +68,6 @@ extern pthread_mutex_t buff_size_mut;
 extern pthread_cond_t buff_size_cond;
 extern int32_t copied;
 
-// Connection info for hiredis
-const char *redis_host;
-int redis_port;
-
 // Mutex for the hiredis connection.
 extern pthread_mutex_t hiredis_mut;
 
@@ -270,15 +266,7 @@ imss_metadata(void *arg_)
 		pthread_exit(NULL);
 	}
 
-	// Initialize the Redis server.
-	redis_host = "127.0.0.1";
-	redis_port = 6379;
-	redisContext *hiredis_context = redis_init(redis_host, redis_port);
-	if (hiredis_context == NULL)
-	{
-		perror("HERCULES_ERR_HIREDIS_INIT");
-		pthread_exit(NULL);
-	}
+	
 	// Address pointing to the end of the last metadata record.
 	char *offset = pt_met;
 
@@ -304,9 +292,6 @@ imss_metadata(void *arg_)
 	{
 		// Add port number to set of thread arguments.
 		arguments[i].port = (arg.port)++;
-
-		// Add redis server context to set of thread arguments.
-		arguments[i].hiredis_context = hiredis_context;
 
 		// Deploy all dispatcher + service threads.
 		if (!i)
@@ -349,7 +334,7 @@ imss_metadata(void *arg_)
 		pthread_exit(NULL);
 
 	// Freeing all resources of the redis server.
-	redis_close(hiredis_context);
+	// redis_close(hiredis_context);
 
 	if (pthread_mutex_destroy(&hiredis_mut) != 0)
 	{

@@ -6,15 +6,17 @@
 #include <sys/signal.h>
 #include "metadata_stat.h"
 #include "memalloc.h"
-#include "directory.h"
+#include "redis.h"
 #include "records.hpp"
 #include "map_ep.hpp"
 #include <inttypes.h>
 #include <unistd.h>
 
-// Pointer to the tree's root node.
-extern GNode *tree_root;
-extern pthread_mutex_t tree_mut;
+// Communication resources with worker threads.
+extern pthread_mutex_t hiredis_mut;
+extern const char *redis_host;
+extern int redis_port;
+extern redisContext *hiredis_context;
 extern int32_t __thread current_dataset;   // Dataset whose policy has been set last.
 extern dataset_info __thread curr_dataset; // Currently managed dataset.
 extern imss __thread curr_imss;
@@ -659,16 +661,28 @@ int32_t main(int32_t argc, char **argv)
 	// Metadata server.
 	else
 	{
-		// Create the tree_root node.
-		char *root_data = (char *)calloc(8, sizeof(char));
-		strcpy(root_data, "imss://");
-		tree_root = g_node_new((void *)root_data);
+		// Initialize the metadata server.
+		// char *root_data = (char *)calloc(8, sizeof(char));
+		// strcpy(root_data, "imss://");
+		// tree_root = g_node_new((void *)root_data);
 
-		if (pthread_mutex_init(&tree_mut, NULL) != 0)
+		if (pthread_mutex_init(&hiredis_mut, NULL) != 0)
 		{
-			perror("HERCULES_ERR_TREE_MUT_INIT");
+			perror("HERCULES_ERR_HIREDIS_MUT_INIT");
 			pthread_exit(NULL);
 		}
+		
+		// Connection info for hiredis
+		redis_host = "127.0.0.1";
+		redis_port = 6379;
+
+		redisContext *hiredis_context = redis_init(redis_host, redis_port);
+		if (hiredis_context == NULL)
+		{
+			perror("HERCULES_ERR_HIREDIS_INIT");
+			exit(-1);
+		}
+
 	}
 
 	/***************************************************************/
@@ -744,6 +758,9 @@ int32_t main(int32_t argc, char **argv)
 		// Add the instance URI to the thread arguments.
 		strcpy(arguments[i].my_uri, args.imss_uri);
 		arguments[i].args = args;
+
+		// Add the redis context to the thread arguments.
+		arguments[i].hiredis_context = hiredis_context;
 
 		// Deploy all dispatcher + service threads.
 		if (i == 0)
@@ -980,12 +997,12 @@ int32_t main(int32_t argc, char **argv)
 
 		// Send a message to all data servers to shutdown.
 
-		// Freeing all resources of the tree structure.
-		g_node_traverse(tree_root, G_PRE_ORDER, G_TRAVERSE_ALL, -1, gnodetraverse, NULL);
+		// Freeing all resources of the redis server.
+		redis_close(hiredis_context);
 
-		if (pthread_mutex_destroy(&tree_mut) != 0)
+		if (pthread_mutex_destroy(&hiredis_mut) != 0)
 		{
-			perror("HERCULES_ERR_TREE_MUT_DESTROY");
+			perror("HERCULES_ERR_HIREDIS_MUT_DESTROY");
 			pthread_exit(NULL);
 		}
 		// fprintf(stderr, "Ending metadata server.\n");
