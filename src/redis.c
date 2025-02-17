@@ -21,7 +21,7 @@ redisContext* redis_init(const char *hostname, int port)
         if (context)
         {
             slog_error("Error: %s\n", context->errstr);
-            return NULL;
+            return context;
         }
         else
         {
