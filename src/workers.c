@@ -14,7 +14,7 @@
 #include <mcheck.h>
 #include <fcntl.h>
 #include <condition_variable>
-#include "../include/redis.h"
+#include "redis.h"
 #include "imss.h"
 #include "workers.h"
 #include "directory.h"
@@ -50,7 +50,7 @@ static long iov_cnt = 1;
 // Map that stores server side endpoints
 void *map_server_eps;
 
-pthread_mutex_t hiredis_mut = PTHREAD_MUTEX_INITIALIZER;
+extern pthread_mutex_t hiredis_mut;
 pthread_mutex_t mp = PTHREAD_MUTEX_INITIALIZER;
 
 ucp_worker_h *ucp_worker_threads;
@@ -1688,7 +1688,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			// Retrieve all elements inside the requested directory.
 			pthread_mutex_lock(&hiredis_mut);
 			slog_info("[workers][stat_worker_helper] Calling redis_getdir, key=%s", key.c_str());
-			buffer = redis_getdir(hiredis_context, (char *)key.c_str(), &numelems_indir);
+			buffer = redis_getdir(hiredis_context, ( char const *)key.c_str(), (int32_t *)&numelems_indir);
 			slog_info("[workers][stat_worker_helper] Ending redis_getdir, key=%s, numelems_indir=%d", key.c_str(), numelems_indir);
 			pthread_mutex_unlock(&hiredis_mut);
 			if (buffer == NULL)

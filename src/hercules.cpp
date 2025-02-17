@@ -68,7 +68,6 @@ extern pthread_mutex_t buff_size_mut;
 extern pthread_cond_t buff_size_cond;
 extern int32_t copied;
 
-// Mutex for the hiredis connection.
 extern pthread_mutex_t hiredis_mut;
 
 // Number of bytes assigned to the IMSS backend storage (in KB).

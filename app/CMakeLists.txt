@@ -1,10 +1,11 @@
 
 # set_source_files_properties(../src/comms.c ../src/crc.c ../src/directory.c ../src/hercules.cpp ../src/imss.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX )
 set_source_files_properties(../src/comms.c ../src/crc.c ../src/directory.c ../src/imss.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX )
-set_source_files_properties(../src/memalloc.c ../src/policies.c ../src/stat.c ../src/workers.c ../src/arg_parser.c ../src/map_server_eps.cpp PROPERTIES LANGUAGE CXX )
+set_source_files_properties(../src/memalloc.c ../src/policies.c ../src/stat.c ../src/workers.c ../src/arg_parser.c ../src/map_server_eps.cpp ../src/redis.c PROPERTIES LANGUAGE CXX )
 set_source_files_properties(./server.c ./release_imss.c PROPERTIES LANGUAGE CXX )
 
 ADD_EXECUTABLE( hercules_server
+        ../src/redis.c
 		./server.c
 		../src/map_ep.cpp
 		../src/stat.cpp
@@ -24,13 +25,13 @@ ADD_EXECUTABLE( hercules_server
 		../src/shared_memory.c
 		../src/policies.c
 		../src/hercules.cpp
-		../src/redis.c
 )
 
 ADD_LIBRARY( imss_static STATIC
 		../src/crc.c
 		../src/stat.cpp
 		../src/imss.c
+		../src/redis.c
 		../src/comms.c
 		../src/workers.c
 		../src/queue.c
@@ -42,7 +43,6 @@ ADD_LIBRARY( imss_static STATIC
 		../src/slog.c
 		../src/map_server_eps.cpp
 		../src/shared_memory.c
-		../src/redis.c
 )
 
 ADD_LIBRARY( imss_shared SHARED
@@ -50,6 +50,7 @@ ADD_LIBRARY( imss_shared SHARED
 		../src/stat.cpp
 		../src/imss.c
 		../src/comms.c
+		../src/redis.c
 		../src/queue.c
 		../src/workers.c
 		../src/hercules.cpp
@@ -60,7 +61,7 @@ ADD_LIBRARY( imss_shared SHARED
 		../src/slog.c
 		../src/map_server_eps.cpp
 		../src/shared_memory.c
-		../src/redis.c
+	
 )
 
 SET(IMSS_INC "-I${CMAKE_SOURCE_DIR}/include")

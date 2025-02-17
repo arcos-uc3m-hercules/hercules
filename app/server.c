@@ -13,10 +13,14 @@
 #include <unistd.h>
 
 // Communication resources with worker threads.
+
+
+extern char redis_host[256];
 extern pthread_mutex_t hiredis_mut;
-extern const char *redis_host;
+extern char redis_host[256];
 extern int redis_port;
 extern redisContext *hiredis_context;
+
 extern int32_t __thread current_dataset;   // Dataset whose policy has been set last.
 extern dataset_info __thread curr_dataset; // Currently managed dataset.
 extern imss __thread curr_imss;
@@ -673,10 +677,10 @@ int32_t main(int32_t argc, char **argv)
 		}
 		
 		// Connection info for hiredis
-		redis_host = "127.0.0.1";
+		strcpy(redis_host, "127.0.0.1");
 		redis_port = 6379;
 
-		redisContext *hiredis_context = redis_init(redis_host, redis_port);
+		redisContext *hiredis_context = redis_init((const char *)redis_host, redis_port);
 		if (hiredis_context == NULL)
 		{
 			perror("HERCULES_ERR_HIREDIS_INIT");
