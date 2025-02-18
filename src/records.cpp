@@ -678,6 +678,17 @@ int32_t map_records::freeAllMemory()
 	return 0;
 }
 
+// Function to extract the number after the '$' symbol
+int extractNumber(const std::string &key)
+{
+	size_t pos = key.find('$');
+	if (pos != std::string::npos)
+	{
+		return std::stoi(key.substr(pos + 1));
+	}
+	return -1;
+}
+
 /**
  * @brief Fetch all data related to a file name.
  */
@@ -708,7 +719,7 @@ char *map_records::GetDataFromFile(string file_name, uint64_t *file_size_occupie
 		{
 			vec.insert(vec.begin(), partner_key);
 			*file_size_occupied = *file_size_occupied + it2.second.second;
-			extra_size += sizeof(block_number);
+			extra_size += sizeof(int);
 		}
 	}
 
@@ -721,14 +732,18 @@ char *map_records::GetDataFromFile(string file_name, uint64_t *file_size_occupie
 	}
 
 	// std::sort(vec.begin(), vec.end());
+	// sort elements by the block number.
+	std::sort(vec.begin(), vec.end(), [](const std::string &a, const std::string &b)
+			  { return extractNumber(a) < extractNumber(b); });
 
-	char *chucks_of_file_buffer = (char *)malloc((*file_size_occupied + extra_size) * sizeof(char));
+	char *chucks_of_file_buffer = (char *)malloc((*file_size_occupied + extra_size + 1) * sizeof(char));
 	char *aux_buf = chucks_of_file_buffer;
 	char *address_ = NULL;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string>::iterator i;
-	uint64_t block_size_rtvd = 0, total_written = 0;
+	uint64_t block_size_rtvd = 0;
+	off_t total_written = 0;
 	string data_uri, block_file_name;
 	for (i = vec.begin(); i != vec.end(); i++)
 	{
@@ -740,22 +755,12 @@ char *map_records::GetDataFromFile(string file_name, uint64_t *file_size_occupie
 		block_size_rtvd = item->second.second;
 		address_ = (char *)item->second.first;
 
-		memcpy((char *)aux_buf + total_written, &block_number, sizeof(block_number));
-		memcpy((char *)aux_buf + total_written + sizeof(block_number), address_, block_size_rtvd);
+		memcpy((char *)aux_buf + total_written, &block_number, sizeof(int));
+		memcpy((char *)aux_buf + total_written + sizeof(int), address_, block_size_rtvd);
 
-		total_written = total_written + block_size_rtvd + sizeof(block_number);
-
-		// aux_buf += item->second.second;
-
-		// push the memory pointer of this block inside the mem pool to be reused.
-		// StsQueue.push(mem_pool, item->second.first);
-		// fprintf(stderr, "quantity_occupied = %lu\n", quantity_occupied);
-		// free(item->second.first);
-		// erase the dataset information from the map.
-		// fprintf(stderr, "Erasing element with key %s\n", i);
-		// buffer.erase(*i);
-		// buffer_snapshot.erase(*i);
+		total_written = total_written + block_size_rtvd + sizeof(int);
 	}
+	chucks_of_file_buffer[total_written-1] = '\0';
 	return chucks_of_file_buffer;
 }
 
@@ -787,70 +792,60 @@ char *map_records::MergeData(__off_t *size_of_data, uint32_t num_of_data_servers
 	int32_t server_number = 0;
 	for (server_number = 0; server_number < num_of_data_servers; server_number++)
 	{
-		// sleep to test this function works.
-		// sleep(10);
-
 		char *buffer_address = NULL;
 		uint64_t storage_buffer_size = 0;
 
 		sprintf(expected_key_format, "imss://%s$%" PRId32, file_name.c_str(), server_number);
 		std::string expected_key = expected_key_format;
-
+		// Wait until data for this server id is ready.
 		while (get_broadcast(expected_key, (void **)&buffer_address, &storage_buffer_size) == 0)
 		{
 			slog_debug("key %s has not been find", expected_key.c_str());
 			sleep(1);
 		}
-		// if (find == 0)
-		// {
-		// 	slog_debug("key %s has not been find", expected_key.c_str());
-		// 	continue;
-		// }
-		// else
+
+		slog_debug("key %s has been find, storage_buffer_size=%lu", expected_key.c_str(), storage_buffer_size);
+		// iterate the buffer to get the blocks data.
+		int block_number = -1;
+		while (*buffer_address != '\0')
 		{
-			slog_debug("key %s has been find, storage_buffer_size=%lu", expected_key.c_str(), storage_buffer_size);
-			// iterate the buffer to get the blocks data.
-			int block_number = -1;
-			while (*buffer_address != '\0')
+			// Each block number has been added to the data string.
+			// TODO: block number should be a unsigned long integer.
+			memcpy(&block_number, buffer_address, sizeof(int));
+			block_offset = (block_number - 1) * block_size;
+			// if (block_number > 100000) // TODO: delete this condition.
+			// {
+			// 	perror("HERCULES_ERR_RETREIVING_THE_BLOCK_NUMBER");
+			// 	return NULL;
+			// }
+
+			// This helps to write the last block with the remaining data
+			// preventing writing the entire block.
+			if ((block_size + block_offset) > file_size)
 			{
-				// Each block number has been added to the data string.
-				// TODO: block number should be a unsigned long integer.
-				memcpy(&block_number, buffer_address, sizeof(int));
-				block_offset = (block_number - 1) * block_size;
-				slog_debug("block number=%d, block_offset=%d, block_size=%d, file_size=%ld", block_number, block_offset, block_size, file_size);
-				if (block_number > 100000) // TODO: delete this condition.
-				{
-					perror("HERCULES_ERR_RETREIVING_THE_BLOCK_NUMBER");
-					return NULL;
-				}
-
-				// This helps to write the last block with the remaining data
-				// preventing writing the entire block.
-				if (block_size + block_offset > file_size)
-				{
-					block_size_rtvd = file_size - block_offset;
-				}
-				else
-				{
-					block_size_rtvd = block_size;
-				}
-
-				memcpy((char *)reconstructed_data_file + block_offset, buffer_address + sizeof(int), block_size_rtvd);
-				// Move the pointer by the data size copied plus the int size.
-				buffer_address = buffer_address + block_size_rtvd + sizeof(int);
-				total_written += block_size_rtvd;
-			}
-
-			find = erase_broadcast_element(expected_key);
-			if (find == 0)
-			{
-				slog_debug("key %s has not been deleted in broadcast", expected_key.c_str());
-				continue;
+				block_size_rtvd = file_size - block_offset;
 			}
 			else
 			{
-				slog_debug("key %s has been deleted in broadcast", expected_key.c_str());
+				block_size_rtvd = block_size;
 			}
+
+			slog_debug("block number=%d, block_offset=%d, block_size=%d, file_size=%ld, block_size_rtvd=%lu", block_number, block_offset, block_size, file_size, block_size_rtvd);
+			memcpy((char *)reconstructed_data_file + block_offset, buffer_address + sizeof(int), block_size_rtvd);
+			// Move the pointer by the data size copied plus the int size (block number as integer).
+			buffer_address = buffer_address + block_size_rtvd + sizeof(int);
+			total_written += block_size_rtvd;
+		}
+
+		find = erase_broadcast_element(expected_key);
+		if (find == 0)
+		{
+			slog_debug("key %s has not been deleted in broadcast", expected_key.c_str());
+			continue;
+		}
+		else
+		{
+			slog_debug("key %s has been deleted in broadcast", expected_key.c_str());
 		}
 
 		slog_debug("total_written=%ld, file_size=%ld", total_written, file_size);
