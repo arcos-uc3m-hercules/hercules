@@ -251,6 +251,7 @@ int32_t redis_rename(redisContext *context, const char *old_path, const char *ne
         slog_error("Error inserting new path\n");
         return -1;
     }
+    return 0;
 }
 
 // Function to rename a directory and all its subdirectories in Redis
