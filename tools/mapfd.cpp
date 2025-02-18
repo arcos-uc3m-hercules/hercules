@@ -11,7 +11,6 @@
 #include "slog.h"
 
 using std::string;
-// typedef std::map<std::string, std::pair<int, long>> Map;
 typedef std::map<int, std::pair<std::string, long>> Map;
 
 std::mutex fdlock;

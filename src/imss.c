@@ -3337,13 +3337,6 @@ int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, c
 		// Server receiving the current data block.
 		uint32_t n_server_ = to_data_server_id;
 
-		//	gettimeofday(&start, NULL);
-
-		// if (data_id == 0)
-		// 	size = sizeof(struct stat);
-		// else if (size == 0)
-		// 	size = curr_dataset.data_entity_size;
-
 		// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
 		sprintf(request, "SNAPSET %lu %d %s$%d", size, 0, key, from_data_server_id);
 

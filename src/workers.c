@@ -1085,16 +1085,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						perror("HERCULES_ERR_MEMORY_ALLOCATION");
 						slog_error("HERCULES_ERR_MEMORY_ALLOCATION");
 						return -1;
-						// std::size_t found = key.find("$0");
-						// if (found != std::string::npos)
-						// { // block 0.
-						// 	size_asigned_to_block = BLOCK_SIZE;
-						// }
-						// else
-						// { // non block 0.
-						// 	// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
-						// 	size_asigned_to_block = msg_length + block_offset;
-						// }
 					}
 					size_asigned_to_block = BLOCK_SIZE;
 
