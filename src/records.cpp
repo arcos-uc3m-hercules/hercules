@@ -736,7 +736,10 @@ char *map_records::GetDataFromFile(string file_name, uint64_t *file_size_occupie
 	std::sort(vec.begin(), vec.end(), [](const std::string &a, const std::string &b)
 			  { return extractNumber(a) < extractNumber(b); });
 
-	char *chucks_of_file_buffer = (char *)malloc((*file_size_occupied + extra_size + 1) * sizeof(char));
+	// Sum the extra size for the block numbers represented as integers.
+	*file_size_occupied += extra_size;
+
+	char *chucks_of_file_buffer = (char *)malloc((*file_size_occupied + 1) * sizeof(char));
 	char *aux_buf = chucks_of_file_buffer;
 	char *address_ = NULL;
 	// Block the access to the map structure.
@@ -760,21 +763,21 @@ char *map_records::GetDataFromFile(string file_name, uint64_t *file_size_occupie
 
 		total_written = total_written + block_size_rtvd + sizeof(int);
 	}
-	chucks_of_file_buffer[total_written-1] = '\0';
+	chucks_of_file_buffer[total_written] = '\0';
 	return chucks_of_file_buffer;
 }
 
-char *map_records::MergeData(__off_t *size_of_data, uint32_t num_of_data_servers, string file_name, __off_t file_size, uint64_t block_size)
+char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, string file_name, off_t file_size, uint64_t block_size)
 {
 	slog_debug("Merge data of file %s with size %ld", file_name.c_str(), file_size);
 
 	// Skip data server 0.
 	int32_t find = 0;
 	uint64_t block_size_rtvd = 0;
-	__off_t total_written = 0;
+	off_t total_written = 0;
+	off_t block_offset = 0;
 	char expected_key_format[PATH_MAX];
 	char *reconstructed_data_file = NULL;
-	off_t block_offset = 0;
 
 	if (file_size <= 0)
 	{
@@ -1043,7 +1046,6 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 
 				if (full_data_from_file != NULL)
 				{
-					/* code */
 					free(full_data_from_file);
 				}
 
