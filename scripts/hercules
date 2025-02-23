@@ -329,16 +329,16 @@ if [[ "$SLURM" -eq "1" ]]; then
     echo "[+] Slurm is active."
     ## If slurm is enabled, we concat the job id to the configuration file to create a new one.
     CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
-    cp $FILE $CURR_HERCULES_CONF_FILE
+    cp "${FILE}" "${CURR_HERCULES_CONF_FILE}"
 else 
     CURR_HERCULES_CONF_FILE="${FILE}"
 fi
 
-export HERCULES_CONF=$CURR_HERCULES_CONF_FILE
+export HERCULES_CONF="${CURR_HERCULES_CONF_FILE}"
 # exit 0
 
 # echo "+ + + Initial number of data nodes is $INIT_HERCULES_NUM_DATA/$HERCULES_NUM_DATA"
-export "HERCULES_INIT_NUM_DATA=${INIT_HERCULES_NUM_DATA}"
+export HERCULES_INIT_NUM_DATA="${INIT_HERCULES_NUM_DATA}"
 
 ## \< \> to match exact word.
 
@@ -474,9 +474,10 @@ then
    
     exit 0
 fi
-
+# set -x
 ## If not empty, the field "METADATA_HOSTFILE" and "DATA_HOSTFILE" field was set on the configuration file.
 if [ ! -z "$HERCULES_METADATA_HOSTFILE" ]; then
+    echo "${HERCULES_METADATA_HOSTFILE} exists"
     if [[ "$SLURM" -eq "1" ]]; then
         # If slurm is enabled, we added the slurm job id to the meta hostfile.
         HERCULES_METADATA_HOSTFILE+="_"$SLURM_JOB_ID
@@ -484,18 +485,20 @@ if [ ! -z "$HERCULES_METADATA_HOSTFILE" ]; then
         ESCAPED_HERCULES_METADATA_HOSTFILE="${HERCULES_METADATA_HOSTFILE//\//\\/}"
         ## Replace the old metadata hostfile name with the new one containing the job id.
         sed -i "s/^METADATA_HOSTFILE = .*/METADATA_HOSTFILE = $ESCAPED_HERCULES_METADATA_HOSTFILE/g"  "$CURR_HERCULES_CONF_FILE"
+        # echo "HERCULES_METADATA_HOSTFILE=${HERCULES_METADATA_HOSTFILE}"
     fi
 fi
-if [ ! -z "$HERCULES_DATA_HOSTFILE" ]; then
+if [ ! -z "${HERCULES_DATA_HOSTFILE}" ]; then
     if [[ "$SLURM" -eq "1" ]]; then
         # If slurm is enabled, we added the slurm job id to the data hostfile.
-        HERCULES_DATA_HOSTFILE+="_"$SLURM_JOB_ID
+        HERCULES_DATA_HOSTFILE+="_${SLURM_JOB_ID}"
         ## Replace all "/" with "\/" because "/" is an special character for the sed command.
         ESCAPED_HERCULES_DATA_HOSTFILE="${HERCULES_DATA_HOSTFILE//\//\\/}"
         ## Replace the old data hostfile name with the new one containing the job id.
-        sed -i "s/^DATA_HOSTFILE = .*/DATA_HOSTFILE = $ESCAPED_HERCULES_DATA_HOSTFILE/g"  "$CURR_HERCULES_CONF_FILE"
+        sed -i "s/^DATA_HOSTFILE = .*/DATA_HOSTFILE = ${ESCAPED_HERCULES_DATA_HOSTFILE}/g"  "${CURR_HERCULES_CONF_FILE}"
     fi
 fi
+# set +x
 
 ## Creates the initial "hercules_num_act_nodes" file.
 echo ${HERCULES_INIT_NUM_DATA} > ${HERCULES_PATH}/tmp/hercules_num_act_nodes

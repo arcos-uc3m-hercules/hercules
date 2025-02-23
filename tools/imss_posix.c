@@ -660,7 +660,7 @@ extern "C"
 		slog_live(" -- REPL_TYPE: %d", REPL_TYPE);
 		slog_live(" -- POLICY: %s", POLICY);
 		slog_live(" -- RELEASE: %d", release);
-		fprintf(stderr, " -- POLICY: %s\n", POLICY);
+		// fprintf(stderr, " -- POLICY: %s\n", POLICY);
 
 		// Metadata server
 		// if (release == 1)
@@ -738,7 +738,7 @@ extern "C"
 			// t_s = clock();
 			release = -1;
 			slog_live("[POSIX] release_imss()");
-			release_imss("imss://", CLOSE_DETACHED);
+			//release_imss("imss://", CLOSE_DETACHED);
 			// slog_live("[POSIX] stat_release()");
 			// stat_release();
 			//  imss_comm_cleanup();

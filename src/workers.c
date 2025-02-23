@@ -1066,6 +1066,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				// If data is stored in shared memory due LOCAL policy, the server does not need to receive the data.
 				if (!is_shared_memory)
 				{
+					slog_debug("[WRITE_OP] is_shared_memory=%d", is_shared_memory);
+					// Get the length of the data to be received.
 					msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
 					if (msg_length == 0)
 					{
@@ -1073,11 +1075,21 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
 						return -1;
 					}
-
-					buffer = (void *)StsQueue.pop(mem_pool);
+					slog_debug("[WRITE_OP] msg_length=%lu", msg_length);
+					// buffer = (void *)StsQueue.pop(mem_pool);
 					if (buffer == NULL)
 					{
-						buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
+						slog_debug("Allocating buffer");
+						if(snapshot_op)
+						{ // Snapshot operation sends data bigger than BLOCK_SIZE.
+							buffer = (void *)malloc(msg_length * sizeof(char));
+						}
+						else
+						{
+							buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
+						}
+					} else {
+						slog_debug("Reusing buffer");
 					}
 
 					if (buffer == NULL)
@@ -1153,7 +1165,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					// slog_debug("key: %s, origin_server_id: %d, data_uri: %s, file_name: %s", key.c_str(), origin_server_id, data_uri.c_str(), file_name.c_str());
 					// Fill buffer_broadcast with the data received from the other servers.
 					// buffer_broadcast[];
-					slog_debug("Snapshot opration, origin server=%s", key.c_str());
+					slog_debug("Snapshot operation, origin server=%s", key.c_str());
 					insert_successful = map->put_broadcast(key, buffer, msg_length);
 				}
 				else
@@ -1436,6 +1448,7 @@ void *Snapshot(void *th_argv)
 		if (global_finish_snapshot == 1)
 		{
 			// TODO: Call a barrier to stop all servers.
+			slog_debug("Waiting to finish Snapshot thread.");
 			sleep(30);
 			global_finish_threads = 1;
 			pthread_mutex_unlock(&mutex_garbage);

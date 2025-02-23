@@ -774,7 +774,7 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 	// Skip data server 0.
 	int32_t find = 0;
 	uint64_t block_size_rtvd = 0;
-	off_t total_written = 0;
+	off_t total_written_acumulated = 0, total_written_per_server = 0;
 	off_t block_offset = 0;
 	char expected_key_format[PATH_MAX];
 	char *reconstructed_data_file = NULL;
@@ -804,13 +804,16 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 		while (get_broadcast(expected_key, (void **)&buffer_address, &storage_buffer_size) == 0)
 		{
 			slog_debug("key %s has not been find", expected_key.c_str());
-			sleep(1);
+			sleep(3);
 		}
 
 		slog_debug("key %s has been find, storage_buffer_size=%lu", expected_key.c_str(), storage_buffer_size);
 		// iterate the buffer to get the blocks data.
 		int block_number = -1;
-		while (*buffer_address != '\0')
+		// while (*buffer_address != '\0')
+		total_written_per_server = 0;
+		off_t aux_counter = 0;
+		while(aux_counter < storage_buffer_size)
 		{
 			// Each block number has been added to the data string.
 			// TODO: block number should be a unsigned long integer.
@@ -833,12 +836,16 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 				block_size_rtvd = block_size;
 			}
 
-			slog_debug("block number=%d, block_offset=%d, block_size=%d, file_size=%ld, block_size_rtvd=%lu", block_number, block_offset, block_size, file_size, block_size_rtvd);
 			memcpy((char *)reconstructed_data_file + block_offset, buffer_address + sizeof(int), block_size_rtvd);
 			// Move the pointer by the data size copied plus the int size (block number as integer).
 			buffer_address = buffer_address + block_size_rtvd + sizeof(int);
-			total_written += block_size_rtvd;
+			total_written_per_server += block_size_rtvd;
+			aux_counter += block_size_rtvd + sizeof(int);
+			slog_debug("block number=%d, block_offset=%d, block_size=%d, file_size=%ld, block_size_rtvd=%lu, total_written_per_server=%ld", block_number, block_offset, block_size, file_size, block_size_rtvd, total_written_per_server);
 		}
+		total_written_acumulated += total_written_per_server;
+		slog_debug("total_written_per_server=%ld, total_written_acumulated=%ld, file_size=%ld",total_written_per_server, total_written_acumulated, file_size);
+		total_written_per_server = 0;
 
 		find = erase_broadcast_element(expected_key);
 		if (find == 0)
@@ -851,9 +858,8 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 			slog_debug("key %s has been deleted in broadcast", expected_key.c_str());
 		}
 
-		slog_debug("total_written=%ld, file_size=%ld", total_written, file_size);
 	}
-	*size_of_data = total_written;
+	*size_of_data = total_written_acumulated;
 	return reconstructed_data_file;
 }
 
@@ -896,10 +902,10 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 		is_shared_memory = 1;
 	}
 	// Allows to do the snapshot only when Hercules is stopping.
-	// if (!finish)
-	// {
-	// 	return 0;
-	// }
+	if (!finish)
+	{
+		return 0;
+	}
 	// fprintf(stderr, "Running snapshot\n");
 	data_buffer = (char *)malloc((quantity_occupied + 1024) * sizeof(char *)); // do not forget to free this pointer.
 	char *reconstructed_data_file = NULL;
@@ -1036,12 +1042,12 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 					put_broadcast((string)expected_key_format, data_, file_size_occupied);
 				}
 
-				__off_t size_of_merge_data = 0;
+				off_t size_of_merge_data = 0;
 				char *full_data_from_file = MergeData(&size_of_merge_data, number_active_storage_servers, file_name, file_size, block_size);
 
 				int fd = Open_file(checkpoint_dir, data_hostname);
-				slog_debug("writting %lu to disk with the name %s", size_of_merge_data, data_hostname);
-				fprintf(stderr, "Writting %lu to disk with the name %s\n", size_of_merge_data, data_hostname);
+				slog_debug("writting %lu bytes to disk with the name %s", size_of_merge_data, data_hostname);
+				fprintf(stderr, "Writting %lu bytes to disk from %d servers with the name %s\n", size_of_merge_data, number_active_storage_servers, data_hostname);
 				Write_2_disk(fd, full_data_from_file, size_of_merge_data, 0);
 
 				if (full_data_from_file != NULL)
@@ -1107,6 +1113,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 			}
 		}
 	}
+	slog_debug("Ending Snapshot");
 	// if (total_written > 0)
 	// {
 	// 	// char *pointer_of_buffers = (char *)malloc(1024 * sizeof(char*));

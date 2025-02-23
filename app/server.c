@@ -214,9 +214,9 @@ void handle_signal_server(int signal)
 		int pkill_operation = 0, ret = 0;
 		char buf[10], action[20], temporal_path[PATH_MAX];
 
-		sprintf(temporal_path,"%s/tmp/hercules_pkill_operation", args.hercules_path);
-			// fprintf(stderr,"Temporal path: %s\n", temporal_path);
-		
+		sprintf(temporal_path, "%s/tmp/hercules_pkill_operation", args.hercules_path);
+		// fprintf(stderr,"Temporal path: %s\n", temporal_path);
+
 		// Get the operation number.
 		int fd = open(temporal_path, O_RDONLY);
 		if (fd == -1)
@@ -254,12 +254,23 @@ void handle_signal_server(int signal)
 			// "global_finish_threads" is a gloabl variable readed by the
 			// dispatcher and workers threads. 1 indicates those threads
 			// must finish their execution.
-			if (args.type == TYPE_METADATA_SERVER || global_finish_checkpoint == 1)
+			
+			if (args.type == TYPE_METADATA_SERVER || global_finish_checkpoint == 1) {
+				//return;
 				global_finish_threads = 1;
-			else {
+			}else
+			{
 				global_finish_checkpoint = 1;
 				global_finish_snapshot = 1;
-				}
+			}
+			
+			while (global_finish_threads != 1)
+			{
+				fprintf(stderr,"Waiting for snapshot and checkpointing...");
+				sleep(10);
+			}
+			
+
 			sprintf(action, "stop");
 
 			// Shutdown or close the socket used by the dispatcher pointed
