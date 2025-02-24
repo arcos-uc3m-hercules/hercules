@@ -645,7 +645,7 @@ RETURNS:	0 - Resources were released successfully.
 	int32_t Make_directory(const char *dirname);
 	int32_t Open_file(const char *checkpoint_dir, const char *filename);
 	int32_t Close_file(int fd);
-	int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset);
+	ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset);
 
 #ifdef __cplusplus
 }

@@ -3923,27 +3923,35 @@ int32_t Close_file(int fd)
 	return ret;
 }
 
-int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset)
+ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset)
 {
 	int ret = -1;
 
 	// ssize_t bytes = pwrite(fd, buffer, size, offset);
-	ssize_t bytes = write(fd, buffer, size);
-
-	if (bytes < 0)
+	size_t bytes_to_write = 0;
+	ssize_t bytes_written = 0;
+	ssize_t bytes = 0;
+	while (bytes_written < size)
 	{
-		perror("HERCULES_ERR_WRITE_DISK");
-		slog_error("HERCULES_ERR_WRITE_DISK");
-		ret = close(fd);
-		if (ret < 0)
+		bytes_to_write = size;
+		if (bytes_written + bytes_to_write > size)
 		{
-			perror("HERCULES_ERR_CLOSE_DISK");
-			slog_error("HERCULES_ERR_CLOSE_DISK");
+			bytes_to_write = size - bytes_written;
 		}
-		return -1;
+		
+		bytes = write(fd, buffer, bytes_to_write);
+
+		if (bytes < 0)
+		{
+			perror("HERCULES_ERR_WRITE_DISK");
+			slog_error("HERCULES_ERR_WRITE_DISK");
+			Close_file(fd);
+			return -1;
+		}
+		bytes_written += bytes;
 	}
 
-	return bytes;
+	return bytes_written;
 }
 
 int32_t Make_directory(const char *dirname)

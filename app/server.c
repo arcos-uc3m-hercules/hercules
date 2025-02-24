@@ -52,6 +52,9 @@ extern int global_finish_threads;
 extern int global_finish_checkpoint;
 extern int global_finish_snapshot;
 extern int global_server_fd_thread;
+extern pthread_cond_t global_finish_cond;
+extern pthread_cond_t global_run_snapshot_cond;
+extern pthread_mutex_t global_finish_mut;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
@@ -256,7 +259,6 @@ void handle_signal_server(int signal)
 			// must finish their execution.
 			
 			if (args.type == TYPE_METADATA_SERVER || global_finish_checkpoint == 1) {
-				//return;
 				global_finish_threads = 1;
 			}else
 			{
@@ -264,11 +266,17 @@ void handle_signal_server(int signal)
 				global_finish_snapshot = 1;
 			}
 			
-			while (global_finish_threads != 1)
-			{
-				fprintf(stderr,"Waiting for snapshot and checkpointing...");
-				sleep(10);
-			}
+			pthread_mutex_lock(&global_finish_mut);
+			pthread_cond_wait(&global_finish_cond, &global_finish_mut);
+			// while (global_finish_threads != 1)
+			// {
+			// 	fprintf(stderr,"Waiting for snapshot and checkpointing...");
+			// 	sleep(10);
+			// }
+				fprintf(stderr,"Waiting for snapshot and checkpointing in server %d\n", args.id);
+
+			pthread_mutex_unlock(&global_finish_mut);
+			fprintf(stderr,"Server %d has been unlocked\n", args.id);
 			
 
 			sprintf(action, "stop");
@@ -336,6 +344,9 @@ int32_t main(int32_t argc, char **argv)
 {
 	signal(SIGUSR1, handle_signal_server);
 	signal(SIGUSR2, handle_signal_server);
+
+	pthread_cond_init(&global_run_snapshot_cond, NULL);
+	pthread_cond_init(&global_finish_cond, NULL);
 
 	// clock_t t;
 	double time_taken;

@@ -60,6 +60,11 @@ int global_finish_threads = 0;
 int global_finish_checkpoint = 0;
 int global_finish_snapshot = 0;
 int global_server_fd_thread = -1;
+pthread_cond_t global_broadcast_cond;
+pthread_cond_t global_finish_cond;
+pthread_cond_t global_run_snapshot_cond;
+pthread_mutex_t global_finish_mut = PTHREAD_MUTEX_INITIALIZER;
+
 size_t global_offset = 0;
 
 std::mutex mtx;
@@ -126,20 +131,20 @@ int ready(char *tmp_file_path, const char *msg)
 // int malleability_on = 0;
 #define MALLEABILITY_MESSAGE = "MALLEABILITY";
 
-void handle_signal(int signal)
-{
-	if (signal == SIGUSR1)
-	{
-		fprintf(stderr, "*** Received SIGUSR1\n");
-		global_finish_threads = 1;
+// void handle_signal(int signal)
+// {
+// 	if (signal == SIGUSR1)
+// 	{
+// 		fprintf(stderr, "*** Received SIGUSR1\n");
+// 		global_finish_threads = 1;
 
-		// To dispatcher thread.
-		if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
-		{
-			fprintf(stderr, "Error closing server_fd\n");
-		}
-	}
-}
+// 		// To dispatcher thread.
+// 		if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
+// 		{
+// 			fprintf(stderr, "Error closing server_fd\n");
+// 		}
+// 	}
+// }
 
 // Thread method attending client read-write data requests.
 void *srv_worker(void *th_argv)
@@ -335,6 +340,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 		sscanf(req, "%s %s %d", mode, uri_, &sender);
 		slog_debug("BROADCAST condition, req=%s, mode=%s, uri_=%s, sender=%d", req, mode, uri_, sender);
 		map->put_snapshot(uri_, sender);
+		fprintf(stderr, "Sending signal to do Snapshot\n");
+		pthread_cond_signal(&global_run_snapshot_cond);
 		// nothing else to do.
 		return 0;
 	}
@@ -1080,7 +1087,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					if (buffer == NULL)
 					{
 						slog_debug("Allocating buffer");
-						if(snapshot_op)
+						if (snapshot_op)
 						{ // Snapshot operation sends data bigger than BLOCK_SIZE.
 							buffer = (void *)malloc(msg_length * sizeof(char));
 						}
@@ -1088,7 +1095,9 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						{
 							buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
 						}
-					} else {
+					}
+					else
+					{
 						slog_debug("Reusing buffer");
 					}
 
@@ -1195,14 +1204,14 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				std::size_t found = key.find("$0");
 				if (found != std::string::npos) // block 0.
 				{
-						insert_successful = map->put_snapshot(key, -1);
-						// Include the new record in the tracking structure.
-						if (insert_successful != 0)
-						{
-							perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-							slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-							return -1;
-						}
+					insert_successful = map->put_snapshot(key, -1);
+					// Include the new record in the tracking structure.
+					if (insert_successful != 0)
+					{
+						perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+						slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+						return -1;
+					}
 				}
 
 				// Update the pointer.
@@ -1438,24 +1447,45 @@ void *Snapshot(void *th_argv)
 	// 	Make_directory(snapshot_dir);
 	// }
 	fprintf(stderr, "Running Snapshot in %s\n", snapshot_dir);
+	int ret = 0;
 	for (;;)
 	{
 		sleep(CKECKPOINT_PERIOD);
-		slog_debug("Running Snapshot in %s", snapshot_dir);
 		pthread_mutex_lock(&mutex_garbage);
-		TIMING_NO_RETURN(map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot");
+
+		slog_debug("Running Snapshot in %s", snapshot_dir);
+
+		TIMING_NO_RETURN(
+			ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot");
+
+		if (map->get_buffer_size() > 0 && ret != 1)
+		{
+			pthread_cond_wait(&global_run_snapshot_cond, &mutex_garbage);
+			pthread_mutex_unlock(&mutex_garbage);
+			continue;
+		}
+
 		// To stop this thread we will wait for "hercules stop".
+		// if (global_finish_snapshot == 1)
+		// {
+		// 	// TODO: Call a barrier to stop all servers.
+		// 	slog_debug("Waiting to finish Snapshot thread.");
+		// 	sleep(30);
+		// 	global_finish_threads = 1;
+		// 	pthread_mutex_unlock(&mutex_garbage);
+		// 	fprintf(stderr, "Ending checkponting thread.\n");
+		// 	break;
+		// }
+		pthread_mutex_unlock(&mutex_garbage);
 		if (global_finish_snapshot == 1)
 		{
 			// TODO: Call a barrier to stop all servers.
 			slog_debug("Waiting to finish Snapshot thread.");
-			sleep(30);
 			global_finish_threads = 1;
-			pthread_mutex_unlock(&mutex_garbage);
+			pthread_cond_signal(&global_finish_cond);
 			fprintf(stderr, "Ending checkponting thread.\n");
 			break;
 		}
-		pthread_mutex_unlock(&mutex_garbage);
 	}
 
 	t = clock() - t;

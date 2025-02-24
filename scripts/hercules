@@ -103,10 +103,10 @@ WaitForServers() {
             exit 1
         fi
         
-        SERVER_ID=$((SERVER_ID+1))
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "[OK] ${SERVER_NAME} server ${SERVER_ID} ${ACTION} in ${node}"
         fi        
+        SERVER_ID=$((SERVER_ID+1))
     done
 }
 
@@ -118,7 +118,7 @@ if [[ $STATUS != "stop" && $STATUS != "start" && $STATUS != "remove" && $STATUS 
 fi
 
 WAIT_SERVERS=1
-VERBOSE=1
+VERBOSE=0
 
 ## Check if user pass arguments.
 while getopts :m:d:o:c:s:f:k:w:V: flag
