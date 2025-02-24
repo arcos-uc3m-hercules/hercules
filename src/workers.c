@@ -53,6 +53,8 @@ void *map_server_eps;
 extern pthread_mutex_t hiredis_mut;
 pthread_mutex_t mp = PTHREAD_MUTEX_INITIALIZER;
 
+extern redisContext *hiredis_context;
+
 ucp_worker_h *ucp_worker_threads;
 ucp_address_t **local_addr;
 size_t *local_addr_len;
@@ -1599,9 +1601,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
 
-	// Obtain the redis server context from the set of arguments.
-	redisContext *hiredis_context = arguments->hiredis_context;
-
 	uint16_t current_offset = 0;
 
 	// Resources specifying if the ZMQ_SNDMORE flag was set in the sender.
@@ -1683,6 +1682,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		{
 		case GETDIR:
 		{
+			if (hiredis_context == NULL)
+			{
+				perror("HERCULES_ERR_STATWORKER_NOCONN");
+				return -1;
+			}
 			char *buffer;
 			int32_t numelems_indir;
 			// Retrieve all elements inside the requested directory.
@@ -1818,6 +1822,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				char release_msg[10];	  //= "DELETE\0";
 				if (dataset->n_open == 0) // if no more process has the file opened.
 				{
+					if (hiredis_context == NULL)
+					{
+						perror("HERCULES_ERR_STATWORKER_NOCONN");
+						return -1;
+					}
 					int32_t result = map->delete_metadata_stat_worker(key);
 					slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
 					redis_delete_data(hiredis_context, (char *)key.c_str());
@@ -1858,7 +1867,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					slog_warn("[stat_worker_helper][RENAME] 0 elements rename from stat_worker");
 					break;
 				}
-
+				if (hiredis_context == NULL)
+				{
+					perror("HERCULES_ERR_STATWORKER_NOCONN");
+					return -1;
+				}
 				// RENAME REDIS
 				int ret = redis_rename(hiredis_context, (char *)old_key.c_str(), (char *)new_key.c_str());
 				slog_debug("[stat_worker_helper][RENAME] redis_rename=%d", ret);
@@ -1879,6 +1892,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			std::size_t found = key.find(' ');
 			if (found != std::string::npos)
 			{
+				if (hiredis_context == NULL)
+				{
+					perror("HERCULES_ERR_STATWORKER_NOCONN");
+					return -1;
+				}
 				std::string old_dir = key.substr(0, found);
 				std::string rdir_dest = key.substr(found + 1, key.length());
 
@@ -1931,6 +1949,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 									  // if file status is marked as "dest", it is delete after close.
 				if (!strncmp(dataset->status, "dest", strlen("dest")) && dataset->n_open == 0)
 				{
+					if (hiredis_context == NULL)
+					{
+						perror("HERCULES_ERR_STATWORKER_NOCONN");
+						return -1;
+					}
 					slog_debug("Deleting %s", key.c_str());
 					int32_t result = map->delete_metadata_stat_worker(key);
 					slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
@@ -2055,6 +2078,12 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				slog_error("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
 				perror("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
 				free(buffer);
+				return -1;
+			}
+
+			if (hiredis_context == NULL)
+			{
+				perror("HERCULES_ERR_STATWORKER_NOCONN");
 				return -1;
 			}
 

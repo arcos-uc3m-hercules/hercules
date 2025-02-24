@@ -763,9 +763,6 @@ int32_t main(int32_t argc, char **argv)
 		strcpy(arguments[i].my_uri, args.imss_uri);
 		arguments[i].args = args;
 
-		// Add the redis context to the thread arguments.
-		arguments[i].hiredis_context = hiredis_context;
-
 		// Deploy all dispatcher + service threads.
 		if (i == 0)
 		{

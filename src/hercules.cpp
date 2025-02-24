@@ -332,9 +332,6 @@ imss_metadata(void *arg_)
 	if (metadata_write(arg.metadata_file, pt_met, metadata_map.get(), arguments, buffer_segment_, bytes_written) == -1)
 		pthread_exit(NULL);
 
-	// Freeing all resources of the redis server.
-	// redis_close(hiredis_context);
-
 	if (pthread_mutex_destroy(&hiredis_mut) != 0)
 	{
 		perror("HERCULES_ERR_HIREDIS_DESTROY");
