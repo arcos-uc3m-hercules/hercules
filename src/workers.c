@@ -80,15 +80,15 @@ int ready(char *tmp_file_path, const char *msg)
 	char status[25];
 	char err_msg[MAX_ERR_MSG_LEN];
 	char cwd[PATH_MAX];
-	FILE *tmp_file; // = tmpfile(); // make the file pointer as temporary file.
+	FILE *tmp_file; // make the file pointer as temporary file.
 
 	if (getcwd(cwd, sizeof(cwd)) == NULL)
 	{
 		perror("Error getting the current working directory.");
 		return -1;
 	}
-
-	tmp_file = fopen(tmp_file_path, "w");
+	fprintf(stderr, "%s\n", tmp_file_path);
+	tmp_file = fopen(tmp_file_path, "w+");
 	if (tmp_file == NULL)
 	{
 		sprintf(err_msg, "Error in creating the temporary file: %s, current directory is: %s\n", tmp_file_path, cwd);
@@ -99,8 +99,8 @@ int ready(char *tmp_file_path, const char *msg)
 	strcpy(status, "STATUS = ");
 	strcat(status, msg);
 
-	size_t written = fwrite(status, strlen(status), 1, tmp_file);
-	if (written < 0)
+	size_t written = fwrite(status, sizeof(char), strlen(status), tmp_file);
+	if (written < strlen(status))
 	{
 		sprintf(err_msg, "Error writting in temporary file %s\n", tmp_file_path);
 		perror(err_msg);
@@ -115,7 +115,7 @@ int ready(char *tmp_file_path, const char *msg)
 		return -1;
 	}
 
-	// fprintf(stderr, "Writting status file in: %s\n", tmp_file_path);
+	fprintf(stderr, "Writting status %s (%zu bytes) file in: %s\n", msg, strlen(status), tmp_file_path);
 
 	// if there was an error in the initialization of the server,
 	// we kill the process.
@@ -340,7 +340,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 		sscanf(req, "%s %s %d", mode, uri_, &sender);
 		slog_debug("BROADCAST condition, req=%s, mode=%s, uri_=%s, sender=%d", req, mode, uri_, sender);
 		map->put_snapshot(uri_, sender);
-		fprintf(stderr, "Sending signal to do Snapshot\n");
+		fprintf(stderr, "Sending signal to do Snapshot in server %d\n", arguments->args.id);
 		pthread_cond_signal(&global_run_snapshot_cond);
 		// nothing else to do.
 		return 0;
@@ -1447,10 +1447,10 @@ void *Snapshot(void *th_argv)
 	// 	Make_directory(snapshot_dir);
 	// }
 	fprintf(stderr, "Running Snapshot in %s\n", snapshot_dir);
-	int ret = 0;
+	int ret = 1;
 	for (;;)
 	{
-		sleep(CKECKPOINT_PERIOD);
+		// sleep(CKECKPOINT_PERIOD);
 		pthread_mutex_lock(&mutex_garbage);
 
 		slog_debug("Running Snapshot in %s", snapshot_dir);
@@ -1458,10 +1458,20 @@ void *Snapshot(void *th_argv)
 		TIMING_NO_RETURN(
 			ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot");
 
-		if (map->get_buffer_size() > 0 && ret != 1)
+		// if (map->get_buffer_size() > 0 && ret != 1)
+
+		// if (map->get_buffer_size() > 0) {
+
+		// }
+
+		if (ret != 1)
 		{
+			fprintf(stderr, "Waiting for signal to unlock snapshot in server %d\n", server_id);
 			pthread_cond_wait(&global_run_snapshot_cond, &mutex_garbage);
 			pthread_mutex_unlock(&mutex_garbage);
+			if (map->get_buffer_size() == 0) { // if there is no data to copy to disk, we will finish the snapshot.
+				break;
+			}
 			continue;
 		}
 

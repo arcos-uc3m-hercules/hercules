@@ -23,11 +23,16 @@ StopServers() {
         echo "# Operation = ${OPERATION}"
     fi
     echo ${OPERATION} > "${HERCULES_PATH}/tmp/hercules_pkill_operation"
+    RM="rm ${HERCULES_PATH}/tmp/m-hercules-$i"
+
+    # Sends the pkill operation to each server.
     for node in "${hosts[@]}"
     do
         # Set the action to be doing by the servers when they received the pkill signal.
         # ( ssh $node  "echo $OPERATION > ./tmp/hercules_pkill_operation" )
         # Kill threads and finish the server.
+        echo "[+] Removing temporal files on ${node}"
+        ( ssh $node "$RM" )
         ( ssh ${node} "pkill -SIGUSR1 hercules_server" )
     done
     rm "${HERCULES_PATH}/tmp/hercules_pkill_operation"
@@ -95,9 +100,9 @@ WaitForServers() {
         else # if slurm is available.
         set -x
             ret=$(srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
-        set +x
         fi
         ret=$?
+        
         if [ "$ret" -gt 0 ]; then
             echo "[Error: $ret] It has not been possible to "${ACTION}" a ${SERVER_NAME} server on ${node}, please verify the configuration file and logs."
             exit 1
@@ -107,6 +112,7 @@ WaitForServers() {
             echo "[OK] ${SERVER_NAME} server ${SERVER_ID} ${ACTION} in ${node}"
         fi        
         SERVER_ID=$((SERVER_ID+1))
+        set +x
     done
 }
 
@@ -118,7 +124,7 @@ if [[ $STATUS != "stop" && $STATUS != "start" && $STATUS != "remove" && $STATUS 
 fi
 
 WAIT_SERVERS=1
-VERBOSE=0
+VERBOSE=1
 
 ## Check if user pass arguments.
 while getopts :m:d:o:c:s:f:k:w:V: flag
@@ -604,10 +610,12 @@ do
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "[+] Removing temporal files on ${node}"
         fi
+        set -x
         srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} ${RM} 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         echo "[+] Starting metadata server $i on $node..."
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=80G -w ${node} ${COMMAND} &
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=40G -w $node $COMMAND &
+        set +x
     fi
     i=$(($i+1))
 done
@@ -686,7 +694,7 @@ do
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "[+] Starting data server $i on $node..."
         fi
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=80G -N 1 -n 1 -w $node $COMMAND &
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=40G -w $node $COMMAND &
     fi
     i=$(($i+1))
 done
