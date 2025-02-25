@@ -23,17 +23,19 @@ StopServers() {
         echo "# Operation = ${OPERATION}"
     fi
     echo ${OPERATION} > "${HERCULES_PATH}/tmp/hercules_pkill_operation"
-    RM="rm ${HERCULES_PATH}/tmp/m-hercules-$i"
 
+    i=0
     # Sends the pkill operation to each server.
     for node in "${hosts[@]}"
     do
+        RM="rm ${HERCULES_PATH}/tmp/d-hercules-$i-stop"
         # Set the action to be doing by the servers when they received the pkill signal.
         # ( ssh $node  "echo $OPERATION > ./tmp/hercules_pkill_operation" )
         # Kill threads and finish the server.
         echo "[+] Removing temporal files on ${node}"
         ( ssh $node "$RM" )
         ( ssh ${node} "pkill -SIGUSR1 hercules_server" )
+        i=$(($i+1))
     done
     rm "${HERCULES_PATH}/tmp/hercules_pkill_operation"
 }
@@ -124,7 +126,7 @@ if [[ $STATUS != "stop" && $STATUS != "start" && $STATUS != "remove" && $STATUS 
 fi
 
 WAIT_SERVERS=1
-VERBOSE=1
+VERBOSE=0
 
 ## Check if user pass arguments.
 while getopts :m:d:o:c:s:f:k:w:V: flag
@@ -614,7 +616,7 @@ do
         srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} ${RM} 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         echo "[+] Starting metadata server $i on $node..."
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=40G -w $node $COMMAND &
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node $COMMAND &
         set +x
     fi
     i=$(($i+1))
@@ -671,7 +673,7 @@ fi
 start=`date +%s.%N`
 for node in ${data_hosts[@]}
 do
-    RM="rm ${HERCULES_PATH}/tmp/d-hercules-$i"
+    RM="rm ${HERCULES_PATH}/tmp/d-hercules-$i-start"
     COMMAND="$HERCULES_BUILD_PATH/hercules_server d $i ${meta_hosts[0]} $INIT_HERCULES_NUM_DATA"
     if [[ "$SLURM" -eq "0" ]]; then
         # ssh $node "$RM; cd $HERCULES_BASH_PATH &&  $COMMAND &"
@@ -694,7 +696,7 @@ do
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "[+] Starting data server $i on $node..."
         fi
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=40G -w $node $COMMAND &
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node $COMMAND &
     fi
     i=$(($i+1))
 done

@@ -892,7 +892,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 {
 	clock_t t;
 	double parcial_time_taken = 0.0, total_time_taken = 0.0;
-	int pos = 0, ret = 0, fd = -1, block_number = 0, skip = 0;
+	int pos = 0, ret = 0, fd = -1, block_number = 0, skip = 0, continue_exe = 0;
 	u_int32_t number_active_storage_servers = 0;
 	size_t offset = 0;
 	string key, inner_key, block, file_name, inner_file_name, data_uri;
@@ -923,13 +923,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 	{
 		is_shared_memory = 1;
 	}
-	// Allows to do the snapshot only when Hercules is stopping.
-	// if (!finish)
-	// {
-	// 	return 0;
-	// }
-	// fprintf(stderr, "Running snapshot\n");
-	// data_buffer = (char *)malloc((quantity_occupied + 1024) * sizeof(char *)); // do not forget to free this pointer.
+	
 	char *reconstructed_data_file = NULL;
 	off_t block_offset = 0;
 
@@ -1053,6 +1047,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 
 				uint64_t file_size_occupied = 0;
 				// This server add their data.
+				fprintf(stderr,"Performing Snapshopt from file %s in data server %d\n", expected_uri, args.id);
 
 				char *data_ = GetDataFromFile(expected_uri, &file_size_occupied);
 				if (data_ != NULL)
@@ -1078,7 +1073,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 
 				Close_file(fd);
 
-				ret = 1;
+				continue_exe = 1;
 
 				// int find = erase_broadcast_element(key);
 				int find = erase_snapshot_element(key);
@@ -1124,7 +1119,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 
 			slog_debug("Data sent to server %d", n_server_);
 
-			ret = 1;
+			continue_exe = 1;
 
 			int find = erase_snapshot_element(key);
 			if (find)
@@ -1299,6 +1294,6 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 	// 			  (double)total_written / total_time_taken / 1024 / 1024 / 1024,
 	// 			  block_size);
 	// }
-	return ret;
+	return continue_exe;
 	// return total_time_taken;
 }

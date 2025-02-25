@@ -115,7 +115,7 @@ int ready(char *tmp_file_path, const char *msg)
 		return -1;
 	}
 
-	fprintf(stderr, "Writting status %s (%zu bytes) file in: %s\n", msg, strlen(status), tmp_file_path);
+	//fprintf(stderr, "Writting status %s (%zu bytes) file in: %s\n", msg, strlen(status), tmp_file_path);
 
 	// if there was an error in the initialization of the server,
 	// we kill the process.
@@ -1457,12 +1457,6 @@ void *Snapshot(void *th_argv)
 
 		TIMING_NO_RETURN(
 			ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot");
-
-		// if (map->get_buffer_size() > 0 && ret != 1)
-
-		// if (map->get_buffer_size() > 0) {
-
-		// }
 
 		if (ret != 1)
 		{

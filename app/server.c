@@ -984,6 +984,8 @@ int32_t main(int32_t argc, char **argv)
 		}
 	}
 
+	ret = ready(tmp_file_path, "OK");
+	fprintf(stderr, "Server %d is ready = %d\n", args.id, ret);
 	// Wait for threads to finish.
 	for (int32_t i = 0; i < total_threads; i++)
 	{
@@ -991,8 +993,6 @@ int32_t main(int32_t argc, char **argv)
 		t = clock() - t;
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
-		ret = ready(tmp_file_path, "OK");
-		fprintf(stderr, "Server %d is ready = %d\n", args.id, ret);
 		if (pthread_join(threads[i], NULL) != 0)
 		{
 			perror("HERCULES_ERR_SERVER_THREAD_JOIN");

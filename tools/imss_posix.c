@@ -2199,7 +2199,7 @@ extern "C"
 			unsigned long offset = 0;
 			int flags = 0, oflags = 0;
 
-			if ((flags = __sflags(mode, &oflags)) == 0)
+			if ((flags = __sflags_(mode, &oflags)) == 0)
 				return (NULL);
 
 			file = real_fopen("/dev/null", mode);
