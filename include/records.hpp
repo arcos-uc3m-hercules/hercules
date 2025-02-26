@@ -63,7 +63,7 @@ public:
 	int32_t get_snapshot(std::string key, int *to_copy);
 	int32_t get_broadcast(std::string key, void **add_, uint64_t *size_);
 
-	char *GetDataFromFile(std::string file_name, uint64_t *file_size_occupied);
+	char *GetDataOfFile(std::string file_name, uint64_t *file_size_occupied);
 	char *MergeData(__off_t *size_of_data, uint32_t num_of_data_servers, std::string file_name, __off_t file_size, uint64_t block_size);
 
 	// char* getDataFromFile(std::string file_name);

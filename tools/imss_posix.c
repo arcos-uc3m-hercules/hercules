@@ -232,7 +232,7 @@ extern "C"
 	// static int (*real_fcntl)(int fd, int cmd, ... /* arg */) = NULL;
 	static int (*real_syncfs)(int fd) = NULL;
 	static int (*real_posix_fadvise)(int fd, off_t offset, off_t len, int advice) = NULL;
-	static int (*real_posix_fadvise64)(int fd, off64_t offset, off64_t len, int advice) = NULL;
+	// static int (*real_posix_fadvise64)(int fd, off64_t offset, off64_t len, int advice) = NULL;
 	static int (*real_faccessat)(int dir_fd, const char *pathname, int mode, int flags) = NULL;
 	static int (*real_unlinkat)(int fd, const char *name, int flag) = NULL;
 	static int (*real_renameat2)(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags) = NULL;

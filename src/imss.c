@@ -3939,7 +3939,7 @@ ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset)
 			bytes_to_write = size - bytes_written;
 		}
 		
-		bytes = write(fd, buffer, bytes_to_write);
+		bytes = write(fd, (char *)buffer+bytes_written, bytes_to_write);
 
 		if (bytes < 0)
 		{
