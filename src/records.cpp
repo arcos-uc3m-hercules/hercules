@@ -1079,19 +1079,21 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 				ssize_t written_bytes_in_disk = Write_2_disk(fd, full_data_from_file, size_of_merge_data, 0);
 				fprintf(stderr, "Writting %lu bytes to disk from %d servers with the name %s, written_bytes_in_disk=%zd\n", size_of_merge_data, number_active_storage_servers, data_hostname, written_bytes_in_disk);
 
-				if (full_data_from_file != NULL)
-				{
-					free(full_data_from_file);
-				}
-
 				Close_file(fd);
 
 				t = clock() - t;
 				time_taken_for_writting = ((double)t) / (CLOCKS_PER_SEC);
 
+				if (full_data_from_file != NULL)
+				{
+					free(full_data_from_file);
+				}
+
 				continue_exe = 1;
 
-				slog_time("ServerID,%d,Hostname,%s,Total-written,%lu,B,%f,MB,%f,GB,Time-Writting,%f,s,Troughput,%f,B/s,%f,MB/s,%f,GB/s,Blocksize,%lu,KB,Time-Collecting,%f,Time-Merging,%f s", args.id,
+				// slog_time("NumberServers,%d,ServerID,%d,Hostname,%s,Total-written,%lu,B,%f,MB,%f,GB,Time-Writting,%f,s,Troughput,%f,B/s,%f,MB/s,%f,GB/s,Blocksize,%lu,KB,Time-Collecting,%f,s,Time-Merging,%f,s",
+				slog_time("%d,%d,%s,%lu,%f,%f,%f,%f,%f,%f,%lu,%f,%f",
+						  number_active_storage_servers,
 						  server_id,
 						  data_hostname,
 						  written_bytes_in_disk,
@@ -1103,10 +1105,8 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 						  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024 / 1024,
 						  block_size,
 						  time_taken_for_collecting,
-						  time_taken_for_merge
-						);
+						  time_taken_for_merge);
 
-				// int find = erase_broadcast_element(key);
 				int find = erase_snapshot_element(key);
 				if (find)
 				{
@@ -1136,7 +1136,6 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 			}
 			t = clock() - t;
 			time_taken_for_collecting = ((double)t) / (CLOCKS_PER_SEC);
-
 
 			// char key_[REQUEST_SIZE];
 			int n_server_ = origin_server_id;

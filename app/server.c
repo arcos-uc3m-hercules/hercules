@@ -429,12 +429,14 @@ int32_t main(int32_t argc, char **argv)
 	strncpy(POLICY, args.policy, sizeof(POLICY));
 
 	char log_path[PATH_MAX];
+	char *workdir = getenv("PWD");
 	slog_debug("Server type=%c\n", args.type);
 	struct tm tm = *localtime(&t);
-	sprintf(log_path, "./%c-server-%d.%02d-%02d-%02d", args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
+	sprintf(log_path, "%s/%c-server-%d.%02d-%02d-%02d", workdir, args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
 	// Initializate logger.
 	slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, args.id);
+	// slog_time("Server %d started", args.id);
 
 	if (args.logging.hercules_debug_file > 0)
 	{
