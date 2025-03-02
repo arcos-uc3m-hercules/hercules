@@ -773,11 +773,18 @@ char *map_records::GetDataOfFile(string file_name, uint64_t *file_size_occupied)
 	return chucks_of_file_buffer;
 }
 
-char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, string file_name, off_t file_size, uint64_t block_size)
-{
-	slog_debug("Merge data of file %s with size %ld", file_name.c_str(), file_size);
+// TODO: make a function to allow each server to write the collected data.
 
-	// Skip data server 0.
+
+/**
+ * @brief Merge all data comming from the data servers following a Posix format.
+ * @param size_of_data: size of the data that has been merged. This pointer is updated with the accumulated size of data comming from all data servers.
+ * @param num_of_data_servers: number of data servers that will merge their data.
+ * @param file_size: size of the original file according to the block 0.
+ * @param block_size: size of the block used by Hercules when this file was stored.
+ */
+char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, off_t file_size, uint64_t block_size)
+{
 	int32_t find = 0;
 	uint64_t block_size_rtvd = 0;
 	off_t total_written_acumulated = 0, total_written_per_server = 0;
@@ -799,32 +806,23 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 		return NULL;
 	}
 
-	// int32_t server_number = 0;
 	int32_t indx = 0;
+	// We used a control flag to iterate over the incomming data on the broadcast map.
+	// This loop will break when certain number of data servers that send its data has been reached.
 	int flag = 1;
-
-	// for (server_number = 0; server_number < num_of_data_servers; server_number++)
 	while (flag)
 	{
 		char *buffer_address = NULL;
 		uint64_t storage_buffer_size = 0;
 
-		// sprintf(expected_key_format, "imss://%s$%" PRId32, file_name.c_str(), server_number);
 		// std::string expected_key = expected_key_format;
 		std::string expected_key;
 
-		// Wait until data for this server id is ready.
-		// while (get_broadcast(expected_key, (void **)&buffer_address, &storage_buffer_size) == 0)
-		// {
-		// 	slog_debug("key %s has not been find", expected_key.c_str());
-		// 	sleep(3);
-		// }
 		// if broadcast map is empty, we wait
 		std::unique_lock<std::mutex> lk(mtx);
 		cv.wait(lk, [this]
 				{ return get_broadcast_size() > 0; });
-
-		// expected_key = buffer_broadcast[indx++];
+		// get the first element of the broadcast map.
 		auto firstElement = buffer_broadcast.begin();
 		expected_key = firstElement->first;
 		buffer_address = (char *)firstElement->second.first;
@@ -833,7 +831,6 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 		slog_debug("key %s has been find, storage_buffer_size=%lu", expected_key.c_str(), storage_buffer_size);
 		// iterate the buffer to get the blocks data.
 		int block_number = -1;
-		// while (*buffer_address != '\0')
 		total_written_per_server = 0;
 		off_t aux_counter = 0;
 		while (aux_counter < storage_buffer_size)
@@ -864,9 +861,10 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 		total_written_acumulated += total_written_per_server;
 		slog_debug("total_written_per_server=%ld, total_written_acumulated=%ld, file_size=%ld", total_written_per_server, total_written_acumulated, file_size);
 		total_written_per_server = 0;
-
+		// erase the element from the broadcast map.
 		find = erase_broadcast_element(expected_key);
 		indx++;
+		// if all data servers has sent its data, we break the loop.
 		if (indx >= num_of_data_servers)
 		{
 			flag = 0;
@@ -886,35 +884,29 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 }
 
 /**
- * @brief Copy all data stored in Hercules without following a Posix format file.
+ * @brief Copy all data stored in Hercules FOLLOWING a Posix format file.
  */
-int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id, char *data_hostname, struct arguments args)
+int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int finish, int server_id, char *data_hostname, struct arguments args)
 {
 	clock_t t;
 	double parcial_time_taken = 0.0, time_taken_for_writting = 0.0, time_taken_for_merge = 0.0, time_taken_for_collecting = 0.0;
 	int pos = 0, ret = 0, fd = -1, block_number = 0, continue_exe = 0;
 	u_int32_t number_active_storage_servers = 0;
-	size_t offset = 0;
-	string key, inner_key, block, file_name, inner_file_name, data_uri;
-	char key_block_0[PATH_MAX];
+	string key, block, file_name, data_uri;
 	char expected_uri[PATH_MAX];
 	char expected_key_format[PATH_MAX + sizeof(int) + 1];
-	char old_expected_uri[PATH_MAX];
 	void *address_ = NULL;
 	void *address_block_0 = NULL;
-	uint64_t block_size_rtvd = 0, block_0_size = 0;
-	int copy_to_disk = 0;
+	uint64_t block_size_rtvd = 0;
 	int origin_server_id = 0;
 	struct stat *stats = NULL;
 	int32_t file_desc = 0;
 	std::size_t found = 0;
 	size_t iteration = 0;
-	int to_free = 0, is_shared_memory = 0;
+	int is_shared_memory = 0;
 	__off_t file_size = 0;
 
 	char *POLICY = args.policy;
-	// TODO: it is better to use "number_active_storage_servers"
-	// to avoid issues when malleability is actived.
 	const int64_t number_of_data_servers = args.num_data_servers;
 	number_active_storage_servers = (u_int32_t)get_number_of_active_nodes(args.hercules_path);
 
@@ -926,7 +918,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 	char *reconstructed_data_file = NULL;
 	off_t block_offset = 0;
 
-	// TODO: in order to avoid locks and syncronizations:
+	// in order to avoid locks and syncronizations:
 	// server 0 checks for a file to be snapshoting.
 	// server 0 sends a signal to all servers to find and "reduce" all its
 	// data about this file.
@@ -1057,8 +1049,10 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 				time_taken_for_collecting = ((double)t) / (CLOCKS_PER_SEC);
 
 				off_t size_of_merge_data = 0;
+				slog_debug("Merge data of file %s with size %ld", file_name.c_str(), file_size);
 				t = clock();
-				char *full_data_from_file = MergeData(&size_of_merge_data, number_active_storage_servers, file_name, file_size, block_size);
+				// Merge the data from all servers.
+				char *full_data_from_file = MergeData(&size_of_merge_data, number_active_storage_servers, file_size, block_size);
 				if (full_data_from_file == NULL)
 				{
 					fprintf(stderr, "Data from file %s has not been merge in server %d\n", file_name.c_str(), args.id);
@@ -1074,7 +1068,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 				time_taken_for_merge = ((double)t) / (CLOCKS_PER_SEC);
 
 				t = clock();
-				int fd = Open_file(checkpoint_dir, data_hostname);
+				int fd = Open_file(snapshot_dir, data_hostname);
 				slog_debug("writting %lu bytes to disk with the name %s", size_of_merge_data, data_hostname);
 				ssize_t written_bytes_in_disk = Write_2_disk(fd, full_data_from_file, size_of_merge_data, 0);
 				fprintf(stderr, "Writting %lu bytes to disk from %d servers with the name %s, written_bytes_in_disk=%zd\n", size_of_merge_data, number_active_storage_servers, data_hostname, written_bytes_in_disk);
@@ -1091,8 +1085,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 
 				continue_exe = 1;
 
-				// slog_time("NumberServers,%d,ServerID,%d,Hostname,%s,Total-written,%lu,B,%f,MB,%f,GB,Time-Writting,%f,s,Troughput,%f,B/s,%f,MB/s,%f,GB/s,Blocksize,%lu,KB,Time-Collecting,%f,s,Time-Merging,%f,s",
-				slog_time("%d,%d,%s,%lu,%f,%f,%f,%f,%f,%f,%lu,%f,%f",
+				slog_time("%d,%d,%s,%lu,%f,%f,%f,%f,%f,%f,%lu,%f,%f,%s",
 						  number_active_storage_servers,
 						  server_id,
 						  data_hostname,
@@ -1105,7 +1098,9 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 						  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024 / 1024,
 						  block_size,
 						  time_taken_for_collecting,
-						  time_taken_for_merge);
+						  time_taken_for_merge,
+						  POLICY
+						);
 
 				int find = erase_snapshot_element(key);
 				if (find)
@@ -1175,167 +1170,294 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *checkpoint_dir, i
 		}
 	}
 	slog_debug("Ending Snapshot");
-	// if (total_written > 0)
-	// {
-	// 	// char *pointer_of_buffers = (char *)malloc(1024 * sizeof(char*));
-
-	// 	// int buffer_sizes[number_of_data_servers - 1];
-	// 	if (!args.id)
-	// 	{ // Only server 0 performs the I/O.
-	// 		sleep(10);
-	// 		// Get data.
-	// 		// Block until this server receives all data.
-	// 		// std::unique_lock<std::mutex> lock(mtx);
-
-	// 		// cv.wait(lock, []
-	// 		// 		{ return data_ready; });
-	// 		// To iterate buffer broadcast and copy the content to the final
-	// 		// buffer. The "key" must be the server id and it should be
-	// 		// an incremental sequencial number. So if server 1 is not ready,
-	// 		// we must to wait for it before to continue.
-	// 		// TODO: change the key for the server id in workers.c
-	// 		// for (const auto &it : buffer_broadcast) {
-	// 		// 	it.get_broadcast();
-	// 		// }
-
-	// 		fd = Open_file(checkpoint_dir, data_hostname);
-	// 		// Server 0 writres its data.
-	// 		// t = clock();
-	// 		// block_size_rtvd = Write_2_disk(fd, data_buffer, total_written, 0);
-	// 		// t = clock() - t;
-	// 		// parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
-	// 		// total_time_taken += parcial_time_taken;
-
-	// 		// Skip data server 0.
-	// 		int32_t find = 0;
-	// 		for (int64_t server_number = 1; server_number < number_of_data_servers; server_number++)
-	// 		{
-	// 			char *buffer_address = NULL;
-	// 			uint64_t storage_buffer_size = 0;
-
-	// 			// std::string expected_key = std::format("{}${}", file_name, server_number);
-	// 			sprintf(expected_key_format, "imss://%s$%" PRId64, file_name.c_str(), server_number);
-	// 			std::string expected_key = expected_key_format;
-
-	// 			// int origin_server_id = 0;
-	// 			// std::string data_uri;
-	// 			// std::string file_name;
-	// 			// getBlockInformation(key, &origin_server_id, &data_uri, &file_name);
-	// 			// slog_debug("key: %s, origin_server_id: %d, data_uri: %s, file_name: %s", key.c_str(), origin_server_id, data_uri.c_str(), file_name.c_str());
-	// 			// sprintf(expected_key.c_str(), "%s$%d", file_name.c_str(), server_number);
-	// 			find = get_broadcast(expected_key, (void **)&buffer_address, &storage_buffer_size);
-	// 			// Store the address and the buffer size in two arrays.
-	// 			// pointer_of_buffers[server_number - 1] = (char *)buffer_address;
-	// 			// buffer_sizes[server_number - 1] = storage_buffer_size;
-	// 			if (find == 0)
-	// 			{
-	// 				slog_debug("key %s has not been find", expected_key.c_str());
-	// 				continue;
-	// 			}
-	// 			else
-	// 			{
-	// 				slog_debug("key %s has been find", expected_key.c_str());
-	// 				// iterate the buffer to get the blocks data.
-	// 				// t = clock();
-	// 				int block_number = -1;
-	// 				while (*buffer_address != '\0')
-	// 				{
-	// 					// Each block number has been added to the data string.
-	// 					// TODO: block number should be a unsigned long integer.
-	// 					memcpy(&block_number, buffer_address, sizeof(int));
-	// 					block_offset = (block_number - 1) * block_size;
-	// 					slog_debug("block number=%d, block_offset=%d, block_size=%d", block_number, block_offset, block_size);
-	// 					if (block_number > 100000) // TODO: delete this condition.
-	// 					{
-	// 						perror("HERCULES_ERR_RETREIVING_THE_BLOCK_NUMBER");
-	// 						return -1;
-	// 					}
-
-	// 					// This helps to write the last block with the remaining data
-	// 					// preventing writing the entire block.
-	// 					if (block_size + block_offset > file_size)
-	// 					{
-	// 						block_size_rtvd = file_size - block_offset;
-	// 					}
-	// 					else
-	// 					{
-	// 						block_size_rtvd = block_size;
-	// 					}
-
-	// 					memcpy((char *)reconstructed_data_file + block_offset, buffer_address + sizeof(int), block_size_rtvd);
-	// 					// Move the pointer by the data size copied plus the int size.
-	// 					buffer_address = buffer_address + block_size_rtvd + sizeof(int);
-	// 					total_written += block_size_rtvd;
-	// 				}
-	// 				// block_size_rtvd = Write_2_disk(fd, buffer_address, storage_buffer_size, 0);
-	// 				// t = clock() - t;
-	// 				// parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
-	// 				// total_time_taken += parcial_time_taken;
-	// 			}
-	// 			find = erase_broadcast_element(expected_key);
-	// 			if (find == 0)
-	// 			{
-	// 				slog_debug("key %s comming from server %d has not been find to be deleted", expected_key.c_str(), server_number);
-	// 				continue;
-	// 			}
-	// 			else
-	// 			{
-	// 				slog_debug("key %s commig from server %d has been deleted", expected_key.c_str(), server_number);
-	// 			}
-	// 		}
-
-	// 		// while (*data_buffer != '\0')
-	// 		// {
-	// 		// 	block_offset = (block_number - 1) * args.block_size;
-	// 		// 	memcpy((char *)reconstructed_data_file + block_offset, data_buffer, args.block_size);
-	// 		// 	data_buffer = data_buffer + args.block_size;
-	// 		// }
-
-	// 		t = clock();
-	// 		block_size_rtvd = Write_2_disk(fd, reconstructed_data_file, total_written, 0);
-	// 		t = clock() - t;
-	// 		parcial_time_taken = ((double)t) / (CLOCKS_PER_SEC);
-	// 		total_time_taken += parcial_time_taken;
-
-	// 		Close_file(fd);
-	// 	}
-	// 	// else
-	// 	// { // All servers send their data.
-	// 	// 	char key_[REQUEST_SIZE];
-	// 	// 	int n_server_ = 0;
-	// 	// 	// ucp_ep_h ep;
-
-	// 	// 	// sprintf(key_, "SNAPSET %lu %d %s$%d", total_written, 0, curr_dataset.uri_, server_id);
-
-	// 	// 	// TODO: Implement SNAPSET on workers.c
-	// 	// 	// buffer_broadcast
-
-	// 	// 	if (set_data_server_reduce(server_id, 0, data_buffer, total_written, n_server_) < 0)
-	// 	// 	{
-	// 	// 		perror("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
-	// 	// 		slog_error("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
-	// 	// 		return -1;
-	// 	// 	}
-	// 	// }
-	// }
-
-	// free(data_buffer);
-
-	// if (total_time_taken > 0)
-	// {
-	// 	slog_time("ServerID,%d,Hostname,%s,Total-writen,%lu B,%f MB,%f GB,Time-taken,%f s,Troughput,%f B/s,%f MB/s,%f GB/s,Blocksize,%lu KB",
-	// 			  server_id,
-	// 			  data_hostname,
-	// 			  total_written,
-	// 			  (double)total_written / 1024 / 1024,
-	// 			  (double)total_written / 1024 / 1024 / 1024,
-	// 			  total_time_taken,
-	// 			  (double)total_written / total_time_taken,
-	// 			  (double)total_written / total_time_taken / 1024 / 1024,
-	// 			  (double)total_written / total_time_taken / 1024 / 1024 / 1024,
-	// 			  block_size);
-	// }
 
 	return continue_exe;
-	// return total_time_taken;
+}
+
+int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id, char *data_hostname, struct arguments args)
+{
+	clock_t t;
+	double parcial_time_taken = 0.0, time_taken_for_writting = 0.0, time_taken_for_merge = 0.0, time_taken_for_collecting = 0.0;
+	int pos = 0, ret = 0, fd = -1, block_number = 0, continue_exe = 0;
+	u_int32_t number_active_storage_servers = 0;
+	string key, block, file_name, data_uri;
+	char expected_uri[PATH_MAX];
+	char expected_key_format[PATH_MAX + sizeof(int) + 1];
+	void *address_ = NULL;
+	void *address_block_0 = NULL;
+	uint64_t block_size_rtvd = 0;
+	int origin_server_id = 0;
+	struct stat *stats = NULL;
+	int32_t file_desc = 0;
+	std::size_t found = 0;
+	size_t iteration = 0;
+	int is_shared_memory = 0;
+	__off_t file_size = 0;
+
+	char *POLICY = args.policy;
+	const int64_t number_of_data_servers = args.num_data_servers;
+	number_active_storage_servers = (u_int32_t)get_number_of_active_nodes(args.hercules_path);
+
+	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
+	{
+		is_shared_memory = 1;
+	}
+
+	char *reconstructed_data_file = NULL;
+	off_t block_offset = 0;
+
+	// in order to avoid locks and syncronizations:
+	// server 0 checks for a file to be snapshoting.
+	// server 0 sends a signal to all servers to find and "reduce" all its
+	// data about this file.
+	// all servers sends its data to server 0.
+	// Server 0 find and "reduce" all its data about the file.
+	// Server 0 collects and re-structure all the data comming from others servers and write the final file.
+
+	for (const auto &it : buffer_snapshot)
+	{
+		key = it.first;
+		if (key.empty())
+		{
+			fprintf(stderr, "Key is missing\n");
+			continue;
+		}
+		origin_server_id = it.second;
+
+		pos = key.find('$') + 1; // +1 to skip '$' on the block number.
+		if (pos == std::string::npos)
+		{
+			perror("HERCULES_ERR_MISSFORMAT_KEY");
+			slog_error("HERCULES_ERR_MISSFORMAT_KEY");
+			continue;
+		}
+		slog_debug("key=%s, origin_server_id=%d, iteration=%d", key.c_str(), origin_server_id, iteration);
+		if (origin_server_id == -1)
+		{
+			block = key.substr(pos, key.length() + 1); // substract the block number from the key.
+			if (block.empty())
+			{
+				fprintf(stderr, "Block number is missing in %s\n", key.c_str());
+				continue;
+			}
+			block_number = stoi(block, 0, 10); //  string to number.
+			pos -= 1;						   // -1 to skip '$' on the data uri.
+			data_uri = key.substr(0, pos);	   // substract the data uri from the key.
+			file_name = data_uri.substr(strlen("imss://"));
+			sprintf(expected_uri, "imss://%s", file_name.c_str());
+
+			// We need at least one iteartion to ensure "curr_dataset" is not
+			// empty.
+			if (iteration > 0)
+			{
+				// if the expected uri is different from the previous iteration,
+				// we are in a block of another dataset. So, we need to get the
+				// information of this dataset and to check it is ready to be
+				// copied to disk or not.
+				if (!strcmp(curr_dataset.uri_, expected_uri) && curr_dataset.n_open > 0)
+				{
+					slog_debug("current_dataset.uri=%s, expecred_uri=%s, n_open=%d", curr_dataset.uri_, expected_uri, curr_dataset.n_open);
+					// Skip all blocks of this dataset because is not ready.
+					continue;
+				}
+			}
+
+			// To check if this is a block 0.
+			found = key.find("$0");
+			if (found != std::string::npos)
+			{ // checks if block 0 is for regular file or directory.
+				slog_debug("Block 0 for key %s", key.c_str());
+				ret = get(key, &address_, &block_size_rtvd);
+				if (ret == 0)
+				{
+					fprintf(stderr, "key %s not found for snapshot\n", key.c_str());
+					continue;
+				}
+				if (!is_shared_memory)
+				{
+					stats = (struct stat *)address_;
+				}
+				else
+				{ // get block 0 from shared memory.
+					size_t memory_offset = 0;
+					uint32_t stored_block_size = 0;
+					sscanf((const char *)address_, "%lu %d", &memory_offset, &stored_block_size);
+					fprintf(stderr, "memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
+					stats = (struct stat *)((char *)args.pool_memory + memory_offset);
+				}
+				if (S_ISDIR(stats->st_mode)) // directory case.
+				{
+					fprintf(stderr, "%s is a directory\n", key.c_str());
+					Make_directory(file_name.c_str());
+				}
+				// Send a message to all servers telling this servers needs the information.
+
+				// Deletes all information related to this uri from the local arrays. it ensures the dataset information will be updated from the remote metadata server.
+				clear_dataset(expected_uri);
+
+				// To get dataset info from the metadata server. here
+				// "curr_dataset" is filled.
+				file_desc = open_dataset(expected_uri, 0);
+				if (file_desc < 0)
+				{
+					continue;
+				}
+				iteration++;
+
+				// Checks if there are still processes with the file opened.
+				// Also, if "hercules stop" was called, we ignore this condition to copy the remaining data.
+				// if (curr_dataset.n_open > 0 && finish != 1)
+				slog_debug("curr_dataset.n_open=%d", curr_dataset.n_open);
+				if (curr_dataset.n_open > 0)
+				{
+					fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset.uri_, curr_dataset.n_open);
+					slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset.uri_, curr_dataset.n_open);
+					continue;
+				}
+
+				// Send the message to all servers.
+				char broadcast_request[PATH_MAX + 1024];
+				sprintf(broadcast_request, "BROADCAST %s %d", expected_uri, args.id);
+				SendBroadcastMessage(args.id, number_active_storage_servers, broadcast_request);
+
+				file_size = stats->st_size;
+
+				uint64_t file_size_occupied = 0;
+				// This server add their data.
+				fprintf(stderr, "Performing Snapshopt from file %s in data server %d\n", expected_uri, args.id);
+				t = clock();
+				char *data_ = GetDataOfFile(expected_uri, &file_size_occupied);
+				if (data_ != NULL)
+				{
+					// TODO: add the error condition.
+					sprintf(expected_key_format, "%s$%d", expected_uri, args.id);
+					put_broadcast((string)expected_key_format, data_, file_size_occupied);
+				}
+				t = clock() - t;
+				time_taken_for_collecting = ((double)t) / (CLOCKS_PER_SEC);
+
+				off_t size_of_merge_data = 0;
+				slog_debug("Merge data of file %s with size %ld", file_name.c_str(), file_size);
+				t = clock();
+				// Merge the data from all servers.
+				char *full_data_from_file = MergeData(&size_of_merge_data, number_active_storage_servers, file_size, block_size);
+				if (full_data_from_file == NULL)
+				{
+					fprintf(stderr, "Data from file %s has not been merge in server %d\n", file_name.c_str(), args.id);
+					slog_error("HERCULES_ERR_MERGE_DATA_SNAPSHOT");
+					perror("HERCULES_ERR_MERGE_DATA_SNAPSHOT");
+					if (data_ != NULL)
+					{
+						free(data_);
+					}
+					continue;
+				}
+				t = clock() - t;
+				time_taken_for_merge = ((double)t) / (CLOCKS_PER_SEC);
+
+				t = clock();
+				int fd = Open_file(checkpoint_dir, data_hostname);
+				slog_debug("writting %lu bytes to disk with the name %s", size_of_merge_data, data_hostname);
+				ssize_t written_bytes_in_disk = Write_2_disk(fd, full_data_from_file, size_of_merge_data, 0);
+				fprintf(stderr, "Writting %lu bytes to disk from %d servers with the name %s, written_bytes_in_disk=%zd\n", size_of_merge_data, number_active_storage_servers, data_hostname, written_bytes_in_disk);
+
+				Close_file(fd);
+
+				t = clock() - t;
+				time_taken_for_writting = ((double)t) / (CLOCKS_PER_SEC);
+
+				if (full_data_from_file != NULL)
+				{
+					free(full_data_from_file);
+				}
+
+				continue_exe = 1;
+
+				slog_time("%d,%d,%s,%lu,%f,%f,%f,%f,%f,%f,%lu,%f,%f,%s",
+						  number_active_storage_servers,
+						  server_id,
+						  data_hostname,
+						  written_bytes_in_disk,
+						  (double)written_bytes_in_disk / 1024 / 1024,
+						  (double)written_bytes_in_disk / 1024 / 1024 / 1024,
+						  time_taken_for_writting,
+						  (double)written_bytes_in_disk / time_taken_for_writting,
+						  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024,
+						  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024 / 1024,
+						  block_size,
+						  time_taken_for_collecting,
+						  time_taken_for_merge,
+						  POLICY
+						);
+
+				int find = erase_snapshot_element(key);
+				if (find)
+				{
+					slog_debug("Element %s has been deleted", key.c_str());
+					break;
+				}
+				else
+				{
+					slog_warn("Element %s has NOT been deleted", key.c_str());
+				}
+			}
+		}
+		else
+		{
+			// Other blocks differents to 0 in this map
+			// means that there are a server waiting for
+			// the data.
+			uint64_t file_size_occupied = 0;
+			t = clock();
+			char *data_ = GetDataOfFile(key, &file_size_occupied);
+			if (data_ == NULL)
+			{
+				fprintf(stderr, "Data from file %s has not been get in server %d\n", key.c_str(), args.id);
+				slog_error("HERCULES_ERR_GET_DATA_OF_SNAPSHOT");
+				perror("HERCULES_ERR_GET_DATA_OF_SNAPSHOT");
+				continue;
+			}
+			t = clock() - t;
+			time_taken_for_collecting = ((double)t) / (CLOCKS_PER_SEC);
+
+			// char key_[REQUEST_SIZE];
+			int n_server_ = origin_server_id;
+			// Deletes all information related to this uri from the local arrays. it ensures the dataset information will be updated from the remote metadata server.
+			clear_dataset((char *)key.c_str());
+
+			// To get dataset info from the metadata server. here
+			// "curr_dataset" is filled.
+			file_desc = open_dataset((char *)key.c_str(), 0);
+			if (file_desc < 0)
+			{
+				continue;
+			}
+
+			// buffer_broadcast
+			if (set_data_server_reduce(server_id, n_server_, data_, file_size_occupied, key.c_str()) < 0)
+			{
+				perror("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
+				slog_error("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
+				return -1;
+			}
+
+			slog_debug("Data sent to server %d", n_server_);
+
+			continue_exe = 1;
+
+			int find = erase_snapshot_element(key);
+			if (find)
+			{
+				slog_debug("Element %s has been deleted", key.c_str());
+				break;
+			}
+			else
+			{
+				slog_warn("Element %s has NOT been deleted", key.c_str());
+			}
+		}
+	}
+	slog_debug("Ending Snapshot");
+
+	return continue_exe;
 }

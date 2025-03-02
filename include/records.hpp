@@ -64,9 +64,7 @@ public:
 	int32_t get_broadcast(std::string key, void **add_, uint64_t *size_);
 
 	char *GetDataOfFile(std::string file_name, uint64_t *file_size_occupied);
-	char *MergeData(__off_t *size_of_data, uint32_t num_of_data_servers, std::string file_name, __off_t file_size, uint64_t block_size);
-
-	// char* getDataFromFile(std::string file_name);
+	char *MergeData(__off_t *size_of_data, uint32_t num_of_data_servers, __off_t file_size, uint64_t block_size);
 
 	// Method updating a new record.
 	int32_t update(std::string key, void *add_, uint64_t length);
@@ -93,6 +91,7 @@ public:
 
 	// int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id);
 	// int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
+	int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id, char *data_hostname, struct arguments args);
 	int32_t Snapshot(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.

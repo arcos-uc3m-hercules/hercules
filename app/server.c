@@ -54,6 +54,7 @@ extern int global_finish_snapshot;
 extern int global_server_fd_thread;
 extern pthread_cond_t global_finish_cond;
 extern pthread_cond_t global_run_snapshot_cond;
+extern pthread_cond_t global_run_checkpoint_cond;
 extern pthread_mutex_t global_finish_mut;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
@@ -271,14 +272,11 @@ void handle_signal_server(int signal)
 				global_finish_snapshot = 1;
 
 				pthread_cond_signal(&global_run_snapshot_cond);
+				pthread_cond_signal(&global_run_checkpoint_cond);
 
 				pthread_mutex_lock(&global_finish_mut);
 				pthread_cond_wait(&global_finish_cond, &global_finish_mut);
-				// while (global_finish_threads != 1)
-				// {
-				// 	fprintf(stderr,"Waiting for snapshot and checkpointing...");
-				// 	sleep(10);
-				// }
+				
 				fprintf(stderr, "Waiting for snapshot and checkpointing in server %d\n", args.id);
 				// This file is readed by the hercules script to know if this server
 				// was correctly shutting down.
