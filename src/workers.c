@@ -2606,6 +2606,7 @@ void *dispatcher(void *th_argv)
 			// metadata servers.
 			ret = send(new_socket, &local_addr_len[0], sizeof(local_addr_len[0]), 0);
 			ret = send(new_socket, local_addr[0], local_addr_len[0], 0);
+			slog_debug("[DISPATCHER] Sent address %lu (%lu) to the client", local_addr[0], local_addr_len[0]);
 		}
 		// Check if someone is requesting identity resources.
 		else if (*((int32_t *)req) == WHO)
