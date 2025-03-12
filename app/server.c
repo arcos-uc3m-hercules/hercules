@@ -4,13 +4,14 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <sys/signal.h>
-#include "metadata_stat.h"
-#include "memalloc.h"
-#include "directory.h"
-#include "records.hpp"
-#include "map_ep.hpp"
 #include <inttypes.h>
 #include <unistd.h>
+#include "records.hpp"
+#include "map_ep.hpp"
+#include "memalloc.h"
+#include "metadata_stat.h"
+#include "directory.h"
+#include "policies.h"
 
 // Pointer to the tree's root node.
 extern GNode *tree_root;
@@ -41,7 +42,7 @@ ucp_worker_h ucp_worker;
 
 // ucp_ep_h pub_ep;
 ucp_address_t *req_addr;
-ucp_ep_h **metadata_endpoints;
+ucp_ep_h *metadata_endpoints;
 size_t req_addr_len;
 
 unsigned long number_active_storage_servers = 0; // stores the current number of active storage servers.
@@ -108,7 +109,7 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 		pos -= 1;											   // -1 to skip '$' on the data uri.
 		std::string data_uri = key.substr(0, pos);			   // substract the data uri from the key.
 		slog_debug("key='%s',\turi='%s',\tblock='%s'\n", key.c_str(), data_uri.c_str(), block.c_str());
-		int next_server = find_server(number_active_storage_servers, block_number, data_uri.c_str(), 0);
+		int next_server = find_server(number_active_storage_servers, block_number, data_uri.c_str(), 0, args.type, curr_imss.info.session_plcy);  // TODO: check for the current data policy in the dataset, not in the imss configuration.
 
 		slog_info("key='%s',\turi='%s%s',\tfrom server %d to server %d,\tactive servers=%lu\n", key.c_str(), data_uri.c_str(), block.c_str(), server_id, next_server, number_active_storage_servers);
 		slog_debug("new server=%d, curr_server=%d\n", next_server, server_id);
@@ -163,7 +164,8 @@ int stop_server()
 	// last "0" is the server status to be set.
 	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, args.imss_uri, 0);
 	slog_debug("[main] Request - %s", key_plus_size);
-	if (send_req(ucp_worker, *metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
+	// TODO: locate the metadata server.
+	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
 	{
 		perror("HERCULES_ERR_STOP_SERVER_SEND_REQ");
 		return -1;
@@ -195,7 +197,7 @@ int wakeup_server()
 	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, args.imss_uri, 1);
 	// fprintf(stderr, "Request - %s\n", key_plus_size);
 	slog_debug("[main] Request - %s", key_plus_size);
-	if (send_req(ucp_worker, *metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
+	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
 	{
 		perror("ERR_HERCULES_RLS_SERVER_SEND_REQ");
 		return -1;
@@ -560,10 +562,9 @@ int32_t main(int32_t argc, char **argv)
 		int32_t n_chars;
 		int init_server_status = 1;
 		// int num_active_data_servers = 0;
-		metadata_endpoints = (ucp_ep_h **)malloc(args.num_metadata_servers * sizeof(ucp_ep_h *));
+		metadata_endpoints = (ucp_ep_h *)malloc(args.num_metadata_servers * sizeof(ucp_ep_h));
 		for (int32_t i = 0; i < args.num_metadata_servers; i++)
 		{
-			metadata_endpoints[i] = (ucp_ep_h *)malloc(sizeof(ucp_ep_h));
 			// Allocate resources in the metadata structure so as to store the current HERCULES's IP.
 			// (my_imss.ips)[i] = (char *)calloc(LINE_LENGTH, sizeof(char));
 			size_t num_bytes_for_line = 0;
@@ -611,7 +612,7 @@ int32_t main(int32_t argc, char **argv)
 			ep_params.err_handler.arg = NULL;
 			ep_params.user_data = &ep_status;
 			slog_debug("Creating endpoint with the metadata server %d", i);
-			status = ucp_ep_create(ucp_worker, &ep_params, metadata_endpoints[i]);
+			status = ucp_ep_create(ucp_worker, &ep_params, &metadata_endpoints[i]);
 			slog_debug("Endpoint with the metadata %d created", i);
 			// status = ucp_worker_get_address(ucp_worker, &req_addr, &req_addr_len);
 
@@ -632,7 +633,7 @@ int32_t main(int32_t argc, char **argv)
 				sprintf(formated_uri, "%" PRIu32 " GET 0 %s", id, args.imss_uri);
 				slog_debug("Request - %s", formated_uri);
 				// Send the request.
-				if (send_req(ucp_worker, *metadata_endpoints[i], req_addr, req_addr_len, formated_uri) == 0)
+				if (send_req(ucp_worker, metadata_endpoints[i], req_addr, req_addr_len, formated_uri) == 0)
 				{
 					slog_error("HERCULES_ERR__SEND_REQ");
 					perror("HERCULES_ERR__SEND_REQ");
@@ -650,7 +651,7 @@ int32_t main(int32_t argc, char **argv)
 				}
 				// Receive the associated structure.
 				imss_info *imss_info_ = (imss_info *)malloc(sizeof(imss_info) * length);
-				ret = recv_dynamic_stream(ucp_worker, *metadata_endpoints[i], imss_info_, IMSS_INFO, attr.worker_uid, length);
+				ret = recv_dynamic_stream(ucp_worker, metadata_endpoints[i], imss_info_, IMSS_INFO, attr.worker_uid, length);
 				// If another data server has taken the URI, this HERCULES configuration should not be deployed.
 				// Two HERCULES configurations cannot have the same URI.
 				// We check if "recv_dynamic_stream" has successed, if so, there are another HERCULES instance using
@@ -990,7 +991,7 @@ int32_t main(int32_t argc, char **argv)
 		for (size_t j = 0; j < args.num_metadata_servers; j++)
 		{
 
-			if (send_req(ucp_worker, *metadata_endpoints[j], req_addr, req_addr_len, key_plus_size) == 0)
+			if (send_req(ucp_worker, metadata_endpoints[j], req_addr, req_addr_len, key_plus_size) == 0)
 			{
 				perror("HERCULES_ERR_SEND_REQ_SET_STR");
 				slog_fatal("HERCULES_ERR_SEND_REQ_SET_STR");
@@ -999,7 +1000,7 @@ int32_t main(int32_t argc, char **argv)
 
 			slog_debug("[SERVER] Creating IMSS_INFO at metadata server. ");
 			// Send the new HERCULES metadata structure to the metadata server entity.
-			if (send_dynamic_stream(ucp_worker, *metadata_endpoints[j], (char *)&my_imss, IMSS_INFO, attr.worker_uid) == -1)
+			if (send_dynamic_stream(ucp_worker, metadata_endpoints[j], (char *)&my_imss, IMSS_INFO, attr.worker_uid) == -1)
 			{
 				return -1;
 			}
@@ -1039,13 +1040,14 @@ int32_t main(int32_t argc, char **argv)
 				// printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
 				// return -1;
 				sleep(3);
+				continue;
 			}
 			break;
 		}
 	}
 
 	ret = ready(tmp_file_path, "OK");
-	fprintf(stderr, "Server %d is ready = %d\n", args.id, ret);
+	fprintf(stderr, "%c-server %d is ready = %d\n", args.type, args.id, ret);
 	// Wait for threads to finish.
 	for (int32_t i = 0; i < total_threads; i++)
 	{

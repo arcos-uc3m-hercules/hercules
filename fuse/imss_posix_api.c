@@ -237,7 +237,7 @@ int imss_refresh(const char *path)
 	int fd = -1;
 	void *aux = NULL;
 	const char *imss_path = path; // this pointer should not be free.
-
+	// Lookup the current file on the local front-end map.
 	fd_lookup(imss_path, &fd, &old_stats, (char **)&aux);
 	if (fd >= 0)
 	{
@@ -302,9 +302,9 @@ int imss_getattr(const char *path, struct stat *stbuf)
 		map_erase(map, imss_path);
 		pthread_mutex_unlock(&lock_file);
 		// map_release_prefetch(map_prefetch, path);
-		slog_debug("[imss_posix_api] Calling release prefetch path = %s", imss_path);
+		slog_debug("Calling release prefetch path = %s", imss_path);
 		map_release_prefetch(map_prefetch, imss_path);
-		slog_debug("[imss_posix_api] Ending release prefetch path = %s", imss_path);
+		slog_debug("Ending release prefetch path = %s", imss_path);
 		return -ENOENT;
 	case 1: // Directory case?
 		if ((n_ent = get_dir((char *)imss_path, &buffer, &refs)) != -1)

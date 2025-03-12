@@ -663,7 +663,6 @@ extern "C"
 		// fprintf(stderr, " -- POLICY: %s\n", POLICY);
 
 		// Metadata server
-		// if (release == 1)
 		if (stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank) == -1)
 		{
 			// In case of error notify and exit

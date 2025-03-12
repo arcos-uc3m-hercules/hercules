@@ -1653,7 +1653,7 @@ void *stat_worker(void *th_argv)
 		arguments->peer_address = peer_addr;
 		arguments->server_ep = ep;
 		arguments->worker_uid = attr.worker_uid;
-		muntrace();
+		// muntrace();
 
 		// arguments->worker_uid = attr.worker_uid;
 		stat_worker_helper(arguments, req);
@@ -1683,29 +1683,20 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 
-	/*struct timeval start, end;
-	  long delta_us;*/
-
 	int operation = 0; // server id.
 	char mode[MODE_SIZE];
 	int32_t req_size = 0;
 	char raw_msg[req_size + 1];
 	char number[16];
-	// char *uri_;
 	char uri_[URI_];
 	int extra_info = 0;
 	int num_characters_read = 0;
 	int num_input_read = 0;
 
-	// slog_debug("[STAT WORKER] Waiting for new request.");
 	// Save the request to be served.
-	// recv_data(arguments->ucp_worker, arguments->server_ep, req);
 	slog_info("[STAT WORKER] Request - '%s'", req);
-	// 	sscanf(req, "%" PRIu32 " %s", &operation, mode);
-	num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
-
-	// char *req_content = strstr(req, mode);
-	// req_content += 4;
+	// num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
+	num_input_read = sscanf(req, "%d %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
 
 	if (!strcmp(mode, "GET"))
 		more = GET_OP;
@@ -1720,6 +1711,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 	// printf("*********worker_metadata raw_msg %s",raw_msg);
 	slog_info("[workers][stat_worker_helper] request received=%s", req);
+	//fprintf(stderr,"Req=%s\n", req);
 
 	// Reference to the client request.
 	// sscanf(raw_msg, "%s", number);
@@ -1730,9 +1722,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	// memcpy(uri, raw_msg, number_length + 1);
 	uint64_t block_size_recv = (uint64_t)atoi(number);
 
-	// req_content += req_size;
-
-	// slog_info("[workers][stat_worker_helper] operation=%d, number=%s, number_length=%d, uri=%s, block_size_recv=%ld", operation, number, number_length, uri_, block_size_recv);
 	slog_info("[workers][stat_worker_helper] operation=%d, number=%s, uri=%s, block_size_recv=%ld", operation, number, uri_, block_size_recv);
 
 	// Create an std::string in order to be managed by the map structure.

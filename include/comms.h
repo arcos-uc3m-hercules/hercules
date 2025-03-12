@@ -38,6 +38,10 @@
 // Max lenght for POLICY name.
 #define MAX_POLICY_LEN 16
 
+/*** TYPE argument legal values ***/
+#define TYPE_DATA_SERVER 'd'
+#define TYPE_METADATA_SERVER 'm'
+
 static const ucp_tag_t tag_req = 0x1337a880u;
 static const ucp_tag_t tag_data = 0x2337a880u;
 static const ucp_tag_t tag_reply = 0x3337a880u;

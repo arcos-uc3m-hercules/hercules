@@ -25,9 +25,7 @@
 /* metadata server options */
 #define STAT_LOGFILE_OPT 'l'
 
-/*** TYPE argument legal values ***/
-#define TYPE_DATA_SERVER 'd'
-#define TYPE_METADATA_SERVER 'm'
+
 
 
 struct logging_opts

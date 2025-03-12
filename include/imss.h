@@ -123,10 +123,7 @@ static uint64_t BLOCK_SIZE;
 #endif
 
 int32_t get_data_location(int32_t, int32_t, int32_t);
-int32_t find_server(int32_t n_servers,
-					int32_t n_msg,
-					const char *fname,
-					int32_t op_type);
+
 // typedef enum {
 //     CLIENT_SERVER_SEND_RECV_STREAM  = UCS_BIT(0),
 //     CLIENT_SERVER_SEND_RECV_DEFAULT = CLIENT_SERVER_SEND_RECV_STREAM
@@ -154,6 +151,8 @@ typedef struct
 	int num_active_storages;
 	// Number of IMSS servers.
 	int32_t num_storages;
+	// Policy that was followed for the metadata.
+	int32_t session_plcy;
 	// Server's dispatcher thread connection port.
 	uint16_t conn_port;
 } imss_info;
@@ -187,6 +186,7 @@ typedef struct
 	char type; // = 'D';
 	// Policy that was followed in order to write the dataset.
 	char policy[MAX_POLICY_LEN];
+	int32_t session_plcy;
 	// Number of data elements conforming the dataset entity.
 	int32_t num_data_elem;
 	// Size of each data element (in KB).
