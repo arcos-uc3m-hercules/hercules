@@ -1710,7 +1710,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	// raw_msg[req_size] = '\0';
 
 	// printf("*********worker_metadata raw_msg %s",raw_msg);
-	slog_info("[workers][stat_worker_helper] request received=%s", req);
+	slog_info("[workers] request received=%s", req);
 	//fprintf(stderr,"Req=%s\n", req);
 
 	// Reference to the client request.
@@ -1722,7 +1722,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	// memcpy(uri, raw_msg, number_length + 1);
 	uint64_t block_size_recv = (uint64_t)atoi(number);
 
-	slog_info("[workers][stat_worker_helper] operation=%d, number=%s, uri=%s, block_size_recv=%ld", operation, number, uri_, block_size_recv);
+	slog_info("[workers] operation=%d, number=%s, uri=%s, block_size_recv=%ld", operation, number, uri_, block_size_recv);
 
 	// Create an std::string in order to be managed by the map structure.
 	std::string key;
@@ -1748,9 +1748,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			int32_t numelems_indir;
 			// Retrieve all elements inside the requested directory.
 			pthread_mutex_lock(&tree_mut);
-			slog_info("[workers][stat_worker_helper] Calling GTree_getdir, key=%s", key.c_str());
+			slog_info("[workers] Calling GTree_getdir, key=%s", key.c_str());
 			buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
-			slog_info("[workers][stat_worker_helper] Ending GTree_getdir, key=%s, numelems_indir=%d", key.c_str(), numelems_indir);
+			slog_info("[workers] Ending GTree_getdir, key=%s, numelems_indir=%d", key.c_str(), numelems_indir);
 			pthread_mutex_unlock(&tree_mut);
 			if (buffer == NULL)
 			{
@@ -1767,7 +1767,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			m.size = numelems_indir * URI_;
 			m.data = buffer;
 
-			slog_info("[workers][stat_worker_helper] MSG, numelems_indir=%ld, size=%ld", numelems_indir, m.size);
+			slog_info("[workers] MSG, numelems_indir=%ld, size=%ld", numelems_indir, m.size);
 
 			if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid) < 0)
 			{
@@ -1775,7 +1775,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				return -1;
 			}
 
-			slog_debug("[workers][stat_worker_helper] buffer=%s", buffer);
+			slog_debug("[workers] buffer=%s", buffer);
 
 			char *curr = buffer;
 			// char *item = (char *)malloc(URI_ * sizeof(char));
@@ -1792,6 +1792,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		}
 		case READ_OP:
 		{
+			slog_debug("[READ_OP]");
 			// Check if there was an associated block to the key.
 			int err = map->get(key, &address_, &block_size_rtvd);
 			slog_debug("[STAT WORKER] map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
@@ -1908,7 +1909,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				std::string old_key = key.substr(0, found);
 				std::string new_key = key.substr(found + 1, key.length());
 
-				slog_debug("[stat_worker_helper][RENAME] old_key=%s, new_key=%s\n", old_key.c_str(), new_key.c_str());
+				slog_debug("[RENAME] old_key=%s, new_key=%s\n", old_key.c_str(), new_key.c_str());
 
 				// RENAME MAP
 				int32_t result = map->rename_metadata_stat_worker(old_key, new_key);
@@ -1916,13 +1917,13 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				if (result == 0)
 				{
 					// printf("0 elements rename from stat_worker");
-					slog_warn("[stat_worker_helper][RENAME] 0 elements rename from stat_worker");
+					slog_warn("[RENAME] 0 elements rename from stat_worker");
 					break;
 				}
 
 				// RENAME TREE
 				int ret = GTree_rename((char *)old_key.c_str(), (char *)new_key.c_str());
-				slog_debug("[stat_worker_helper][RENAME] GTree_rename=%d", ret);
+				slog_debug("[RENAME] GTree_rename=%d", ret);
 			}
 
 			char release_msg[] = "RENAME\0";
@@ -2075,7 +2076,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		if (!map->get(key, &address_, &block_size_rtvd))
 		{
 			pthread_mutex_unlock(&mp);
-			// slog_debug("[STAT WORKER] Adding new block %p", &address_);
 
 			slog_debug("[STAT WORKER] Recv dynamic buffer size %ld", block_size_recv);
 			// Get the length of the message to be received.
@@ -2094,8 +2094,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 			dataset_info *struct_ = (dataset_info *)buffer;
 
-			// ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
-			// length = recv_dynamic_stream_opt(arguments->ucp_worker, arguments->server_ep, &buffer, BUFFER, arguments->worker_uid, length);
 			slog_debug("[STAT WORKER] END Recv dynamic, n_server_when_created=%d", struct_->n_servers_when_created);
 
 			if (ret < 0)
@@ -2107,7 +2105,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			}
 
 			int32_t insert_successful = -1;
-			// insert_successful = map->put(key, buffer, block_size_recv);
 			insert_successful = map->put(key, buffer, length);
 			slog_debug("[STAT WORKER] map->put (key %s) err %d", key.c_str(), insert_successful);
 

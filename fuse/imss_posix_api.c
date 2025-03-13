@@ -415,7 +415,6 @@ int imss_getattr(const char *path, struct stat *stbuf)
 
 int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t offset)
 {
-	// fprintf(stderr,"imss_readdir=%s\n",path);
 	// Needed variables for the call
 	char *buffer;
 	char **refs;
@@ -432,14 +431,14 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 	// 	strcat(imss_path, "/");
 	// }
 
-	slog_debug("[IMSS][imss_readdir] imss_path=%s", imss_path);
+	slog_debug("[IMSS] imss_path=%s", imss_path);
 	// Call IMSS to get metadata
 	n_ent = get_dir((char *)imss_path, &buffer, &refs);
-	slog_debug("[IMSS][imss_readdir] imss_path=%s, n_ent=%d", imss_path, n_ent);
+	slog_debug("[IMSS] imss_path=%s, n_ent=%d", imss_path, n_ent);
 	if (n_ent < 0)
 	{
 		strcat(imss_path, "/");
-		slog_debug("[IMSS][imss_readdir] imss_path=%s", imss_path);
+		slog_debug("[IMSS] imss_path=%s", imss_path);
 		// fprintf(stderr,"try again imss_path=%s\n",imss_path);
 		n_ent = get_dir((char *)imss_path, &buffer, &refs);
 		if (n_ent < 0)
@@ -448,32 +447,32 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 			return -ENOENT;
 		}
 	}
-	slog_debug("[IMSS][imss_readdir] Before flush data");
+	slog_debug("[IMSS]Before flush data");
 
 	// flush_data();
 
 	// Fill buffer
 	// TODO: Check if subdirectory
 	// printf("[FUSE] imss_readdir %s has=%d\n",path, n_ent);
-	slog_debug("[IMSS][imss_readdir] imss_readdir %s has=%d", path, n_ent);
+	slog_debug("[IMSS] imss_readdir %s has=%d", path, n_ent);
 	for (int i = 0; i < n_ent; ++i)
 	{
 		if (i == 0)
 		{
-			// slog_debug("[IMSS][imss_readdir] . y ..");
+			// slog_debug("[IMSS]. y ..");
 			filler(buf, "..", NULL, 0);
 			filler(buf, ".", NULL, 0);
 		}
 		else
 		{
-			// slog_debug("[IMSS][imss_readdir] %s", refs[i]);
+			// slog_debug("[IMSS]%s", refs[i]);
 			// the stbuf is not used after here.
 			// struct stat stbuf;
 			// int error = imss_getattr(refs[i] + 6, &stbuf);
 			// if (!error)
 			{
 				char *last = refs[i] + strlen(refs[i]) - 1;
-				// slog_info("last=%s", last);
+				slog_info("last=%s of %s", last, refs);
 				if (last[0] == '/')
 				{
 					last[0] = '\0';

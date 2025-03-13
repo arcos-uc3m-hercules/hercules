@@ -509,75 +509,97 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 	int ret = 0;
 	// Discover the metadata server that shall deal with the former URI.
 	// uint32_t m_srv = discover_stat_srv(requested_uri);
-	uint32_t m_srv = find_server(n_stat_servers, 0, requested_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-
-	ucp_ep_h ep = stat_eps[m_srv];
+	// uint32_t m_srv = find_server(n_stat_servers, 0, requested_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
 
 	pthread_mutex_lock(&lock_network);
-	// GETDIR request.
 	char getdir_req[REQUEST_SIZE];
-	sprintf(getdir_req, "%" PRIu32 " GET %d %s", stat_ids[m_srv], GETDIR, requested_uri);
-	slog_debug("[IMSS][get_dir] Request - %s", getdir_req);
-	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, getdir_req) == 0)
-	{
-		pthread_mutex_unlock(&lock_network);
-		slog_error("HERCULES_ERR_GET_DIR_SEND_REQ");
-		perror("HERCULES_ERR_GET_DIR_SEND_REQ");
-		return -1;
-	}
+	uint32_t total_num_elements = 0;
 
-	// Get the length of the message to be received.
-	size_t length = 0;
-	length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
-	if (length == 0)
+	char **arr_elements = (char **)malloc(n_stat_servers * sizeof(char *));
+	int arr_lengths[n_stat_servers]  = {0};
+	// Search in all servers.
+	for (int m_srv = 0; m_srv < n_stat_servers; m_srv++)
 	{
-		pthread_mutex_unlock(&lock_network);
-		perror("HERCULES_ERR_GET_DIR_GET_RECV_DATA_LENGTH");
-		slog_error("HERCULES_ERR_GET_DIR_GET_RECV_DATA_LENGTH");
-		return -1;
-	}
-	void *elements = malloc(length);
-	//  Retrieve the set of elements within the requested uri.
-	ret = recv_dynamic_stream(ucp_worker_meta, ep, elements, BUFFER, local_meta_uid, length);
-	if (ret < 0)
-	{
-		pthread_mutex_unlock(&lock_network);
-		perror("HERCULES_ERR_GET_DIR_RECV_STREAM");
-		slog_error("HERCULES_ERR_GET_DIR_RECV_STREAM");
-		free(elements);
-		return -1;
-	}
+		ucp_ep_h ep = stat_eps[m_srv];
 
-	if (!strncmp("$ERRIMSS_NO_KEY_AVAIL$", (const char *)elements, 22))
-	{
-		pthread_mutex_unlock(&lock_network);
-		slog_error("HERCULES_ERR_GET_DIR_NODIR");
-		free(elements);
-		return -1;
-	}
+		// GETDIR request.
+		sprintf(getdir_req, "%" PRIu32 " GET %d %s", stat_ids[m_srv], GETDIR, requested_uri);
+		slog_debug("[IMSS] Request - %s", getdir_req);
+		if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, getdir_req) == 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			slog_error("HERCULES_ERR_GET_DIR_SEND_REQ");
+			perror("HERCULES_ERR_GET_DIR_SEND_REQ");
+			return -1;
+		}
 
-	uint32_t elements_size = ret;
-	uint32_t num_elements = elements_size / URI_;
-	*items = (char **)calloc(num_elements, sizeof(char *));
+		// Get the length of the message to be received.
+		size_t length = 0;
+		length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
+		if (length == 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			perror("HERCULES_ERR_GET_DIR_GET_RECV_DATA_LENGTH");
+			slog_error("HERCULES_ERR_GET_DIR_GET_RECV_DATA_LENGTH");
+			return -1;
+		}
+		char *elements = (char *)malloc(length * sizeof(char));
+		//  Retrieve the set of elements within the requested uri.
+		ret = recv_dynamic_stream(ucp_worker_meta, ep, elements, BUFFER, local_meta_uid, length);
+		if (ret < 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			perror("HERCULES_ERR_GET_DIR_RECV_STREAM");
+			slog_error("HERCULES_ERR_GET_DIR_RECV_STREAM");
+			free(elements);
+			return -1;
+		}
+
+		if (!strncmp("$ERRIMSS_NO_KEY_AVAIL$", (const char *)elements, 22))
+		{
+			pthread_mutex_unlock(&lock_network);
+			perror("HERCULES_ERR_GET_DIR_NODIR");
+			slog_error("HERCULES_ERR_GET_DIR_NODIR");
+			free(elements);
+			return -1;
+		}
+		uint32_t elements_size = ret;
+		uint32_t num_elements = elements_size / URI_;
+		total_num_elements += num_elements;
+		// *items = (char **)calloc(num_elements, sizeof(char *));
+		arr_elements[m_srv] = elements;
+		arr_lengths[m_srv] = num_elements;
+	}
 
 	// Identify each element within the buffer provided.
-	char *curr = (char *)elements;
-	for (int32_t i = 0; i < num_elements; i++)
+	*items = (char **)calloc(total_num_elements, sizeof(char *));
+	int pos = 0;
+	for (int m_srv = 0; m_srv < n_stat_servers; m_srv++)
 	{
-		// slog_debug("[IMSS][get_dir] item %d -- calloc", i);
-		(*items)[i] = (char *)calloc(URI_, 1);
-		// slog_debug("[IMSS][get_dir] item %d -- memcpy", i);
-		memcpy((*items)[i], curr, URI_);
-		//(*items)[i] = elements;
-		// slog_debug("[IMSS][get_dir] item %d -- curr+=URI", i);
-		curr += URI_;
-		// slog_debug("[IMSS][get_dir] item %d: %s", i, (*items)[i]);
+		// char *curr = (char *)elements;
+		slog_debug("arr_lengths[%d]=%d, total_num_elements=%d", m_srv, arr_lengths[m_srv], total_num_elements);
+		char *curr = (char *)arr_elements[m_srv];
+		for (int32_t i = 0; i < arr_lengths[m_srv]; i++)
+		{
+			// slog_debug("[IMSS] item %d -- calloc", i);
+			(*items)[pos] = (char *)calloc(URI_, 1);
+			// slog_debug("[IMSS] item %d -- memcpy", i);
+			memcpy((*items)[pos], curr, URI_);
+			pos++;
+			//(*items)[i] = elements;
+			// slog_debug("[IMSS] item %d -- curr+=URI", i);
+			curr += URI_;
+			// slog_debug("[IMSS] item %d: %s", i, (*items)[i]);
+		}
+		free(arr_elements[m_srv]);
 	}
 
-	free(elements);
-	slog_debug("[IMSS] Ending, num_elements=%d", num_elements);
+	// free(elements);
+	free(arr_elements);
+
+	slog_debug("[IMSS] Ending, total_num_elements=%d", total_num_elements);
 	pthread_mutex_unlock(&lock_network);
-	return num_elements;
+	return total_num_elements;
 }
 
 /**********************************************************************************/
@@ -1238,7 +1260,6 @@ int32_t create_dataset(char *dataset_uri,
 	// Discover the metadata server that handle the new dataset.
 	// uint32_t m_srv = discover_stat_srv(new_dataset.uri_);
 	uint32_t m_srv = find_server(n_stat_servers, 0, new_dataset.uri_, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-
 
 	char formated_uri[REQUEST_SIZE];
 	// sprintf(formated_uri, "%" PRIu32 " SET %lu %s", stat_ids[m_srv], msg_size, new_dataset.uri_);
@@ -3705,7 +3726,7 @@ int32_t get_type(const char *uri)
 	ep = stat_eps[m_srv];
 
 	sprintf(formated_uri, "%d GET 0 %s", 0, uri);
-	slog_info("[IMSS][get_type] Request - '%s'", formated_uri);
+	slog_info("[IMSS] Request - '%s'", formated_uri);
 	// printf("get_type=%s",uri);
 	// Send the request.
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
@@ -3734,7 +3755,7 @@ int32_t get_type(const char *uri)
 	result = malloc(length);
 
 	ret = recv_dynamic_stream(ucp_worker_meta, ep, result, BUFFER, local_meta_uid, length);
-	slog_debug("[IMSS][get_type] after recv_dynamic_stream ret=%d", ret);
+	slog_debug("[IMSS] after recv_dynamic_stream ret=%d", ret);
 
 	if (ret < 0)
 	{

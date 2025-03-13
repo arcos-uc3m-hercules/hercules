@@ -748,13 +748,14 @@ int32_t main(int32_t argc, char **argv)
 	{
 		// Create the tree_root node.
 		char *root_data = (char *)calloc(8, sizeof(char));
-		strcpy(root_data, "imss://");
+		// strcpy(root_data, "imss://");
+		strcpy(root_data, args.imss_uri);
 		tree_root = g_node_new((void *)root_data);
 
 		if (pthread_mutex_init(&tree_mut, NULL) != 0)
 		{
 			perror("HERCULES_ERR_TREE_MUT_INIT");
-			pthread_exit(NULL);
+			exit(1);
 		}
 	}
 

@@ -31,15 +31,14 @@ GTree_search_(GNode *parent_node,
 
 		// HAVE TO CHECK IF IT IS A DIRECTORY OR A FILE
 		// For this i check if it has at the end /
-
+		slog_debug("child->data=%s, desired_data=%s", child->data, desired_data);
 		if (desired_data[strlen(desired_data) - 1] == '/' && !strncmp((char *)child->data, desired_data, strlen((char *)child->data)))
-		{
+		{ // directory case.
+			slog_debug("directory case");
 			// Check if the compared node is the requested one.
-			int a = 1;
 			if (!strcmp((char *)child->data, desired_data))
 			{
 				*found_node = child;
-
 				// The desired data was found.
 				return 1;
 			}
@@ -50,12 +49,12 @@ GTree_search_(GNode *parent_node,
 			}
 		}
 		else if (desired_data[strlen(desired_data) - 1] != '/' && !strncmp((char *)child->data, desired_data, strlen((char *)child->data)))
-		{
+		{ // regular file.
+			slog_debug("regular file");
 			// Check if the compared node is the requested one.
 			if (!strcmp((char *)child->data, desired_data))
 			{
 				*found_node = child;
-
 				// The desired data was found.
 				return 1;
 			}
@@ -65,7 +64,7 @@ GTree_search_(GNode *parent_node,
 				// CHECK THE NUMBERS OF '/' IN THE PATHS TO SEE IF WE ARRIVE TO THE DIRECTORY
 				int amount = 0;
 				for (int32_t j = 0; j < strlen(desired_data) - 1; j++)
-				{
+				{ // counts the number of "/" on the path.
 					if (desired_data[j] == '/')
 					{
 						amount = amount + 1;
@@ -73,14 +72,15 @@ GTree_search_(GNode *parent_node,
 				}
 				int amount_child = 0;
 				char *path_child = (char *)child->data;
+				slog_debug("path_child=%s, desired_data=%s", path_child, desired_data);
 				for (int32_t j = 0; j < strlen(path_child) - 1; j++)
-				{
+				{ // counts the number of "/" on the child path.
 					if (path_child[j] == '/')
 					{
 						amount_child = amount_child + 1;
 					}
 				}
-
+				slog_debug("amount=%d, amount_child=%d", amount, amount_child);
 				if (amount == amount_child)
 				{
 					// Move on to the following child.
@@ -97,6 +97,7 @@ GTree_search_(GNode *parent_node,
 		child = child->next;
 	}
 	last_parent = parent_node;
+	slog_debug("last_parent=%s", last_parent->data);
 	return 0;
 }
 
@@ -227,10 +228,9 @@ GTree_insert(char *desired_data)
 {
 	// Closest node to the one requested (or even the requested one itself).
 	GNode *closest_node = NULL;
-
+	slog_debug("last_parent->data=%s, desired_data=%s", last_parent, desired_data);
 	if (last_parent != NULL)
 	{
-
 		char *data_search = (char *)calloc(256, sizeof(char));
 		if (desired_data[strlen(desired_data) - 1] == '/')
 		{
@@ -261,6 +261,7 @@ GTree_insert(char *desired_data)
 	{
 		if (GTree_search(tree_root, desired_data, &closest_node))
 		{
+			slog_debug("closest_node=%s", closest_node);
 			return 0;
 		}
 	}
@@ -276,7 +277,6 @@ GTree_insert(char *desired_data)
 	if (!more_chars && (closest_data_length == 2))
 	{
 		more_chars = 1;
-
 		closest_data_length--;
 	}
 
@@ -285,7 +285,7 @@ GTree_insert(char *desired_data)
 	for (int32_t i = 0; i < more_chars; i++)
 	{
 		int32_t new_position = closest_data_length + i;
-		slog_debug("[Gtree] path=%s, new_position=%d, i=%d, %c", desired_data, new_position, i, desired_data[new_position]);
+		// slog_debug("[Gtree] path=%s, new_position=%d, i=%d, %c", desired_data, new_position, i, desired_data[new_position]);
 
 		if ((desired_data[new_position] == '/') || (i == (more_chars - 1)))
 		{
@@ -307,7 +307,6 @@ GTree_insert(char *desired_data)
 			g_node_append(closest_node, new_node);
 
 			return 0;
-
 			// closest_node = new_node;
 		}
 	}
@@ -409,18 +408,18 @@ GTree_getdir(char *desired_dir,
 	// Number of children of the directory node.
 	uint32_t num_children = g_node_n_children(dir_node);
 	*numdir_elems = num_children + 1; //+1 because of the actual directory + childrens
-	slog_info("[GTree_getdir] num_children=%d", num_children);
+	slog_info("num_children=%d", *numdir_elems);
 
 	// Buffer containing the whole set of elements within a certain directory.
-	// char * dir_elements = (char *) malloc(sizeof(char)*num_elements_indir*URI_);
+	// char *dir_elements = (char *) malloc(sizeof(char)*num_elements_indir*URI_);
 	char *dir_elements = (char *)malloc((num_children + 1) * URI_);
 	char *aux_dir_elem = dir_elements;
 
 	// Call the serialization function storing all dir elements in the buffer.
 	// TO CHECK!
-	slog_info("[GTree_getdir] serialize_dir_childrens(dir_node, num_children=%d, &aux_dir_elem)", num_children);
+	slog_info("serialize_dir_childrens(dir_node=%s, num_children=%d, &aux_dir_elem)", dir_node, num_children);
 	serialize_dir_childrens(dir_node, num_children, &aux_dir_elem);
-	slog_info("[GTree_getdir] ending serialize_dir_childrens, aux_dir_elem=%s", aux_dir_elem);
+	slog_info("ending serialize_dir_childrens, aux_dir_elem=%s", aux_dir_elem);
 
 	return dir_elements;
 }
