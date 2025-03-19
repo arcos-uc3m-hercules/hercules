@@ -376,14 +376,14 @@ extern "C"
 		size_t pathname_len = strlen(pathname);
 		// size_t max_lenght = MAX(pathname_len, strlen(MOUNT_POINT));
 		size_t compare_len = 0;
-		
+
 		// To calculate the string lenght to be compared to know if the user want to intercept
 		// the HERCULES root (MOUNT_POINT).
 		// For example: if MOUNT_POINT=/mnt/hercules/ and pathname=/mnt/hercules/x
 		// then, the correct lenght must be the one of pathname (15).
-		// But, if pathname=/mnt/hercules, the max lenght to be compared is 
+		// But, if pathname=/mnt/hercules, the max lenght to be compared is
 		// the MOUNT_POINT lenght minus 1 because we do not want to consider the last "/".
-		// In this last case we will make the comparition of MOUNT_POINT=/mnt/hercules and 
+		// In this last case we will make the comparition of MOUNT_POINT=/mnt/hercules and
 		//  pathname=/mnt/hercules.
 		if (pathname_len >= MOUNT_POINT_LEN)
 		{
@@ -423,7 +423,7 @@ extern "C"
 			}
 
 			strcpy(new_path, "imss://");
-		} 
+		}
 		else
 		{ // To check if "pathname" is part of HERCULES.
 			if (!strncmp(pathname, MOUNT_POINT, strlen(MOUNT_POINT) - 1) || (pathname[0] != '/' && !strncmp(workdir, MOUNT_POINT, strlen(MOUNT_POINT) - 1)))
@@ -737,12 +737,12 @@ extern "C"
 			// t_s = clock();
 			release = -1;
 			slog_live("[POSIX] release_imss()");
-			//release_imss("imss://", CLOSE_DETACHED);
-			// slog_live("[POSIX] stat_release()");
-			// stat_release();
-			//  imss_comm_cleanup();
-			//  t_s = clock() - t_s;
-			//  time_taken = ((double)t_s) / (CLOCKS_PER_SEC);
+			// release_imss("imss://", CLOSE_DETACHED);
+			//  slog_live("[POSIX] stat_release()");
+			//  stat_release();
+			//   imss_comm_cleanup();
+			//   t_s = clock() - t_s;
+			//   time_taken = ((double)t_s) / (CLOCKS_PER_SEC);
 		}
 		// fprintf(stderr, "End 'run_me_last', pid=%d, release=%d\n", g_pid, release);
 		slog_live("End 'run_me_last', pid=%d, release=%d", g_pid, release);
@@ -2685,6 +2685,9 @@ extern "C"
 		char *new_path = checkHerculesPath(path);
 		if (new_path != NULL)
 		{
+			char *last = new_path + strlen(new_path) - 1;
+			if (last[0] != '/')
+				strcat(new_path, "/");
 			slog_live("[POSIX]. Calling Hercules 'mkdir', path=%s, new_path=%s", path, new_path);
 			// fprintf(stderr, "[POSIX]. Calling Hercules 'mkdir', path=%s, new_path=%s\n", path, new_path);
 
@@ -4011,6 +4014,10 @@ extern "C"
 		struct dirent *entry = NULL;
 		if (pathname != NULL)
 		{
+			char *last = pathname + strlen(pathname) - 1;
+			if (last[0] != '/')
+				strcat(pathname, "/");
+
 			slog_live("[POSIX]. Calling Hercules 'readdir', pathname=%s", pathname);
 			entry = (struct dirent *)malloc(sizeof(struct dirent));
 			char buf[KB * KB] = {0};
@@ -4159,6 +4166,9 @@ extern "C"
 		char *pathname = map_fd_search_by_val(map_fd, fd);
 		if (pathname != NULL)
 		{
+			char *last = pathname + strlen(pathname) - 1;
+			if (last[0] != '/')
+				strcat(pathname, "/");
 			// fprintf(stderr, "Hercules closedir, %s\n", pathname);
 			slog_live("[POSIX] Calling Hercules 'closedir', pathname=%s, fd=%d.", pathname, fd);
 

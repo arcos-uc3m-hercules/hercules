@@ -224,7 +224,7 @@ void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
 	{
 		tmp = new_dataset.original_name;
 	}
-	snprintf(passed_name,PATH_MAX,"%s",tmp);
+	snprintf(passed_name, PATH_MAX, "%s", tmp);
 	// slog_debug("fnameadd=%p, passed_nameadd=%p", fname, passed_name);
 	// slog_debug("passed_name=%s", passed_name);
 	if (passed_name == NULL)
@@ -237,8 +237,7 @@ void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
  * @brief Method retrieving the server that will receive the following message attending a policy.
  * @return next server number (positive integer, >= 0) to send the operation according to the policy, on error -1 is returned,
  */
-int32_t
-find_server(
+int32_t find_server(
 	int32_t n_servers,
 	int32_t n_msg,
 	const char *fname,
@@ -247,7 +246,6 @@ find_server(
 	int32_t session_plcy)
 {
 	int32_t next_server = -1;
-	// char *passed_name = NULL;
 	char passed_name[PATH_MAX];
 
 	switch (session_plcy)
@@ -367,7 +365,6 @@ find_server(
 	}
 	slog_debug("session_plcy=%ld, fname=%s, next_server=%d, passed_name=%s", session_plcy, fname, next_server, passed_name);
 	// slog_debug("fnameadd=%p, passed_nameadd=%p", fname, passed_name);
-
 
 	// "next_server" must be a value between 0 and n_servers-1.
 	if (next_server < 0 || next_server >= n_servers)

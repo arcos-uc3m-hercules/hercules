@@ -186,6 +186,10 @@ typedef struct
 	char type; // = 'D';
 	// Policy that was followed in order to write the dataset.
 	char policy[MAX_POLICY_LEN];
+	// Original name when the data was created for the first time, need it for policy CRC16_ in distributed operation rename
+	char original_name[URI_];
+	// first parent directory.
+	char first_parent_dir[URI_];
 	int32_t session_plcy;
 	// Number of data elements conforming the dataset entity.
 	int32_t num_data_elem;
@@ -201,8 +205,7 @@ typedef struct
 	int32_t local_conn;
 	// Actual size
 	int64_t size;
-	// Original name when the data was created for the first time, need it for policy CRC16_ in distributed operation rename
-	char original_name[256];
+	
 	// N_servers
 	int32_t n_servers;
 	/*************** USED EXCLUSIVELY BY LOCAL DATASETS ***************/
@@ -638,6 +641,8 @@ RETURNS:	0 - Resources were released successfully.
 	int32_t imss_comm_cleanup();
 
 	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
+
+	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
 
 	/**
 	 * Disk methods.

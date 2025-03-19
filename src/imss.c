@@ -197,7 +197,7 @@ Get_fd(int32_t *pos,
 int32_t imss_check(char *dataset_uri)
 {
 	imss imss_;
-	slog_live("[imss_check] imssd->len=%d", imssd->len);
+	slog_live(" imssd->len=%d", imssd->len);
 	// Traverse the whole set of IMSS structures in order to find the one.
 	for (int32_t i = 0; i < imssd->len; i++)
 	{
@@ -206,7 +206,7 @@ int32_t imss_check(char *dataset_uri)
 		int32_t imss_uri_len = strlen(imss_.info.uri_);
 		// int32_t dataset_uri_len = strlen(dataset_uri);
 		// int32_t length = MAX(dataset_uri_len, imss_uri_len);
-		slog_live("[imss_check] data_uri=%s, imss_.info.uri_=%s, imss_uri_len=%d", dataset_uri, imss_.info.uri_, imss_uri_len);
+		slog_live(" data_uri=%s, imss_.info.uri_=%s, imss_uri_len=%d", dataset_uri, imss_.info.uri_, imss_uri_len);
 		// if ((imss_uri_len > 0) && !strncmp(dataset_uri, imss_.info.uri_, length))
 		if ((imss_uri_len > 0) && !strncmp(dataset_uri, imss_.info.uri_, imss_uri_len))
 			return i;
@@ -506,25 +506,47 @@ uint32_t discover_stat_srv(const char *_uri)
 // Method retrieving the whole set of elements contained by a specific URI.
 uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 {
+	char *last = requested_uri + strlen(requested_uri) - 1;
+	if (last[0] != '/')
+	{
+		strcat(requested_uri, "/");
+	}
+
 	int ret = 0;
 	// Discover the metadata server that shall deal with the former URI.
 	// uint32_t m_srv = discover_stat_srv(requested_uri);
-	// uint32_t m_srv = find_server(n_stat_servers, 0, requested_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// m_srv = find_server(n_stat_servers, 0, requested_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	char first_parent_dir[URI_];
+	uint32_t m_srv = 0;
+	int number_metadata_servers = 0;
+	int first_parent_offset = find_first_parent_dir(requested_uri, first_parent_dir);
+	slog_debug("requested_uri=%s, first_parent_dir=%s, first_parent_offset=%d", requested_uri, first_parent_dir, first_parent_offset);
+	if (first_parent_offset > 0)
+	{
+		m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+		number_metadata_servers = 1;
+	}
+	else
+	{
+		number_metadata_servers = n_stat_servers;
+	}
 
 	pthread_mutex_lock(&lock_network);
 	char getdir_req[REQUEST_SIZE];
 	uint32_t total_num_elements = 0;
 
-	char **arr_elements = (char **)malloc(n_stat_servers * sizeof(char *));
-	int arr_lengths[n_stat_servers]  = {0};
+	char **arr_elements = (char **)malloc(number_metadata_servers * sizeof(char *));
+	int arr_lengths[number_metadata_servers] = {0};
+	// int root_found = 0;
+
 	// Search in all servers.
-	for (int m_srv = 0; m_srv < n_stat_servers; m_srv++)
+	for (int i = m_srv; i < m_srv + number_metadata_servers; i++)
 	{
-		ucp_ep_h ep = stat_eps[m_srv];
+		ucp_ep_h ep = stat_eps[i];
 
 		// GETDIR request.
-		sprintf(getdir_req, "%" PRIu32 " GET %d %s", stat_ids[m_srv], GETDIR, requested_uri);
-		slog_debug("[IMSS] Request - %s", getdir_req);
+		sprintf(getdir_req, "%" PRIu32 " GET %d %s", stat_ids[i], GETDIR, requested_uri);
+		slog_debug("[IMSS] Request to metadata %d - %s", i, getdir_req);
 		if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, getdir_req) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -563,35 +585,72 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 			free(elements);
 			return -1;
 		}
+
+		if (!strncmp(empty_directory_msg, (const char *)elements, strlen(empty_directory_msg)))
+		{
+			pthread_mutex_unlock(&lock_network);
+			// perror("HERCULES_ERR_GET_DIR_NODIR");
+			// slog_error("HERCULES_ERR_GET_DIR_NODIR");
+			slog_debug("Empty directory for metadata server %d", i);
+			arr_lengths[i] = 0;
+			free(elements);
+			continue;
+		}
+
+		// if (!root_found && !strncmp(elements, "imss://", URI_))
+		// { // TODO: change "imss:// to a variable."
+		// 	root_found = 1;
+		// }
+		// else
+		// {
+		// 	// Skip the first element.
+		// 	ret -= URI_;
+		// 	// elements += URI_;
+		// }
+
 		uint32_t elements_size = ret;
 		uint32_t num_elements = elements_size / URI_;
 		total_num_elements += num_elements;
 		// *items = (char **)calloc(num_elements, sizeof(char *));
-		arr_elements[m_srv] = elements;
-		arr_lengths[m_srv] = num_elements;
+		arr_elements[i] = elements;
+		arr_lengths[i] = num_elements;
 	}
 
 	// Identify each element within the buffer provided.
+	total_num_elements++;
 	*items = (char **)calloc(total_num_elements, sizeof(char *));
-	int pos = 0;
-	for (int m_srv = 0; m_srv < n_stat_servers; m_srv++)
+	(*items)[0] = (char *)calloc(URI_, 1);
+	memcpy((*items)[0], requested_uri, URI_);
+
+	int pos = 1;
+	// for (int i = 0; i < number_metadata_servers; i++)
+	for (int i = m_srv; i < m_srv + number_metadata_servers; i++)
 	{
 		// char *curr = (char *)elements;
-		slog_debug("arr_lengths[%d]=%d, total_num_elements=%d", m_srv, arr_lengths[m_srv], total_num_elements);
-		char *curr = (char *)arr_elements[m_srv];
-		for (int32_t i = 0; i < arr_lengths[m_srv]; i++)
+		slog_debug("arr_lengths[%d]=%d, total_num_elements=%d", i, arr_lengths[i], total_num_elements);
+		char *curr = (char *)arr_elements[i];
+		for (int32_t j = 0; j < arr_lengths[i]; j++)
 		{
-			// slog_debug("[IMSS] item %d -- calloc", i);
+
+			// slog_debug("[IMSS] item %d -- calloc", j);
 			(*items)[pos] = (char *)calloc(URI_, 1);
-			// slog_debug("[IMSS] item %d -- memcpy", i);
+			// slog_debug("[IMSS] item %d -- memcpy", j);
+
+			// if (!root_found && !strncmp(curr, "imss://", URI_))
+			// {
+			// 	root_found = 1;
+			// 	(*items)[pos] = NULL;
+			// } else {
 			memcpy((*items)[pos], curr, URI_);
+			// }
+
 			pos++;
-			//(*items)[i] = elements;
-			// slog_debug("[IMSS] item %d -- curr+=URI", i);
+			//(*items)[j] = elements;
+			// slog_debug("[IMSS] item %d -- curr+=URI", j);
 			curr += URI_;
-			// slog_debug("[IMSS] item %d: %s", i, (*items)[i]);
+			// slog_debug("[IMSS] item %d: %s", j, (*items)[j]);
 		}
-		free(arr_elements[m_srv]);
+		// free(arr_elements[m_srv]);
 	}
 
 	// free(elements);
@@ -691,8 +750,7 @@ int32_t open_imss(char *imss_uri)
 
 		char request[REQUEST_SIZE];
 		sprintf(request, "%" PRIu32 " GET %s", process_rank, "HELLO!JOIN");
-		slog_live("session_policy ip_address=%s:%d", new_imss.info.ips[i], new_imss.info.conn_port);
-		// fprintf(stderr, "session_policy ip_address=%s:%d\n", new_imss.info.ips[i], new_imss.info.conn_port);
+		slog_live("ip_address=%s:%d", new_imss.info.ips[i], new_imss.info.conn_port);
 
 		if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
 		{
@@ -943,7 +1001,19 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 
 	// Discover the metadata server that handles the IMSS instance.
 	// uint32_t m_srv = discover_stat_srv(imss_uri);
-	uint32_t m_srv = find_server(n_stat_servers, 0, imss_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// uint32_t m_srv = find_server(n_stat_servers, 0, imss_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	char first_parent_dir[URI_];
+	uint32_t m_srv = 0;
+	// int number_data_servers = 0;
+	int first_parent_offset = find_first_parent_dir(imss_uri, first_parent_dir);
+	slog_debug("imss_uri=%s, first_parent_dir=%s, first_parent_offset=%d", imss_uri, first_parent_dir, first_parent_offset);
+	// if (first_parent_offset > 0)
+	// {
+	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// number_data_servers = 1;
+	// } else {
+	// number_data_servers = n_stat_servers;
+	// }
 
 	ep = stat_eps[m_srv];
 
@@ -999,7 +1069,21 @@ int32_t stat_imss_info(char *imss_uri, imss_info *imss_info_)
 
 	// Discover the metadata server that handles the IMSS instance.
 	// uint32_t m_srv = discover_stat_srv(imss_uri);
-	uint32_t m_srv = find_server(n_stat_servers, 0, imss_uri, GET, TYPE_METADATA_SERVER, imss_info_->session_plcy);
+	// uint32_t m_srv = find_server(n_stat_servers, 0, imss_uri, GET, TYPE_METADATA_SERVER, imss_info_->session_plcy);
+	char first_parent_dir[URI_];
+	uint32_t m_srv = 0;
+	// int number_data_servers = 0;
+	int first_parent_offset = find_first_parent_dir(imss_uri, first_parent_dir);
+	slog_debug("imss_uri=%s, first_parent_dir=%s, first_parent_offset=%d", imss_uri, first_parent_dir, first_parent_offset);
+	// if (first_parent_offset > 0)
+	// {
+	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// number_data_servers = 1;
+	// }
+	// else
+	// {
+	// number_data_servers = n_stat_servers;
+	// }
 
 	ep = stat_eps[m_srv];
 
@@ -1119,20 +1203,25 @@ int32_t create_dataset(char *dataset_uri,
 	dataset_info new_dataset;
 
 	// Checks if parent directories exists.
-	char *last = dataset_uri + strlen(dataset_uri) - 1;
-	slog_live("last=%s", last);
-	if (last[0] == '/')
-	{
-		last[0] = '\0';
-	}
-	int offset = 0;
+	// char *last = dataset_uri + strlen(dataset_uri) - 1;
+	// slog_live("last=%s", last);
+	// if (last[0] == '/')
+	// {
+	// 	last[0] = '\0';
+	// }
+	int offset = 0, first_parent_offset = 0;
 	// Skip the uri "imss://", and iterates the "dataset_uri" to
 	// find the parent directory position.
-	for (int j = strlen("imss://"); j < strlen(dataset_uri); ++j)
+	// TODO: change "imss://" to a variable from the configuration file.
+	for (int j = strlen("imss://"); j < strlen(dataset_uri) - 1; ++j)
 	{
-		slog_live("dataset_uri[%d]=%c", j, dataset_uri[j]);
+		// slog_live("dataset_uri[%d]=%c", j, dataset_uri[j]);
 		if (dataset_uri[j] == '/')
 		{
+			if (!first_parent_offset)
+			{ // Search for the first directory offset on the path.
+				first_parent_offset = j;
+			}
 			offset = j;
 		}
 	}
@@ -1145,7 +1234,11 @@ int32_t create_dataset(char *dataset_uri,
 		slog_live("parent directory = %s", parent_dir);
 		if ((ret = stat_dataset(parent_dir, &new_dataset, 0)) <= 0)
 		{
-			slog_error("parent directory %s does not exists", parent_dir);
+			/********** TO CHECK */
+			char err_msg[MAX_ERR_MSG_LEN];
+			sprintf(err_msg, "Parent directory %s does not exists", parent_dir);
+			slog_error("%s", err_msg);
+			perror(err_msg);
 			return -ENOENT;
 		}
 	}
@@ -1188,6 +1281,20 @@ int32_t create_dataset(char *dataset_uri,
 	new_dataset.local_conn = associated_imss.conns.matching_server;
 	new_dataset.size = 0;
 
+	char first_parent_dir[PATH_MAX];
+	find_first_parent_dir(new_dataset.uri_, first_parent_dir);
+
+	// if (first_parent_offset > 0)
+	// {
+	// 	strncpy(new_dataset.first_parent_dir, dataset_uri, first_parent_offset);
+	// 	new_dataset.first_parent_dir[first_parent_offset - 1] = '\0';
+	// }
+	// else
+	// {
+	// 	strcpy(new_dataset.first_parent_dir, new_dataset.uri_);
+	// }
+	slog_debug("dataset_uri=%s, first_parent_dir=%s", dataset_uri, first_parent_dir);
+
 	if (opened == 1)
 	{ // the dataset is created by an 'open' syscall.
 		new_dataset.n_open = 1;
@@ -1196,22 +1303,22 @@ int32_t create_dataset(char *dataset_uri,
 	{ // the dataset is created by another syscall.
 		new_dataset.n_open = 0;
 	}
-	// mark the file as attach. It helps to delete the file in case of a delete and close.
+	// mark the file as attach. It helps to delete the file in case of a close and delete.
 	strncpy(new_dataset.status, "attach", strlen("attach"));
 
-	if (link != NO_LINK)
+	if (link == NO_LINK)
 	{
-		strcpy(new_dataset.link, link);
-		slog_live("[IMSS][create_dataset] link=%s, new_dataset=%s", link, new_dataset.link);
-		new_dataset.is_link = 1;
+		slog_live("[IMSS] link=%s", link);
+		new_dataset.is_link = 0;
 	}
 	else
 	{
-		slog_live("[IMSS][create_dataset] link=%s", link);
-		new_dataset.is_link = 0;
+		strcpy(new_dataset.link, link);
+		slog_live("[IMSS] link=%s, new_dataset=%s", link, new_dataset.link);
+		new_dataset.is_link = 1;
 	}
 
-	slog_live("[IMSS][create_dataset] curr_imss.info.num_storages=%d, n_servers=%d, num_active_storages=%d", curr_imss.info.num_storages, n_servers, curr_imss.info.num_active_storages);
+	slog_live("[IMSS] curr_imss.info.num_storages=%d, n_servers=%d, num_active_storages=%d", curr_imss.info.num_storages, n_servers, curr_imss.info.num_active_storages);
 	// if (n_servers > 0 && n_servers <= curr_imss.info.num_storages)
 	{
 		new_dataset.n_servers = n_servers;
@@ -1255,35 +1362,41 @@ int32_t create_dataset(char *dataset_uri,
 	// else
 	new_dataset.type = 'D';
 
-	slog_live("[IMSS][create_dataset] new_dataset.type=%c, local_conn=%d, new_dataset.n_servers_when_created=%d", new_dataset.type, associated_imss.conns.matching_server, new_dataset.n_servers_when_created);
+	slog_live("[IMSS] new_dataset.type=%c, local_conn=%d, new_dataset.n_servers_when_created=%d", new_dataset.type, associated_imss.conns.matching_server, new_dataset.n_servers_when_created);
+
+	// to find the first parent subdirectory after root.
 
 	// Discover the metadata server that handle the new dataset.
 	// uint32_t m_srv = discover_stat_srv(new_dataset.uri_);
-	uint32_t m_srv = find_server(n_stat_servers, 0, new_dataset.uri_, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-
+	// uint32_t m_srv = find_server(n_stat_servers, 0, new_dataset.uri_, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	uint32_t m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
 	char formated_uri[REQUEST_SIZE];
-	// sprintf(formated_uri, "%" PRIu32 " SET %lu %s", stat_ids[m_srv], msg_size, new_dataset.uri_);
 	sprintf(formated_uri, "%" PRIu32 " SET %lu %s", opened, msg_size, new_dataset.uri_);
-	slog_info("[IMSS][create_dataset] Request - '%s'", formated_uri);
-
-	pthread_mutex_lock(&lock_network);
-	ep = stat_eps[m_srv];
-	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
+	// for (int m_srv = 0; m_srv < n_stat_servers; m_srv++)
 	{
-		pthread_mutex_unlock(&lock_network);
-		perror("HERCULES_ERR_CREATEDATASET_SENDREQ");
-		slog_error("HERCULES_ERR_CREATEDATASET_SENDREQ");
-		return -1;
-	}
+		slog_info("[IMSS] Request to metadata server %d - '%s'", m_srv, formated_uri);
+		// sprintf(formated_uri, "%" PRIu32 " SET %lu %s", stat_ids[m_srv], msg_size, new_dataset.uri_);
 
-	// slog_live("[IMSS][create_dataset] dataset_create: sending dataset_info");
-	// Send the new dataset metadata structure to the metadata server entity.
-	if (send_dynamic_stream(ucp_worker_meta, ep, (void *)&new_dataset, DATASET_INFO, local_meta_uid) < 0)
-	{
+		pthread_mutex_lock(&lock_network);
+		ep = stat_eps[m_srv];
+		if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			perror("HERCULES_ERR_CREATEDATASET_SENDREQ");
+			slog_error("HERCULES_ERR_CREATEDATASET_SENDREQ");
+			return -1;
+		}
+
+		// slog_live("[IMSS] dataset_create: sending dataset_info");
+		// Send the new dataset metadata structure to the metadata server entity.
+		if (send_dynamic_stream(ucp_worker_meta, ep, (void *)&new_dataset, DATASET_INFO, local_meta_uid) < 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			slog_error("HERCULES_ERR_CREATEDATASET_SENDSTREAM");
+			perror("HERCULES_ERR_CREATEDATASET_SENDSTREAM");
+			return -1;
+		}
 		pthread_mutex_unlock(&lock_network);
-		slog_error("HERCULES_ERR_CREATEDATASET_SENDSTREAM");
-		perror("HERCULES_ERR_CREATEDATASET_SENDSTREAM");
-		return -1;
 	}
 
 	// slog_live("[IMSS] dataset_create: sent dataset_info");
@@ -1311,7 +1424,6 @@ int32_t create_dataset(char *dataset_uri,
 	// Add the created struture into the underlying IMSSs.
 	ret = GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
 	slog_live("[IMSS] dataset_create: GIsinsert %d", ret);
-	pthread_mutex_unlock(&lock_network);
 	return ret;
 }
 
@@ -1627,7 +1739,21 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 
 	// Discover the metadata server that handles the dataset.
 	// uint32_t m_srv = discover_stat_srv((char *)dataset_uri);
-	uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	char first_parent_dir[URI_];
+	uint32_t m_srv = 0;
+	// int number_data_servers = 0;
+	int first_parent_offset = find_first_parent_dir((char *)dataset_uri, first_parent_dir);
+	slog_debug("dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", dataset_uri, first_parent_dir, first_parent_offset);
+	// if (first_parent_offset > 0)
+	// {
+	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// number_data_servers = 1;
+	// }
+	// else
+	// {
+	// number_data_servers = n_stat_servers;
+	// }
 
 	ep = stat_eps[m_srv];
 
@@ -1725,7 +1851,6 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 // Method deleting a dataset.
 int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
 {
-	pthread_mutex_lock(&lock_network);
 	ucp_ep_h ep;
 	// Formated dataset uri to be sent to the metadata server.
 	char formated_uri[REQUEST_SIZE];
@@ -1733,7 +1858,21 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
 
 	// Discover the metadata server that handles the dataset.
 	// uint32_t m_srv = discover_stat_srv((char *)dataset_uri);
-	uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	char first_parent_dir[URI_];
+	uint32_t m_srv = 0;
+	// int number_data_servers = 0;
+	int first_parent_offset = find_first_parent_dir((char *)dataset_uri, first_parent_dir);
+	slog_debug("dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", dataset_uri, first_parent_dir, first_parent_offset);
+	// if (first_parent_offset > 0)
+	// {
+	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// number_data_servers = 1;
+	// }
+	// else
+	// {
+	// number_data_servers = n_stat_servers;
+	// }
 
 	ep = stat_eps[m_srv];
 
@@ -1741,6 +1880,8 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
 	sprintf(formated_uri, "%d GET 4 %s", 4, dataset_uri); // delete
 
 	slog_debug("[IMSS][delete_dataset] formated_uri='%s'", formated_uri);
+
+	pthread_mutex_lock(&lock_network);
 
 	// Send the request.
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
@@ -1840,33 +1981,42 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 			g_array_insert_val(datasetd, i, dataset_info_);
 		}
 	}
-	pthread_mutex_lock(&lock_network);
 	/*********RENAME METADATA*******/
 	// Formated dataset uri to be sent to the metadata server.
 	char formated_uri[REQUEST_SIZE];
 
 	// Discover the metadata server that handles the dataset.
 	// uint32_t m_srv = discover_stat_srv((char *)old_dir);
-	uint32_t m_srv = find_server(n_stat_servers, 0, (char *)old_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// uint32_t m_srv = find_server(n_stat_servers, 0, (char *)old_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	char first_parent_dir[URI_];
+	uint32_t m_srv = 0;
+	// int number_data_servers = 0;
+	int first_parent_offset = find_first_parent_dir((char *)old_dir, first_parent_dir);
+	slog_debug("old_dir=%s, first_parent_dir=%s, first_parent_offset=%d", old_dir, first_parent_dir, first_parent_offset);
+	// if (first_parent_offset > 0)
+	// {
+	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// number_data_servers = 1;
+	// }
+	// else
+	// {
+	// number_data_servers = n_stat_servers;
+	// }
 
 	ep = stat_eps[m_srv];
 
+	pthread_mutex_lock(&lock_network);
+
 	// Send the request.
 	sprintf(formated_uri, "%" PRIu32 " GET 6 %s %s", stat_ids[m_srv], old_dir, rdir_dest);
+	slog_debug("Request to metadata %d = %s", m_srv, formated_uri);
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
-		perror("ERR_HERCULES_RENAME_DATASET_METADATA_DIR_DIR_SEND_REQ");
-		slog_error("ERR_HERCULES_RENAME_DATASET_METADATA_DIR_DIR_SEND_REQ");
+		perror("HERCULES_ERR_RENAME_DATASET_METADATA_DIR_DIR_SEND_REQ");
+		slog_error("HERCULES_ERR_RENAME_DATASET_METADATA_DIR_DIR_SEND_REQ");
 		return -1;
 	}
-
-	// char result[RESPONSE_SIZE];
-	// if (recv_data(ucp_worker_meta, ep, result, local_meta_uid, 0) < 0)
-	// {
-	// 	perror("ERRIMSS_RECVDYNAMSTRUCT_RECV");
-	// 	return -1;
-	// }
 
 	size_t msg_length = 0;
 	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
@@ -1915,15 +2065,28 @@ rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 	}
 
 	/*********RENAME METADATA*******/
-	pthread_mutex_lock(&lock_network);
 	// Formated dataset uri to be sent to the metadata server.
 	char formated_uri[REQUEST_SIZE];
 
 	// Discover the metadata server that handles the dataset.
 	// uint32_t m_srv = discover_stat_srv((char *)old_dataset_uri);
-	uint32_t m_srv = find_server(n_stat_servers, 0, (char *)old_dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// uint32_t m_srv = find_server(n_stat_servers, 0, (char *)old_dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	char first_parent_dir[URI_];
+	uint32_t m_srv = 0;
+	// int number_data_servers = 0;
+	int first_parent_offset = find_first_parent_dir((char *)old_dataset_uri, first_parent_dir);
+	slog_debug("old_dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", old_dataset_uri, first_parent_dir, first_parent_offset);
+	// if (first_parent_offset > 0)
+	// {
+	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// // number_data_servers = 1;
+	// } else {
+	// number_data_servers = n_stat_servers;
+	// }
 
 	ep = stat_eps[m_srv];
+
+	pthread_mutex_lock(&lock_network);
 
 	// Send the request.
 	sprintf(formated_uri, "%" PRIu32 " GET 5 %s %s", stat_ids[m_srv], old_dataset_uri, new_dataset_uri);
@@ -1977,7 +2140,6 @@ rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 // Send a query to the metadata server to tell it a client is opening a local dataset.
 int32_t open_local_dataset(const char *dataset_uri, int opened)
 {
-	pthread_mutex_lock(&lock_network);
 	int ret = 0;
 	ucp_ep_h ep;
 
@@ -1987,9 +2149,25 @@ int32_t open_local_dataset(const char *dataset_uri, int opened)
 
 	// Discover the metadata server that handles the dataset.
 	// uint32_t m_srv = discover_stat_srv((char *)dataset_uri);
-	uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	char first_parent_dir[URI_];
+	uint32_t m_srv = 0;
+	// int number_data_servers = 0;
+	int first_parent_offset = find_first_parent_dir((char *)dataset_uri, first_parent_dir);
+	slog_debug("dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", dataset_uri, first_parent_dir, first_parent_offset);
+	// if (first_parent_offset > 0)
+	// {
+	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// number_data_servers = 1;
+	// }
+	// else
+	// {
+	// number_data_servers = n_stat_servers;
+	// }
 
 	ep = stat_eps[m_srv];
+
+	pthread_mutex_lock(&lock_network);
 
 	// sprintf(formated_uri, "%" PRIu32 " GET 0 %s", stat_ids[m_srv], dataset_uri);
 	sprintf(formated_uri, "%" PRIu32 " GET 8 %s", opened, dataset_uri);
@@ -2049,7 +2227,6 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 	ucp_ep_h ep;
 
 	slog_live("[IMSS] opened=%d, datasetd->len=%d", opened, datasetd->len);
-	// fprintf(stderr, "[IMSS] opened=%d, datasetd->len=%d\n", opened, datasetd->len);
 
 	// Search for the requested dataset in the local vector.
 	for (int32_t i = 0; i < datasetd->len; i++)
@@ -2064,15 +2241,31 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 		}
 	}
 
-	pthread_mutex_lock(&lock_network);
 	// Formated dataset uri to be sent to the metadata server.
 	char formated_uri[REQUEST_SIZE];
+	char first_parent_dir[URI_];
+	uint32_t m_srv = 0;
 
 	// Discover the metadata server that handles the dataset.
 	// uint32_t m_srv = discover_stat_srv((char *)dataset_uri);
-	uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// int number_data_servers = 0;
+	int first_parent_offset = find_first_parent_dir((char *)dataset_uri, first_parent_dir);
+	slog_debug("dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", dataset_uri, first_parent_dir, first_parent_offset);
+	// if (first_parent_offset > 0)
+	// {
+	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	// number_data_servers = 1;
+	// }
+	// else
+	// {
+	// number_data_servers = n_stat_servers;
+	// }
 
 	ep = stat_eps[m_srv];
+
+	pthread_mutex_lock(&lock_network);
+
 	// sprintf(formated_uri, "%" PRIu32 " GET 0 %s", stat_ids[m_srv], dataset_uri);
 	sprintf(formated_uri, "%" PRIu32 " GET 0 %s", opened, dataset_uri);
 	slog_live("Request - %s", formated_uri);
@@ -2099,19 +2292,20 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 	}
 
 	// Receive the associated structure.
-	// void *data = NULL;
 	void *data = malloc(msg_len * sizeof(char));
 	ret = recv_dynamic_stream(ucp_worker_meta, ep, data, DATASET_INFO, local_meta_uid, msg_len);
 	if (ret < 0)
 	{
 		pthread_mutex_unlock(&lock_network);
-		slog_warn("[IMSS][stat_dataset] dataset does not exist, req=%s.", formated_uri);
+		slog_warn("[IMSS] dataset does not exist, req=%s", formated_uri);
 		free(data);
 		return 0;
 	}
 	pthread_mutex_unlock(&lock_network);
+
 	memcpy(dataset_info_, data, sizeof(dataset_info));
 	free(data);
+
 	return 1;
 }
 
@@ -2183,8 +2377,8 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 		{
 			if ((server = find_server(num_storages, data_id, curr_dataset.uri_, op_type, TYPE_DATA_SERVER, curr_dataset.session_plcy)) < 0)
 			{
-				perror("ERR_HERCULES_FIND_SERVER");
-				slog_fatal("ERR_HERCULES_FIND_SERVER");
+				perror("HERCULES_ERR_FIND_SERVER");
+				slog_fatal("HERCULES_ERR_FIND_SERVER");
 				return -1;
 			}
 
@@ -3709,32 +3903,63 @@ char **get_dataloc(const char *dataset,
 	return machines;
 }
 
+int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir)
+{
+	int first_parent_offset = 0;
+	size_t uri_len = strlen(dataset_uri);
+	for (int j = strlen("imss://"); j < uri_len; ++j)
+	{
+		if (dataset_uri[j] == '/')
+		{
+			// if (!first_parent_offset)
+			{ // Search for the first directory offset on the path.
+				first_parent_offset = j;
+				break;
+			}
+		}
+	}
+
+	if (first_parent_offset > 0)
+	{
+		strncpy(first_parent_dir, dataset_uri, first_parent_offset);
+		first_parent_dir[first_parent_offset] = '\0'; // To ensure null-termination.
+	}
+	else
+	{
+		strcpy(first_parent_dir, dataset_uri);
+	}
+	return first_parent_offset;
+}
+
 // Method specifying the type (DATASET or IMSS INSTANCE) of a provided URI.
 int32_t get_type(const char *uri)
 {
-	// pthread_mutex_lock(&lock_op);
 	ucp_ep_h ep;
 	// Formated uri to be sent to the metadata server.
-	pthread_mutex_lock(&lock_network);
 	char formated_uri[REQUEST_SIZE];
+	char first_parent_dir[URI_];
+	int32_t ret = -1;
+
+	find_first_parent_dir(uri, first_parent_dir);
+	slog_debug("uri=%s, first_parent_dir=%s", uri, first_parent_dir);
 
 	// Discover the metadata server that handles the entity.
 	// uint32_t m_srv = discover_stat_srv(uri);
-	uint32_t m_srv = find_server(n_stat_servers, 0, uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-	int32_t ret;
+	// uint32_t m_srv = find_server(n_stat_servers, 0, uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	uint32_t m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
 
 	ep = stat_eps[m_srv];
 
+	pthread_mutex_lock(&lock_network);
+
 	sprintf(formated_uri, "%d GET 0 %s", 0, uri);
-	slog_info("[IMSS] Request - '%s'", formated_uri);
-	// printf("get_type=%s",uri);
+	slog_info("[IMSS] Request to metadata %d - '%s'", m_srv, formated_uri);
 	// Send the request.
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
-		// pthread_mutex_unlock(&lock_op);
-		slog_error("HERCULES_ERR_GET_TYPE_SEND_ADDR");
 		perror("HERCULES_ERR_GET_TYPE_SEND_ADDR");
+		slog_error("HERCULES_ERR_GET_TYPE_SEND_ADDR");
 		return -1;
 	}
 
@@ -3751,7 +3976,6 @@ int32_t get_type(const char *uri)
 		slog_error("HERCULES_ERR_GET_TYPE_GET_RECV_DATA_LENGTH");
 		return -1;
 	}
-	// slog_debug("[IMSS][get_type] length=%ld, NUM_DATA_SERVERS=%d", length, NUM_DATA_SERVERS);
 	result = malloc(length);
 
 	ret = recv_dynamic_stream(ucp_worker_meta, ep, result, BUFFER, local_meta_uid, length);
@@ -3773,23 +3997,19 @@ int32_t get_type(const char *uri)
 	// Determine what was retrieved from the metadata server.
 	if (data->type == 'I')
 	{
-		// return 1;
 		ret = 1;
 	}
 	else if (data->type == 'D' || data->type == 'L')
 	{
-		// return 2;
 		ret = 2;
 	}
 	else
 	{
 		ret = 0;
 	}
-	// pthread_mutex_unlock(&lock_op);
-
 	free(result);
-	// return 0;
 	pthread_mutex_unlock(&lock_network);
+
 	return ret;
 }
 

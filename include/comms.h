@@ -47,6 +47,10 @@ static const ucp_tag_t tag_data = 0x2337a880u;
 static const ucp_tag_t tag_reply = 0x3337a880u;
 static const ucp_tag_t tag_mask = UINT64_MAX;
 
+// Common messages between front and back ends.
+static char empty_directory_msg[] = "EMPTY_DIRECTORY\0";
+
+
 /**
  * Macro to measure the time spend by function_to_call.
  * char*::print_comment: comment to be concatenated to the elapsed time.

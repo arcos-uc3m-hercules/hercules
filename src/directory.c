@@ -261,7 +261,7 @@ GTree_insert(char *desired_data)
 	{
 		if (GTree_search(tree_root, desired_data, &closest_node))
 		{
-			slog_debug("closest_node=%s", closest_node);
+			slog_debug("closest_node=%s", closest_node->data);
 			return 0;
 		}
 	}
@@ -321,8 +321,8 @@ serialize_dir_childrens(GNode *visited_node,
 						char **buffer)
 {
 	// Add the concerned uri into the buffer.
-	memcpy(*buffer, (char *)visited_node->data, URI_);
-	*buffer += URI_;
+	// memcpy(*buffer, (char *)visited_node->data, URI_);
+	// *buffer += URI_;
 
 	GNode *child = visited_node->children;
 	// printf("node=%s  num_children=%d\n",(char *) visited_node->data,num_children);
@@ -397,8 +397,10 @@ GTree_getdir(char *desired_dir,
 	GNode *dir_node;
 
 	// Check if the node is inserted.
-	if (!GTree_search(tree_root, desired_dir, &dir_node))
+	if (!GTree_search(tree_root, desired_dir, &dir_node)) {
+		*numdir_elems = -1;
 		return NULL;
+	}
 
 	// Number of elements contained by the concerned directory.
 	// uint32_t num_elements_indir = g_node_n_nodes (dir_node, G_TRAVERSE_ALL);
@@ -407,8 +409,16 @@ GTree_getdir(char *desired_dir,
 
 	// Number of children of the directory node.
 	uint32_t num_children = g_node_n_children(dir_node);
-	*numdir_elems = num_children + 1; //+1 because of the actual directory + childrens
+	// *numdir_elems = num_children + 1; //+1 because of the actual directory + childrens
+	*numdir_elems = num_children; //+1 because of the actual directory + childrens
+	
 	slog_info("num_children=%d", *numdir_elems);
+
+	if (*numdir_elems == 0)
+	{
+		return NULL;
+	}
+	
 
 	// Buffer containing the whole set of elements within a certain directory.
 	// char *dir_elements = (char *) malloc(sizeof(char)*num_elements_indir*URI_);
@@ -417,7 +427,7 @@ GTree_getdir(char *desired_dir,
 
 	// Call the serialization function storing all dir elements in the buffer.
 	// TO CHECK!
-	slog_info("serialize_dir_childrens(dir_node=%s, num_children=%d, &aux_dir_elem)", dir_node, num_children);
+	slog_info("serialize_dir_childrens(dir_node=%s, num_children=%d, &aux_dir_elem)", dir_node->data, num_children);
 	serialize_dir_childrens(dir_node, num_children, &aux_dir_elem);
 	slog_info("ending serialize_dir_childrens, aux_dir_elem=%s", aux_dir_elem);
 

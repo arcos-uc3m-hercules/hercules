@@ -118,7 +118,7 @@ int ready(char *tmp_file_path, const char *msg)
 		return -1;
 	}
 
-	//fprintf(stderr, "Writting status %s (%zu bytes) file in: %s\n", msg, strlen(status), tmp_file_path);
+	// fprintf(stderr, "Writting status %s (%zu bytes) file in: %s\n", msg, strlen(status), tmp_file_path);
 
 	// if there was an error in the initialization of the server,
 	// we kill the process.
@@ -1408,7 +1408,8 @@ void *Checkpoint(void *th_argv)
 			fprintf(stderr, "Waiting for signal to unlock Checkpoint in server %d\n", server_id);
 			pthread_cond_wait(&global_run_checkpoint_cond, &mutex_checkpoint);
 			pthread_mutex_unlock(&mutex_checkpoint);
-			if (map->get_buffer_size() == 0) { // if there is no data to copy to disk, we will finish the snapshot.
+			if (map->get_buffer_size() == 0)
+			{ // if there is no data to copy to disk, we will finish the snapshot.
 				break;
 			}
 			continue;
@@ -1481,7 +1482,8 @@ void *Snapshot(void *th_argv)
 			fprintf(stderr, "Waiting for signal to unlock snapshot in server %d\n", server_id);
 			pthread_cond_wait(&global_run_snapshot_cond, &mutex_snapshot);
 			pthread_mutex_unlock(&mutex_snapshot);
-			if (map->get_buffer_size() == 0) { // if there is no data to copy to disk, we will finish the snapshot.
+			if (map->get_buffer_size() == 0)
+			{ // if there is no data to copy to disk, we will finish the snapshot.
 				break;
 			}
 			continue;
@@ -1711,7 +1713,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 	// printf("*********worker_metadata raw_msg %s",raw_msg);
 	slog_info("[workers] request received=%s", req);
-	//fprintf(stderr,"Req=%s\n", req);
+	// fprintf(stderr,"Req=%s\n", req);
 
 	// Reference to the client request.
 	// sscanf(raw_msg, "%s", number);
@@ -1750,11 +1752,30 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			pthread_mutex_lock(&tree_mut);
 			slog_info("[workers] Calling GTree_getdir, key=%s", key.c_str());
 			buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
+			if (numelems_indir == -1)
+			{
+				const char *last = key.c_str() + strlen(key.c_str()) - 1;
+				if (last[0] != '/')
+				{
+					key += '/';
+					buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
+				}
+			}
 			slog_info("[workers] Ending GTree_getdir, key=%s, numelems_indir=%d", key.c_str(), numelems_indir);
 			pthread_mutex_unlock(&tree_mut);
-			if (buffer == NULL)
+			// if (buffer == NULL)
+			if (numelems_indir == -1)
 			{
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
+				{
+					perror("HERCULES_ERR_STATWORKER_NODIR");
+					return -1;
+				}
+				break;
+			}
+			if (numelems_indir == 0)
+			{
+				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, empty_directory_msg, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STATWORKER_NODIR");
 					return -1;
@@ -1777,7 +1798,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 			slog_debug("[workers] buffer=%s", buffer);
 
-			char *curr = buffer;
+			// char *curr = buffer;
 			// char *item = (char *)malloc(URI_ * sizeof(char));
 			// for (int32_t i = 0; i < numelems_indir; i++)
 			// {
@@ -1795,6 +1816,16 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			slog_debug("[READ_OP]");
 			// Check if there was an associated block to the key.
 			int err = map->get(key, &address_, &block_size_rtvd);
+			if (err == 0)
+			{
+				const char *last = key.c_str() + strlen(key.c_str()) - 1;
+				if (last[0] != '/')
+				{
+					key += '/';
+					err = map->get(key, &address_, &block_size_rtvd);
+				}
+			}
+
 			slog_debug("[STAT WORKER] map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
 			{
@@ -2021,6 +2052,17 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		{
 			slog_debug("OPEN_OP");
 			int err = map->get(key, &address_, &block_size_rtvd);
+			if (err == 0)
+			{
+				const char *last = key.c_str() + strlen(key.c_str()) - 1;
+				if (last[0] != '/')
+				{
+					key += '/';
+					err = map->get(key, &address_, &block_size_rtvd);
+				}
+				
+			}
+
 			slog_debug("[STAT WORKER] map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
 			{

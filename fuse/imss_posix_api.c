@@ -296,7 +296,6 @@ int imss_getattr(const char *path, struct stat *stbuf)
 	switch (type)
 	{
 	case 0:
-		// free(imss_path);
 		// erase dataset from the local maps.
 		pthread_mutex_lock(&lock_file);
 		map_erase(map, imss_path);
@@ -443,17 +442,16 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 		n_ent = get_dir((char *)imss_path, &buffer, &refs);
 		if (n_ent < 0)
 		{
-			fprintf(stderr, "[IMSS-FUSE]	Error retrieving directories for URI=%s", path);
+			fprintf(stderr, "[IMSS-FUSE]	Error retrieving directories for URI=%s\n", path);
 			return -ENOENT;
 		}
 	}
-	slog_debug("[IMSS]Before flush data");
+	slog_debug("[IMSS] Before flush data");
 
 	// flush_data();
 
 	// Fill buffer
 	// TODO: Check if subdirectory
-	// printf("[FUSE] imss_readdir %s has=%d\n",path, n_ent);
 	slog_debug("[IMSS] imss_readdir %s has=%d", path, n_ent);
 	for (int i = 0; i < n_ent; ++i)
 	{
@@ -472,7 +470,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 			// if (!error)
 			{
 				char *last = refs[i] + strlen(refs[i]) - 1;
-				slog_info("last=%s of %s", last, refs);
+				slog_info("last=%s of %s", last, refs[i]);
 				if (last[0] == '/')
 				{
 					last[0] = '\0';
