@@ -236,9 +236,18 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	// Check if the value did exist within the map.
 	if (it == buffer.end())
 	{
-		// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
-		// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
-		return 0;
+		const char *last = key.c_str() + strlen(key.c_str()) - 1;
+		if (last[0] != '/')
+		{
+			key += '/';
+			it = buffer.find(key);
+		}
+		if (it == buffer.end())
+		{
+			// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
+			// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
+			return 0;
+		}
 	}
 
 	// fprintf(stderr,"GET-%s \n", key.c_str());
@@ -521,6 +530,12 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 		}
 	}
 
+	// check if the vector is empty, meaning that the old key is not valid.
+	if (vec.size() == 0)
+	{
+		return -1;
+	}
+
 	std::vector<string>::iterator i;
 	for (i = vec.begin(); i < vec.end(); i++)
 	{
@@ -620,6 +635,17 @@ int32_t map_records::cleaning_specific(std::string new_key)
 		{
 			vec.insert(vec.begin(), partner_key);
 		}
+	}
+
+	if (vec.size() == 0)
+	{
+		const char *last = new_key.c_str() + strlen(new_key.c_str()) - 1;
+		if (last[0] != '/')
+		{
+			new_key += '/';
+			cleaning_specific(new_key);
+		}
+		return -1;
 	}
 
 	// Block the access to the map structure.
@@ -774,7 +800,6 @@ char *map_records::GetDataOfFile(string file_name, uint64_t *file_size_occupied)
 }
 
 // TODO: make a function to allow each server to write the collected data.
-
 
 /**
  * @brief Merge all data comming from the data servers following a Posix format.
@@ -1099,8 +1124,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 						  block_size,
 						  time_taken_for_collecting,
 						  time_taken_for_merge,
-						  POLICY
-						);
+						  POLICY);
 
 				int find = erase_snapshot_element(key);
 				if (find)
@@ -1387,8 +1411,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 						  block_size,
 						  time_taken_for_collecting,
 						  time_taken_for_merge,
-						  POLICY
-						);
+						  POLICY);
 
 				int find = erase_snapshot_element(key);
 				if (find)

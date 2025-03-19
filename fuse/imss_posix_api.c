@@ -446,8 +446,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 			return -ENOENT;
 		}
 	}
-	slog_debug("[IMSS] Before flush data");
-
+	// slog_debug("[IMSS] Before flush data");
 	// flush_data();
 
 	// Fill buffer
@@ -485,7 +484,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 				}
 
 				// filler(buf, refs[i] + offset + 1, &stbuf, 0); // original
-				// slog_info("refs[i] + offset + 1=%s", refs[i] + offset + 1);
+				slog_info("refs[i] + offset + 1=%s", refs[i] + offset + 1);
 				filler(buf, refs[i] + offset + 1, NULL, 0);
 				// filler(buf, refs[i], NULL, 0);
 			}
@@ -2234,7 +2233,7 @@ int imss_unlink(const char *path)
 
 	// Write initial block (0).
 	memcpy(buff, &header, sizeof(struct stat));
-	slog_debug("[imss_posix_api] header.st_nlink=%lu", header.st_nlink);
+	slog_debug("header.st_nlink=%lu", header.st_nlink);
 	set_data(ds, 0, (char *)buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
@@ -2244,7 +2243,7 @@ int imss_unlink(const char *path)
 		// Those operations must be performed by the server itself when it knows no more process are using the file.
 		// Erase metadata in the backend.
 		ret = delete_dataset(imss_path, ds);
-		slog_debug("[imss_posix_api] delete_dataset %s, ret=%d", imss_path, ret);
+		slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
 
 		switch (ret)
 		{
@@ -2268,7 +2267,7 @@ int imss_unlink(const char *path)
 			slog_debug("[imss_posix_api] relese_dataset ret=%d", ret);
 			if (ret < 0)
 			{
-				slog_error("ERR_HERCULES_RELEASE_DATASET");
+				slog_error("HERCULES_ERR_RELEASE_DATASET");
 			}
 
 			ret = 3;
@@ -2639,7 +2638,7 @@ int imss_rename(const char *old_path, const char *new_path)
 			if (file_desc_o < 0)
 			{
 
-				slog_error("[IMSS-FUSE]    Cannot open dataset.");
+				slog_error("HERCULES_ERR_IMSS_RENAME_CANNOT_OPEN_DATASET");
 				free(new_rpath);
 				return -ENOENT;
 			}
@@ -2677,7 +2676,7 @@ int imss_rename(const char *old_path, const char *new_path)
 
 					// RENAME SRV_WORKER(MAP)
 
-					rename_dataset_srv_worker_dir_dir(old_rpath, new_rpath, fd, 0);
+					rename_dataset_srv_worker_dir_dir(old_rpath, new_rpath, file_desc_o, 0);
 					free(dir_dest);
 					free(rdir_dest);
 					free(old_rpath);

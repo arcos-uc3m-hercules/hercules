@@ -3389,7 +3389,9 @@ extern "C"
 			int32_t type = get_type(new_path);
 			if (type == 0)
 			{
-				strcat(new_path, "/");
+				char *last = new_path + strlen(new_path) - 1;
+				if (last[0] != '/')
+					strcat(new_path, "/");
 				type = get_type(new_path);
 				slog_live("[POSIX] type=%d, new_path=%s", type, new_path);
 				if (type == 2)
@@ -3469,6 +3471,10 @@ extern "C"
 		char *new_path = checkHerculesPath(path);
 		if (new_path != NULL)
 		{
+			char *last = new_path + strlen(new_path) - 1;
+			if (last[0] != '/')
+				strcat(new_path, "/");
+
 			slog_live("[POSIX]. Calling Hercules 'rmdir', new_path=%s", new_path);
 			ret = imss_rmdir(new_path);
 			if (ret == -1)
@@ -3564,7 +3570,9 @@ extern "C"
 			int32_t type = get_type(new_path);
 			if (type == 0)
 			{
-				strcat(new_path, "/");
+				// char *last = new_path + strlen(new_path) - 1;
+				// if (last[0] != '/')
+				// 	strcat(new_path, "/");
 				type = get_type(new_path);
 				slog_live("[POSIX][remove] type=%d, new_path=%s", type, new_path);
 				if (type == 2)

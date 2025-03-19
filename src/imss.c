@@ -354,7 +354,7 @@ int32_t stat_init(char *stat_hostfile,
 	// Open the file containing the IMSS metadata server nodes.
 	if ((stat_nodes = fopen(stat_hostfile, "r+")) == NULL)
 	{
-		char error_msg[500];
+		char error_msg[MAX_ERR_MSG_LEN];
 		sprintf(error_msg, "ERRHERCULES_OPEN_STATFILE: %s", stat_hostfile);
 		perror(error_msg);
 		return -1;
@@ -921,7 +921,7 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 				return -1;
 			}
 
-			slog_debug("[delete_dataset] result=%s, msg_length=%d", (const char *)result, msg_length);
+			slog_debug(" result=%s, msg_length=%d", (const char *)result, msg_length);
 			if (!strncmp((const char *)result, "RELEASE", strlen("RELEASE")))
 			{
 				// free the message received from the metadata server.
@@ -1500,11 +1500,12 @@ int32_t open_dataset(char *dataset_uri, int opened)
 				dataset_info_ = g_array_index(datasetd, dataset_info, i);
 				if (!strcmp(dataset_uri, dataset_info_.uri_))
 				{
-					slog_live("[IMSS] dataset_uri=%s, dataset_info_->uri_=%s", dataset_uri, dataset_info_.uri_);
+					slog_live("i=%d, dataset_uri=%s, dataset_info_->uri_=%s", i, dataset_uri, dataset_info_.uri_);
 					// fprintf(stderr, "[IMSS] dataset_uri=%s, dataset_info_->uri_=%s\n", dataset_uri, dataset_info_.uri_);
 					break;
 				}
 			}
+			slog_debug("g_array -> inserting %s in %d", dataset_info_.uri_, i);
 			curr_dataset = g_array_index(datasetd, dataset_info, i);
 			return i;
 			// return GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
@@ -1879,7 +1880,7 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
 	// sprintf(formated_uri, "%" PRIu32 " GET 4 %s", stat_ids[m_srv], dataset_uri); // delete
 	sprintf(formated_uri, "%d GET 4 %s", 4, dataset_uri); // delete
 
-	slog_debug("[IMSS][delete_dataset] formated_uri='%s'", formated_uri);
+	slog_debug("[IMSS] formated_uri='%s'", formated_uri);
 
 	pthread_mutex_lock(&lock_network);
 
@@ -1898,15 +1899,15 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
 	// 	perror("ERRIMSS_RECVDYNAMSTRUCT_RECV");
 	// 	return -1;
 	// }
-	// slog_debug("[IMSS][delete_dataset] response=%s", result);
+	// slog_debug("[IMSS] response=%s", result);
 
 	size_t msg_length = 0;
 	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
 	if (msg_length < 0)
 	{
 		pthread_mutex_unlock(&lock_network);
-		perror("ERRIMSS_DEL_DATASET_INVALID_MSG_LENGTH");
-		slog_error("ERRIMSS_DEL_DATASET_INVALID_MSG_LENGTH");
+		perror("HERCULES_ERR_DEL_DATASET_INVALID_MSG_LENGTH");
+		slog_error("HERCULES_ERR_DEL_DATASET_INVALID_MSG_LENGTH");
 		return -1;
 	}
 
@@ -1917,14 +1918,14 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
 	if (msg_length == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
-		perror("ERR_HERCULES_DEL_DATASET_RECV_DATA");
-		slog_error("ERR_HERCULES_DEL_DATASET_RECV_DATA");
+		perror("HERCULES_ERR_DEL_DATASET_RECV_DATA");
+		slog_error("HERCULES_ERR_DEL_DATASET_RECV_DATA");
 		free(result);
 		return -1;
 	}
 	pthread_mutex_unlock(&lock_network);
 
-	slog_debug("[delete_dataset] result=%s, msg_length=%d", (const char *)result, msg_length);
+	slog_debug(" result=%s, msg_length=%d", (const char *)result, msg_length);
 	if (!strncmp((const char *)result, "NODELETE", strlen("NODELETE")))
 	{
 		// free the message received from the metadata server.
@@ -1959,6 +1960,7 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 
 		if (strstr(dataset_info_.uri_, old_dir) != NULL)
 		{
+			slog_debug("datset_info_.uri=%s, old_dir=%s", dataset_info_.uri_, old_dir);
 			char *path = dataset_info_.uri_;
 
 			size_t len = strlen(old_dir);
@@ -2009,7 +2011,7 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 
 	// Send the request.
 	sprintf(formated_uri, "%" PRIu32 " GET 6 %s %s", stat_ids[m_srv], old_dir, rdir_dest);
-	slog_debug("Request to metadata %d = %s", m_srv, formated_uri);
+	slog_debug("Request to metadata %d - %s", m_srv, formated_uri);
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -2023,26 +2025,31 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	if (msg_length == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
+		perror("ERR_HERCULES_REN_DATASET_METADATA_DIR_DIR_INVALID_MSG_LENGTH");
 		slog_error("ERRIMSS_REN_DATASET_METADATA_DIR_DIR_INVALID_MSG_LENGTH");
-		perror("ERRIMSS_REN_DATASET_METADATA_DIR_DIR_INVALID_MSG_LENGTH");
 		return -1;
 	}
 
-	// char result[msg_length];
-	// char *result = (char *)malloc(msg_length * sizeof(char));
 	void *result = malloc(msg_length);
 	msg_length = recv_data(ucp_worker_meta, ep, result, msg_length, local_meta_uid, 0);
-	// msg_length = recv_data_opt(ucp_worker_meta, ep, result, msg_length, local_meta_uid, 0);
 	if (msg_length == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
-		perror("ERRIMSS_REN_DATASET_METADATA_DIR_DIR_RECV_DATA");
-		slog_error("ERRIMSS_REN_DATASET_METADATA_DIR_DIR_RECV_DATA");
+		perror("ERR_HERCULES_REN_DATASET_METADATA_DIR_DIR_RECV_DATA");
+		slog_error("ERR_HERCULES_REN_DATASET_METADATA_DIR_DIR_RECV_DATA");
 		free(result);
 		return -1;
 	}
-	free(result);
 	pthread_mutex_unlock(&lock_network);
+
+	if (strncmp((const char *)result, "RENAME", strlen("RENAME")))
+	{ // if the response message is different from "RENAME" it was an error.
+		perror("HERCULES_ERR_RENAME_DIR_FAILED");
+		free(result);
+		return -1;
+	}
+
+	free(result);
 	return 0;
 }
 
@@ -2327,7 +2334,7 @@ int32_t set_dataset(char * dataset_uri, unsigned char * buffer, uint64_t offset)
 int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 {
 	// If the current dataset policy was not established yet.
-	slog_debug("[IMSS] dataset_id=%d, current_dataset=%d", dataset_id, current_dataset);
+	slog_debug("dataset_id=%d, current_dataset=%d", dataset_id, current_dataset);
 	// fprintf(stderr,"current_dataset=%d, dataset_id=%d\n", current_dataset, dataset_id);
 
 	// if (current_dataset != dataset_id) // TO FIX: if a thread does not met the condition, their curr_datset could have the value of the previous thread. curr_dataset is global.
@@ -2336,7 +2343,7 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 		curr_dataset = g_array_index(datasetd, dataset_info, dataset_id);
 		// curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
 		curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
-		slog_debug("[IMSS] curr_dataset.uri=%s, curr_dataset.imss_d=%d, curr_dataset.repl_factor=%d, dataset_id=%d, curr_dataset.policy=%s, curr_dataset.n_servers=%d, curr_dataset.n_servers_when_created=%d", curr_dataset.uri_, curr_dataset.imss_d, curr_dataset.repl_factor, dataset_id, curr_dataset.policy, curr_dataset.n_servers, curr_dataset.n_servers_when_created);
+		slog_debug("curr_dataset.uri=%s, curr_dataset.imss_d=%d, curr_dataset.repl_factor=%d, dataset_id=%d, curr_dataset.policy=%s, curr_dataset.n_servers=%d, curr_dataset.n_servers_when_created=%d", curr_dataset.uri_, curr_dataset.imss_d, curr_dataset.repl_factor, dataset_id, curr_dataset.policy, curr_dataset.n_servers, curr_dataset.n_servers_when_created);
 
 		// Set the corresponding.
 		if (set_policy_dataset(&curr_dataset) == -1)
@@ -2452,7 +2459,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 	{
 		ucp_ep_h ep = curr_imss.conns.eps[i];
 
-		sprintf(key_, "GET 6 0 %s %s", old_dir, rdir_dest);
+		sprintf(key_, "GET 6 0 %s,%s", old_dir, rdir_dest);
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);

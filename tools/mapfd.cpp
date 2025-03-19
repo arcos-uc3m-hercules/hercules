@@ -75,20 +75,40 @@ extern "C"
 
 	int map_fd_erase_by_pathname(void *map, const char *pathname)
 	{
+		slog_debug("Erasing %s from the map", pathname);
 		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
+		char aux_path[PATH_MAX] = {0};
+		const char *last = pathname + strlen(pathname) - 1;
+		if (last[0] != '/')
+		{
+			strcat(aux_path, pathname);
+			strcat(aux_path, "/");
+		}
 
 		for (auto &it : *m)
 		{
 			const char *val = it.second.first.c_str();
 			// if (!strncmp(val, pathname, strlen(val)))
-			if (!strcmp(val, pathname))
+			slog_debug("pathname=%s, aux_path=%s", pathname, aux_path);
+			if (!strcmp(val, pathname) || !strcmp(val, aux_path))
 			{
 				int fd = it.first;
 				m->erase(fd);
 				return 1;
 			}
 		}
+		// if (last[0] != '/')
+		// {
+		// 	char aux_path[PATH_MAX] = {0};
+		// 	strcat(aux_path, pathname);
+		// 	strcat(aux_path, "/");
+		// 	int ret = map_fd_erase_by_pathname(map, aux_path);
+		// 	if (ret)
+		// 	{
+		// 		return ret;
+		// 	}
+		// }
 		return -1;
 	}
 

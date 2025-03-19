@@ -481,8 +481,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			ret = send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid);
 			if (ret == 0)
 			{
-				perror("ERR_HERCULES_PUBLISH_DELETEOP");
-				slog_error("ERR_HERCULES_PUBLISH_DELETEOP");
+				perror("HERCULES_ERR_PUBLISH_DELETEOP");
+				slog_error("HERCULES_ERR_PUBLISH_DELETEOP");
 				return -1;
 			}
 			break;
@@ -523,7 +523,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 		case RENAME_DIR_DIR_OP:
 		{
 			// printf("SRV_WORKER RENAME_DIR_DIR_OP");
-			std::size_t found = key.find(' ');
+			std::size_t found = key.find(',');
 			if (found != std::string::npos)
 			{
 				std::string old_dir = key.substr(0, found);
@@ -1685,7 +1685,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 
-	int operation = 0; // server id.
+	uint32_t operation = 0; // server id.
 	char mode[MODE_SIZE];
 	int32_t req_size = 0;
 	char raw_msg[req_size + 1];
@@ -1696,9 +1696,10 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	int num_input_read = 0;
 
 	// Save the request to be served.
-	slog_info("[STAT WORKER] Request - '%s'", req);
+	slog_info("Request - '%s'", req);
 	// num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
-	num_input_read = sscanf(req, "%d %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
+	// num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
+	num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
 
 	if (!strcmp(mode, "GET"))
 		more = GET_OP;
@@ -1712,7 +1713,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	// raw_msg[req_size] = '\0';
 
 	// printf("*********worker_metadata raw_msg %s",raw_msg);
-	slog_info("[workers] request received=%s", req);
+	// slog_info("request received=%s", req);
 	// fprintf(stderr,"Req=%s\n", req);
 
 	// Reference to the client request.
@@ -1724,7 +1725,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	// memcpy(uri, raw_msg, number_length + 1);
 	uint64_t block_size_recv = (uint64_t)atoi(number);
 
-	slog_info("[workers] operation=%d, number=%s, uri=%s, block_size_recv=%ld", operation, number, uri_, block_size_recv);
+	slog_info("operation=%d, number=%s, uri=%s, block_size_recv=%ld, num_characters_read=%d", operation, number, uri_, block_size_recv, num_characters_read);
 
 	// Create an std::string in order to be managed by the map structure.
 	std::string key;
@@ -1750,7 +1751,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			int32_t numelems_indir;
 			// Retrieve all elements inside the requested directory.
 			pthread_mutex_lock(&tree_mut);
-			slog_info("[workers] Calling GTree_getdir, key=%s", key.c_str());
+			slog_info("Calling GTree_getdir, key=%s", key.c_str());
 			buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
 			if (numelems_indir == -1)
 			{
@@ -1788,11 +1789,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			m.size = numelems_indir * URI_;
 			m.data = buffer;
 
-			slog_info("[workers] MSG, numelems_indir=%ld, size=%ld", numelems_indir, m.size);
+			slog_info("numelems_indir=%ld, size=%ld", numelems_indir, m.size);
 
 			if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid) < 0)
 			{
-				perror("ERRIMSS_WORKER_SENDBLOCK");
+				perror("HERCULES_ERR_WORKER_SEND_STREAM_GETDIR");
 				return -1;
 			}
 
@@ -1844,6 +1845,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				// printf("READ_OP SEND data->type=%c",data->type);
 				// Send the requested block.
 				dataset = (dataset_info *)address_;
+				// TODO: check why dataset->n_open is 21893 for imss://
 				slog_debug("Before dataset->n_open=%d", dataset->n_open);
 				// Checks if the clients wants to open the file.
 				switch (operation)
@@ -1882,7 +1884,17 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		{
 			slog_debug("DELETE_OP");
 			int err = map->get(key, &address_, &block_size_rtvd);
-			slog_debug("[STAT WORKER] map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
+			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
+			if (err == 0)
+			{
+				const char *last = key.c_str() + strlen(key.c_str()) - 1;
+				if (last[0] != '/')
+				{
+					key += '/';
+					err = map->get(key, &address_, &block_size_rtvd);
+				}
+			}
+
 			if (err == 0)
 			{
 				// Send the error code block.
@@ -1900,7 +1912,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				switch (operation)
 				{
 				case 4: // unlink.
-					strncpy(dataset->status, "dest", strlen("dest"));
+					strncpy(dataset->status, "dest\0", strlen("dest\0"));
 					slog_debug("Dataset mark as dest");
 					break;
 				default:
@@ -1911,8 +1923,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				char release_msg[10];	  //= "DELETE\0";
 				if (dataset->n_open == 0) // if no more process has the file opened.
 				{
+					// TODO: add error handling and recursive search.
 					int32_t result = map->delete_metadata_stat_worker(key);
-					slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
+					slog_debug("delete_metadata_stat_worker=%d", result);
 					GTree_delete((char *)key.c_str());
 					strncpy(release_msg, "DELETE\0", strlen("DELETE\0") + 1);
 				}
@@ -1969,22 +1982,51 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		}
 		case RENAME_DIR_DIR_OP:
 		{
-			std::size_t found = key.find(' ');
-			if (found != std::string::npos)
+			char response_msg[10];
+			int ret = -1;
+			if (req[num_characters_read] != '\0')
 			{
-				std::string old_dir = key.substr(0, found);
-				std::string rdir_dest = key.substr(found + 1, key.length());
+				char new_uri_[URI_];
+				slog_live("Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
+				// fprintf(stderr, "Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
+				// get the server status to be set.
+				sscanf(&req[num_characters_read], "%s", new_uri_);
+				// flag = 1;
+				// std::size_t found = key.find(' ');
+				// if (found != std::string::npos)
+				// {
+				std::string old_dir = key; // key.substr(0, found);
+				// std::string rdir_dest = key.substr(found + 1, key.length());
+				std::string rdir_dest;
+				rdir_dest.assign((const char *)new_uri_);
 
 				// RENAME MAP
-				map->rename_metadata_dir_stat_worker(old_dir, rdir_dest);
+				ret = map->rename_metadata_dir_stat_worker(old_dir, rdir_dest);
 
 				// RENAME TREE
-				GTree_rename_dir_dir((char *)old_dir.c_str(), (char *)rdir_dest.c_str());
+				if (ret != -1)
+					ret = GTree_rename_dir_dir((char *)old_dir.c_str(), (char *)rdir_dest.c_str());
+
+				slog_debug("old_dir=%s, rdir_dest=%s, ret=%d", old_dir.c_str(), rdir_dest.c_str(), ret);
+				// }
+			}
+			else
+			{
+				slog_live("No extra characters found.\n");
+				ret = -1;
+				// fprintf(stderr, "No extra characters found.\n");
 			}
 
-			char release_msg[] = "RENAME\0";
+			if (ret == -1)
+			{
+				strcpy(response_msg, "ERROR\0");
+			}
+			else
+			{
+				strcpy(response_msg, "RENAME\0");
+			}
 
-			if (send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid) == 0)
+			if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 			{
 				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
 				slog_error("ERR_HERCULES_PUBLISH_RENAMEMSG");
@@ -2026,7 +2068,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				{
 					slog_debug("Deleting %s", key.c_str());
 					int32_t result = map->delete_metadata_stat_worker(key);
-					slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
+					slog_debug("[READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
 					GTree_delete((char *)key.c_str());
 					strcpy(release_msg, "DELETE\0");
 				}
@@ -2060,7 +2102,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					key += '/';
 					err = map->get(key, &address_, &block_size_rtvd);
 				}
-				
 			}
 
 			slog_debug("[STAT WORKER] map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
@@ -2082,7 +2123,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				// case 1: // file opened.
 				slog_debug("Before dataset->n_open=%d", dataset->n_open);
 				dataset->n_open += 1;
-				slog_debug("File closed");
+				// slog_debug("File closed");
 				// break;
 				// default:
 				// 	break;
