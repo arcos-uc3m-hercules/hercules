@@ -34,6 +34,8 @@
 #include <pwd.h>
 #include <sys/sysmacros.h>
 #include <limits.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #undef __USE_GNU
 // #include <poll.h>
 // #include <sys/ptrace.h>
@@ -46,6 +48,10 @@
 extern "C"
 {
 #endif
+
+
+#define _Nullable
+#define _Nonnull
 
 #define KB 1024
 #define GB 1073741824
@@ -249,6 +255,7 @@ extern "C"
 
 	static ssize_t (*real_readlink)(const char *pathname, char *buf, size_t bufsiz) = NULL;
 	static ssize_t (*real_readlinkat)(int dirfd, const char *pathname, char *buf, size_t bufsiz) = NULL;
+	static int (*real_utimensat)(int dirfd, const char *pathname, const struct timespec times[_Nullable 2], int flags) = NULL;
 
 	void copy_stat_to_statx(const struct stat *src, struct statx *dest)
 	{
@@ -5408,6 +5415,102 @@ extern "C"
 			slog_full("[POSIX] Calling real 'chdir', pathname=%s", pathname);
 			ret = real_chdir(pathname);
 			slog_full("[POSIX] Ending real 'chdir', pathname=%s, ret=%d\n", pathname, ret);
+		}
+
+		return ret;
+	}
+
+
+    int utimensat(int dirfd, const char *pathname, const struct timespec times[_Nullable 2], int flags)
+	{
+		if (!real_utimensat)
+			real_utimensat = (int (*)(int, const char*, const struct timespec *, int ))dlsym(RTLD_NEXT, "utimensat");
+
+		if (!init)
+		{
+			return real_utimensat(dirfd, pathname, times, flags);
+		}
+
+		errno = 0;
+		int ret = 0;
+		char *pathname_dir, *new_path = NULL;
+		mode_t new_mode;
+		new_mode |= S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
+
+		if (dirfd == AT_FDCWD)
+		{
+			// pathname_dir = getenv("PWD");
+			// new_path = checkHerculesPath(pathname_dir);
+			// pathname_dir = NULL;
+			new_path = checkHerculesPath(pathname);
+			pathname_dir = NULL;
+		}
+		else
+		{
+			pathname_dir = map_fd_search_by_val(map_fd, dirfd);
+		}
+
+		if (pathname_dir != NULL || new_path != NULL)
+		{
+			slog_live("[POSIX] Calling Hercules 'utimensat' flags=%d, dirfd=%d, pathname_dir=%s, pathname=%s", flags, dirfd, pathname_dir, pathname);
+			int is_absolute_path = IsAbsolutePath(pathname);
+
+			// If pathname is absolute, then dir_fd is ignored.
+			if (is_absolute_path == 1)
+			{
+				// char *new_path = checkHerculesPath(pathname);
+				slog_live("[POSIX] is absolute, 'utimensat', pathname=%s", pathname);
+
+				ret = generalOpen((char *)pathname, flags, new_mode, -1);
+				// ret = generalOpen(new_path, flags, mode);
+				// free(new_path);
+			}
+			else if (is_absolute_path == 0) // pathname is relative.
+			{
+				if (dirfd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
+				{						// TO CHECK!
+					// char *new_path = checkHerculesPath(pathname);
+					// slog_live("[POSIX] is relative, current directory, 'unlinkat', new_path=%s", new_path);
+					slog_live("[POSIX] is relative, current directory, 'utimensat', pathname=%s", pathname);
+					// pathname is interpreted relative to the current working directory of the calling process (like real_open).
+					// ret = generalOpen(new_path, flags, mode);
+					ret = generalOpen((char *)pathname, flags, new_mode, -1);
+					// free(new_path);
+				}
+				else
+				{
+					// // get the pathname of the directory pointed by dir_fd if it is storage in the local map "map_fd".
+					// char *pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
+					// if (pathname_dir == NULL)
+					// { // if dir_fd is not storage locally
+					// 	// search dir_fd on the metadata server.
+					// 	slog_error("[POSIX] dir_fd=%d could not be resolved.");
+					// 	return -1;
+					// }
+
+					char absolute_pathname[PATH_MAX];
+					char *dirr = pathname_dir + strlen("imss://");
+					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
+
+					// char *new_path = checkHerculesPath(absolute_pathname);
+					//  slog_live("[POSIX] is relative, 'unlinkat', new_path=%s", new_path);
+					slog_live("[POSIX] is relative, 'utimensat', absolute_pathname=%s", absolute_pathname);
+					ret = generalOpen(absolute_pathname, flags, new_mode, -1);
+
+					// ret = generalOpen(new_path, flags, mode);
+					// free(new_path);
+				}
+			}
+
+			slog_live("[POSIX] Ending Hercules 'utimensat', ret=%d\n", ret);
+			if (new_path != NULL)
+				free(new_path);
+		}
+		else
+		{
+			slog_full("[POSIX] Calling real 'utimensat' flags=%d, dir_fd=%d, pathname=%s", flags, dirfd, pathname);
+			ret = real_utimensat(dirfd, pathname, times, flags);
+			slog_full("[POSIX] Ending real 'utimensat' flags=%d, dir_fd=%d, pathname=%s", flags, dirfd, pathname);
 		}
 
 		return ret;
