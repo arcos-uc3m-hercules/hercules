@@ -235,12 +235,11 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     memcpy(aux_dir_elements, (char *)desired_dir, URI_);
     aux_dir_elements += URI_;
 
-    for (size_t i = 0; i < reply->elements; i++) {
-        const char* sub_dir = reply->element[i]->str;
+    for (int32_t i = 0; i < num_children; i++) {
+        char* sub_dir = reply->element[i]->str;
         memcpy(aux_dir_elements, sub_dir, URI_);
         aux_dir_elements += URI_;
-    }
-
+    } 
 
     freeReplyObject(reply);
     return dir_elements;
