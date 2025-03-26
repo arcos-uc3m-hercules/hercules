@@ -205,8 +205,15 @@ void delete_subdirectories(redisContext *context, const char* parent_dir) {
 
 // Function to get the directory contents from Redis
 char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems) {
+    // Check if the desired dir exists
+    redisReply *reply = (redisReply *)redisCommand(context, "EXISTS %s", desired_dir);
+    if (reply == NULL || reply->integer == 0) {
+        freeReplyObject(reply);
+        return NULL;
+    }
+
     // Retrieve the contents of the directory
-    redisReply *reply = (redisReply *)redisCommand(context, "SMEMBERS %s", desired_dir);
+    reply = (redisReply *)redisCommand(context, "SMEMBERS %s", desired_dir);
     if (reply == NULL || reply->type != REDIS_REPLY_ARRAY) {
         slog_error("Error: %s\n", context->errstr);
         return NULL;
@@ -225,13 +232,13 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     }
     // Serialize the directory children into the buffer
     char *aux_dir_elements = dir_elements;
-    memcpy(aux_dir_elements, desired_dir, URI_);
-    *aux_dir_elements += URI_;
+    memcpy(aux_dir_elements, (char *)desired_dir, URI_);
+    aux_dir_elements += URI_;
 
     for (size_t i = 0; i < reply->elements; i++) {
         const char* sub_dir = reply->element[i]->str;
         memcpy(aux_dir_elements, sub_dir, URI_);
-        *aux_dir_elements += URI_;
+        aux_dir_elements += URI_;
     }
 
 

@@ -4,6 +4,54 @@
 #include <stdlib.h>
 
 
+
+redisContext* redis_init(const char *hostname, int port);
+void redis_close(redisContext *context);
+int32_t redis_insert_data(redisContext *context, const char *desired_data);
+int32_t redis_delete_data(redisContext *context, const char *desired_data);
+char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems);
+int32_t redis_rename(redisContext *context, const char *old_path, const char *new_path);
+int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir);
+
+
+pthread_mutex_t hiredis_mut = PTHREAD_MUTEX_INITIALIZER;
+char redis_host[256];
+int redis_port;
+redisContext *hiredis_context;
+
+int main(){
+    hiredis_context = redis_init("localhost", 6379);
+    if (hiredis_context == NULL) {
+        printf("Error initializing Redis\n");
+        return -1;
+    }
+
+    char *desired_data = "imss://";
+    redis_insert_data(hiredis_context, desired_data);
+    char *desired_data2 = "imss://Makefile";
+    redis_insert_data(hiredis_context, desired_data2);
+    char *desired_data3 = "imss://src";
+    redis_insert_data(hiredis_context, desired_data3);
+    char *desired_data4 = "imss://src/redis.c";
+
+    int32_t numdir_elems;
+    char *dir_elements = redis_getdir(hiredis_context, desired_data, &numdir_elems);
+    if (dir_elements == NULL) {
+        printf("Error getting directory contents\n");
+        return -1;
+    }
+
+    printf("Directory contents:%s\n", dir_elements);
+    for (int i = 0; i < numdir_elems; i++) {
+        char *element = dir_elements + (i * 256); // Each element is 256 bytes
+        printf("Element %d: %s\n", i, element);
+    }
+
+    redis_close(hiredis_context);
+    return 0;
+}
+
+
 // Method initializing the Redis connection.
 redisContext* redis_init(const char *hostname, int port)
 {
@@ -13,7 +61,7 @@ redisContext* redis_init(const char *hostname, int port)
         if (context)
         {
             printf("Error: %s\n", context->errstr);
-            return NULL;
+            return context;
         }
         else
         {
@@ -32,7 +80,7 @@ void redis_close(redisContext *context)
         // Flush all data from all databases
         redisReply *reply = (redisReply *)redisCommand(context, "FLUSHALL");
         if (reply == NULL) {
-            fprintf(stderr, "Error: %s\n", context->errstr);
+            printf("Error: %s\n", context->errstr);
         } else {
             freeReplyObject(reply);
         }
@@ -40,77 +88,11 @@ void redis_close(redisContext *context)
     redisFree(context);
 }
 
-
-
-// Helper method to get the parent directory of a path
-static char* get_parent_dir(const char* path) {
-    // Find the last occurrence of '/'
-    const char* last_slash = strrchr(path, '/');
-    // If no / or the path is the root, return the root
-    if (last_slash == NULL || last_slash == path + strlen("imss:/")) {
-        return strdup("imss://");
-    }
-
-    printf("Last slash: %s\n", last_slash);
-
-    // Calculate the length of the parent directory path
-    size_t parent_len = last_slash - path;
-
-    // Allocate memory for the parent directory path
-    char* parent_dir = (char*)malloc(parent_len + 1);
-    if (parent_dir == NULL) {
-        printf("Memory allocation error\n");
-        return NULL;
-    }
-
-    // Copy the parent directory path
-    strncpy(parent_dir, path, parent_len);
-    parent_dir[parent_len] = '\0';
-
-    return parent_dir;
-} 
-
-// Helper method to get the last part of the path (file or directory name)
-static char* get_path_last_part(const char* path) {
-    // Find the last occurrence of '/'
-    const char* last_slash = strrchr(path, '/');
-    if (last_slash == NULL) {
-        // If no '/' is found, return the entire path
-        return strdup(path);
-    }
-
-    // Return the substring that follows the last '/'
-    return strdup(last_slash + 1);
-}
-
-int parent_dir_exists(redisContext *context, const char *parent_dir) {
-    // If the parent directory is the root, it exists
-    if (strcmp(parent_dir, "imss://") == 0)
-    {
-        printf("Parent directory is root\n");
-        return 1;
-    }
-    char *grandparent_dir = get_parent_dir(parent_dir);
-    char *parent_dir_name = get_path_last_part(parent_dir);
-    redisReply *reply = (redisReply *)redisCommand(context, "SISMEMBER %s %s", grandparent_dir, parent_dir_name);
-    free(grandparent_dir);
-    if (reply == NULL)
-    {
-        printf("Error: %s\n", context->errstr);
-        return -1;
-    }
-    int exists = reply->integer;
-    freeReplyObject(reply);
-    return exists;
-}
-
 // Method inserting a new path.
 int32_t redis_insert_data(redisContext *context, const char *desired_data)
 {
     char *parent_dir = get_parent_dir(desired_data);
     char *file = get_path_last_part(desired_data); // This can be either a file or a dir
-    printf("Parent directory: %s\n", parent_dir);
-    printf("File: %s\n", file);
 
     // Check if the parent directory exists
     if (!parent_dir_exists(context, parent_dir))
@@ -134,32 +116,63 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
     return 0;
 }
 
-// Helper method for deleting all subdirectories of a directory
-static void delete_subdirectories(redisContext *context, const char* parent_dir) {
-    // Get all the subdirectories of the parent directory
-    redisReply *reply = NULL;
-    long cursor = 0;
-    do {
-        reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s/*", cursor, parent_dir);
-        if (reply == NULL) {
-            printf("Error: %s\n", context->errstr);
-            return;
-        }
-        // Update the cursor
-        cursor = strtol(reply->element[0]->str, NULL, 10);
-        // Iterate over the subdirectories and delete them
-        for (size_t i = 0; i < reply->element[1]->elements; i++) {
-            const char* key = reply->element[1]->element[i]->str;
-            redisReply *del_reply = (redisReply *)redisCommand(context, "DEL %s", key);
-            if (del_reply == NULL) {
-                printf("Error: %s\n", context->errstr);
-                freeReplyObject(reply);
-                return;
-            }
-            freeReplyObject(del_reply);
-        }
-    } while (cursor != 0);
+// Helper method to get the parent directory of a path
+char* get_parent_dir(const char* path) {
+    // Find the last occurrence of '/'
+    const char* last_slash = strrchr(path, '/');
+    if (last_slash == NULL || last_slash == path + strlen("imss:/")) {
+        // If no '/' is found or the path is the root '/', return "/"
+        return strdup("imss://");
+    }
+
+    // Calculate the length of the parent directory path
+    size_t parent_len = last_slash - path;
+
+    // Allocate memory for the parent directory path
+    char* parent_dir = (char*)malloc(parent_len + 1);
+    if (parent_dir == NULL) {
+        printf("Memory allocation error");
+        return NULL;
+    }
+
+    // Copy the parent directory path
+    strncpy(parent_dir, path, parent_len);
+    parent_dir[parent_len] = '\0';
+
+    return parent_dir;
+} 
+
+// Helper method to get the last part of the path (file or directory name)
+char* get_path_last_part(const char* path) {
+    // Find the last occurrence of '/'
+    const char* last_slash = strrchr(path, '/');
+    if (last_slash == NULL) {
+        // If no '/' is found, return the entire path
+        return strdup(path);
+    }
+
+    // Return the substring that follows the last '/'
+    return strdup(last_slash + 1);
+}
+
+int parent_dir_exists(redisContext *context, const char *parent_dir) {
+    // If the parent directory is the root, it exists
+    if (strcmp(parent_dir, "imss://") == 0)
+    {
+        return 1;
+    }
+    char *grandparent_dir = get_parent_dir(parent_dir);
+    char *parent_dir_name = get_path_last_part(parent_dir);
+    redisReply *reply = (redisReply *)redisCommand(context, "SISMEMBER %s %s", grandparent_dir, parent_dir_name);
+    free(grandparent_dir);
+    if (reply == NULL)
+    {
+        printf("Error: %s\n", context->errstr);
+        return -1;
+    }
+    int exists = reply->integer;
     freeReplyObject(reply);
+    return exists;
 }
 
 // Method deleting a new path.
@@ -202,7 +215,33 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     return 1;
 }
 
-
+// Helper method for deleting all subdirectories of a directory
+void delete_subdirectories(redisContext *context, const char* parent_dir) {
+    // Get all the subdirectories of the parent directory
+    redisReply *reply = NULL;
+    long cursor = 0;
+    do {
+        reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s/*", cursor, parent_dir);
+        if (reply == NULL) {
+            printf("Error: %s\n", context->errstr);
+            return;
+        }
+        // Update the cursor
+        cursor = strtol(reply->element[0]->str, NULL, 10);
+        // Iterate over the subdirectories and delete them
+        for (size_t i = 0; i < reply->element[1]->elements; i++) {
+            const char* key = reply->element[1]->element[i]->str;
+            redisReply *del_reply = (redisReply *)redisCommand(context, "DEL %s", key);
+            if (del_reply == NULL) {
+                printf("Error: %s\n", context->errstr);
+                freeReplyObject(reply);
+                return;
+            }
+            freeReplyObject(del_reply);
+        }
+    } while (cursor != 0);
+    freeReplyObject(reply);
+}
 
 // Function to get the directory contents from Redis
 char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems) {
@@ -227,12 +266,12 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     // Serialize the directory children into the buffer
     char *aux_dir_elements = dir_elements;
     memcpy(aux_dir_elements, desired_dir, 256);
-    *aux_dir_elements += 256;
+    aux_dir_elements += 256;
 
     for (size_t i = 0; i < reply->elements; i++) {
         const char* sub_dir = reply->element[i]->str;
         memcpy(aux_dir_elements, sub_dir, 256);
-        *aux_dir_elements += 256;
+        aux_dir_elements += 256;
     }
 
 
@@ -252,12 +291,35 @@ int32_t redis_rename(redisContext *context, const char *old_path, const char *ne
         printf("Error inserting new path\n");
         return -1;
     }
+    return 0;
 }
 
+// Function to rename a directory and all its subdirectories in Redis
+int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir) {
+    char new_parent_dir[256];
+    char *filename = get_path_last_part(old_dir); // This can be either a file or a dir
+    // Construct the new parent directory path
+    snprintf(new_parent_dir, sizeof(new_parent_dir), "%s/%s", new_dir, filename); 
+    // Rename the parent directory first
+    if (rename_key(context, old_dir, new_parent_dir) < 0) {
+        return -1;
+    }
 
+    // Rename all its subdirectories
+    if (rename_subdirectories(context, old_dir, new_dir) != 0) {
+        return -1;
+    }
+
+    // Insert the file/dir in the new parent directory key
+    if (redis_insert_data(context, new_parent_dir) != 0) {
+        return -1;
+    }
+
+    return 0;
+}
 
 // Helper function to rename a single key
-static int rename_key(redisContext *context, const char *old_key, const char *new_key) {
+int rename_key(redisContext *context, const char *old_key, const char *new_key) {
     redisReply *reply = (redisReply *)redisCommand(context, "RENAME %s %s", old_key, new_key);
     if (reply == NULL) {
         printf("Error: %s\n", context->errstr);
@@ -268,7 +330,7 @@ static int rename_key(redisContext *context, const char *old_key, const char *ne
 }
 
 // Helper function to recursively rename directories
-static int rename_subdirectories(redisContext *context, const char *old_dir, const char *new_dir) {
+int rename_subdirectories(redisContext *context, const char *old_dir, const char *new_dir) {
     long cursor = 0;
     char *old_dir_last_part = get_path_last_part(old_dir);
     do {
@@ -298,61 +360,5 @@ static int rename_subdirectories(redisContext *context, const char *old_dir, con
         freeReplyObject(reply);
     } while (cursor != 0);
 
-    return 0;
-}
-
-
-// Function to rename a directory and all its subdirectories in Redis
-int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir) {
-    char new_parent_dir[256];
-    char *filename = get_path_last_part(old_dir); // This can be either a file or a dir
-    // Construct the new parent directory path
-    snprintf(new_parent_dir, sizeof(new_parent_dir), "%s/%s", new_dir, filename); 
-    // Rename the parent directory first
-    if (rename_key(context, old_dir, new_parent_dir) < 0) {
-        return -1;
-    }
-
-    // Rename all its subdirectories
-    if (rename_subdirectories(context, old_dir, new_dir) != 0) {
-        return -1;
-    }
-
-    // Insert the file/dir in the new parent directory key
-    if (redis_insert_data(context, new_parent_dir) != 0) {
-        return -1;
-    }
-
-    return 0;
-}
-
-int main() {
-    redisContext *context = redis_init("localhost", 6379);
-    if (context == NULL) {
-        return 1;
-    }
-
-    // redis_insert_data(context, "/home/user1/dir1/file1.txt");
-    redis_insert_data(context, "imss://home");
-    redis_insert_data(context, "imss://tmp");
-    redis_insert_data(context, "imss://home/user1");
-    redis_insert_data(context, "imss://home/user2");
-    redis_insert_data(context, "imss://home/user2/file");
-    redis_insert_data(context, "imss://home/user2/file/file2");
-    redis_insert_data(context, "imss://home/user2/file/file3");
-    redis_rename_dir_dir(context, "imss://home", "imss://tmp");
-    //  redis_delete_data(context, "/tmp");
-    // redis_insert_data(context, "/home/user1/dir1");
-    // int32_t numdir_elems;
-    // char *dir_elements = redis_getdir(context, "/home", &numdir_elems);
-
-    // char *current_element = dir_elements;
-    // for (int i = 0; i < numdir_elems; i++) {
-    //     printf("Element %d: %s\n", i, current_element);
-    //     current_element += 256;
-    // }
-    
-
-    redis_close(context);
     return 0;
 }

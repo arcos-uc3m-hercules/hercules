@@ -356,6 +356,7 @@ serialize_dir(GNode *visited_node,
 			  uint32_t num_nodes,
 			  char **buffer)
 {
+	// serialize_dir_childrens(dir_node, num_children, &aux_dir_elem);
 	// Add the concerned uri into the buffer.
 	memcpy(*buffer, (char *)visited_node->data, URI_);
 	*buffer += URI_;
