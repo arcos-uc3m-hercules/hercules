@@ -225,14 +225,9 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
 
     // Buffer containing the whole set of elements within a certain directory
     char *dir_elements = (char *)malloc((num_children + 1) * URI_);
-    if (dir_elements == NULL) {
-        slog_error("Memory allocation error\n");
-        freeReplyObject(reply);
-        return NULL;
-    }
-    // Serialize the directory children into the buffer
     char *aux_dir_elements = dir_elements;
-    memcpy(aux_dir_elements, (char *)desired_dir, URI_);
+
+    memcpy(aux_dir_elements, desired_dir, URI_);
     aux_dir_elements += URI_;
 
     for (int32_t i = 0; i < num_children; i++) {
