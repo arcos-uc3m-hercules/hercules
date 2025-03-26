@@ -232,7 +232,7 @@ extern "C"
 	// static int (*real_fcntl)(int fd, int cmd, ... /* arg */) = NULL;
 	static int (*real_syncfs)(int fd) = NULL;
 	static int (*real_posix_fadvise)(int fd, off_t offset, off_t len, int advice) = NULL;
-	static int (*real_posix_fadvise64)(int fd, off64_t offset, off64_t len, int advice) = NULL;
+	// static int (*real_posix_fadvise64)(int fd, off64_t offset, off64_t len, int advice) = NULL;
 	static int (*real_faccessat)(int dir_fd, const char *pathname, int mode, int flags) = NULL;
 	static int (*real_unlinkat)(int fd, const char *name, int flag) = NULL;
 	static int (*real_renameat2)(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags) = NULL;
@@ -412,7 +412,7 @@ extern "C"
 		// To check if "pathname" is the root of HERCULES.
 		if (!strncmp(pathname, MOUNT_POINT, compare_len))
 		{
-			fprintf(stderr, "root path\n");
+			// fprintf(stderr, "root path\n");
 			slog_live("[HERCULES] pathname=%s, MOUNT_POINT=%s, pathname=%s, Success", pathname, MOUNT_POINT, pathname);
 			new_path = (char *)calloc(strlen("imss://") + 1, sizeof(char));
 			if (!new_path)
@@ -660,7 +660,7 @@ extern "C"
 		slog_live(" -- REPL_TYPE: %d", REPL_TYPE);
 		slog_live(" -- POLICY: %s", POLICY);
 		slog_live(" -- RELEASE: %d", release);
-		fprintf(stderr, " -- POLICY: %s\n", POLICY);
+		// fprintf(stderr, " -- POLICY: %s\n", POLICY);
 
 		// Metadata server
 		// if (release == 1)
@@ -738,7 +738,7 @@ extern "C"
 			// t_s = clock();
 			release = -1;
 			slog_live("[POSIX] release_imss()");
-			release_imss("imss://", CLOSE_DETACHED);
+			//release_imss("imss://", CLOSE_DETACHED);
 			// slog_live("[POSIX] stat_release()");
 			// stat_release();
 			//  imss_comm_cleanup();
@@ -2199,7 +2199,7 @@ extern "C"
 			unsigned long offset = 0;
 			int flags = 0, oflags = 0;
 
-			if ((flags = __sflags(mode, &oflags)) == 0)
+			if ((flags = __sflags_(mode, &oflags)) == 0)
 				return (NULL);
 
 			file = real_fopen("/dev/null", mode);
@@ -2591,7 +2591,7 @@ extern "C"
 
 		if (pathname_dir != NULL || new_path != NULL)
 		{
-			slog_live("[POSIX] Calling Hercules 'openat' flags=%d, mode=%o, dir_fd=%d, pathname_dir=%s, pathname=%s, errno=%d:%s", flags, mode, dir_fd, pathname_dir, pathname, errno, strerror(errno));
+			slog_live("[POSIX] Calling Hercules 'openat' flags=%d, mode=%o, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, mode, dir_fd, pathname_dir, pathname);
 			// checkOpenFlags(pathname, flags);
 
 			int is_absolute_path = IsAbsolutePath(pathname);
@@ -4884,7 +4884,7 @@ extern "C"
 		char *new_path = checkHerculesPath(pathname);
 		if (new_path != NULL)
 		{
-			slog_live("[POSIX]. Calling Hercules 'statx', new_path=%s.", new_path);
+			slog_live("[POSIX]. Calling Hercules 'statx', new_path=%s", new_path);
 			imss_refresh(new_path);
 			ret = imss_getattr(new_path, &buf);
 			if (ret < 0)

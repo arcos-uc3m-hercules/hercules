@@ -23,6 +23,8 @@
 
 // Lock dealing when cleaning blocks
 pthread_mutex_t mutex_garbage = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_snapshot = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_checkpoint = PTHREAD_MUTEX_INITIALIZER;
 
 // Initial buffer address.
 char *buffer_address;
@@ -63,6 +65,12 @@ int global_finish_threads = 0;
 int global_finish_checkpoint = 0;
 int global_finish_snapshot = 0;
 int global_server_fd_thread = -1;
+pthread_cond_t global_broadcast_cond;
+pthread_cond_t global_finish_cond;
+pthread_cond_t global_run_snapshot_cond;
+pthread_cond_t global_run_checkpoint_cond;
+pthread_mutex_t global_finish_mut = PTHREAD_MUTEX_INITIALIZER;
+
 size_t global_offset = 0;
 
 std::mutex mtx;
@@ -78,14 +86,15 @@ int ready(char *tmp_file_path, const char *msg)
 	char status[25];
 	char err_msg[MAX_ERR_MSG_LEN];
 	char cwd[PATH_MAX];
-	FILE *tmp_file; // = tmpfile(); // make the file pointer as temporary file.
+	FILE *tmp_file; // make the file pointer as temporary file.
 
-	if(getcwd(cwd, sizeof(cwd)) == NULL) {
+	if (getcwd(cwd, sizeof(cwd)) == NULL)
+	{
 		perror("Error getting the current working directory.");
 		return -1;
 	}
-
-	tmp_file = fopen(tmp_file_path, "w");
+	fprintf(stderr, "%s\n", tmp_file_path);
+	tmp_file = fopen(tmp_file_path, "w+");
 	if (tmp_file == NULL)
 	{
 		sprintf(err_msg, "Error in creating the temporary file: %s, current directory is: %s\n", tmp_file_path, cwd);
@@ -96,8 +105,8 @@ int ready(char *tmp_file_path, const char *msg)
 	strcpy(status, "STATUS = ");
 	strcat(status, msg);
 
-	size_t written = fwrite(status, strlen(status), 1, tmp_file);
-	if (written < 0)
+	size_t written = fwrite(status, sizeof(char), strlen(status), tmp_file);
+	if (written < strlen(status))
 	{
 		sprintf(err_msg, "Error writting in temporary file %s\n", tmp_file_path);
 		perror(err_msg);
@@ -112,7 +121,7 @@ int ready(char *tmp_file_path, const char *msg)
 		return -1;
 	}
 
-	// fprintf(stderr, "Writting status file in: %s\n", tmp_file_path);
+	//fprintf(stderr, "Writting status %s (%zu bytes) file in: %s\n", msg, strlen(status), tmp_file_path);
 
 	// if there was an error in the initialization of the server,
 	// we kill the process.
@@ -128,20 +137,20 @@ int ready(char *tmp_file_path, const char *msg)
 // int malleability_on = 0;
 #define MALLEABILITY_MESSAGE = "MALLEABILITY";
 
-void handle_signal(int signal)
-{
-	if (signal == SIGUSR1)
-	{
-		fprintf(stderr, "*** Received SIGUSR1\n");
-		global_finish_threads = 1;
+// void handle_signal(int signal)
+// {
+// 	if (signal == SIGUSR1)
+// 	{
+// 		fprintf(stderr, "*** Received SIGUSR1\n");
+// 		global_finish_threads = 1;
 
-		// To dispatcher thread.
-		if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
-		{
-			fprintf(stderr, "Error closing server_fd\n");
-		}
-	}
-}
+// 		// To dispatcher thread.
+// 		if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
+// 		{
+// 			fprintf(stderr, "Error closing server_fd\n");
+// 		}
+// 	}
+// }
 
 // Thread method attending client read-write data requests.
 void *srv_worker(void *th_argv)
@@ -320,7 +329,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 	char mode[MODE_SIZE];
 
-	slog_debug(" Waiting for new request.");
+	// slog_debug(" Waiting for new request.");
 	// Save the request to be served.
 	slog_debug(" request to be served %s", req);
 
@@ -328,9 +337,23 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 	uint32_t block_size_recv, block_offset;
 	char uri_[URI_];
 	size_t to_read = 0;
+	int sender = 0;
+
+	sscanf(req, "%s", mode);
+
+	if (!strcmp(mode, "BROADCAST"))
+	{
+		sscanf(req, "%s %s %d", mode, uri_, &sender);
+		slog_debug("BROADCAST condition, req=%s, mode=%s, uri_=%s, sender=%d", req, mode, uri_, sender);
+		map->put_snapshot(uri_, sender);
+		fprintf(stderr, "Sending signal to do Snapshot in server %d\n", arguments->args.id);
+		pthread_cond_signal(&global_run_snapshot_cond);
+		pthread_cond_signal(&global_run_checkpoint_cond);
+		// nothing else to do.
+		return 0;
+	}
 
 	sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read);
-
 	if (!strcmp(mode, "GET"))
 	{
 		more = GET_OP;
@@ -1033,7 +1056,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			// Checks if it is data for the Snapshot operation or regular data.
 			if (snapshot_op)
 			{
-				
+				// Nothing to do.
 			}
 			else
 			{
@@ -1057,6 +1080,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				// If data is stored in shared memory due LOCAL policy, the server does not need to receive the data.
 				if (!is_shared_memory)
 				{
+					slog_debug("[WRITE_OP] is_shared_memory=%d", is_shared_memory);
+					// Get the length of the data to be received.
 					msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
 					if (msg_length == 0)
 					{
@@ -1064,11 +1089,23 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
 						return -1;
 					}
-
-					buffer = (void *)StsQueue.pop(mem_pool);
+					slog_debug("[WRITE_OP] msg_length=%lu", msg_length);
+					// buffer = (void *)StsQueue.pop(mem_pool);
 					if (buffer == NULL)
 					{
-						buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
+						slog_debug("Allocating buffer");
+						if (snapshot_op)
+						{ // Snapshot operation sends data bigger than BLOCK_SIZE.
+							buffer = (void *)malloc(msg_length * sizeof(char));
+						}
+						else
+						{
+							buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
+						}
+					}
+					else
+					{
+						slog_debug("Reusing buffer");
 					}
 
 					if (buffer == NULL)
@@ -1076,16 +1113,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						perror("HERCULES_ERR_MEMORY_ALLOCATION");
 						slog_error("HERCULES_ERR_MEMORY_ALLOCATION");
 						return -1;
-						// std::size_t found = key.find("$0");
-						// if (found != std::string::npos)
-						// { // block 0.
-						// 	size_asigned_to_block = BLOCK_SIZE;
-						// }
-						// else
-						// { // non block 0.
-						// 	// buffer = (void *)calloc(msg_length + block_offset, sizeof(char));
-						// 	size_asigned_to_block = msg_length + block_offset;
-						// }
 					}
 					size_asigned_to_block = BLOCK_SIZE;
 
@@ -1146,12 +1173,22 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				// TODO: should this be block_size_recv or a different size? block_size_recv might not be the full block size
 				if (snapshot_op)
 				{
+					// Get the origin data server id from the received key.
+					// int origin_server_id = 0;
+					// std::string data_uri;
+					// std::string file_name;
+					// getBlockInformation(key, &origin_server_id, &data_uri, &file_name);
+					// slog_debug("key: %s, origin_server_id: %d, data_uri: %s, file_name: %s", key.c_str(), origin_server_id, data_uri.c_str(), file_name.c_str());
+					// Fill buffer_broadcast with the data received from the other servers.
 					// buffer_broadcast[];
-					
-				} else {
+					slog_debug("Snapshot operation, origin server=%s", key.c_str());
+					insert_successful = map->put_broadcast(key, buffer, msg_length);
+				}
+				else
+				{
 					insert_successful = map->put(key, buffer, size_asigned_to_block);
 				}
-				slog_debug("[WRITE_OP] insert_successful %d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
+				slog_debug("[WRITE_OP] insert_successful=%d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
 				tr = clock() - tr;
 				double time_taken = ((double)tr) / CLOCKS_PER_SEC; // in seconds
 
@@ -1164,20 +1201,29 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					return -1;
 				}
 
-				// The following buffer is used for checkpoints.
-				// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding checkpoint thread copy the data to disk.
-				// fprintf(stderr, "Inserting key = %s\n", key.c_str());
-				insert_successful = map->put_simple(key, 1);
-				// Include the new record in the tracking structure.
-				if (insert_successful != 0)
+				// // Only when there is not a snapshot operation.
+				// if (!snapshot_op)
+				// {
+				// 	// The following buffer is used for Sanpshot.
+				// 	// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding Snapshot thread copy the data to disk.
+				// 	// fprintf(stderr, "Inserting key = %s\n", key.c_str());
+
+				std::size_t found = key.find("$0");
+				if (found != std::string::npos) // block 0.
 				{
-					perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-					slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-					return -1;
+					insert_successful = map->put_snapshot(key, -1);
+					// Include the new record in the tracking structure.
+					if (insert_successful != 0)
+					{
+						perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+						slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+						return -1;
+					}
 				}
 
 				// Update the pointer.
 				arguments->pt += block_size_recv;
+				// }
 			}
 			// if the block was already stored:
 			else
@@ -1224,7 +1270,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 						// TODO: should we update this block's size in the map?
 						// map->update(key, address_, msg_length);
 						// Updates the second map to update the data in disk.
-						map->update_simple(key, 1);
+						// map->update_simple(key, 1);
 
 						free(buffer);
 					}
@@ -1320,7 +1366,7 @@ void *garbage_collector(void *th_argv)
 // Thread method to copy datasets from Hercules to Disk.
 void *Checkpoint(void *th_argv)
 {
-	slog_debug("Init checkpoint writter");
+	slog_debug("Init Snapshot");
 
 	clock_t t;
 	double time_taken;
@@ -1330,44 +1376,58 @@ void *Checkpoint(void *th_argv)
 	BLOCK_SIZE = arguments->blocksize * 1024;
 	sleep(1);
 	// Obtain the current map class element from the set of arguments.
-	// map_records *map =(map_records *) arguments->map; // (map_records *)th_argv;
 	std::shared_ptr<map_records> map = arguments->map;
 
-	// fprintf(stderr, "Checkpoint path = %s, len=%lu\n", arguments->args.hercules_checkpoint_path, strlen(arguments->args.hercules_checkpoint_path));
-	const char *checkpoint_dir = arguments->args.hercules_checkpoint_path;
+	const char *checkpoint_dir = arguments->args.hercules_snapshot_path;
 	const int server_id = arguments->args.id;
 	const char *POLICY = arguments->args.policy;
 
 	if (strlen(checkpoint_dir) == 0)
 	{
-		printf("Checkpointing path has not been provided.\tHERCULES_CHECKPOINT_PATH = /home/user/checkpointing_path/\n");
+		printf("Snapshot path has not been provided.\tHERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/\n");
 		fflush(stdout);
-		global_finish_checkpoint = 1;
+		global_finish_snapshot = 1;
 		pthread_exit(NULL);
 	}
 
 	// if (!arguments->args.id)
-	// { // only one server creates the checkpoint directory.
+	// { // only one server creates the snapshot directory.
 	// 	Make_directory(checkpoint_dir);
 	// }
-
+	fprintf(stderr, "Running Checkpoint in %s\n", checkpoint_dir);
+	int ret = 1;
 	for (;;)
 	{
-		sleep(CKECKPOINT_PERIOD);
-		// fprintf(stderr, "Running Checkpointing, global_finish_checkpoint=%d\n", global_finish_checkpoint);
-		pthread_mutex_lock(&mutex_garbage);
-		TIMING_NO_RETURN(map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_checkpoint, arguments->args.id, arguments->args.data_hostname, arguments->args), "Checkpoint");
-		// To stop this thread we will wait for "hercules stop".
-		if (global_finish_checkpoint == 1)
+		// sleep(CKECKPOINT_PERIOD);
+		pthread_mutex_lock(&mutex_checkpoint);
+
+		slog_debug("Running Checkpoint in %s", checkpoint_dir);
+
+		TIMING_NO_RETURN(
+			ret = map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Checkpoint");
+
+		if (ret != 1)
 		{
-			// Call a barrier to stop all servers.
-			sleep(30);
+			fprintf(stderr, "Waiting for signal to unlock Checkpoint in server %d\n", server_id);
+			pthread_cond_wait(&global_run_checkpoint_cond, &mutex_checkpoint);
+			pthread_mutex_unlock(&mutex_checkpoint);
+			if (map->get_buffer_size() == 0) { // if there is no data to copy to disk, we will finish the snapshot.
+				break;
+			}
+			continue;
+		}
+
+		pthread_mutex_unlock(&mutex_checkpoint);
+		// To stop this thread we will wait for "hercules stop".
+		if (global_finish_snapshot == 1)
+		{
+			// TODO: Call a barrier to stop all servers.
+			slog_debug("Waiting to finish Snapshot thread.");
 			global_finish_threads = 1;
-			pthread_mutex_unlock(&mutex_garbage);
+			pthread_cond_signal(&global_finish_cond);
 			fprintf(stderr, "Ending checkponting thread.\n");
 			break;
 		}
-		pthread_mutex_unlock(&mutex_garbage);
 	}
 
 	t = clock() - t;
@@ -1407,23 +1467,40 @@ void *Snapshot(void *th_argv)
 	// { // only one server creates the snapshot directory.
 	// 	Make_directory(snapshot_dir);
 	// }
-
+	fprintf(stderr, "Running Snapshot in %s\n", snapshot_dir);
+	int ret = 1;
 	for (;;)
 	{
-		sleep(CKECKPOINT_PERIOD);
-		pthread_mutex_lock(&mutex_garbage);
-		TIMING_NO_RETURN(map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot");
+		// sleep(CKECKPOINT_PERIOD);
+		pthread_mutex_lock(&mutex_snapshot);
+
+		slog_debug("Running Snapshot in %s", snapshot_dir);
+
+		TIMING_NO_RETURN(
+			ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot");
+
+		if (ret != 1)
+		{
+			fprintf(stderr, "Waiting for signal to unlock snapshot in server %d\n", server_id);
+			pthread_cond_wait(&global_run_snapshot_cond, &mutex_snapshot);
+			pthread_mutex_unlock(&mutex_snapshot);
+			if (map->get_buffer_size() == 0) { // if there is no data to copy to disk, we will finish the snapshot.
+				break;
+			}
+			continue;
+		}
+
+		pthread_mutex_unlock(&mutex_snapshot);
 		// To stop this thread we will wait for "hercules stop".
 		if (global_finish_snapshot == 1)
 		{
-			// Call a barrier to stop all servers.
-			sleep(30);
+			// TODO: Call a barrier to stop all servers.
+			slog_debug("Waiting to finish Snapshot thread.");
 			global_finish_threads = 1;
-			pthread_mutex_unlock(&mutex_garbage);
+			pthread_cond_signal(&global_finish_cond);
 			fprintf(stderr, "Ending checkponting thread.\n");
 			break;
 		}
-		pthread_mutex_unlock(&mutex_garbage);
 	}
 
 	t = clock() - t;
@@ -2458,7 +2535,6 @@ void *dispatcher(void *th_argv)
 	struct sockaddr_in server_addr;
 	socklen_t addrlen = sizeof(server_addr);
 	int ret;
-	// int server_fd = -1;
 	int listenfd = -1;
 	int optval = 1;
 	// char service[8];
@@ -2514,7 +2590,7 @@ void *dispatcher(void *th_argv)
 		ucs_status_t status;
 		char mode[MODE_SIZE];
 
-		slog_debug("[DISPATCHER] Waiting for connection requests.");
+		// slog_debug("[DISPATCHER] Waiting for connection requests.");
 		// fprintf(stderr, "[DISPATCHER] Waiting for connection requests.\n");
 		new_socket = accept(global_server_fd_thread, (struct sockaddr *)&server_addr, &addrlen);
 
@@ -2526,7 +2602,8 @@ void *dispatcher(void *th_argv)
 
 		if (new_socket < 0)
 		{
-			slog_error("ERR_HERCULES_DISPATCHER_ACCEPT");
+			// slog_error("ERR_HERCULES_DISPATCHER_ACCEPT");
+			continue;
 		}
 		ret = recv(new_socket, req, REQUEST_SIZE, MSG_WAITALL);
 		if (ret < 0)

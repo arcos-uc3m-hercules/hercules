@@ -30,7 +30,7 @@ TRANSFER_SIZE=$FILE_SIZE_PER_CLIENT
 # COMMAND="$IOR_PATH/ior -w -r -k -e -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5 -o /beegfs/home/javier.garciablas/hercules/bash/ior_output/data.txt"
 # fi
 
-COMMAND="$IOR_PATH/ior -w -r -W -R -k -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5"
+COMMAND="$IOR_PATH/ior -w -r -W -R -k -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 3"
 
 if [ "$IOR_FILE_PER_PROCESS" -eq 1 ]; then
 ## File-per-process with write and read verification.
@@ -47,8 +47,8 @@ COMMAND="$COMMAND -C -e"
 fi
 
 ##  Add the output file path.
-#COMMAND="$COMMAND -o /beegfs/home/javier.garciablas/hercules/bash/ior_output/data.txt"
-COMMAND="$COMMAND -o /tmp/data.txt"
+COMMAND="$COMMAND -o /beegfs/home/javier.garciablas/hercules/bash/ior_output/data.txt"
+#COMMAND="$COMMAND -o /tmp/data.txt"
 
 set -x
 
@@ -56,5 +56,5 @@ mpiexec -np $NUMBER_OF_PROCESS -ppn $PROCESS_PER_NODE  $COMMAND
 
 set +x
 
-#rm ./ior_output/*
-rm /tmp/data.txt
+rm ./ior_output/*
+#rm /tmp/data.txt

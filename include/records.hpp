@@ -55,11 +55,16 @@ public:
 
 	// Method storing a new record.
 	int32_t put(std::string key, void *address, uint64_t length);
-	int32_t put_simple(std::string key, int value);
+	int32_t put_snapshot(std::string key, int value);
+	int32_t put_broadcast(std::string key, void *address, uint64_t length);
 
 	// Method retrieving the address associated to a certain record.
 	int32_t get(std::string key, void **add_, uint64_t *size_);
-	int32_t get_simple(std::string key, uint64_t *to_copy);
+	int32_t get_snapshot(std::string key, int *to_copy);
+	int32_t get_broadcast(std::string key, void **add_, uint64_t *size_);
+
+	char *GetDataOfFile(std::string file_name, uint64_t *file_size_occupied);
+	char *MergeData(__off_t *size_of_data, uint32_t num_of_data_servers, __off_t file_size, uint64_t block_size);
 
 	// Method updating a new record.
 	int32_t update(std::string key, void *add_, uint64_t length);
@@ -74,22 +79,28 @@ public:
 	// Method renaming from stat_worker
 	int32_t rename_metadata_dir_stat_worker(std::string old_dir, std::string rdir_dest);
 	// Used in str_worker threads
-	// Method retrieving the address associated to a certain record.
+	// Method deleting the address associated to a certain record.
 	int32_t cleaning();
 	int32_t cleaning_specific(std::string new_key);
 	int32_t freeAllMemory();
+	int32_t erase_broadcast_element(std::string key);
+	int32_t erase_snapshot_element(std::string key);
+
+	int32_t get_broadcast_size();
+	int32_t get_buffer_size();
 
 	// int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id);
-	int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
+	// int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
+	int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id, char *data_hostname, struct arguments args);
 	int32_t Snapshot(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.
-	std::map<std::string, std::pair<void *, uint64_t>>::iterator begin()
+	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator begin()
 	{
 		return buffer.begin();
 	}
 	// Method retrieving a reference to the end of the map.
-	std::map<std::string, std::pair<void *, uint64_t>>::iterator end()
+	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator end()
 	{
 		return buffer.end();
 	}
@@ -103,10 +114,10 @@ public:
 private:
 	// Map structure tracking stored records (by default sorts keys with '<' op).
 	// <key(file uri), <data, lenght>>
-	std::map<std::string, std::pair<void *, uint64_t>> buffer;
+	std::unordered_map<std::string, std::pair<void *, uint64_t>> buffer;
 	std::map<std::string, int> buffer_snapshot;
-	std::unordered_map<std::string, int> buffer_broadcast;
-	// std::map<std::string, std::pair<uint64_t, uint64_t>> buffer_snapshot;
+	// std::unordered_map<std::string, int> buffer_broadcast;
+	std::map<std::string, std::pair<void *, uint64_t>> buffer_broadcast;
 	std::map<std::string, std::pair<int, __off_t>> buffer_fd;
 	// Mutex restricting access to structure.
 	uint64_t total_size;

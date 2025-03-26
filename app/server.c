@@ -56,7 +56,12 @@ pthread_t *threads;
 // global variables usted to finish threads.
 extern int global_finish_threads;
 extern int global_finish_checkpoint;
+extern int global_finish_snapshot;
 extern int global_server_fd_thread;
+extern pthread_cond_t global_finish_cond;
+extern pthread_cond_t global_run_snapshot_cond;
+extern pthread_cond_t global_run_checkpoint_cond;
+extern pthread_mutex_t global_finish_mut;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
@@ -151,7 +156,7 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 int stop_server()
 {
 	// Get the current number of active nodes.
-	number_active_storage_servers = get_number_of_active_nodes();
+	number_active_storage_servers = get_number_of_active_nodes(args.hercules_path);
 
 	if (number_active_storage_servers < 0)
 	{
@@ -182,7 +187,7 @@ int stop_server()
 int wakeup_server()
 {
 	// Get the current number of active nodes.
-	number_active_storage_servers = get_number_of_active_nodes();
+	number_active_storage_servers = get_number_of_active_nodes(args.hercules_path);
 
 	if (number_active_storage_servers < 0)
 	{
@@ -218,10 +223,11 @@ void handle_signal_server(int signal)
 		slog_info("SIGUSR1 received");
 		int pkill_operation = 0, ret = 0;
 		char buf[10], action[20], temporal_path[PATH_MAX];
+		char tmp_file_path[PATH_MAX];
 
-		sprintf(temporal_path,"%s/tmp/hercules_pkill_operation", args.hercules_path);
-			// fprintf(stderr,"Temporal path: %s\n", temporal_path);
-		
+		sprintf(temporal_path, "%s/tmp/hercules_pkill_operation", args.hercules_path);
+		// fprintf(stderr,"Temporal path: %s\n", temporal_path);
+
 		// Get the operation number.
 		int fd = open(temporal_path, O_RDONLY);
 		if (fd == -1)
@@ -259,11 +265,33 @@ void handle_signal_server(int signal)
 			// "global_finish_threads" is a gloabl variable readed by the
 			// dispatcher and workers threads. 1 indicates those threads
 			// must finish their execution.
-			if (args.type == TYPE_METADATA_SERVER || global_finish_checkpoint == 1)
-				global_finish_threads = 1;
-			else
-				global_finish_checkpoint = 1;
 			sprintf(action, "stop");
+
+			// if (args.type == TYPE_METADATA_SERVER || global_finish_checkpoint == 1)
+			if (args.type == TYPE_METADATA_SERVER)
+			{
+				global_finish_threads = 1;
+			}
+			else
+			{
+				global_finish_checkpoint = 1;
+				global_finish_snapshot = 1;
+
+				pthread_cond_signal(&global_run_snapshot_cond);
+				pthread_cond_signal(&global_run_checkpoint_cond);
+
+				pthread_mutex_lock(&global_finish_mut);
+				pthread_cond_wait(&global_finish_cond, &global_finish_mut);
+				
+				fprintf(stderr, "Waiting for snapshot and checkpointing in server %d\n", args.id);
+				// This file is readed by the hercules script to know if this server
+				// was correctly shutting down.
+				sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
+				ready(tmp_file_path, "LOCKED");
+
+				pthread_mutex_unlock(&global_finish_mut);
+				fprintf(stderr, "Server %d has been unlocked\n", args.id);
+			}
 
 			// Shutdown or close the socket used by the dispatcher pointed
 			// by the file descriptor "global_server_fd_thread".
@@ -295,7 +323,6 @@ void handle_signal_server(int signal)
 		}
 		// This file is readed by the hercules script to know if this server
 		// was correctly shutting down.
-		char tmp_file_path[PATH_MAX];
 		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
 		ready(tmp_file_path, "OK");
 	}
@@ -328,6 +355,9 @@ int32_t main(int32_t argc, char **argv)
 {
 	signal(SIGUSR1, handle_signal_server);
 	signal(SIGUSR2, handle_signal_server);
+
+	pthread_cond_init(&global_run_snapshot_cond, NULL);
+	pthread_cond_init(&global_finish_cond, NULL);
 
 	// clock_t t;
 	double time_taken;
@@ -403,12 +433,14 @@ int32_t main(int32_t argc, char **argv)
 	strncpy(POLICY, args.policy, sizeof(POLICY));
 
 	char log_path[PATH_MAX];
+	char *workdir = getenv("PWD");
 	slog_debug("Server type=%c\n", args.type);
 	struct tm tm = *localtime(&t);
-	sprintf(log_path, "./%c-server-%d.%02d-%02d-%02d", args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
+	sprintf(log_path, "%s/%c-server-%d.%02d-%02d-%02d", workdir, args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
 	// Initializate logger.
 	slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, args.id);
+	// slog_time("Server %d started", args.id);
 
 	if (args.logging.hercules_debug_file > 0)
 	{
@@ -783,8 +815,8 @@ int32_t main(int32_t argc, char **argv)
 			slog_debug("[SERVER] Creating checkpoint thread.");
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
-			// if (pthread_create(&threads[i], NULL, checkpoint, (void *)g_map.get()) == -1)
-			if (pthread_create(&threads[i], NULL, Checkpoint, (void *)&arguments[i]) == -1)
+			// if (pthread_create(&threads[i], NULL, Checkpoint, (void *)&arguments[i]) == -1)
+			if (pthread_create(&threads[i], NULL, Snapshot, (void *)&arguments[i]) == -1)
 			{
 				// Notify thread error deployment.
 				ready(tmp_file_path, "ERROR");
@@ -970,6 +1002,8 @@ int32_t main(int32_t argc, char **argv)
 		}
 	}
 
+	ret = ready(tmp_file_path, "OK");
+	fprintf(stderr, "Server %d is ready = %d\n", args.id, ret);
 	// Wait for threads to finish.
 	for (int32_t i = 0; i < total_threads; i++)
 	{
@@ -977,8 +1011,6 @@ int32_t main(int32_t argc, char **argv)
 		t = clock() - t;
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
-		ready(tmp_file_path, "OK");
-		fprintf(stderr, "Server %d is ready\n", args.id);
 		if (pthread_join(threads[i], NULL) != 0)
 		{
 			perror("HERCULES_ERR_SERVER_THREAD_JOIN");
@@ -1023,8 +1055,8 @@ int32_t main(int32_t argc, char **argv)
 	// ep_close(ucp_worker, client_ep, UCP_EP_CLOSE_MODE_FORCE);
 	// ucp_cleanup(ucp_context);
 
-	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-stop", args.hercules_path, args.type, args.id);
-	ready(tmp_file_path, "OK");
+	// sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-stop", args.hercules_path, args.type, args.id);
+	// ready(tmp_file_path, "OK");
 
 	// Free the publisher release address.
 	fprintf(stderr, "Ending %c server\n", args.type);

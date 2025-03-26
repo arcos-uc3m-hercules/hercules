@@ -537,7 +537,9 @@ RETURNS:	 0 - The requested block was successfully stored.
 
 	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server);
 
-	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, off_t offset);
+	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char* key);
+
+	int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const char *request);
 
 	/* Method retrieving the location of a specific data object.
 
@@ -577,7 +579,7 @@ char ** locations = get_dataloc(datasetd, data_id, &num_storages);
 	 * the current number of active data nodes.
 	 * @return Current number of active data nodes, on error -1 is returned.
 	 */
-	int get_number_of_active_nodes();
+	int get_number_of_active_nodes(char *hercules_path);
 
 	/* Method specifying the type (DATASET or IMSS INSTANCE) of a provided URI.
 
@@ -643,7 +645,7 @@ RETURNS:	0 - Resources were released successfully.
 	int32_t Make_directory(const char *dirname);
 	int32_t Open_file(const char *checkpoint_dir, const char *filename);
 	int32_t Close_file(int fd);
-	int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset);
+	ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset);
 
 #ifdef __cplusplus
 }

@@ -1298,7 +1298,6 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	if ((associated_imss_indx = imss_check(dataset_uri)) == -1)
 	{
 		slog_fatal("HERCULES_ERR_OPEN_DATASET_NOT_FOUND");
-		// return -1;
 	}
 
 	slog_live("[IMSS] associated_imss_indx=%d", associated_imss_indx);
@@ -2130,7 +2129,6 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 	int32_t old_num_storages = curr_imss.info.num_active_storages;
 	if (curr_num_data_nodes_env != curr_imss.info.num_active_storages)
 	{
-		// curr_imss.info.num_storages = atoi(curr_num_data_nodes);
 		stat_imss_info(curr_imss.info.uri_, &curr_imss.info);
 		fprintf(stderr, "HERCULES_CURR_ACTIVE_DATA_NODES=%d, old_num_storages=%d, num_active_storages=%d, uri=%s\n", curr_num_data_nodes_env, old_num_storages, curr_imss.info.num_active_storages, curr_imss.info.uri_);
 		// unsetenv("HERCULES_CURR_ACTIVE_DATA_NODES");
@@ -2170,10 +2168,8 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 			}
 			slog_warn("Server %d is not avaiable, number of active nodes was %d\n", server, curr_imss.info.arr_num_active_storages[server]);
 			// fprintf(stderr, "Server %d is not avaiable, recalculating\n", server);
-			// fprintf(stderr, "Server %d is not avaiable for data id %d, number of active nodes was %d\n", server, data_id, curr_imss.info.arr_num_active_storages[server]);
-			num_storages = curr_imss.info.arr_num_active_storages[server]; // curr_imss.info.num_active_storages;
+			num_storages = curr_imss.info.arr_num_active_storages[server];
 			it++;
-			// if (it >= curr_imss.info.num_storages)
 			if (it >= 10)
 			{
 				fprintf(stderr, "[ERROR] Not find server for data id %d after %d iterations, %s\n", data_id, it, curr_dataset.uri_);
@@ -2233,7 +2229,6 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 		ucp_ep_h ep = curr_imss.conns.eps[i];
 
 		sprintf(key_, "GET 6 0 %s %s", old_dir, rdir_dest);
-		// if (comm_send(curr_imss.conns.eps_[repl_servers[i]], key, key_length, 0) != key_length)
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -2688,7 +2683,6 @@ void *split_readv(void *th_argv)
 	{
 		ucp_ep_h ep;
 		// Send read request message specifying the block URI.
-		// if (comm_send(curr_imss.conns.eps_[repl_servers[i]], key, KEY, 0) < 0)
 		// printf("[SPLIT READV] 1-send_data");
 		sprintf(key_, "GET 9 0 %s %ld %ld %d %d",
 				arguments->path, arguments->BLKSIZE, arguments->start_offset,
@@ -2755,88 +2749,6 @@ void *split_readv(void *th_argv)
 	pthread_mutex_unlock(&lock_network);
 	pthread_exit(NULL);
 }
-// Method retrieving multiple data from a specific server
-/*int32_t
-  split_readv(int32_t n_server,
-  char * path,
-  char * msg,
-  unsigned char * buffer,
-  int32_t size,
-  uint64_t BLKSIZE,
-  int64_t    start_offset,
-  int    stats_size)
-  {
-  printf("n_server=%d msg=%s size=%d", n_server, msg, size);
-
-//Servers that the data block is going to be requested to.
-int32_t repl_servers[curr_dataset.repl_factor];
-
-int32_t curr_imss_storages = curr_imss.info.num_storages;
-
-//Retrieve the corresponding connections to the previous servers.
-for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
-{
-//Server storing the current data block.
-uint32_t n_server_ = (n_server + i*(curr_imss_storages/curr_dataset.repl_factor)) % curr_imss_storages;
-
-repl_servers[i] = n_server_;
-
-//Check if the current connection is the local one (if there is).
-if (repl_servers[i] == curr_dataset.local_conn)
-{
-//Move the local connection to the first one to be requested.
-
-int32_t aux_conn = repl_servers[0];
-
-repl_servers[0] = repl_servers[i];
-
-repl_servers[i] = aux_conn;
-}
-}
-
-char key_[KEY];
-//Key related to the requested data element.
-sprintf(key_, "9 %s %ld %ld %d %s",path, BLKSIZE, start_offset, stats_size, msg);
-int key_length = strlen(key_)+1;
-char key[key_length];
-memcpy((void *) key, (void *) key_, key_length);
-key[key_length-1] = '\0';
-
-//Request the concerned block to the involved servers.
-for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
-{
-//printf("BLOCK %d ASKED TO %d SERVER with key: %s (%d)", curr_block, repl_servers[i], key, key_length);
-
-//Send read request message specifying the block URI.
-//if (comm_send(curr_imss.conns.eps_[repl_servers[i]], key, KEY, 0) < 0)
-
-if (comm_send(curr_imss.conns.eps_[repl_servers[i]], key, key_length, 0) != key_length)
-{
-perror("ERRIMSS_GETDATA_REQ");
-return -1;
-}
-//Receive data related to the previous read request directly into the buffer.
-if (comm_recv(curr_imss.conns.eps_[repl_servers[i]], buffer, size*BLKSIZE*KB, 0) == -1)
-{
-if (errno != EAGAIN)
-{
-perror("ERRIMSS_GETDATA_RECV");
-return -1;
-}
-else
-break;
-}
-//Check if the requested key was correctly retrieved.
-if (strncmp((const char *) buffer, "$ERRIMSS_NO_KEY_AVAIL$", 22)){
-	return 0;
-}
-
-}
-
-//slog_fatal( "ERRIMSS_GETDATA_UNAVAIL");
-return -1;
-}
-*/
 
 int32_t flush_data()
 {
@@ -2888,7 +2800,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		return -2;
 	}
 	replication_factor = curr_dataset.repl_factor;
-	curr_imss_storages = curr_imss.info.num_active_storages; // curr_imss.info.num_storages;
+	curr_imss_storages = curr_imss.info.num_active_storages;
 	// }
 	// else
 	// {
@@ -3088,7 +3000,7 @@ size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t 
 
 	// Servers that the data block is going to be requested to.
 	int32_t repl_servers[curr_dataset.repl_factor];
-	int32_t curr_imss_storages = curr_imss.info.num_active_storages; // curr_imss.info.num_storages;
+	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
 
 	// Retrieve the corresponding connections to the previous servers.
 	// slog_debug("curr_dataset.repl_factor=%d", curr_dataset.repl_factor);
@@ -3201,7 +3113,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
-	int32_t curr_imss_storages = curr_imss.info.num_active_storages; // curr_imss.info.num_storages;
+	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
 
 	// Send the data block to every server implementing redundancy.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -3362,8 +3274,6 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
-	// int32_t curr_imss_storages = curr_imss.info.num_storages;
-	// curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
 
 	// Send the data block to every server implementing redundancy.
 	// for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -3414,37 +3324,28 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 	return 1;
 }
 
-int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, off_t offset)
+int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char *key)
 {
-
 	pthread_mutex_lock(&lock_network);
-	char key_[REQUEST_SIZE];
-	// int32_t curr_imss_storages = curr_imss.info.num_storages;
-	// curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
 
-	// Send the data block to every server implementing redundancy.
-	// for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
+	curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
+
+	char request[REQUEST_SIZE];
+
 	{
 		ucp_ep_h ep;
 		// Server receiving the current data block.
-		uint32_t n_server_ = to_data_server_id; // (n_server + i * (curr_imss_storages / curr_dataset.repl_factor)) % curr_imss_storages;
-
-		//	gettimeofday(&start, NULL);
-
-		// if (data_id == 0)
-		// 	size = sizeof(struct stat);
-		// else if (size == 0)
-		// 	size = curr_dataset.data_entity_size;
+		uint32_t n_server_ = to_data_server_id;
 
 		// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
-		sprintf(key_, "SNAPSET %lu %d %s$%d", size, 0, curr_dataset.uri_, from_data_server_id);
+		sprintf(request, "SNAPSET %lu %d %s$%d", size, 0, key, from_data_server_id);
 
-		slog_info("[IMSS] Request to Server %d: %s (%lu)", n_server_, key_, size);
-		
+		slog_info("[IMSS] Request to Server %d: %s (%lu)", n_server_, request, size);
+
 		ep = curr_imss.conns.eps[n_server_];
 		// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id)
 		// in a dataset (curr_dataset.uri).
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, request) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("HERCULES_ERR_SET_REQ_SEND_REQ");
@@ -3461,7 +3362,7 @@ int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, c
 			slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
 			return -1;
 		}
-		slog_info("[IMSS][completed] Request sent to server %d: %s (%d)", n_server_, key_, size);
+		slog_info("[IMSS][completed] Request sent to server %d: %s (%d)", n_server_, request, size);
 		/*	gettimeofday(&end, NULL);
 			delta_us = (long) (end.tv_usec - start.tv_usec);
 			printf("[CLIENT] [SWRITE SEND_DATA] delta_us=%6.3f",(delta_us/1000.0F));*/
@@ -3470,6 +3371,58 @@ int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, c
 	// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 
 	// slog_info("[IMSS] [SET DATA] sent data %f s", time_taken);
+	pthread_mutex_unlock(&lock_network);
+	return 1;
+}
+
+int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const char *request)
+{
+
+	pthread_mutex_lock(&lock_network);
+	// char key_[REQUEST_SIZE];
+	// int32_t curr_imss_storages = curr_imss.info.num_storages;
+	curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
+
+	// Send the request to each server .
+	for (int32_t i = 0; i < num_of_servers; i++)
+	{
+		if (i == from_data_server_id)
+		{
+			// Skip current server.
+			continue;
+		}
+
+		ucp_ep_h ep;
+		// Server receiving the current data block.
+		uint32_t n_server_ = i;
+
+		// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
+		// sprintf(key_, "SNAPSET %lu %d %s$%d", size, 0, curr_dataset.uri_, from_data_server_id);
+
+		slog_info("[IMSS] num_active_storages from curr_imss=%d", curr_imss.info.num_active_storages);
+		ep = curr_imss.conns.eps[n_server_];
+		slog_info("[IMSS] Request to Server %d: %s", n_server_, request);
+
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, (char *)request) == 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			perror("HERCULES_ERR_BROADCAST_SET_REQ_SEND_REQ");
+			slog_error("HERCULES_ERR_BROADCAST_SET_REQ_SEND_REQ");
+			return -1;
+			// exit(-1);
+		}
+
+		// // send the data to the data server of the current dataset.
+		// if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+		// {
+		// 	pthread_mutex_unlock(&lock_network);
+		// 	perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
+		// 	slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
+		// 	return -1;
+		// }
+		slog_info("[IMSS][completed] Request sent to server %d: %s", n_server_, request);
+	}
+
 	pthread_mutex_unlock(&lock_network);
 	return 1;
 }
@@ -3891,16 +3844,20 @@ int32_t free_dataset(dataset_info *dataset_info_)
  * the current number of active data nodes.
  * @return Current number of active data nodes, on error -1 is returned.
  */
-int get_number_of_active_nodes()
+int get_number_of_active_nodes(char *hercules_path)
 {
 	int number_active_storage_servers = 0;
-	char buf[10];
+	char buf[10], absolute_path[PATH_MAX];
+	sprintf(absolute_path, "%s/tmp/hercules_num_act_nodes", hercules_path);
+
 	// Open the "hercules_num_act_nodes" file. This file should be created by
 	// the user application or the malleability manager.
-	int fd = open("./hercules_num_act_nodes", O_RDONLY);
+	int fd = open(absolute_path, O_RDONLY);
 	if (fd == -1)
 	{
-		perror("ERR_HERCULES_OPEN_NUM_ACTVIES_NODES");
+		char err_msg[MAX_ERR_MSG_LEN];
+		sprintf(err_msg, "ERR_HERCULES_OPEN_NUM_ACTVIES_NODES:%s", absolute_path);
+		perror(err_msg);
 		return -1;
 	}
 	// Read the content.
@@ -3922,7 +3879,7 @@ int get_number_of_active_nodes()
 	else
 	{
 		number_active_storage_servers = atoi(buf);
-		fprintf(stderr, "The new number of active data nodes is %s\n", buf);
+		// fprintf(stderr, "The new number of active data nodes is %s\n", buf);
 		slog_debug("The new number of active data nodes is %s\n", buf);
 	}
 	// Close the file.
@@ -3944,8 +3901,10 @@ int32_t Open_file(const char *checkpoint_dir, const char *filename)
 	fd = open(disk_path, O_CREAT | O_WRONLY, 0600);
 	if (fd < 0)
 	{
-		perror("HERCULES_ERR_OPEN_DISK");
-		slog_error("HERCULES_ERR_OPEN_DISK");
+		char err_msg[MAX_ERR_MSG_LEN];
+		sprintf(err_msg, "HERCULES_ERR_OPEN_DISK: path=%s", disk_path);
+		perror(err_msg);
+		slog_error("%s", err_msg);
 		return -1;
 	}
 	return fd;
@@ -3964,25 +3923,35 @@ int32_t Close_file(int fd)
 	return ret;
 }
 
-int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset)
+ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset)
 {
 	int ret = -1;
 
-	ssize_t bytes = pwrite(fd, buffer, size, offset);
-	if (bytes < 0)
+	// ssize_t bytes = pwrite(fd, buffer, size, offset);
+	size_t bytes_to_write = 0;
+	ssize_t bytes_written = 0;
+	ssize_t bytes = 0;
+	while (bytes_written < size)
 	{
-		perror("HERCULES_ERR_WRITE_DISK");
-		slog_error("HERCULES_ERR_WRITE_DISK");
-		ret = close(fd);
-		if (ret < 0)
+		bytes_to_write = size;
+		if (bytes_written + bytes_to_write > size)
 		{
-			perror("HERCULES_ERR_CLOSE_DISK");
-			slog_error("HERCULES_ERR_CLOSE_DISK");
+			bytes_to_write = size - bytes_written;
 		}
-		return -1;
+		
+		bytes = write(fd, (char *)buffer+bytes_written, bytes_to_write);
+
+		if (bytes < 0)
+		{
+			perror("HERCULES_ERR_WRITE_DISK");
+			slog_error("HERCULES_ERR_WRITE_DISK");
+			Close_file(fd);
+			return -1;
+		}
+		bytes_written += bytes;
 	}
 
-	return bytes;
+	return bytes_written;
 }
 
 int32_t Make_directory(const char *dirname)
@@ -3991,7 +3960,7 @@ int32_t Make_directory(const char *dirname)
 	const char *disk_path = dirname;
 	int ret = 1;
 	struct stat sb;
-	//sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", dirname);
+	// sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", dirname);
 	if (stat(disk_path, &sb) == 0 && S_ISDIR(sb.st_mode))
 	{
 		fprintf(stderr, "directory %s exists\n", disk_path);
@@ -4009,4 +3978,3 @@ int32_t Make_directory(const char *dirname)
 	}
 	return ret;
 }
-
