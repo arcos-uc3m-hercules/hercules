@@ -57,10 +57,13 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
     // Check if the parent directory exists
     if (!parent_dir_exists(context, parent_dir))
     {
-        slog_error("Error: Parent directory does not exist\n");
-        free(parent_dir);
-        free(file);
-        return -1;
+        // If it does not exist, create it
+        int32_t insert_parent_result = redis_insert_data(context, parent_dir);
+        if (insert_parent_result == -1)
+        {
+            slog_error("Error inserting directory\n");
+            return -1;
+        }
     }
 
     // Insert the file into the parent directory
@@ -81,8 +84,15 @@ char* get_parent_dir(const char* path) {
     // Find the last occurrence of '/'
     const char* last_slash = strrchr(path, '/');
     if (last_slash == NULL || last_slash == path + strlen("imss:/")) {
-        // If no '/' is found or the path is the root '/', return "/"
         return strdup("imss://");
+    }
+
+    // If the last character is a '/', get the previous one
+    if (*(last_slash + 1) == '\0') {
+        last_slash = strrchr(path, '/');
+        if (last_slash == NULL || last_slash == path + strlen("imss:/")) {
+            return strdup("imss://");
+        }
     }
 
     // Calculate the length of the parent directory path
@@ -109,6 +119,11 @@ char* get_path_last_part(const char* path) {
     if (last_slash == NULL) {
         // If no '/' is found, return the entire path
         return strdup(path);
+    }
+
+    // If the last character is a '/', get the previous one
+    if (*(last_slash + 1) == '\0') {
+        last_slash = strrchr(path, '/');
     }
 
     // Return the substring that follows the last '/'
