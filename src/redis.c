@@ -208,11 +208,19 @@ int parent_dir_exists(redisContext *context, const char *parent_dir) {
 // Method deleting a new path.
 int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     char *parent_dir = get_parent_dir(desired_data);
-    char *file = get_path_last_part(desired_data); // This can be either a file or a dir
+    char *data_to_insert = get_path_last_part(desired_data); // This can be either a file or a dir
+
+    if (!parent_dir || !data_to_insert) {
+        slog_error("Error deleting");
+        free(parent_dir);
+        free(data_to_insert);
+        return -1;
+    }
 
     // First, remove the file from the parent directory
-    redisReply *reply = (redisReply *)redisCommand(context, "SREM %s %s", parent_dir, file);
-
+    redisReply *reply = (redisReply *)redisCommand(context, "SREM %s %s", parent_dir, data_to_insert);
+    free(parent_dir);
+    free(data_to_insert);
     if (reply == NULL)
     {
         slog_error("Error: %s\n", context->errstr);
@@ -222,8 +230,6 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     // If the file was not found in the parent directory, end execution
     if (reply->integer == 0) {
         freeReplyObject(reply);
-        free(parent_dir);
-        free(file);
         return 0;
     }
 
@@ -240,8 +246,6 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     }
 
     freeReplyObject(reply);
-    free(parent_dir);
-    free(file);
     return 1;
 }
 
@@ -251,7 +255,7 @@ void delete_subdirectories(redisContext *context, const char* parent_dir) {
     redisReply *reply = NULL;
     long cursor = 0;
     do {
-        reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s/*", cursor, parent_dir);
+        reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s*", cursor, parent_dir);
         if (reply == NULL) {
             slog_error("Error: %s\n", context->errstr);
             return;

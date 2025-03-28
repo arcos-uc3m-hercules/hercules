@@ -13,6 +13,7 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data);
 char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems);
 int32_t redis_rename(redisContext *context, const char *old_path, const char *new_path);
 int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir);
+
 char* get_parent_dir(const char* path);
 const char* find_last_slash(const char* path);
 char* get_path_last_part(const char* path);
@@ -41,6 +42,8 @@ int main(){
     char *desired_data4 = "imss://src/redis.c";
     redis_insert_data(hiredis_context, desired_data4);
     redis_insert_data(hiredis_context, desured_data5);
+    redis_delete_data(hiredis_context, "imss://src/");
+    redis_delete_data(hiredis_context, "imss://nonexistent/");
 
     int32_t numdir_elems;
     char *dir_elements = redis_getdir(hiredis_context, desired_data, &numdir_elems);
@@ -258,11 +261,19 @@ int parent_dir_exists(redisContext *context, const char *parent_dir) {
 // Method deleting a new path.
 int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     char *parent_dir = get_parent_dir(desired_data);
-    char *file = get_path_last_part(desired_data); // This can be either a file or a dir
+    char *data_to_insert = get_path_last_part(desired_data); // This can be either a file or a dir
+
+    if (!parent_dir || !data_to_insert) {
+        printf("Error deleting");
+        free(parent_dir);
+        free(data_to_insert);
+        return -1;
+    }
 
     // First, remove the file from the parent directory
-    redisReply *reply = (redisReply *)redisCommand(context, "SREM %s %s", parent_dir, file);
-
+    redisReply *reply = (redisReply *)redisCommand(context, "SREM %s %s", parent_dir, data_to_insert);
+    free(parent_dir);
+    free(data_to_insert);
     if (reply == NULL)
     {
         printf("Error: %s\n", context->errstr);
@@ -272,8 +283,6 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     // If the file was not found in the parent directory, end execution
     if (reply->integer == 0) {
         freeReplyObject(reply);
-        free(parent_dir);
-        free(file);
         return 0;
     }
 
@@ -290,8 +299,6 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     }
 
     freeReplyObject(reply);
-    free(parent_dir);
-    free(file);
     return 1;
 }
 
@@ -301,7 +308,7 @@ void delete_subdirectories(redisContext *context, const char* parent_dir) {
     redisReply *reply = NULL;
     long cursor = 0;
     do {
-        reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s/*", cursor, parent_dir);
+        reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s*", cursor, parent_dir);
         if (reply == NULL) {
             printf("Error: %s\n", context->errstr);
             return;
