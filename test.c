@@ -96,6 +96,7 @@ void redis_close(redisContext *context)
     redisFree(context);
 }
 
+
 // Method inserting a new path.
 int32_t redis_insert_data(redisContext *context, const char *desired_data)
 {
@@ -103,8 +104,16 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
         printf("Error inserting: trying to insert root");
         return -1;
     }
+
     char *parent_dir = get_parent_dir(desired_data);
     char *data_to_insert = get_path_last_part(desired_data); // This can be either a file or a dir
+
+    if (!parent_dir || !data_to_insert){
+        printf("Error inserting");
+        free(parent_dir);
+        free(data_to_insert);
+        return -1;
+    }
 
     // Check if the parent directory exists
     if (!parent_dir_exists(context, parent_dir))
@@ -114,20 +123,25 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
         if (insert_parent_result == -1)
         {
             printf("Error inserting directory\n");
+            free(parent_dir);
+            free(data_to_insert);
             return -1;
         }
     }
 
     // Insert the file into the parent directory
     redisReply *reply = (redisReply *)redisCommand(context, "SADD %s %s", parent_dir, data_to_insert);
+    free(parent_dir);
+    free(data_to_insert);
     if (reply == NULL)
     {
         printf("Error: %s\n", context->errstr);
+        free(parent_dir);
+        free(data_to_insert);
+        freeReplyObject(reply);
         return -1;
     }
     freeReplyObject(reply);
-    free(parent_dir);
-    free(data_to_insert);
     return 0;
 }
 
