@@ -51,8 +51,12 @@ void redis_close(redisContext *context)
 // Method inserting a new path.
 int32_t redis_insert_data(redisContext *context, const char *desired_data)
 {
+    if (strcmp(desired_data, "imss://") == 0) {
+        slog_error("Error inserting: trying to insert root");
+        return -1;
+    }
     char *parent_dir = get_parent_dir(desired_data);
-    char *file = get_path_last_part(desired_data); // This can be either a file or a dir
+    char *data_to_insert = get_path_last_part(desired_data); // This can be either a file or a dir
 
     // Check if the parent directory exists
     if (!parent_dir_exists(context, parent_dir))
@@ -67,7 +71,7 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
     }
 
     // Insert the file into the parent directory
-    redisReply *reply = (redisReply *)redisCommand(context, "SADD %s %s", parent_dir, file);
+    redisReply *reply = (redisReply *)redisCommand(context, "SADD %s %s", parent_dir, data_to_insert);
     if (reply == NULL)
     {
         slog_error("Error: %s\n", context->errstr);
@@ -75,59 +79,97 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
     }
     freeReplyObject(reply);
     free(parent_dir);
-    free(file);
+    free(data_to_insert);
     return 0;
 }
 
 // Helper method to get the parent directory of a path
 char* get_parent_dir(const char* path) {
+    size_t len = strlen(path);
+
+    // Make a modifiable copy of the path
+    char* temp = strdup(path);
+    if (temp == NULL) {
+        slog_error("Memory allocation error");
+        return NULL;
+    }
+
+    // Remove trailing '/' unless it's part of "imss://"
+    if (len > strlen("imss://") && temp[len - 1] == '/') {
+        temp[len - 1] = '\0';
+    }
+
     // Find the last occurrence of '/'
-    const char* last_slash = strrchr(path, '/');
-    if (last_slash == NULL || last_slash == path + strlen("imss:/")) {
+    const char* last_slash = strrchr(temp, '/');
+    if (last_slash == NULL || last_slash == temp + strlen("imss:/")) {
+        free(temp);
         return strdup("imss://");
     }
 
-    // If the last character is a '/', get the previous one
-    if (*(last_slash + 1) == '\0') {
-        last_slash = strrchr(path, '/');
-        if (last_slash == NULL || last_slash == path + strlen("imss:/")) {
-            return strdup("imss://");
-        }
-    }
-
     // Calculate the length of the parent directory path
-    size_t parent_len = last_slash - path;
+    size_t parent_len = last_slash - temp + 1;
 
     // Allocate memory for the parent directory path
     char* parent_dir = (char*)malloc(parent_len + 1);
     if (parent_dir == NULL) {
         slog_error("Memory allocation error");
+        free(temp);
         return NULL;
     }
 
     // Copy the parent directory path
-    strncpy(parent_dir, path, parent_len);
+    strncpy(parent_dir, temp, parent_len);
     parent_dir[parent_len] = '\0';
 
+    free(temp);
     return parent_dir;
-} 
+}
 
 // Helper method to get the last part of the path (file or directory name)
 char* get_path_last_part(const char* path) {
+    size_t len = strlen(path);
+
+    // Make a modifiable copy of the path
+    char* temp = strdup(path);
+    if (temp == NULL) {
+        slog_error("Memory allocation error");
+        return NULL;
+    }
+
+    // Remove trailing '/' unless it's part of "imss://"
+    if (len > strlen("imss://") && temp[len - 1] == '/') {
+        temp[len - 1] = '\0';
+    }
+
     // Find the last occurrence of '/'
-    const char* last_slash = strrchr(path, '/');
+    const char* last_slash = strrchr(temp, '/');
+    char* result;
+
     if (last_slash == NULL) {
-        // If no '/' is found, return the entire path
-        return strdup(path);
+        // No slash found, return whole path
+        result = strdup(temp);
+    } else {
+        // Return the substring after the last '/'
+        result = strdup(last_slash + 1);
     }
 
-    // If the last character is a '/', get the previous one
-    if (*(last_slash + 1) == '\0') {
-        last_slash = strrchr(path, '/');
+    // Restore the trailing '/' if it was removed
+    if (len > strlen("imss://") && path[len - 1] == '/') {
+        size_t result_len = strlen(result);
+        char* result_with_slash = (char*)malloc(result_len + 2); // +1 for '/' and +1 for '\0'
+        if (result_with_slash == NULL) {
+            slog_error("Memory allocation error");
+            free(temp);
+            free(result);
+            return NULL;
+        }
+        snprintf(result_with_slash, result_len + 2, "%s/", result);
+        free(result);
+        result = result_with_slash;
     }
 
-    // Return the substring that follows the last '/'
-    return strdup(last_slash + 1);
+    free(temp);
+    return result;
 }
 
 int parent_dir_exists(redisContext *context, const char *parent_dir) {
@@ -312,7 +354,7 @@ int rename_subdirectories(redisContext *context, const char *old_dir, const char
     do {
         redisReply *reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s/*", cursor, old_dir);
         if (reply == NULL) {
-            printf("Error: %s\n", context->errstr);
+            slog_error("Error: %s\n", context->errstr);
             return -1;
         }
 

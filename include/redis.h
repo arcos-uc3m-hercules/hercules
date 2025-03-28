@@ -29,6 +29,7 @@ int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const c
 
 // Helper functions
 char* get_parent_dir(const char* path);
+const char* find_last_slash(const char* path);
 char* get_path_last_part(const char* path);
 int parent_dir_exists(redisContext *context, const char *parent_dir);
 void delete_subdirectories(redisContext *context, const char* parent_dir);

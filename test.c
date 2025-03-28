@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#define URI_ 256
 
 
 
@@ -12,6 +13,13 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data);
 char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems);
 int32_t redis_rename(redisContext *context, const char *old_path, const char *new_path);
 int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir);
+char* get_parent_dir(const char* path);
+const char* find_last_slash(const char* path);
+char* get_path_last_part(const char* path);
+int parent_dir_exists(redisContext *context, const char *parent_dir);
+void delete_subdirectories(redisContext *context, const char* parent_dir);
+int rename_key(redisContext *context, const char *old_key, const char *new_key);
+int rename_subdirectories(redisContext *context, const char *old_dir, const char *new_dir);
 
 
 pthread_mutex_t hiredis_mut = PTHREAD_MUTEX_INITIALIZER;
@@ -27,12 +35,12 @@ int main(){
     }
 
     char *desired_data = "imss://";
-    redis_insert_data(hiredis_context, desired_data);
-    char *desired_data2 = "imss://Makefile";
-    redis_insert_data(hiredis_context, desired_data2);
-    char *desired_data3 = "imss://src";
+    char *desired_data3 = "imss://src/";
+    char *desured_data5 = "imss://nonexistent/file/";
     redis_insert_data(hiredis_context, desired_data3);
     char *desired_data4 = "imss://src/redis.c";
+    redis_insert_data(hiredis_context, desired_data4);
+    redis_insert_data(hiredis_context, desured_data5);
 
     int32_t numdir_elems;
     char *dir_elements = redis_getdir(hiredis_context, desired_data, &numdir_elems);
@@ -91,20 +99,27 @@ void redis_close(redisContext *context)
 // Method inserting a new path.
 int32_t redis_insert_data(redisContext *context, const char *desired_data)
 {
+    if (strcmp(desired_data, "imss://") == 0) {
+        printf("Error inserting: trying to insert root");
+        return -1;
+    }
     char *parent_dir = get_parent_dir(desired_data);
-    char *file = get_path_last_part(desired_data); // This can be either a file or a dir
+    char *data_to_insert = get_path_last_part(desired_data); // This can be either a file or a dir
 
     // Check if the parent directory exists
     if (!parent_dir_exists(context, parent_dir))
     {
-        printf("Error: Parent directory does not exist\n");
-        free(parent_dir);
-        free(file);
-        return -1;
+        // If it does not exist, create it
+        int32_t insert_parent_result = redis_insert_data(context, parent_dir);
+        if (insert_parent_result == -1)
+        {
+            printf("Error inserting directory\n");
+            return -1;
+        }
     }
 
     // Insert the file into the parent directory
-    redisReply *reply = (redisReply *)redisCommand(context, "SADD %s %s", parent_dir, file);
+    redisReply *reply = (redisReply *)redisCommand(context, "SADD %s %s", parent_dir, data_to_insert);
     if (reply == NULL)
     {
         printf("Error: %s\n", context->errstr);
@@ -112,47 +127,98 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
     }
     freeReplyObject(reply);
     free(parent_dir);
-    free(file);
+    free(data_to_insert);
     return 0;
 }
 
 // Helper method to get the parent directory of a path
 char* get_parent_dir(const char* path) {
+    size_t len = strlen(path);
+
+    // Make a modifiable copy of the path
+    char* temp = strdup(path);
+    if (temp == NULL) {
+        printf("Memory allocation error");
+        return NULL;
+    }
+
+    // Remove trailing '/' unless it's part of "imss://"
+    if (len > strlen("imss://") && temp[len - 1] == '/') {
+        temp[len - 1] = '\0';
+    }
+
     // Find the last occurrence of '/'
-    const char* last_slash = strrchr(path, '/');
-    if (last_slash == NULL || last_slash == path + strlen("imss:/")) {
-        // If no '/' is found or the path is the root '/', return "/"
+    const char* last_slash = strrchr(temp, '/');
+    if (last_slash == NULL || last_slash == temp + strlen("imss:/")) {
+        free(temp);
         return strdup("imss://");
     }
 
     // Calculate the length of the parent directory path
-    size_t parent_len = last_slash - path;
+    size_t parent_len = last_slash - temp + 1;
 
     // Allocate memory for the parent directory path
     char* parent_dir = (char*)malloc(parent_len + 1);
     if (parent_dir == NULL) {
         printf("Memory allocation error");
+        free(temp);
         return NULL;
     }
 
     // Copy the parent directory path
-    strncpy(parent_dir, path, parent_len);
+    strncpy(parent_dir, temp, parent_len);
     parent_dir[parent_len] = '\0';
 
+    free(temp);
     return parent_dir;
-} 
+}
+
 
 // Helper method to get the last part of the path (file or directory name)
 char* get_path_last_part(const char* path) {
-    // Find the last occurrence of '/'
-    const char* last_slash = strrchr(path, '/');
-    if (last_slash == NULL) {
-        // If no '/' is found, return the entire path
-        return strdup(path);
+    size_t len = strlen(path);
+
+    // Make a modifiable copy of the path
+    char* temp = strdup(path);
+    if (temp == NULL) {
+        printf("Memory allocation error");
+        return NULL;
     }
 
-    // Return the substring that follows the last '/'
-    return strdup(last_slash + 1);
+    // Remove trailing '/' unless it's part of "imss://"
+    if (len > strlen("imss://") && temp[len - 1] == '/') {
+        temp[len - 1] = '\0';
+    }
+
+    // Find the last occurrence of '/'
+    const char* last_slash = strrchr(temp, '/');
+    char* result;
+
+    if (last_slash == NULL) {
+        // No slash found, return whole path
+        result = strdup(temp);
+    } else {
+        // Return the substring after the last '/'
+        result = strdup(last_slash + 1);
+    }
+
+    // Restore the trailing '/' if it was removed
+    if (len > strlen("imss://") && path[len - 1] == '/') {
+        size_t result_len = strlen(result);
+        char* result_with_slash = (char*)malloc(result_len + 2); // +1 for '/' and +1 for '\0'
+        if (result_with_slash == NULL) {
+            printf("Memory allocation error");
+            free(temp);
+            free(result);
+            return NULL;
+        }
+        snprintf(result_with_slash, result_len + 2, "%s/", result);
+        free(result);
+        result = result_with_slash;
+    }
+
+    free(temp);
+    return result;
 }
 
 int parent_dir_exists(redisContext *context, const char *parent_dir) {
@@ -245,8 +311,15 @@ void delete_subdirectories(redisContext *context, const char* parent_dir) {
 
 // Function to get the directory contents from Redis
 char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems) {
+    // Check if the desired dir exists
+    redisReply *reply = (redisReply *)redisCommand(context, "EXISTS %s", desired_dir);
+    if (reply == NULL || reply->integer == 0) {
+        freeReplyObject(reply);
+        return NULL;
+    }
+
     // Retrieve the contents of the directory
-    redisReply *reply = (redisReply *)redisCommand(context, "SMEMBERS %s", desired_dir);
+    reply = (redisReply *)redisCommand(context, "SMEMBERS %s", desired_dir);
     if (reply == NULL || reply->type != REDIS_REPLY_ARRAY) {
         printf("Error: %s\n", context->errstr);
         return NULL;
@@ -257,23 +330,17 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     *numdir_elems = num_children + 1; // +1 for the actual directory + children
 
     // Buffer containing the whole set of elements within a certain directory
-    char *dir_elements = (char *)malloc((num_children + 1) * 256);
-    if (dir_elements == NULL) {
-        printf("Memory allocation error\n");
-        freeReplyObject(reply);
-        return NULL;
-    }
-    // Serialize the directory children into the buffer
+    char *dir_elements = (char *)malloc((num_children + 1) * URI_);
     char *aux_dir_elements = dir_elements;
-    memcpy(aux_dir_elements, desired_dir, 256);
-    aux_dir_elements += 256;
 
-    for (size_t i = 0; i < reply->elements; i++) {
-        const char* sub_dir = reply->element[i]->str;
-        memcpy(aux_dir_elements, sub_dir, 256);
-        aux_dir_elements += 256;
-    }
+    memcpy(aux_dir_elements, desired_dir, URI_);
+    aux_dir_elements += URI_;
 
+    for (int32_t i = 0; i < num_children; i++) {
+        char* sub_dir = reply->element[i]->str;
+        memcpy(aux_dir_elements, sub_dir, URI_);
+        aux_dir_elements += URI_;
+    } 
 
     freeReplyObject(reply);
     return dir_elements;
