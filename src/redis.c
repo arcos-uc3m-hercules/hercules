@@ -335,6 +335,11 @@ int32_t redis_rename(redisContext *context, const char *old_path, const char *ne
 // Function to rename a directory and all its subdirectories in Redis
 int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir) {
     char *filename = get_path_last_part(old_dir); // This can be either a file or a dir
+
+    if (!dir_exists(context, old_dir)) {
+        return 0;
+    }
+
     // Rename the parent directory first
     if (rename_key(context, old_dir, new_dir) < 0) {
         return -1;
@@ -356,6 +361,32 @@ int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const c
     }
 
     return 0;
+}
+
+int dir_exists(redisContext *context, const char *path) {
+    char *dir_name = get_path_last_part(path);
+    char *parent_dir = get_parent_dir(dir_name);
+
+    if (!parent_dir) {
+        slog_error("Error checking if dir exists");
+        return -1;
+    }
+
+    redisReply *reply;
+    if (strcmp(parent_dir, "imss://") == 0) {
+        reply = (redisReply *)redisCommand(context, "EXISTS %s", path);
+    } else {
+        reply = (redisReply *)redisCommand(context, "SISMEMBER %s %s", parent_dir, dir_name);
+    }
+
+    if (!reply) {
+        slog_error("Redis error checking if dir exists");
+        return -1;
+    }
+
+    int result = reply->integer;
+    freeReplyObject(reply);
+    return result;
 }
 
 // Helper function to rename a single key

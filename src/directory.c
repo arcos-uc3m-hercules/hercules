@@ -164,7 +164,7 @@ GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 		uint32_t num_elements_indir_childrens = g_node_n_children(dir_node);
 		// printf("DIR_NUM_ELEMENTS=%d\n",num_elements_indir+1);
 		char *dir_elements = (char *)malloc((num_elements_indir + 1) * URI_);
-		char *aux_dir_elem = dir_elements;
+			char *aux_dir_elem = dir_elements;
 		serialize_dir(dir_node, num_elements_indir_childrens, &aux_dir_elem);
 
 		char *aux = dir_elements;
