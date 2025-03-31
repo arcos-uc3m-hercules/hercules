@@ -336,8 +336,9 @@ int32_t redis_rename(redisContext *context, const char *old_path, const char *ne
 int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir) {
     char *filename = get_path_last_part(old_dir); // This can be either a file or a dir
 
-    if (!dir_exists(context, old_dir)) {
-        return 0;
+    int exists = dir_exists(context, old_dir);
+    if (exists <= 0) {
+        return exists;
     }
 
     // Rename the parent directory first
@@ -365,7 +366,7 @@ int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const c
 
 int dir_exists(redisContext *context, const char *path) {
     char *dir_name = get_path_last_part(path);
-    char *parent_dir = get_parent_dir(dir_name);
+    char *parent_dir = get_parent_dir(path);
 
     if (!parent_dir) {
         slog_error("Error checking if dir exists");
@@ -373,6 +374,7 @@ int dir_exists(redisContext *context, const char *path) {
     }
 
     redisReply *reply;
+    // If parent is root, check for the key of the whole path (root is never inserted as a key)
     if (strcmp(parent_dir, "imss://") == 0) {
         reply = (redisReply *)redisCommand(context, "EXISTS %s", path);
     } else {
