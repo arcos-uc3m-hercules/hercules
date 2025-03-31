@@ -388,8 +388,11 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     memcpy(aux_dir_elements, desired_dir, URI_);
     aux_dir_elements += URI_;
 
+    char sub_dir[URI_];
+    
     for (int32_t i = 0; i < num_children; i++) {
-        char* sub_dir = reply->element[i]->str;
+        // Copy the whole path into the buffer
+        sprintf(sub_dir, "%s%s", desired_dir, reply->element[i]->str);
         memcpy(aux_dir_elements, sub_dir, URI_);
         aux_dir_elements += URI_;
     } 
