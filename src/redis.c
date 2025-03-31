@@ -268,7 +268,7 @@ void delete_subdirectories(redisContext *context, const char* parent_dir) {
             redisReply *del_reply = (redisReply *)redisCommand(context, "DEL %s", key);
             if (del_reply == NULL) {
                 slog_error("Error: %s\n", context->errstr);
-                freeReplyObject(reply);
+               freeReplyObject(reply);
                 return;
             }
             freeReplyObject(del_reply);
@@ -331,12 +331,9 @@ int32_t redis_rename(redisContext *context, const char *old_path, const char *ne
 
 // Function to rename a directory and all its subdirectories in Redis
 int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir) {
-    char new_parent_dir[256];
     char *filename = get_path_last_part(old_dir); // This can be either a file or a dir
-    // Construct the new parent directory path
-    snprintf(new_parent_dir, sizeof(new_parent_dir), "%s/%s", new_dir, filename); 
     // Rename the parent directory first
-    if (rename_key(context, old_dir, new_parent_dir) < 0) {
+    if (rename_key(context, old_dir, new_dir) < 0) {
         return -1;
     }
 
@@ -345,8 +342,13 @@ int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const c
         return -1;
     }
 
+    // Delete the old file/dir from the parent
+    if (redis_delete_data(context, old_dir) < 0) {
+        return -1;
+    }
+
     // Insert the file/dir in the new parent directory key
-    if (redis_insert_data(context, new_parent_dir) != 0) {
+    if (redis_insert_data(context, new_dir) != 0) {
         return -1;
     }
 
