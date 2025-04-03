@@ -86,9 +86,9 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
         return -1;
     }
 
-    // If the data to insert is a dir, create a redis key for it
-    if (desired_data[strlen(desired_data)-1] == '/') {
-        reply = (redisReply *)redisCommand(context, "SADD %s %s", data_to_insert, "");
+    // If the data to insert is a dir, create a redis key for it unless it's root
+    if (desired_data[strlen(desired_data)-1] == '/' && strcmp(desired_data, "imss://") != 0) {
+        reply = (redisReply *)redisCommand(context, "SADD %s %s", desired_data, "");
     }
     free(data_to_insert);
     if (reply == NULL)
