@@ -51,11 +51,6 @@ void redis_close(redisContext *context)
 // Method inserting a new path.
 int32_t redis_insert_data(redisContext *context, const char *desired_data)
 {
-    // If trying to insert root, end execution
-    if (strcmp(desired_data, "imss://") == 0) {
-        return 0;
-    }
-
     char *parent_dir = get_parent_dir(desired_data);
     char *data_to_insert = get_path_last_part(desired_data); // This can be either a file or a dir
 
@@ -83,12 +78,22 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
     // Insert the file into the parent directory
     redisReply *reply = (redisReply *)redisCommand(context, "SADD %s %s", parent_dir, data_to_insert);
     free(parent_dir);
+    if (reply == NULL)
+    {
+        slog_error("Error: %s\n", context->errstr);
+        free(data_to_insert);
+        freeReplyObject(reply);
+        return -1;
+    }
+
+    // If the data to insert is a dir, create a redis key for it
+    if (desired_data[strlen(desired_data)-1] == '/') {
+        reply = (redisReply *)redisCommand(context, "SADD %s %s", data_to_insert, "");
+    }
     free(data_to_insert);
     if (reply == NULL)
     {
         slog_error("Error: %s\n", context->errstr);
-        free(parent_dir);
-        free(data_to_insert);
         freeReplyObject(reply);
         return -1;
     }
@@ -279,6 +284,12 @@ void delete_subdirectories(redisContext *context, const char* parent_dir) {
 
 // Function to get the directory contents from Redis
 char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems) {
+    // Check if the target is a dir
+    if (desired_dir[strlen(desired_dir)-1] != '/') {
+        slog_error("Target is a file, not a dir");
+        return NULL;
+    }
+
     // Check if the desired dir exists
     redisReply *reply = (redisReply *)redisCommand(context, "EXISTS %s", desired_dir);
     if (reply == NULL || reply->integer == 0) {
