@@ -86,17 +86,7 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
         return -1;
     }
 
-    // If the data to insert is a dir, create a redis key for it unless it's root
-    if (desired_data[strlen(desired_data)-1] == '/' && strcmp(desired_data, "imss://") != 0) {
-        reply = (redisReply *)redisCommand(context, "SADD %s %s", desired_data, "");
-    }
     free(data_to_insert);
-    if (reply == NULL)
-    {
-        slog_error("Error: %s\n", context->errstr);
-        freeReplyObject(reply);
-        return -1;
-    }
     freeReplyObject(reply);
     return 0;
 }
@@ -284,21 +274,8 @@ void delete_subdirectories(redisContext *context, const char* parent_dir) {
 
 // Function to get the directory contents from Redis
 char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numdir_elems) {
-    // Check if the target is a dir
-    if (desired_dir[strlen(desired_dir)-1] != '/') {
-        slog_error("Target is a file, not a dir");
-        return NULL;
-    }
-
-    // Check if the desired dir exists
-    redisReply *reply = (redisReply *)redisCommand(context, "EXISTS %s", desired_dir);
-    if (reply == NULL || reply->integer == 0) {
-        freeReplyObject(reply);
-        return NULL;
-    }
-
     // Retrieve the contents of the directory
-    reply = (redisReply *)redisCommand(context, "SMEMBERS %s", desired_dir);
+    redisReply *reply = (redisReply *)redisCommand(context, "SMEMBERS %s", desired_dir);
     if (reply == NULL || reply->type != REDIS_REPLY_ARRAY) {
         slog_error("Error: %s\n", context->errstr);
         return NULL;
