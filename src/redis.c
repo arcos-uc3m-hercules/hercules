@@ -115,7 +115,7 @@ char* get_parent_dir(const char* path) {
     }
 
     // Calculate the length of the parent directory path
-    size_t parent_len = last_slash - temp + 1;
+    size_t parent_len = last_slash - temp;
 
     // Allocate memory for the parent directory path
     char* parent_dir = (char*)malloc(parent_len + 1);
@@ -296,7 +296,7 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     
     for (int32_t i = 0; i < num_children; i++) {
         // Copy the whole path into the buffer
-        sprintf(sub_dir, "%s%s", desired_dir, reply->element[i]->str);
+        sprintf(sub_dir, "%s/%s", desired_dir, reply->element[i]->str);
         memcpy(aux_dir_elements, sub_dir, URI_);
         aux_dir_elements += URI_;
     } 
