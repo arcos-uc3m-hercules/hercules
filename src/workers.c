@@ -48,9 +48,6 @@ char att_imss_uri[URI_];
 
 static long iov_cnt = 1;
 
-// Map that stores server side endpoints
-void *map_server_eps;
-
 pthread_mutex_t tree_mut = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mp = PTHREAD_MUTEX_INITIALIZER;
 
@@ -134,21 +131,6 @@ int ready(char *tmp_file_path, const char *msg)
 // int malleability_on = 0;
 #define MALLEABILITY_MESSAGE = "MALLEABILITY";
 
-// void handle_signal(int signal)
-// {
-// 	if (signal == SIGUSR1)
-// 	{
-// 		fprintf(stderr, "*** Received SIGUSR1\n");
-// 		global_finish_threads = 1;
-
-// 		// To dispatcher thread.
-// 		if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
-// 		{
-// 			fprintf(stderr, "Error closing server_fd\n");
-// 		}
-// 	}
-// }
-
 // Thread method attending client read-write data requests.
 void *srv_worker(void *th_argv)
 {
@@ -174,9 +156,14 @@ void *srv_worker(void *th_argv)
 	ep_params.err_handler.cb = err_cb_server;
 	// ep_params.err_handler.arg = NULL;
 
-	map_server_eps = map_server_eps_create();
+	// Map that stores server side endpoints
+	void *map_server_eps;
 
-	BLOCK_SIZE = arguments->blocksize * 1024;
+	// if (!arguments->thread_id)
+	{ // thread 0.
+		map_server_eps = map_server_eps_create();
+		BLOCK_SIZE = arguments->blocksize * 1024;
+	}
 
 	for (;;)
 	{
@@ -244,7 +231,7 @@ void *srv_worker(void *th_argv)
 		// 	// }
 		// }
 
-		slog_debug("[srv_worker] Message length=%ld bytes.", info_tag.length);
+		slog_debug("Message length=%ld bytes.", info_tag.length);
 		msg = (msg_req_t *)malloc(info_tag.length);
 
 		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
@@ -288,31 +275,29 @@ void *srv_worker(void *th_argv)
 		}
 		else
 		{
-			slog_debug("\t[srv_worker]['%" PRIu64 "] Endpoint already exist'", attr.worker_uid);
+			slog_debug("\t['%" PRIu64 "] Endpoint already exist'", attr.worker_uid);
 		}
 
 		arguments->peer_address = peer_addr;
 		arguments->server_ep = ep;
 		arguments->worker_uid = attr.worker_uid;
 
-		srv_worker_helper(arguments, req);
+		srv_worker_helper(arguments, req, map_server_eps);
 		t = clock() - t;
 
 		time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
-		slog_info("[srv_worker] Serving time %f s\n", time_taken);
+		slog_info("Serving time %f s\n", time_taken);
 
 		free(peer_addr);
 		free(msg);
 	}
 }
 
-int srv_worker_helper(p_argv *arguments, const char *req)
+int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 {
 
 	ucs_status_t status;
 	int ret = -1;
-
-	// Cast from generic pointer type to p_argv struct type pointer.
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
@@ -326,7 +311,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 	char mode[MODE_SIZE];
 
-	// slog_debug(" Waiting for new request.");
 	// Save the request to be served.
 	slog_debug(" request to be served %s", req);
 
@@ -410,7 +394,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			}
 			else
 			{
-				// ret = TIMING(send_data(arguments->ucp_worker, arguments->server_ep, address_, block_size_rtvd, arguments->worker_uid), "[READ_OP][READ_OP] Send the requested block");
 				if (to_read <= 0)
 				{
 					to_read = block_size_rtvd;
@@ -461,13 +444,12 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 		{
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			slog_debug("[READ_OP][RELEASE]");
-			char release_msg[] = "RELEASE\0";
-
-			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send release", int);
+			char response_msg[] = "RELEASE\0";
+			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send release", int);
 			if (ret == 0)
 			{
-				perror("ERR_HERCULES_SRV_SEND_DATA_RELEASE");
-				slog_error("ERR_HERCULES_SRV_SEND_DATA_RELEASE");
+				perror("HERCULES_ERR_SRV_SEND_DATA_RELEASE");
+				slog_error("HERCULES_ERR_SRV_SEND_DATA_RELEASE");
 				return -1;
 			}
 			break;
@@ -477,8 +459,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			slog_debug("DELETE_OP");
 			slog_debug("Cleaning %s", key.c_str());
 			map->cleaning_specific(key);
-			char release_msg[] = "DELETE\0";
-			ret = send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid);
+			char response_msg[] = "DELETE\0";
+			ret = send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid);
 			if (ret == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_DELETEOP");
@@ -495,7 +477,8 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			{
 				slog_debug("[RENAME_OP], found != npos");
 				std::string old_key = key.substr(0, found);
-				std::string new_key = key.substr(found + 1, key.length());
+				// std::string new_key = key.substr(found + 1, key.length());
+				std::string new_key = key.substr(found + 1);
 				slog_debug("[RENAME_OP], old_key=%s, new_key=%s", old_key.c_str(), new_key.c_str());
 				// RENAME MAP
 				map->cleaning_specific(new_key);
@@ -510,12 +493,12 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				slog_debug("[RENAME_OP], found == npos");
 			}
 
-			char release_msg[] = "RENAME\0";
-			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send rename", int);
+			char response_msg[] = "RENAME\0";
+			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send rename", int);
 			if (ret == 0)
 			{
-				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
-				slog_error("ERR_HERCULES_PUBLISH_RENAMEMSG");
+				perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
+				slog_error("HERCULES_ERR_PUBLISH_RENAMEMSG");
 				return -1;
 			}
 			break;
@@ -527,14 +510,15 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			if (found != std::string::npos)
 			{
 				std::string old_dir = key.substr(0, found);
-				std::string rdir_dest = key.substr(found + 1, key.length());
+				// std::string rdir_dest = key.substr(found + 1, key.length());
+				std::string rdir_dest = key.substr(found + 1);
 
 				// RENAME MAP
 				map->rename_data_dir_srv_worker(old_dir, rdir_dest);
 			}
 
-			char release_msg[] = "RENAME\0";
-			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_DIR_DIR_OP] Send rename", int);
+			char response_msg[] = "RENAME\0";
+			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_DIR_DIR_OP] Send rename", int);
 			if (ret == 0)
 			{
 				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
@@ -1009,7 +993,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 			int32_t insert_successful;
 
 			// printf("Nodename	-%s size_recv=%d",detect.nodename,size_recv);
-			// printf("Salida buf full=%c",buf[100]);
 
 			int32_t byte_count = 0;
 			for (int i = 0; i < amount; i++)
@@ -1028,7 +1011,6 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					// If don't exist
 					char *buffer = (char *)aligned_alloc(1024, blocksize);
 					memcpy(buffer, (char *)buf + byte_count, blocksize);
-					// printf("Salida buffer part=%c",buffer[100]);
 					insert_successful = map->put(element, buffer, block_size_recv);
 					if (insert_successful != 0)
 					{
@@ -1125,7 +1107,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 				else // Data in shared memory.
 				{
 					//  Tell the client this is a new block to be copy in the shared memory with an offset "global_offset".
-					char answer[RESPONSE_SIZE];
+					char answer[RESPONSE_SIZE] = {0};
 					sprintf(answer, "NEW %ld", global_offset);
 					slog_info("Answer=%s", answer);
 					ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
@@ -1274,7 +1256,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					else
 					{ // data is in shared memory.
 						//  Tell the client to update the shared memory.
-						char answer[RESPONSE_SIZE];
+						char answer[RESPONSE_SIZE] = {0};
 						// "address_" is the shared memory offset.
 						sprintf(answer, "TOUPDATE %s", (char *)address_);
 						ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
@@ -1316,7 +1298,7 @@ int srv_worker_helper(p_argv *arguments, const char *req)
 					else
 					{ // Data is in shared memory.
 						//  Tell the client to update the shared memory.
-						char answer[RESPONSE_SIZE];
+						char answer[RESPONSE_SIZE] = {0};
 						// "address_" is the shared memory offset.
 						sprintf(answer, "TOUPDATE %s", (char *)address_);
 						ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
@@ -1524,7 +1506,13 @@ void *stat_worker(void *th_argv)
 
 	p_argv *arguments = (p_argv *)th_argv;
 
-	map_server_eps = map_server_eps_create();
+	// Map that stores server side endpoints
+	void *map_server_eps;
+
+	// if (!arguments->thread_id)
+	{ // thread 0.
+		map_server_eps = map_server_eps_create();
+	}
 
 	ucp_ep_params_t ep_params;
 
@@ -1536,9 +1524,11 @@ void *stat_worker(void *th_argv)
 	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
 	ep_params.err_handler.cb = err_cb_server;
 
+	fprintf(stderr, "Starting metadata thread %d\n", arguments->thread_id);
+
 	for (;;)
 	{
-		mtrace();
+		// mtrace();
 
 		size_t peer_addr_len;
 		ucp_address_t *peer_addr;
@@ -1550,9 +1540,6 @@ void *stat_worker(void *th_argv)
 		ucp_tag_message_h msg_tag;
 		msg_req_t *msg;
 		ucp_request_param_t recv_param;
-
-		// Register signal handler
-		// signal(SIGUSR1, handle_signal);
 
 		ucs_status_t status;
 		/* Receive test string from server */
@@ -1658,7 +1645,7 @@ void *stat_worker(void *th_argv)
 		// muntrace();
 
 		// arguments->worker_uid = attr.worker_uid;
-		stat_worker_helper(arguments, req);
+		stat_worker_helper(arguments, req, map_server_eps);
 
 		// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
 		free(peer_addr);
@@ -1668,7 +1655,7 @@ void *stat_worker(void *th_argv)
 	}
 }
 
-int stat_worker_helper(p_argv *arguments, char *req)
+int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 {
 	ucs_status_t status;
 	int ret = 0;
@@ -1736,7 +1723,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 	uint64_t block_size_rtvd;
 	dataset_info *dataset;
 
-	// printf("stat_worker RECV more=%ld, blocksss=%ld",more, block_size_recv);
 	// Differentiate between READ and WRITE operations.
 	switch (more)
 	{
@@ -1755,8 +1741,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
 			if (numelems_indir == -1)
 			{
-				const char *last = key.c_str() + strlen(key.c_str()) - 1;
-				if (last[0] != '/')
+				//const char *last = key.c_str() + strlen(key.c_str()) - 1;
+				//if (last[0] != '/')
+				if (!key.empty() && key.back() != '/') 
 				{
 					key += '/';
 					buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
@@ -1764,9 +1751,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			}
 			slog_info("[workers] Ending GTree_getdir, key=%s, numelems_indir=%d", key.c_str(), numelems_indir);
 			pthread_mutex_unlock(&tree_mut);
-			// if (buffer == NULL)
+
 			if (numelems_indir == -1)
-			{
+			{ // error case.
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STATWORKER_NODIR");
@@ -1775,7 +1762,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				break;
 			}
 			if (numelems_indir == 0)
-			{
+			{ // empty directory case.
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, empty_directory_msg, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STATWORKER_NODIR");
@@ -1819,15 +1806,16 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			int err = map->get(key, &address_, &block_size_rtvd);
 			if (err == 0)
 			{
-				const char *last = key.c_str() + strlen(key.c_str()) - 1;
-				if (last[0] != '/')
+				//const char *last = key.c_str() + strlen(key.c_str()) - 1;
+				//if (last[0] != '/')
+				if (!key.empty() && key.back() != '/') 
 				{
 					key += '/';
 					err = map->get(key, &address_, &block_size_rtvd);
 				}
 			}
 
-			slog_debug("[STAT WORKER] map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
+			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
 			{
 				// Send the error code block.
@@ -1887,8 +1875,9 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
 			{
-				const char *last = key.c_str() + strlen(key.c_str()) - 1;
-				if (last[0] != '/')
+				//const char *last = key.c_str() + strlen(key.c_str()) - 1;
+				//if (last[0] != '/')
+				if (!key.empty() && key.back() != '/') 
 				{
 					key += '/';
 					err = map->get(key, &address_, &block_size_rtvd);
@@ -1912,7 +1901,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				switch (operation)
 				{
 				case 4: // unlink.
-					strncpy(dataset->status, "dest\0", strlen("dest\0"));
+					strncpy(dataset->status, "dest", strlen("dest") + 1);
 					slog_debug("Dataset mark as dest");
 					break;
 				default:
@@ -1920,23 +1909,29 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				}
 
 				slog_debug("dataset->n_open=%d, dataset->status=%s", dataset->n_open, dataset->status);
-				char release_msg[10];	  //= "DELETE\0";
+				char response_msg[MAX_RESPONSE_MSG_LEN]; //= "DELETE\0";
+				int32_t ret_map = 0, ret_tree = 0;
 				if (dataset->n_open == 0) // if no more process has the file opened.
 				{
-					// TODO: add error handling and recursive search.
-					int32_t result = map->delete_metadata_stat_worker(key);
-					slog_debug("delete_metadata_stat_worker=%d", result);
-					GTree_delete((char *)key.c_str());
-					strncpy(release_msg, "DELETE\0", strlen("DELETE\0") + 1);
+					// TODO: before delete, it's better to check if the file is on the structures.
+					ret_map = map->delete_metadata_stat_worker(key);
+					pthread_mutex_lock(&tree_mut);
+					ret_tree = GTree_delete((char *)key.c_str());
+					pthread_mutex_unlock(&tree_mut);
+					slog_debug("delete_metadata_stat_worker=%d, GTree_delete=%d", ret_map, ret_tree);
+				}
+
+				if (ret_map && ret_tree)
+				{
+					strncpy(response_msg, "DELETE", strlen("DELETE") + 1);
 				}
 				else
 				{
-					strncpy(release_msg, "NODELETE\0", strlen("NODELETE") + 1);
+					strncpy(response_msg, "NODELETE", strlen("NODELETE") + 1);
 				}
 
-				// char release_msg[] = "DELETE\0";
-				slog_debug("release_msg=%s", release_msg);
-				if (send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid) == 0)
+				slog_debug("response_msg=%s", response_msg);
+				if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 				{
 					perror("ERR_HERCULES_PUBLISH_DELETEMSG");
 					slog_error("ERR_HERCULES_PUBLISH_DELETEMSG");
@@ -1951,7 +1946,8 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			if (found != std::string::npos)
 			{
 				std::string old_key = key.substr(0, found);
-				std::string new_key = key.substr(found + 1, key.length());
+				// std::string new_key = key.substr(found + 1, key.length());
+				std::string new_key = key.substr(found + 1);
 
 				slog_debug("[RENAME] old_key=%s, new_key=%s\n", old_key.c_str(), new_key.c_str());
 
@@ -1966,13 +1962,14 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				}
 
 				// RENAME TREE
+				pthread_mutex_lock(&tree_mut);
 				int ret = GTree_rename((char *)old_key.c_str(), (char *)new_key.c_str());
+				pthread_mutex_unlock(&tree_mut);
 				slog_debug("[RENAME] GTree_rename=%d", ret);
 			}
 
-			char release_msg[] = "RENAME\0";
-
-			if (send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid) == 0)
+			char response_msg[] = "RENAME\0";
+			if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 			{
 				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
 				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
@@ -1982,7 +1979,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		}
 		case RENAME_DIR_DIR_OP:
 		{
-			char response_msg[10];
+			char response_msg[MAX_RESPONSE_MSG_LEN];
 			int ret = -1;
 			if (req[num_characters_read] != '\0')
 			{
@@ -2005,7 +2002,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 				// RENAME TREE
 				if (ret != -1)
+				{
+					pthread_mutex_lock(&tree_mut);
 					ret = GTree_rename_dir_dir((char *)old_dir.c_str(), (char *)rdir_dest.c_str());
+					pthread_mutex_unlock(&tree_mut);
+				}
 
 				slog_debug("old_dir=%s, rdir_dest=%s, ret=%d", old_dir.c_str(), rdir_dest.c_str(), ret);
 				// }
@@ -2019,11 +2020,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 			if (ret == -1)
 			{
-				strcpy(response_msg, "ERROR\0");
+				strncpy(response_msg, "ERROR", strlen("ERROR") + 1);
 			}
 			else
 			{
-				strcpy(response_msg, "RENAME\0");
+				strncpy(response_msg, "RENAME", strlen("RENAME") + 1);
 			}
 
 			if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
@@ -2038,7 +2039,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		{
 			slog_debug("CLOSE_OP");
 			int err = map->get(key, &address_, &block_size_rtvd);
-			slog_debug("[STAT WORKER] map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
+			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
 			{
 				// Send the error code block.
@@ -2062,26 +2063,25 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				}
 
 				slog_debug("After dataset->n_open=%d, status=%s", dataset->n_open, dataset->status);
-				char release_msg[10]; //= "DELETE\0";
-									  // if file status is marked as "dest", it is delete after close.
+				char response_msg[MAX_RESPONSE_MSG_LEN]; //= "DELETE\0";
+														 // if file status is marked as "dest", it is delete after close.
 				if (!strncmp(dataset->status, "dest", strlen("dest")) && dataset->n_open == 0)
 				{
 					slog_debug("Deleting %s", key.c_str());
 					int32_t result = map->delete_metadata_stat_worker(key);
 					slog_debug("[READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
+					pthread_mutex_lock(&tree_mut);
 					GTree_delete((char *)key.c_str());
-					strcpy(release_msg, "DELETE\0");
+					pthread_mutex_unlock(&tree_mut);
+					strncpy(response_msg, "DELETE", strlen("DELETE") + 1);
 				}
 				else
 				{
-					strcpy(release_msg, "CLOSE\0");
+					strncpy(response_msg, "CLOSE", strlen("CLOSE") + 1);
 				}
 				// int32_t result = map->delete_metadata_stat_worker(key);
 				// slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
-				// GTree_delete((char *)key.c_str());
-				// char release_msg[] = "CLOSE\0";
-				// if (send_data(arguments->ucp_worker, arguments->server_ep, release_msg, RESPONSE_SIZE, arguments->worker_uid) < 0)
-				if (send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid) == 0)
+				if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 				{
 					perror("ERR_HERCULES_PUBLISH_DELETEMSG");
 					slog_error("ERR_HERCULES_PUBLISH_DELETEMSG");
@@ -2096,15 +2096,16 @@ int stat_worker_helper(p_argv *arguments, char *req)
 			int err = map->get(key, &address_, &block_size_rtvd);
 			if (err == 0)
 			{
-				const char *last = key.c_str() + strlen(key.c_str()) - 1;
-				if (last[0] != '/')
+				//const char *last = key.c_str() + strlen(key.c_str()) - 1;
+				//if (last[0] != '/')
+				if (!key.empty() && key.back() != '/') 
 				{
 					key += '/';
 					err = map->get(key, &address_, &block_size_rtvd);
 				}
 			}
 
-			slog_debug("[STAT WORKER] map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
+			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
 			{
 				// Send the error code block.
@@ -2129,13 +2130,11 @@ int stat_worker_helper(p_argv *arguments, char *req)
 				// 	break;
 				// }
 				slog_debug("After dataset->n_open=%d, status=%s", dataset->n_open, dataset->status);
-				char release_msg[10]; //= "DELETE\0";
-				strncpy(release_msg, "OPEN", strlen("OPEN") + 1);
+				char response_msg[] = "OPEN\0";
+				// strncpy(response_msg, "OPEN", strlen("OPEN") + 1);
 				// int32_t result = map->delete_metadata_stat_worker(key);
 				// slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
-				// GTree_delete((char *)key.c_str());
-				// char release_msg[] = "CLOSE\0";
-				if (send_data(arguments->ucp_worker, arguments->server_ep, release_msg, strlen(release_msg) + 1, arguments->worker_uid) == 0)
+				if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 				{
 					perror("ERR_HERCULES_PUBLISH_DELETEMSG");
 					slog_error("ERR_HERCULES_PUBLISH_DELETEMSG");
@@ -2152,15 +2151,14 @@ int stat_worker_helper(p_argv *arguments, char *req)
 		// More messages will arrive to the socket.
 	case SET_OP:
 	{
-		slog_debug("SET_OP");
-		slog_debug("[STAT WORKER] Creating dataset %s.", key.c_str());
+		slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
+		// TO CHECK: this mutex can be removed cause' map->get has another mutex.
 		pthread_mutex_lock(&mp);
 		// If the record was not already stored, add the block.
 		if (!map->get(key, &address_, &block_size_rtvd))
 		{
 			pthread_mutex_unlock(&mp);
-
-			slog_debug("[STAT WORKER] Recv dynamic buffer size %ld", block_size_recv);
+			slog_debug("Recv dynamic buffer size %ld", block_size_recv);
 			// Get the length of the message to be received.
 			size_t length = 0;
 			int32_t ret = -1;
@@ -2177,7 +2175,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 			dataset_info *struct_ = (dataset_info *)buffer;
 
-			slog_debug("[STAT WORKER] END Recv dynamic, n_server_when_created=%d", struct_->n_servers_when_created);
+			slog_debug("END Recv dynamic, n_server_when_created=%d", struct_->n_servers_when_created);
 
 			if (ret < 0)
 			{
@@ -2189,7 +2187,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 			int32_t insert_successful = -1;
 			insert_successful = map->put(key, buffer, length);
-			slog_debug("[STAT WORKER] map->put (key %s) err %d", key.c_str(), insert_successful);
+			slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);
 
 			if (insert_successful != 0)
 			{
@@ -2201,7 +2199,7 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 			// Insert the received uri into the directory tree.
 			pthread_mutex_lock(&tree_mut);
-			// slog_debug("[STAT WORKER] Inserting %s into directory tree", key.c_str());
+			// slog_debug("Inserting %s into directory tree", key.c_str());
 			insert_successful = GTree_insert((char *)key.c_str());
 			pthread_mutex_unlock(&tree_mut);
 
@@ -2216,13 +2214,13 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 			// Update the pointer.
 			arguments->pt += block_size_recv;
-			slog_debug("[STAT WORKER] Dataset %s has been created.", key.c_str());
+			slog_debug("Dataset %s has been created.", key.c_str());
 		}
 		// If was already stored:
 		else
 		{
 			// Follow a certain behavior if the received block was already stored.
-			slog_debug("[STAT WORKER] LOCAL DATASET_UPDATE %ld", block_size_recv);
+			slog_debug("LOCAL DATASET_UPDATE %ld", block_size_recv);
 			switch (1) // TO CKECK!
 			{
 			// Update where the blocks of a LOCAL dataset have been stored.
@@ -2316,7 +2314,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 
 				if (flag)
 				{
-
 					unsigned long num_active_storages = atol(number);
 					int delete_dataserver_indx = operation;
 					slog_debug("[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
@@ -2324,7 +2321,6 @@ int stat_worker_helper(p_argv *arguments, char *req)
 					char *address_aux = (char *)address_;
 					// fprintf(stderr, "block_size_rtvd=%lu\n", block_size_rtvd);
 					imss_info *imss_info_ = (imss_info *)malloc(block_size_rtvd * sizeof(imss_info));
-					// = (imss_info *)address_aux;
 					memcpy(imss_info_, address_aux, sizeof(imss_info));
 
 					// imss_info_->num_active_storages--;
@@ -2406,6 +2402,7 @@ void *srv_attached_dispatcher(void *th_argv)
 	ucp_am_handler_param_t param;
 	ucp_ep_h server_ep;
 	ucs_status_t status;
+	u_int16_t hercules_thread_pool_size = arguments->hercules_thread_pool_size;
 	int ret;
 
 	// Variable specifying the ID that will be granted to the next client.
@@ -2416,7 +2413,7 @@ void *srv_attached_dispatcher(void *th_argv)
 	ret = init_worker(arguments->ucp_context, &ucp_data_worker);
 	if (ret != 0)
 	{
-		perror("ERRIMSS_INIT_WORKER");
+		perror("HERCULES_ERR_INIT_SRV_DISPATCHER");
 		pthread_exit(NULL);
 	}
 
@@ -2464,6 +2461,13 @@ void *srv_attached_dispatcher(void *th_argv)
 
 		// char mode[msg_length];
 		req = (char *)malloc(msg_length * sizeof(char));
+		if (req == NULL)
+		{
+			perror("HERCULES_ERR_DISPATCHER_MEMORY_ALLOC_MSG_LEN");
+			slog_error("HERCULES_ERR_DISPATCHER_MEMORY_ALLOC_MSG_LEN");
+			pthread_exit(NULL);
+		}
+		
 		// char mode[MODE_SIZE];
 		msg_length = recv_data(ucp_data_worker, server_ep, (char *)req, msg_length, arguments->worker_uid, 0);
 		// msg_length = recv_data_opt(ucp_data_worker, server_ep, (void **)&req, msg_length, arguments->worker_uid, 0);
@@ -2471,12 +2475,19 @@ void *srv_attached_dispatcher(void *th_argv)
 		{
 			perror("HERCULES_ERR_SRV_DISPATCHER_DATA_RECV_DATA");
 			slog_error("HERCULES_ERR_SRV_DISPATCHER_DATA_RECV_DATA");
-			// free(mode);
 			free(req);
 			pthread_exit(NULL);
 		}
 
 		char *mode = (char *)malloc(msg_length * sizeof(char));
+		if (mode == NULL)
+		{
+			perror("HERCULES_ERR_DISPATCHER_MEMORY_ALLOC_MODE");
+			slog_error("HERCULES_ERR_DISPATCHER_MEMORY_ALLOC_MODE");
+			free(req);
+			pthread_exit(NULL);
+		}
+		
 		slog_info("Req=%s", req);
 
 		sscanf(req, "%" PRIu32 " %s", &client_id_, mode);
@@ -2509,7 +2520,7 @@ void *srv_attached_dispatcher(void *th_argv)
 			char response_[RESPONSE_SIZE];
 			memset(response_, '\0', RESPONSE_SIZE);
 			// Port that the new client will be forwarded to.
-			int32_t port_ = arguments->port + 1 + (client_id_ % IMSS_THREAD_POOL);
+			int32_t port_ = arguments->port + 1 + (client_id_ % hercules_thread_pool_size);
 			// Wrap the previous info into the ZMQ message.
 			sprintf(response_, "%d%c%d", port_, '-', client_id_++);
 			slog_info("Seding response_=%s", response_);
@@ -2536,8 +2547,8 @@ void *srv_attached_dispatcher(void *th_argv)
 			// Provide the uri of this instance.
 			if (send_data(ucp_data_worker, server_ep, arguments->my_uri, strlen(arguments->my_uri) + 1, arguments->worker_uid) == 0) // MIRAR
 			{
-				perror("ERR_HERCULES_WHOREQUEST");
-				slog_error("ERR_HERCULES_WHOREQUEST");
+				perror("HERCULES_ERR_WHOREQUEST");
+				slog_error("HERCULES_ERR_WHOREQUEST");
 				// ep_flush(server_ep, ucp_data_worker);
 				ep_close(ucp_data_worker, server_ep, UCP_EP_CLOSE_MODE_FLUSH);
 				free(mode);
@@ -2572,15 +2583,15 @@ void *dispatcher(void *th_argv)
 	int ret;
 	int listenfd = -1;
 	int optval = 1;
-	// char service[8];
 	char *tmp_file_path = arguments->tmp_file_path;
+	u_int16_t hercules_thread_pool_size = arguments->hercules_thread_pool_size;
 	int client = 0;
 
 	// Get a socket file descriptor.
 	global_server_fd_thread = socket(AF_INET, SOCK_STREAM, 0);
 	if (global_server_fd_thread < 0)
 	{
-		perror("ERR_HERCULES_DISPATCHER_SOCKET");
+		perror("HERCULES_ERR_DISPATCHER_SOCKET");
 		ready(tmp_file_path, "ERROR");
 		pthread_exit(NULL);
 	}
@@ -2589,7 +2600,7 @@ void *dispatcher(void *th_argv)
 	ret = setsockopt(global_server_fd_thread, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
 	if (ret < 0)
 	{
-		perror("ERR_HERCULES_DISPATCHER_SET_SOCKET_OPT");
+		perror("HERCULES_ERR_DISPATCHER_SET_SOCKET_OPT");
 		ready(tmp_file_path, "ERROR");
 		pthread_exit(NULL);
 	}
@@ -2603,7 +2614,7 @@ void *dispatcher(void *th_argv)
 	// Asociamos el socket a la dirección del servidor
 	if (bind(global_server_fd_thread, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
 	{
-		perror("ERR_HERCULES_DISPATCHER_BIND");
+		perror("HERCULES_ERR_DISPATCHER_BIND");
 		ready(tmp_file_path, "ERROR");
 		pthread_exit(NULL);
 	}
@@ -2612,7 +2623,7 @@ void *dispatcher(void *th_argv)
 	ret = listen(global_server_fd_thread, 100);
 	if (ret < 0)
 	{
-		perror("ERR_HERCULES_DISPATCHER_LISTEN");
+		perror("HERCULES_ERR_DISPATCHER_LISTEN");
 		ready(tmp_file_path, "ERROR");
 		pthread_exit(NULL);
 	}
@@ -2643,7 +2654,7 @@ void *dispatcher(void *th_argv)
 		ret = recv(new_socket, req, REQUEST_SIZE, MSG_WAITALL);
 		if (ret < 0)
 		{
-			slog_error("ERR_HERCULES_DISPATCHER_RECV");
+			slog_error("HERCULES_ERR_DISPATCHER_RECV");
 		}
 
 		sscanf(req, "%" PRIu32 " %s", &client_id_, mode);
@@ -2651,23 +2662,24 @@ void *dispatcher(void *th_argv)
 		char *req_content = strstr(req, mode);
 		req_content += 4;
 
-		slog_debug("[DISPATCHER] req=%s, req_content=%s", req, req_content);
+		slog_debug("req=%s, req_content=%s", req, req_content);
 
 		// Check if the client is requesting connection resources.
 		if (!strncmp(req_content, "HELLO!", 6))
 		{
-			ret = send(new_socket, &local_addr_len[(client % IMSS_THREAD_POOL)], sizeof(local_addr_len[(client % IMSS_THREAD_POOL)]), 0);
+			//fprintf(stderr, "HERCULES_THREAD_POOL_SIZE = %d, client=%d\n", hercules_thread_pool_size, client);
+			ret = send(new_socket, &local_addr_len[(client % hercules_thread_pool_size)], sizeof(local_addr_len[(client % hercules_thread_pool_size)]), 0);
 			if (ret == -1)
 			{
-				slog_error("ERR_HERCULES_DISPATCHER_SEND1");
+				slog_error("HERCULES_ERR_DISPATCHER_SEND1");
 			}
-			ret = send(new_socket, local_addr[(client % IMSS_THREAD_POOL)], local_addr_len[(client % IMSS_THREAD_POOL)], 0);
+			ret = send(new_socket, local_addr[(client % hercules_thread_pool_size)], local_addr_len[(client % hercules_thread_pool_size)], 0);
 			if (ret == -1)
 			{
-				slog_error("ERR_HERCULES_DISPATCHER_SEND2");
+				slog_error("HERCULES_ERR_DISPATCHER_SEND2");
 			}
 			client++;
-			slog_debug("[DISPATCHER] Replied client.");
+			slog_debug("Replied client.");
 		}
 		else if (!strncmp(req_content, "MAIN!", 5))
 		{
@@ -2675,17 +2687,17 @@ void *dispatcher(void *th_argv)
 			// metadata servers.
 			ret = send(new_socket, &local_addr_len[0], sizeof(local_addr_len[0]), 0);
 			ret = send(new_socket, local_addr[0], local_addr_len[0], 0);
-			slog_debug("[DISPATCHER] Sent address %lu (%lu) to the client", local_addr[0], local_addr_len[0]);
+			slog_debug("Sent address %lu (%lu) to the client", local_addr[0], local_addr_len[0]);
 		}
 		// Check if someone is requesting identity resources.
 		else if (*((int32_t *)req) == WHO)
 		{
 			ret = send(new_socket, &local_addr_len[client], sizeof(local_addr_len[client]), 0);
 			ret = send(new_socket, local_addr[client], local_addr_len[client], 0);
-			slog_debug("[DISPATCHER] Replied client %s.", arguments->my_uri);
+			slog_debug("Replied client %s.", arguments->my_uri);
 		}
 
-		// MIRAR ucp_worker_release_address(ucp_worker_threads[client_id_ % IMSS_THREAD_POOL], local_addr);
+		// MIRAR ucp_worker_release_address(ucp_worker_threads[client_id_ % hercules_thread_pool_size], local_addr);
 		close(new_socket);
 	}
 	close(global_server_fd_thread);

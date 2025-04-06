@@ -21,6 +21,8 @@ void *map_server_eps_create()
 void map_server_eps_put(void *map, uint64_t uuid, ucp_ep_h ep)
 {
 	map_server_eps_t *m = reinterpret_cast<map_server_eps_t *>(map);
+	// std::unique_lock<std::mutex> lock(mut_eps);
+
 	m->insert(std::pair<uint64_t, ucp_ep_h>(uuid, ep));
 
 	slog_debug("\t[map_server_eps]['%" PRIu64 "'] Adding new connection, #%ld", uuid, m->size());
@@ -32,6 +34,7 @@ void map_server_eps_erase(void *map, uint64_t uuid, ucp_worker_h ucp_worker)
 	map_server_eps_t *m = reinterpret_cast<map_server_eps_t *>(map);
 	// Count the number of elements in the map
 	// size_t prev_elements = m->size();
+	// std::unique_lock<std::mutex> lock(mut_eps);
 
 	auto search = m->find(uuid);
 
@@ -58,6 +61,10 @@ void map_server_eps_erase(void *map, uint64_t uuid, ucp_worker_h ucp_worker)
 int map_server_eps_search(void *map, uint64_t uuid, ucp_ep_h *ep)
 {
 	map_server_eps_t *m = reinterpret_cast<map_server_eps_t *>(map);
+	// slog_debug("Locking");
+	// std::unique_lock<std::mutex> lock(mut_eps);
+	// slog_debug("Unlocking");
+
 	auto search = m->find(uuid);
 
 	if (search != m->end())

@@ -363,7 +363,7 @@ int32_t find_server(
 	default:
 		break;
 	}
-	slog_debug("session_plcy=%ld, fname=%s, next_server=%d, passed_name=%s", session_plcy, fname, next_server, passed_name);
+	slog_debug("session_plcy=%ld, fname=%s, next_server=%d, n_servers=%d, passed_name=%s", session_plcy, fname, next_server, n_servers, passed_name);
 	// slog_debug("fnameadd=%p, passed_nameadd=%p", fname, passed_name);
 
 	// "next_server" must be a value between 0 and n_servers-1.

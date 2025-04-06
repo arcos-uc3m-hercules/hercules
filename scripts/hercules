@@ -316,7 +316,7 @@ export HERCULES_MOUNT_POINT=$(cat $FILE | grep "\<MOUNT_POINT\>" | head -1 | awk
 META_PORT=$(cat $FILE | grep "\<METADATA_PORT\>" | awk '{print $3}')
 DATA_PORT=$(cat $FILE | grep "\<DATA_PORT\>" | awk '{print $3}')
 MALLEABILITY=$(cat $FILE | grep "\<MALLEABILITY\>" | awk '{print $3}')
-HERCULES_NUM_METADATA=$(cat $FILE | grep "\<NUM_META_SERVERS\>" | awk '{print $3}')
+export HERCULES_NUM_METADATA=$(cat $FILE | grep "\<NUM_META_SERVERS\>" | awk '{print $3}')
 export HERCULES_NUM_DATA=$(cat $FILE | grep "\<NUM_DATA_SERVERS\>" | awk '{print $3}')
 NUM_NODES_FOR_CLIENTS=$(cat $FILE | grep "\<NUM_NODES_FOR_CLIENTS\>" | awk '{print $3}')
 NUM_CLIENTS_PER_NODE=$(cat $FILE | grep "\<NUM_CLIENTS_PER_NODE\>" | awk '{print $3}')
@@ -613,10 +613,10 @@ do
             echo "[+] Removing temporal files on ${node}"
         fi
         set -x
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} ${RM} 2> /dev/null
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${RM} 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         echo "[+] Starting metadata server $i on $node..."
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node $COMMAND &
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
         set +x
     fi
     i=$(($i+1))
@@ -691,12 +691,12 @@ do
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "[+] Removing temporal files on $node"
         fi
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node $RM 2> /dev/null
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "[+] Starting data server $i on $node..."
         fi
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node $COMMAND &
+        srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
     fi
     i=$(($i+1))
 done

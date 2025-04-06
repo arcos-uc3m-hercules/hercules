@@ -48,6 +48,7 @@ static const ucp_tag_t tag_reply = 0x3337a880u;
 static const ucp_tag_t tag_mask = UINT64_MAX;
 
 // Common messages between front and back ends.
+#define MAX_RESPONSE_MSG_LEN 10
 static char empty_directory_msg[] = "EMPTY_DIRECTORY\0";
 
 

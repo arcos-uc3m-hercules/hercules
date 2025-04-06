@@ -175,6 +175,7 @@ int32_t map_records::put(std::string key, void *address, uint64_t length)
 	if (quantity_occupied + length > total_size && total_size > 0)
 	{ // out of space
 		fprintf(stderr, "[Map record] Out of space  %ld/%ld.\n", quantity_occupied + length, total_size);
+		slog_error("Out of space  %ld/%ld.\n", quantity_occupied + length, total_size);
 		return -1;
 	}
 
@@ -182,6 +183,8 @@ int32_t map_records::put(std::string key, void *address, uint64_t length)
 	// uname(&detect);
 	// DPRINT("Nodename    - %s add in map=%s\n", detect.nodename, key.c_str());
 	// fprintf(stderr, "key=%s, quantity=%ld total size=%ld\n", key.c_str(), quantity_occupied, total_size);
+	// if(quantity_occupied % ) {
+	// }
 	quantity_occupied = quantity_occupied + length;
 	buffer.insert({key, value});
 	return 0;
@@ -236,8 +239,10 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	// Check if the value did exist within the map.
 	if (it == buffer.end())
 	{
-		const char *last = key.c_str() + strlen(key.c_str()) - 1;
-		if (last[0] != '/')
+		//const char *last = key.c_str() + strlen(key.c_str()) - 1;
+		//if (last[0] != '/')
+		size_t len = strlen(key.c_str());
+		if (len > 0 && key.c_str()[len - 1] != '/') 
 		{
 			key += '/';
 			it = buffer.find(key);
@@ -374,6 +379,25 @@ int32_t map_records::update_simple(std::string key, int value)
 
 	// Return the address associated to the record.
 	return 1;
+}
+
+int32_t map_records::delete_metadata_stat_worker(std::string key)
+{
+	std::unique_lock<std::mutex> lock(*mut);
+	int num_elements_erased = buffer.erase(key);
+	if (num_elements_erased == 0)
+	{
+		//const char *last = key.c_str() + strlen(key.c_str()) - 1;
+		//if (last[0] != '/')
+		size_t len = strlen(key.c_str());
+		if (len > 0 && key.c_str()[len - 1] != '/') 
+		{
+			key += '/';
+			num_elements_erased = delete_metadata_stat_worker(key);
+		}
+	}
+
+	return num_elements_erased;
 }
 
 /***
@@ -639,8 +663,10 @@ int32_t map_records::cleaning_specific(std::string new_key)
 
 	if (vec.size() == 0)
 	{
-		const char *last = new_key.c_str() + strlen(new_key.c_str()) - 1;
-		if (last[0] != '/')
+		//const char *last = new_key.c_str() + strlen(new_key.c_str()) - 1;
+		//if (last[0] != '/')
+		size_t len = strlen(new_key.c_str());
+		if (len > 0 && new_key.c_str()[len - 1] != '/') 
 		{
 			new_key += '/';
 			cleaning_specific(new_key);

@@ -48,10 +48,7 @@ public:
 	int32_t erase_head_element();
 	// Used in stat_worker threads
 	// Method deleting a record.
-	int32_t delete_metadata_stat_worker(std::string key)
-	{
-		return buffer.erase(key);
-	}
+	int32_t delete_metadata_stat_worker(std::string key);
 
 	// Method storing a new record.
 	int32_t put(std::string key, void *address, uint64_t length);

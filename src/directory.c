@@ -204,11 +204,11 @@ GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 }
 
 // Method deleting a new path.
-int32_t
-GTree_delete(char *desired_data)
+int32_t GTree_delete(char *desired_data)
 {
 	// Closest node to the one requested (or even the requested one itself).
 	GNode *closest_node;
+	int32_t ret = 0;
 
 	// Check if the node has been already inserted.
 	if (GTree_search(tree_root, desired_data, &closest_node) == 1)
@@ -217,14 +217,22 @@ GTree_delete(char *desired_data)
 		{
 			g_node_destroy(closest_node); // Delete Node
 		}
+		ret = 1;
 	}
 	else
 	{
 		// add recursive search.
-		return 0;
+		// const char *last = desired_data + strlen(desired_data) - 1;
+		size_t len = strlen(desired_data);
+		if (len > 0 && desired_data[len - 1] != '/') 
+		{
+			strcat(desired_data,"/");
+			ret = GTree_delete(desired_data);
+		}		
+		// return 0;
 	}
 
-	return 1;
+	return ret;
 }
 
 // Method inserting a new path.
@@ -235,7 +243,7 @@ GTree_insert(char *desired_data)
 	GNode *closest_node = NULL;
 	if (last_parent != NULL)
 	{
-		slog_debug("last_parent->data=%s, desired_data=%s", last_parent, desired_data);
+		slog_debug("last_parent->data=%s, desired_data=%s", last_parent->data, desired_data);
 		char *data_search = (char *)calloc(256, sizeof(char));
 		if (desired_data[strlen(desired_data) - 1] == '/')
 		{
@@ -259,7 +267,9 @@ GTree_insert(char *desired_data)
 		}
 		free(father);
 		free(data_search);
-	} else {
+	}
+	else
+	{
 		slog_debug("last_parent is NULL");
 	}
 
@@ -418,7 +428,7 @@ GTree_getdir(char *desired_dir,
 	// Number of children of the directory node.
 	uint32_t num_children = g_node_n_children(dir_node);
 	// *numdir_elems = num_children + 1; //+1 because of the actual directory + childrens
-	*numdir_elems = num_children; //+1 because of the actual directory + childrens
+	*numdir_elems = num_children; // actual directory is concat in the front-end.
 
 	slog_info("num_children=%d", *numdir_elems);
 

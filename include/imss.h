@@ -645,6 +645,11 @@ RETURNS:	0 - Resources were released successfully.
 	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
 
 	/**
+	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.
+	 */
+	int paths_equal(const char *a, const char *b);
+
+	/**
 	 * Disk methods.
 	 */
 	int32_t Make_directory(const char *dirname);

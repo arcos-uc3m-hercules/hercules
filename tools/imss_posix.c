@@ -2375,7 +2375,6 @@ extern "C"
 		{
 			int create_flag = (flags & O_CREAT);
 			slog_live("[POSIX] new_path:%s, exist: %d, create_flag: %d", new_path, exist, create_flag);
-			// fprintf(stderr, "[POSIX] new_path:%s, exist: %d, create_flag: %d\n", new_path, exist, create_flag);
 			if (create_flag == O_CREAT) // if the file does not exist, then we create it.
 			{
 				slog_live("[POSIX] New file %s, ret=%d", new_path, ret);
@@ -2685,11 +2684,14 @@ extern "C"
 		char *new_path = checkHerculesPath(path);
 		if (new_path != NULL)
 		{
-			char *last = new_path + strlen(new_path) - 1;
-			if (last[0] != '/')
+			// char *last = new_path + strlen(new_path) - 1;
+			// if (last[0] != '/')
+			size_t len = strlen(new_path);
+			if (len > 0 && new_path[len - 1] != '/')
+			{
 				strcat(new_path, "/");
+			}
 			slog_live("[POSIX]. Calling Hercules 'mkdir', path=%s, new_path=%s", path, new_path);
-			// fprintf(stderr, "[POSIX]. Calling Hercules 'mkdir', path=%s, new_path=%s\n", path, new_path);
 
 			// char *new_path;
 			// new_path = convert_path(path, MOUNT_POINT);
@@ -3385,13 +3387,16 @@ extern "C"
 		if (new_path != NULL)
 		{
 			slog_live("[POSIX]. Calling Hercules 'unlink', name=%s, new_path=%s", name, new_path);
-			// fprintf(stderr, "[POSIX]. Calling Hercules 'unlink', new_path=%s\n", new_path);
 			int32_t type = get_type(new_path);
 			if (type == 0)
 			{
-				char *last = new_path + strlen(new_path) - 1;
-				if (last[0] != '/')
+				// char *last = new_path + strlen(new_path) - 1;
+				// if (last[0] != '/')
+				size_t len = strlen(new_path);
+				if (len > 0 && new_path[len - 1] != '/')
+				{
 					strcat(new_path, "/");
+				}
 				type = get_type(new_path);
 				slog_live("[POSIX] type=%d, new_path=%s", type, new_path);
 				if (type == 2)
@@ -3472,8 +3477,12 @@ extern "C"
 		if (new_path != NULL)
 		{
 			char *last = new_path + strlen(new_path) - 1;
-			if (last[0] != '/')
+			// if (last[0] != '/')
+			size_t len = strlen(new_path);
+			if (len > 0 && new_path[len - 1] != '/')
+			{
 				strcat(new_path, "/");
+			}
 
 			slog_live("[POSIX]. Calling Hercules 'rmdir', new_path=%s", new_path);
 			ret = imss_rmdir(new_path);
@@ -4023,8 +4032,12 @@ extern "C"
 		if (pathname != NULL)
 		{
 			char *last = pathname + strlen(pathname) - 1;
-			if (last[0] != '/')
+			// if (last[0] != '/')
+			size_t len = strlen(pathname);
+			if (len > 0 && pathname[len - 1] != '/')
+			{
 				strcat(pathname, "/");
+			}
 
 			slog_live("[POSIX]. Calling Hercules 'readdir', pathname=%s", pathname);
 			entry = (struct dirent *)malloc(sizeof(struct dirent));
@@ -4050,11 +4063,17 @@ extern "C"
 					char path_search[256] = {0};
 					// sprintf(path_search, "imss://%s", token); // original
 					// sprintf(path_search, "%s", token);
-					char *last = pathname + strlen(pathname) - 1;
-					if (last[0] != '/')
+					// char *last = pathname + strlen(pathname) - 1;
+					// if (last[0] != '/')
+					size_t len = strlen(pathname);
+					if (len > 0 && pathname[len - 1] != '/')
+					{
 						sprintf(path_search, "%s/%s", pathname, token);
+					}
 					else
+					{
 						sprintf(path_search, "%s%s", pathname, token);
+					}
 
 					if (!strncmp(token, ".", strlen(token)))
 					{
@@ -4175,8 +4194,12 @@ extern "C"
 		if (pathname != NULL)
 		{
 			char *last = pathname + strlen(pathname) - 1;
-			if (last[0] != '/')
+			// if (last[0] != '/')
+			size_t len = strlen(pathname);
+			if (len > 0 && pathname[len - 1] != '/')
+			{
 				strcat(pathname, "/");
+			}
 			// fprintf(stderr, "Hercules closedir, %s\n", pathname);
 			slog_live("[POSIX] Calling Hercules 'closedir', pathname=%s, fd=%d.", pathname, fd);
 
@@ -4190,8 +4213,14 @@ extern "C"
 				slog_error("[POSIX] Error while Hercules closed the directory %s, errno=%d:%s", pathname, errno, strerror(errno));
 			}
 
+			// ret = real_closedir(dirp);
+			real_closedir(dirp);
+			// if(ret == -1) {
+			// 	slog_error("[POSIX] Error closing the real directory descriptor for %s", pathname);
+			// 	perror("HERCULES_ERR_CLOSING_REAL_DIRECTORY");
+			// }
+
 			slog_live("[POSIX] End Hercules 'closedir', fd=%d, ret=%d\n", fd, ret);
-			// fprintf(stderr, "Hercules closedir, %d\n", ret);
 		}
 		else
 		{
@@ -4199,8 +4228,6 @@ extern "C"
 			ret = real_closedir(dirp);
 			slog_full("[POSIX] End Real 'closedir', fd=%d, ret=%d", fd, ret);
 		}
-
-		// int ret = real_closedir(dirp);
 
 		return ret;
 	}
@@ -5170,49 +5197,60 @@ extern "C"
 			struct stat stat_buf;
 			int permissions = 0;
 			slog_live("Calling Hercules 'access', new_path=%s", new_path);
-			ret = imss_refresh(new_path);
-			// if (ret < 0)
-			// {
-			// 	// errno = -ret;
-			// 	ret = -1;
-			// 	// perror("ERRIMSS_ACCESS_IMSSREFRESH");
-			// }
-			ret = imss_getattr(new_path, &stat_buf);
-			if (ret < 0)
+
+			// Skip special case where the mount point is checked.
+			// TODO: change imss:// for a variable.
+			if (!strncmp(new_path, "imss://", strlen(new_path)))
 			{
-				errno = -ret;
-				ret = -1;
-				// perror("ERRIMSS_ACCESS_IMSSGETATTR");
+				ret = 0;
 			}
 			else
 			{
-				errno = 0;
-				// ret = imss_getattr(new_path, &stat_buf);
+				ret = imss_refresh(new_path);
 				// if (ret < 0)
 				// {
-				// 	errno = -ret;
+				// 	// errno = -ret;
 				// 	ret = -1;
-				// 	// perror("ERRIMSS_ACCESS_IMSSGETATTR");
+				// 	// perror("ERRIMSS_ACCESS_IMSSREFRESH");
 				// }
-				// else
+				ret = imss_getattr(new_path, &stat_buf);
+				if (ret < 0)
 				{
-					/* check permissions */
-					if ((mode & F_OK) == F_OK)
-						permissions |= F_OK; /* file exists */
-					if ((mode & R_OK) == R_OK && (stat_buf.st_mode & S_IRUSR))
-						permissions |= R_OK; /* read permissions granted */
-					if ((mode & W_OK) == W_OK && (stat_buf.st_mode & S_IWUSR))
-						permissions |= W_OK; /* write permissions granted */
-					if ((mode & X_OK) == X_OK && (stat_buf.st_mode & S_IXUSR))
-						permissions |= X_OK; /* execute permissions granted */
+					errno = -ret;
+					ret = -1;
+					// perror("ERRIMSS_ACCESS_IMSSGETATTR");
+				}
+				else
+				{
+					errno = 0;
+					// ret = imss_getattr(new_path, &stat_buf);
+					// if (ret < 0)
+					// {
+					// 	errno = -ret;
+					// 	ret = -1;
+					// 	// perror("ERRIMSS_ACCESS_IMSSGETATTR");
+					// }
+					// else
+					{
+						/* check permissions */
+						if ((mode & F_OK) == F_OK)
+							permissions |= F_OK; /* file exists */
+						if ((mode & R_OK) == R_OK && (stat_buf.st_mode & S_IRUSR))
+							permissions |= R_OK; /* read permissions granted */
+						if ((mode & W_OK) == W_OK && (stat_buf.st_mode & S_IWUSR))
+							permissions |= W_OK; /* write permissions granted */
+						if ((mode & X_OK) == X_OK && (stat_buf.st_mode & S_IXUSR))
+							permissions |= X_OK; /* execute permissions granted */
 
-					/* check if all the tested permissions are granted */
-					if (mode == permissions)
-						ret = 0;
-					else
-						ret = -1;
+						/* check if all the tested permissions are granted */
+						if (mode == permissions)
+							ret = 0;
+						else
+							ret = -1;
+					}
 				}
 			}
+
 			// pthread_mutex_unlock(&system_lock);
 			slog_live("[POSIX]. End Hercules 'access', new_path=%s ret=%d\n", new_path, ret);
 			free(new_path);
