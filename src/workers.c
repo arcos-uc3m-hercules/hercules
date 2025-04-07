@@ -1942,7 +1942,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		}
 		case RENAME_OP:
 		{
-			std::size_t found = key.find(' ');
+			std::size_t found = key.find(',');
 			if (found != std::string::npos)
 			{
 				std::string old_key = key.substr(0, found);

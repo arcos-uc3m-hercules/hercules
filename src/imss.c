@@ -2082,7 +2082,7 @@ rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 	pthread_mutex_lock(&lock_network);
 
 	// Send the request.
-	sprintf(formated_uri, "%" PRIu32 " GET 5 %s %s", stat_ids[m_srv], old_dataset_uri, new_dataset_uri);
+	sprintf(formated_uri, "%" PRIu32 " GET 5 %s,%s", stat_ids[m_srv], old_dataset_uri, new_dataset_uri);
 	slog_live("[rename_dataset_metadata] Request - %s", formated_uri);
 	// fprintf(stderr, "Request - %s\n", formated_uri);
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
