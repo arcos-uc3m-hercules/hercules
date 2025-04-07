@@ -62,7 +62,6 @@ extern int32_t prefetch_offset;
 
 extern pthread_cond_t cond_prefetch;
 extern pthread_mutex_t mutex_prefetch;
-// char fd_table[1024][MAX_PATH];
 
 #define MAX_PATH 256
 extern pthread_mutex_t lock;
@@ -83,8 +82,6 @@ int32_t LOWER_BOUND_SERVERS;
 // const char *TESTX = "imss://wfc1.dat$1";
 // const char *TESTX = "p4x2.save/wfc1.dat";
 
-// extern char *aux_refresh;
-// extern char *imss_path_refresh;
 
 /*
    (*) Mapping for REPL_FACTOR values:
@@ -174,17 +171,17 @@ void fd_lookup(const char *path, int *fd, struct stat *s, char **aux)
 {
 	pthread_mutex_lock(&lock_file);
 	*fd = -1;
+	// TODO: check for directories ending with "/"
 	int found = map_search(map, path, fd, s, aux);
 	if (found == -1)
 	{
-		// fprintf(stderr, "File not found, %s\n", path);
-		slog_warn("[imss_posix_api] file not found, %s", path);
-		slog_debug("[imss_posix_api] path=%s, found=%d, fd=%d", path, found, *fd);
+		slog_warn("file not found, %s", path);
+		slog_debug("path=%s, found=%d, fd=%d", path, found, *fd);
 		*fd = -1;
 	}
 	else
 	{
-		slog_debug("[imss_posix_api] path=%s, found=%d, fd=%d, stat.st_nlink=%lu", path, found, *fd, s->st_nlink);
+		slog_debug("path=%s, found=%d, fd=%d, stat.st_nlink=%lu", path, found, *fd, s->st_nlink);
 	}
 
 	pthread_mutex_unlock(&lock_file);
@@ -237,7 +234,7 @@ int imss_refresh(const char *path)
 	int fd = -1;
 	void *aux = NULL;
 	const char *imss_path = path; // this pointer should not be free.
-
+	// Lookup the current file on the local front-end map.
 	fd_lookup(imss_path, &fd, &old_stats, (char **)&aux);
 	if (fd >= 0)
 	{
@@ -245,7 +242,7 @@ int imss_refresh(const char *path)
 	}
 	else
 	{
-		slog_warn("[imss_refresh] %s", strerror(ENOENT));
+		slog_warn("%s", strerror(ENOENT));
 		return -ENOENT;
 	}
 
@@ -296,15 +293,14 @@ int imss_getattr(const char *path, struct stat *stbuf)
 	switch (type)
 	{
 	case 0:
-		// free(imss_path);
 		// erase dataset from the local maps.
 		pthread_mutex_lock(&lock_file);
 		map_erase(map, imss_path);
 		pthread_mutex_unlock(&lock_file);
 		// map_release_prefetch(map_prefetch, path);
-		slog_debug("[imss_posix_api] Calling release prefetch path = %s", imss_path);
+		slog_debug("Calling release prefetch path = %s", imss_path);
 		map_release_prefetch(map_prefetch, imss_path);
-		slog_debug("[imss_posix_api] Ending release prefetch path = %s", imss_path);
+		slog_debug("Ending release prefetch path = %s", imss_path);
 		return -ENOENT;
 	case 1: // Directory case?
 		if ((n_ent = get_dir((char *)imss_path, &buffer, &refs)) != -1)
@@ -415,7 +411,6 @@ int imss_getattr(const char *path, struct stat *stbuf)
 
 int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t offset)
 {
-	// fprintf(stderr,"imss_readdir=%s\n",path);
 	// Needed variables for the call
 	char *buffer;
 	char **refs;
@@ -432,48 +427,46 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 	// 	strcat(imss_path, "/");
 	// }
 
-	slog_debug("[IMSS][imss_readdir] imss_path=%s", imss_path);
+	slog_debug("[IMSS] imss_path=%s", imss_path);
 	// Call IMSS to get metadata
 	n_ent = get_dir((char *)imss_path, &buffer, &refs);
-	slog_debug("[IMSS][imss_readdir] imss_path=%s, n_ent=%d", imss_path, n_ent);
+	slog_debug("[IMSS] imss_path=%s, n_ent=%d", imss_path, n_ent);
 	if (n_ent < 0)
 	{
 		strcat(imss_path, "/");
-		slog_debug("[IMSS][imss_readdir] imss_path=%s", imss_path);
+		slog_debug("[IMSS] imss_path=%s", imss_path);
 		// fprintf(stderr,"try again imss_path=%s\n",imss_path);
 		n_ent = get_dir((char *)imss_path, &buffer, &refs);
 		if (n_ent < 0)
 		{
-			fprintf(stderr, "[IMSS-FUSE]	Error retrieving directories for URI=%s", path);
+			fprintf(stderr, "[IMSS-FUSE]	Error retrieving directories for URI=%s\n", path);
 			return -ENOENT;
 		}
 	}
-	slog_debug("[IMSS][imss_readdir] Before flush data");
-
+	// slog_debug("[IMSS] Before flush data");
 	// flush_data();
 
 	// Fill buffer
 	// TODO: Check if subdirectory
-	// printf("[FUSE] imss_readdir %s has=%d\n",path, n_ent);
-	slog_debug("[IMSS][imss_readdir] imss_readdir %s has=%d", path, n_ent);
+	slog_debug("[IMSS] imss_readdir %s has=%d", path, n_ent);
 	for (int i = 0; i < n_ent; ++i)
 	{
 		if (i == 0)
 		{
-			// slog_debug("[IMSS][imss_readdir] . y ..");
+			// slog_debug("[IMSS]. y ..");
 			filler(buf, "..", NULL, 0);
 			filler(buf, ".", NULL, 0);
 		}
 		else
 		{
-			// slog_debug("[IMSS][imss_readdir] %s", refs[i]);
+			// slog_debug("[IMSS]%s", refs[i]);
 			// the stbuf is not used after here.
 			// struct stat stbuf;
 			// int error = imss_getattr(refs[i] + 6, &stbuf);
 			// if (!error)
 			{
 				char *last = refs[i] + strlen(refs[i]) - 1;
-				// slog_info("last=%s", last);
+				slog_info("last=%s of %s", last, refs[i]);
 				if (last[0] == '/')
 				{
 					last[0] = '\0';
@@ -488,7 +481,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 				}
 
 				// filler(buf, refs[i] + offset + 1, &stbuf, 0); // original
-				// slog_info("refs[i] + offset + 1=%s", refs[i] + offset + 1);
+				slog_info("refs[i] + offset + 1=%s", refs[i] + offset + 1);
 				filler(buf, refs[i] + offset + 1, NULL, 0);
 				// filler(buf, refs[i], NULL, 0);
 			}
@@ -529,14 +522,14 @@ int imss_open(char *path, uint64_t *fh)
 	char *aux = NULL;
 	// Look for the 'file descriptor' of 'imss_path' in the local map.
 	fd_lookup(imss_path, &fd, &stats, &aux);
-	slog_info("[FUSE][imss_posix_api] imss_path=%s, fd looked up=%d", imss_path, fd);
-	// fprintf(stderr, "[FUSE][imss_posix_api] imss_path=%s, fd looked up=%d\n", imss_path, fd);
+	slog_info("[FUSE]imss_path=%s, fd looked up=%d", imss_path, fd);
+	// fprintf(stderr, "[FUSE]imss_path=%s, fd looked up=%d\n", imss_path, fd);
 	if (fd >= 0)
 	{
 		print_file_type(stats, imss_path);
 		ret = open_local_dataset(imss_path, 1);
 		file_desc = fd;
-		slog_debug("[FUSE][imss_posix_api] open_local_dataset, ret=%d, file_desc=%d, nlink=%lu", ret, file_desc, stats.st_nlink);
+		slog_debug("[FUSE]open_local_dataset, ret=%d, file_desc=%d, nlink=%lu", ret, file_desc, stats.st_nlink);
 	}
 	else if (fd == -2)
 	{
@@ -554,7 +547,7 @@ int imss_open(char *path, uint64_t *fh)
 		}
 		case -2: // symbolic link case.
 		{
-			slog_warn("[FUSE][imss_posix_api] imss_path=%s, file_desc=%d", imss_path, file_desc);
+			slog_warn("[FUSE]imss_path=%s, file_desc=%d", imss_path, file_desc);
 			*fh = file_desc;
 			// errno = 2;
 			// path = imss_path;
@@ -599,7 +592,7 @@ int imss_open(char *path, uint64_t *fh)
 	// File does not exist
 	if (file_desc < 0)
 	{
-		slog_error("[FUSE][imss_posix_api] file descriptor: %d", file_desc);
+		slog_error("[FUSE]file descriptor: %d", file_desc);
 		return -1;
 	}
 
@@ -1525,7 +1518,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		}
 
 		bytes_stored += bytes_to_copy;
-		data_pointer = (char *) data_pointer + bytes_to_copy;
+		data_pointer = (char *)data_pointer + bytes_to_copy;
 		block_offset = 0; // first block has been stored, next blocks don't have an offset
 		++curr_blk;
 	}
@@ -1790,7 +1783,6 @@ int imss_split_readv(const char *path, char *buf, size_t size, off_t offset)
 	char *number = (char *)calloc(64, sizeof(char));
 	for (int server = 0; server < N_SERVERS; server++)
 	{
-		/*char all_blocks[1024];*/
 		memset(all_blocks, '\0', lenght_message);
 		count = 0;
 		for (int i = 0; i < total; i++)
@@ -1998,7 +1990,6 @@ int imss_release(const char *path)
 	else
 		return -ENOENT;
 
-	// char head[IMSS_DATA_BSIZE];
 	char *head = (char *)malloc(IMSS_DATA_BSIZE);
 
 	// Get time
@@ -2035,8 +2026,6 @@ int imss_release(const char *path)
  */
 int imss_close(const char *path, int fd)
 {
-	// clock_t t;
-	// t = clock();
 	int ret = 0;
 	int ds = 0;
 	slog_debug("Calling imss_flush_data");
@@ -2046,23 +2035,22 @@ int imss_close(const char *path, int fd)
 	slog_debug("Ending imss_release, ret=%d", ds);
 	ret = close_dataset(path, fd);
 	slog_debug("Ending close_dataset, ret=%d", ret);
-	// imss_refresh is too slow.
-	// When we remove it pass from 3.45 sec to 0.008505 sec.
 	if (ret)
 	{ // if the file was not deleted by the close we update the stat.
+		// imss_refresh is too slow.
+		// When we remove it pass from 3.45 sec to 0.008505 sec.
 		imss_refresh(path);
 		slog_debug("Ending imss_refresh");
 	}
-	clear_dataset(path);
-	// } else {
-	// delete_dataset(path, ds);
+	else
+	{ // if the file was deleted by the close, we delete registers from the
+		// local tree and local map.
+		clear_dataset(path);
+		map_erase(map, path);
+	}
 
-	// Tell data server the file is ready to be copied to disk.
+	// TODO: Tell data server the file is ready to be copied to disk.
 
-	map_erase(map, path);
-
-	// t = clock() - t;
-	// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 	return ret;
 }
 
@@ -2078,11 +2066,11 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 	// Assing file handler and create dataset.
 	int res = 0;
 	res = create_dataset((char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, NO_LINK, opened);
-	slog_debug("[imss_create] create_dataset((char*)rpath:%s, POLICY:%s,  N_BLKS:%ld, IMSS_BLKSIZE:%d, REPL_FACTOR:%ld, REPL_TYPE:%ld, N_SERVERS:%d), res:%d", (char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, res);
+	slog_debug("create_dataset((char*)rpath:%s, POLICY:%s,  N_BLKS:%ld, IMSS_BLKSIZE:%d, REPL_FACTOR:%ld, REPL_TYPE:%ld, N_SERVERS:%d), res:%d", (char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, res);
 	if (res < 0)
 	{
-		slog_error("[imss_create] Cannot create new dataset.\n");
-		// fprintf(stderr, "[imss_create] Cannot create new dataset %s, may already exist.\n", path);
+		slog_error("Cannot create new dataset.\n");
+		// fprintf(stderr, "Cannot create new dataset %s, may already exist.\n", path);
 		// free(rpath);
 		return res;
 	}
@@ -2125,19 +2113,19 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 	pthread_mutex_unlock(&lock); // unlock.
 
 	map_erase(map, rpath);
-	slog_debug("[imss_create] map_erase(map, rpath:%s)", rpath);
+	slog_debug("map_erase(map, rpath:%s)", rpath);
 	// if(ret < 1){
 	// 	slog_debug("No elements erased by map_erase, ret:%d", ret);
 	// }
 
 	pthread_mutex_lock(&lock_file); // lock.
 	map_put(map, rpath, *fh, ds_stat, (char *)buff);
-	slog_debug("[imss_create] map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath, *fh, ds_stat.st_blksize);
+	slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath, *fh, ds_stat.st_blksize);
 	if (PREFETCH != 0)
 	{
 		char *buff = (char *)malloc(PREFETCH * IMSS_BLKSIZE * KB);
 		map_init_prefetch(map_prefetch, rpath, buff);
-		slog_debug("[imss_create] PREFETCH:%ld, map_init_prefetch(map_prefetch, rpath:%s)", PREFETCH, rpath);
+		slog_debug("PREFETCH:%ld, map_init_prefetch(map_prefetch, rpath:%s)", PREFETCH, rpath);
 	}
 	pthread_mutex_unlock(&lock_file); // unlock.
 	// free(rpath);
@@ -2173,8 +2161,7 @@ int imss_rmdir(const char *path)
 	char *buffer;
 	char **refs;
 	int n_ent = 0;
-	const char *imss_path = path; // This pointer should not be free. 
-	
+	const char *imss_path = path; // This pointer should not be free.
 
 	if ((n_ent = get_dir((char *)imss_path, &buffer, &refs)) > 0)
 	{
@@ -2221,8 +2208,8 @@ int imss_unlink(const char *path)
 	if (ret < 0)
 	{
 		pthread_mutex_unlock(&lock);
-		perror("ERR_HERCULES_IMSS_UNLINK_GET_DATA");
-		slog_error("ERR_HERCULES_IMSS_UNLINK_GET_DATA");
+		perror("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
+		slog_error("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
 		return -1;
 	}
 	// pthread_mutex_lock(&lock);
@@ -2237,7 +2224,7 @@ int imss_unlink(const char *path)
 
 	// Write initial block (0).
 	memcpy(buff, &header, sizeof(struct stat));
-	slog_debug("[imss_posix_api] header.st_nlink=%lu", header.st_nlink);
+	slog_debug("header.st_nlink=%lu", header.st_nlink);
 	set_data(ds, 0, (char *)buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
@@ -2247,7 +2234,7 @@ int imss_unlink(const char *path)
 		// Those operations must be performed by the server itself when it knows no more process are using the file.
 		// Erase metadata in the backend.
 		ret = delete_dataset(imss_path, ds);
-		slog_debug("[imss_posix_api] delete_dataset %s, ret=%d", imss_path, ret);
+		slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
 
 		switch (ret)
 		{
@@ -2262,16 +2249,16 @@ int imss_unlink(const char *path)
 			map_erase(map, imss_path);
 			pthread_mutex_unlock(&lock_file);
 
-			slog_debug("[imss_posix_api] Calling map_release_prefetch %s", path);
+			slog_debug("Calling map_release_prefetch %s", path);
 			// map_release_prefetch(map_prefetch, path);
 			map_release_prefetch(map_prefetch, imss_path);
-			slog_debug("[imss_posix_api] Finish map_release_prefetch %s", path);
+			slog_debug("Finish map_release_prefetch %s", path);
 			// *******************************
 			ret = release_dataset(ds);
-			slog_debug("[imss_posix_api] relese_dataset ret=%d", ret);
+			slog_debug("relese_dataset ret=%d", ret);
 			if (ret < 0)
 			{
-				slog_error("ERR_HERCULES_RELEASE_DATASET");
+				slog_error("HERCULES_ERR_RELEASE_DATASET");
 			}
 
 			ret = 3;
@@ -2321,7 +2308,6 @@ int imss_utimens(const char *path, const struct timespec tv[2])
 		slog_error("[IMSS-FUSE]    Cannot open dataset.");
 	}
 
-	// char *buff = malloc(IMSS_DATA_BSIZE);
 	pthread_mutex_lock(&lock);
 	get_ndata(file_desc, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
@@ -2372,7 +2358,7 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 	switch (_case)
 	{
 	case 0:
-		slog_debug("[FUSE][imss_posix_api] Entering case 0 ");
+		slog_debug("[FUSE]Entering case 0 ");
 		get_iuri(new_path_1, rpath1);
 		get_iuri(new_path_2, rpath2);
 		fd_lookup(new_path_1, &fd, &stats, &aux);
@@ -2406,7 +2392,7 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 
 		break;
 	case 1:
-		slog_debug("[FUSE][imss_posix_api] Entering case 1 ");
+		slog_debug("[FUSE]Entering case 1 ");
 		// rpath1 = new_path_1;
 		get_iuri(new_path_2, rpath2);
 		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3);
@@ -2415,29 +2401,29 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 		break;
 	}
 
-	slog_debug("[FUSE][imss_posix_api] rpath1=%s, rpath2=%s", rpath1, rpath2);
+	slog_debug("[FUSE]rpath1=%s, rpath2=%s", rpath1, rpath2);
 
 	// Assing file handler and create dataset
 
 	if (res < 0)
 	{
 		// fprintf(stderr, "[imss_create]	Cannot create new dataset.\n");
-		slog_error("[imss_create] Cannot create new dataset.\n");
+		slog_error("Cannot create new dataset.\n");
 		free(rpath1);
 		free(rpath2);
 		return res;
 	}
 
 	map_erase(map, rpath2);
-	slog_debug("[imss_create] map_erase(map, rpath:%s), ret:%d", rpath2, ret);
+	slog_debug("map_erase(map, rpath:%s), ret:%d", rpath2, ret);
 	// if(ret < 1){
 	// 	slog_debug("No elements erased by map_erase, ret:%d", ret);
 	// }
 
 	pthread_mutex_lock(&lock_file); // lock.
 	// map_put(map, rpath2, file_desc, ds_stat, aux);
-	// slog_debug("[imss_create] map_put(map, rpath:%s, fh:%ld, ds_stat, buff:%s)", rpath, *fh, buff);
-	slog_debug("[imss_create] map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath2, file_desc, ds_stat.st_blksize);
+	// slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat, buff:%s)", rpath, *fh, buff);
+	slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath2, file_desc, ds_stat.st_blksize);
 
 	pthread_mutex_unlock(&lock_file); // unlock.
 	free(rpath1);
@@ -2480,8 +2466,6 @@ int imss_flush(const char *path)
 		// fprintf(stderr, "[IMSS-FUSE]    Cannot open dataset.\n");
 		return -EACCES;
 	}
-
-	// char *buff = malloc(IMSS_DATA_BSIZE);
 
 	stats.st_mtime = spec.tv_sec;
 
@@ -2642,7 +2626,7 @@ int imss_rename(const char *old_path, const char *new_path)
 			if (file_desc_o < 0)
 			{
 
-				slog_error("[IMSS-FUSE]    Cannot open dataset.");
+				slog_error("HERCULES_ERR_IMSS_RENAME_CANNOT_OPEN_DATASET");
 				free(new_rpath);
 				return -ENOENT;
 			}
@@ -2680,7 +2664,7 @@ int imss_rename(const char *old_path, const char *new_path)
 
 					// RENAME SRV_WORKER(MAP)
 
-					rename_dataset_srv_worker_dir_dir(old_rpath, new_rpath, fd, 0);
+					rename_dataset_srv_worker_dir_dir(old_rpath, new_rpath, file_desc_o, 0);
 					free(dir_dest);
 					free(rdir_dest);
 					free(old_rpath);
@@ -2712,7 +2696,7 @@ int imss_rename(const char *old_path, const char *new_path)
 	{
 
 		// fprintf(stderr, "[IMSS-FUSE]    Cannot open dataset.\n");
-		slog_error("[imss_posix_api] Cannot open dataset, old_rpath=%s", old_rpath);
+		slog_error("Cannot open dataset, old_rpath=%s", old_rpath);
 		free(old_rpath);
 		free(new_rpath);
 		return -ENOENT;

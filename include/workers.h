@@ -56,20 +56,23 @@ typedef struct
 	ucp_address_t *peer_address;
 	uint64_t worker_uid;
 	char *tmp_file_path;
+	u_int16_t hercules_thread_pool_size;
+	int thread_id;
 	struct arguments args;
 } p_argv;
 
 // Thread method attending client data requests.
 void *srv_worker(void *th_argv);
-int srv_worker_helper(p_argv *arguments, const char *req);
+int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps);
 void *Checkpoint(void *th_argv);
+void *Snapshot(void *th_argv);
 
 // Thread method searching and cleaning nodes with st_nlink=0
 void *garbage_collector(void *th_argv);
 
 // Thread method attending client metadata requests.
 void *stat_worker(void *th_argv);
-int stat_worker_helper(p_argv *arguments, char *req);
+int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps);
 
 // Dispatcher thread method distributing clients among the pool server threads.
 void *srv_attached_dispatcher(void *th_argv);

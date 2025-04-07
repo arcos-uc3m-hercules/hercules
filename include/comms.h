@@ -38,10 +38,19 @@
 // Max lenght for POLICY name.
 #define MAX_POLICY_LEN 16
 
+/*** TYPE argument legal values ***/
+#define TYPE_DATA_SERVER 'd'
+#define TYPE_METADATA_SERVER 'm'
+
 static const ucp_tag_t tag_req = 0x1337a880u;
 static const ucp_tag_t tag_data = 0x2337a880u;
 static const ucp_tag_t tag_reply = 0x3337a880u;
 static const ucp_tag_t tag_mask = UINT64_MAX;
+
+// Common messages between front and back ends.
+#define MAX_RESPONSE_MSG_LEN 10
+static char empty_directory_msg[] = "EMPTY_DIRECTORY\0";
+
 
 /**
  * Macro to measure the time spend by function_to_call.
