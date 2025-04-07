@@ -76,8 +76,8 @@ extern "C"
 		{
 			slog_debug("[map] element with key %s was not find", k);
 		}
-		m->erase(std::string(k));
-		slog_debug("[map] finish map_erase");
+		int num_elements_erased = m->erase(std::string(k));
+		slog_debug("[map] finish map_erase, num_elements_erased=%d", num_elements_erased);
 		// return ret;
 	}
 

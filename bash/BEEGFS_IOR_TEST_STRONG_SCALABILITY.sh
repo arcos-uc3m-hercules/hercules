@@ -1,8 +1,8 @@
 #!/bin/bash
 
 SCRIPT_NAME="ior_beegfs_slurm.sh"
-#FILE_SIZE=$((1024*1024*1))
-FILE_SIZE=$((1024*1024*10))
+FILE_SIZE=$((1024*1024*1))
+#FILE_SIZE=$((1024*1024*10))
 
 # 0 = Shared single file, 1 = File per process.
 IOR_FILE_PER_PROCESS=1

@@ -123,10 +123,7 @@ static uint64_t BLOCK_SIZE;
 #endif
 
 int32_t get_data_location(int32_t, int32_t, int32_t);
-int32_t find_server(int32_t n_servers,
-					int32_t n_msg,
-					const char *fname,
-					int32_t op_type);
+
 // typedef enum {
 //     CLIENT_SERVER_SEND_RECV_STREAM  = UCS_BIT(0),
 //     CLIENT_SERVER_SEND_RECV_DEFAULT = CLIENT_SERVER_SEND_RECV_STREAM
@@ -154,6 +151,8 @@ typedef struct
 	int num_active_storages;
 	// Number of IMSS servers.
 	int32_t num_storages;
+	// Policy that was followed for the metadata.
+	int32_t session_plcy;
 	// Server's dispatcher thread connection port.
 	uint16_t conn_port;
 } imss_info;
@@ -187,6 +186,11 @@ typedef struct
 	char type; // = 'D';
 	// Policy that was followed in order to write the dataset.
 	char policy[MAX_POLICY_LEN];
+	// Original name when the data was created for the first time, need it for policy CRC16_ in distributed operation rename
+	char original_name[URI_];
+	// first parent directory.
+	char first_parent_dir[URI_];
+	int32_t session_plcy;
 	// Number of data elements conforming the dataset entity.
 	int32_t num_data_elem;
 	// Size of each data element (in KB).
@@ -201,8 +205,7 @@ typedef struct
 	int32_t local_conn;
 	// Actual size
 	int64_t size;
-	// Original name when the data was created for the first time, need it for policy CRC16_ in distributed operation rename
-	char original_name[256];
+	
 	// N_servers
 	int32_t n_servers;
 	/*************** USED EXCLUSIVELY BY LOCAL DATASETS ***************/
@@ -537,7 +540,9 @@ RETURNS:	 0 - The requested block was successfully stored.
 
 	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server);
 
-	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, off_t offset);
+	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char* key);
+
+	int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const char *request);
 
 	/* Method retrieving the location of a specific data object.
 
@@ -577,7 +582,7 @@ char ** locations = get_dataloc(datasetd, data_id, &num_storages);
 	 * the current number of active data nodes.
 	 * @return Current number of active data nodes, on error -1 is returned.
 	 */
-	int get_number_of_active_nodes();
+	int get_number_of_active_nodes(char *hercules_path);
 
 	/* Method specifying the type (DATASET or IMSS INSTANCE) of a provided URI.
 
@@ -637,13 +642,20 @@ RETURNS:	0 - Resources were released successfully.
 
 	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
 
+	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
+
+	/**
+	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.
+	 */
+	int paths_equal(const char *a, const char *b);
+
 	/**
 	 * Disk methods.
 	 */
 	int32_t Make_directory(const char *dirname);
 	int32_t Open_file(const char *checkpoint_dir, const char *filename);
 	int32_t Close_file(int fd);
-	int32_t Write_2_disk(int fd, void *buffer, size_t size, size_t offset);
+	ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset);
 
 #ifdef __cplusplus
 }

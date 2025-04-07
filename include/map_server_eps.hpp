@@ -4,10 +4,11 @@
 #include <map>
 #include <ucp/api/ucp.h>
 #include <inttypes.h>
+#include <mutex>
 
 
 typedef std::map<uint64_t, ucp_ep_h> map_server_eps_t;
-
+static std::mutex mut_eps;
 
 void *  map_server_eps_create();
 void    map_server_eps_put(void * map, uint64_t uuid, ucp_ep_h ep);

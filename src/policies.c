@@ -6,9 +6,9 @@
 #include "policies.h"
 
 // Default session policy: ROUND ROBIN.
-int32_t session_plcy = ROUND_ROBIN_;
+// int32_t session_plcy = ROUND_ROBIN_;
 // Number of blocks conforming the handled dataset.
-int32_t n_blocks;
+// int32_t n_blocks;
 // Socket connecting the client to the imss server running in the same node.
 int32_t matching_node_socket;
 
@@ -21,44 +21,40 @@ uint64_t *num_blocks_written;
 // Actual blocks written by the client.
 uint32_t *blocks_written;
 
-int32_t
-set_policy(dataset_info *dataset)
+uint32_t get_policy_number(const char *policy_string)
 {
-	// Invalid number of blocks to be sent.
-	if (dataset->num_data_elem <= 0)
-		return -1;
+	// // Invalid number of blocks to be sent.
+	// if (dataset->num_data_elem <= 0)
+	// 	return -1;
 
-	// Save the connection to the imss server running in the same node.
-	matching_node_socket = dataset->local_conn;
-	slog_info("matching_node_socket = %d", matching_node_socket);
-
-	// Set blocks to be sent.
-	n_blocks = dataset->num_data_elem;
+	// // Set blocks to be sent.
+	// n_blocks = dataset->num_data_elem;
+	int32_t session_policy = -1;
 
 	// Set the corresponding policy.
-	if (!strcmp(dataset->policy, "RR"))
+	if (!strcmp(policy_string, "RR"))
 	{
-		session_plcy = 0;
+		session_policy = 0;
 	}
-	else if (!strcmp(dataset->policy, "BUCKETS"))
+	else if (!strcmp(policy_string, "BUCKETS"))
 	{
-		session_plcy = 1;
+		session_policy = 1;
 	}
-	else if (!strcmp(dataset->policy, "HASH"))
+	else if (!strcmp(policy_string, "HASH"))
 	{
-		session_plcy = 2;
+		session_policy = 2;
 	}
-	else if (!strcmp(dataset->policy, "CRC16b"))
+	else if (!strcmp(policy_string, "CRC16b"))
 	{
-		session_plcy = 3;
+		session_policy = 3;
 	}
-	else if (!strcmp(dataset->policy, "CRC64b"))
+	else if (!strcmp(policy_string, "CRC64b"))
 	{
-		session_plcy = 4;
+		session_policy = 4;
 	}
-	else if (!strcmp(dataset->policy, "LOCAL"))
+	else if (!strcmp(policy_string, "LOCAL"))
 	{
-		session_plcy = 5;
+		session_policy = 5;
 
 		// Initialize variables hanlding LOCAL datasets.
 		// data_locations = dataset->data_locations;
@@ -66,9 +62,9 @@ set_policy(dataset_info *dataset)
 		// blocks_written = dataset->blocks_written;
 		// slog_debug("data_locations=%u, num_blocks_written=%u, blocks_written=%u", *data_locations, *num_blocks_written, *blocks_written);
 	}
-	else if (!strcmp(dataset->policy, "ZCOPY"))
+	else if (!strcmp(policy_string, "ZCOPY"))
 	{
-		session_plcy = 6;
+		session_policy = 6;
 
 		// Initialize variables hanlding LOCAL datasets.
 		// data_locations = dataset->data_locations;
@@ -78,152 +74,211 @@ set_policy(dataset_info *dataset)
 	}
 	else
 	{
-		slog_error("HERCULES_ERR_SETPLCY_INVLD : %s", dataset->uri_);
+		slog_error("HERCULES_ERR_SETPLCY_INVLD : %s", policy_string);
 		perror("HERCULES_ERR_SETPLCY_INVLD");
 		return -1;
 	}
 
-	return 0;
+	return session_policy;
 }
 
-int32_t get_policy() {
-	return session_plcy;
+int32_t set_policy_dataset(dataset_info *dataset)
+{
+	// Save the connection to the imss server running in the same node.
+	matching_node_socket = dataset->local_conn;
+	slog_info("matching_node_socket = %d", matching_node_socket);
+	dataset->session_plcy = get_policy_number(dataset->policy);
+	if (dataset->session_plcy < 0)
+	{
+		return -1;
+	}
+	return dataset->session_plcy;
+}
+
+// int32_t set_policy_metadata(imss_info *hercules_info)
+// {
+
+// 	hercules_info->session_plcy = get_policy_number(dataset->policy);
+// 	if (dataset->session_plcy < 0)
+// 	{
+// 		return -1;
+// 	}
+// 	return dataset->session_plcy;
+// }
+
+// int32_t get_policy()
+// {
+// 	return session_plcy;
+// }
+
+int32_t RoundRobin(int32_t n_servers, int32_t n_msg, char *fname)
+{
+	int32_t next_server = -1;
+	uint16_t crc_ = 0;
+	crc_ = crc16(fname, strlen(fname));
+	next_server = crc_ % n_servers;
+	slog_debug("fname=%s, strlen(fname)=%d, next_server=%d, crc_=%d, n_servers=%d", fname, strlen(fname), next_server, crc_, n_servers);
+	// fprintf(stderr, "fname=%s, strlen(fname)=%lu, next_server=%d, crc_=%d, n_servers=%d\n", fname, strlen(fname), next_server, crc_, n_servers);
+
+	// slog_debug("fname=%s, new_dataset.original_name=%s, stat_dataset_res=%ld, next_server=%d, crc_=%d, n_servers=%d", fname, new_dataset.original_name, stat_dataset_res, next_server, crc_, n_servers);
+
+	// Next server receiving the following block.
+	next_server = (next_server + n_msg) % n_servers;
+	return next_server;
+}
+
+// int32_t Buckets(int32_t n_servers, int32_t n_msg, char *fname)
+// {
+// 	int32_t next_server = -1;
+// 	uint16_t crc_ = 0;
+
+// 	crc_ = crc16(fname, strlen(fname));
+
+// 	// First server that received a block from the current file.
+// 	//  incluir "initial_server" en el dataset.
+// 	uint32_t initial_server = crc_ % n_servers;
+
+// 	if (n_blocks < n_servers)
+
+// 		n_blocks = n_servers;
+
+// 	// Number of servers that will be storing one additional block.
+// 	uint32_t one_more_block = n_blocks % n_servers;
+
+// 	// Number of blocks that these servers will be storing.
+// 	uint32_t blocks_srv = (n_blocks / n_servers) + 1;
+
+// 	// The block will be handled by those servers storing one more block.
+// 	if (n_msg < (blocks_srv * one_more_block))
+// 	{
+// 		next_server = n_msg / blocks_srv;
+
+// 		next_server = (next_server + initial_server) % n_servers;
+// 	}
+// 	// The block will be handled by those storing one block less.
+// 	else
+// 	{
+// 		next_server = (n_msg - (blocks_srv * one_more_block)) / (blocks_srv - 1);
+
+// 		next_server = (initial_server + one_more_block + next_server) % n_servers;
+// 	}
+// 	return next_server;
+// }
+
+int32_t Hashed(int32_t n_servers, int32_t n_msg, char *fname)
+{
+	int32_t next_server = 0;
+	// Key identifying the current to-be-sent file block.
+	char key[strlen(fname) + 64];
+	sprintf(key, "%s%c%d", fname, '$', n_msg);
+
+	uint32_t b = 378551;
+	uint32_t a = 63689;
+	uint32_t hash = 0;
+	uint32_t i = 0;
+	uint32_t length = strlen(key);
+
+	// Create the  hash through the messages's content.
+	for (i = 0; i < length; ++i)
+	{
+		hash = hash * a + (key[i]);
+		a = a * b;
+	}
+
+	next_server = hash % n_servers;
+
+	return next_server;
+}
+
+int32_t CRC(int32_t n_servers, char *fname, int32_t bytes_)
+{
+	int32_t next_server = -1;
+	char key[strlen(fname) + 64];
+	switch (bytes_)
+	{
+	case 16:
+		next_server = crc16(key, strlen(key)) % n_servers;
+		break;
+	case 64:
+		next_server = crc64(0, (unsigned char *)key, strlen(key)) % n_servers;
+		break;
+	}
+	return next_server;
+}
+
+void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
+{
+	// Dataset metadata request.
+	dataset_info new_dataset;
+	int32_t stat_dataset_res = 0;
+	if (server_type == TYPE_DATA_SERVER)
+	{
+		stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
+	}
+	char *tmp = NULL;
+	if (stat_dataset_res == 0)
+	{
+		tmp = (char *)fname;
+	}
+	else
+	{
+		tmp = new_dataset.original_name;
+	}
+	snprintf(passed_name, PATH_MAX, "%s", tmp);
+	// slog_debug("fnameadd=%p, passed_nameadd=%p", fname, passed_name);
+	// slog_debug("passed_name=%s", passed_name);
+	if (passed_name == NULL)
+	{
+		perror("HERCULES_ERR_FIND_SERVER_GETTING_FILE_NAME");
+	}
 }
 
 /**
  * @brief Method retrieving the server that will receive the following message attending a policy.
  * @return next server number (positive integer, >= 0) to send the operation according to the policy, on error -1 is returned,
  */
-int32_t
-find_server(int32_t n_servers,
-			int32_t n_msg,
-			const char *fname,
-			int32_t op_type)
+int32_t find_server(
+	int32_t n_servers,
+	int32_t n_msg,
+	const char *fname,
+	int32_t op_type,
+	char server_type,
+	int32_t session_plcy)
 {
 	int32_t next_server = -1;
-	slog_debug("session_plcy=%ld", session_plcy);
+	char passed_name[PATH_MAX];
+
 	switch (session_plcy)
 	{
 	// Follow a round robin policy.
 	case ROUND_ROBIN_:
 	{
-		dataset_info new_dataset;
-		// Dataset metadata request.
-		int32_t stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
-
-		if (stat_dataset_res == 0)
+		FindNameForPolicy(fname, passed_name, server_type);
+		if (passed_name != NULL)
 		{
-			uint16_t crc_ = crc16(fname, strlen(fname));
-			// First server that received a block from the current file.
-			next_server = crc_ % n_servers;
-			slog_debug("fname=%s, stat_dataset_res=%ld, next_server=%d, crc_=%d, n_servers=%d", fname, stat_dataset_res, next_server, crc_, n_servers);
+			next_server = RoundRobin(n_servers, n_msg, passed_name);
 		}
-		else
-		{
-			uint16_t crc_ = crc16(new_dataset.original_name, strlen(new_dataset.original_name));
-			next_server = crc_ % n_servers;
-			slog_debug("fname=%s, new_dataset.original_name=%s, stat_dataset_res=%ld, next_server=%d, crc_=%d, n_servers=%d", fname, new_dataset.original_name, stat_dataset_res, next_server, crc_, n_servers);
-		}
-
-		// Next server receiving the following block.
-		next_server = (next_server + n_msg) % n_servers;
 	}
 	break;
 
 	// Follow a bucketbnn distribution.
-	case BUCKETS_:
-	{
-		uint16_t crc_;
-		dataset_info new_dataset;
-		// Dataset metadata request.
-		int32_t stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
-		if (stat_dataset_res == 0)
-		{
-			crc_ = crc16(fname, strlen(fname));
-		}
-		else
-		{
-			crc_ = crc16(new_dataset.original_name, strlen(new_dataset.original_name));
-		}
-
-		// First server that received a block from the current file.
-		//  incluir "initial_server" en el dataset.
-		uint32_t initial_server = crc_ % n_servers;
-
-		if (n_blocks < n_servers)
-
-			n_blocks = n_servers;
-
-		// Number of servers that will be storing one additional block.
-		uint32_t one_more_block = n_blocks % n_servers;
-
-		// Number of blocks that these servers will be storing.
-		uint32_t blocks_srv = (n_blocks / n_servers) + 1;
-
-		// The block will be handled by those servers storing one more block.
-		if (n_msg < (blocks_srv * one_more_block))
-		{
-			next_server = n_msg / blocks_srv;
-
-			next_server = (next_server + initial_server) % n_servers;
-		}
-		// The block will be handled by those storing one block less.
-		else
-		{
-			next_server = (n_msg - (blocks_srv * one_more_block)) / (blocks_srv - 1);
-
-			next_server = (initial_server + one_more_block + next_server) % n_servers;
-		}
-	}
-	break;
+	// case BUCKETS_:
+	// {
+	// 	FindNameForPolicy(fname, passed_name, server_type);
+	// 	if (passed_name != NULL)
+	// 	{
+	// 		next_server = Buckets(n_servers, n_msg, passed_name);
+	// 	}
+	// }
+	// break;
 
 	// Follow a hashed distribution.
 	case HASHED_:
 	{
-		dataset_info new_dataset;
-		// Dataset metadata request.
-		int32_t stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
-		if (stat_dataset_res == 0)
+		FindNameForPolicy(fname, passed_name, server_type);
+		if (passed_name != NULL)
 		{
-			// Key identifying the current to-be-sent file block.
-			char key[strlen(fname) + 64];
-			sprintf(key, "%s%c%d", fname, '$', n_msg);
-
-			uint32_t b = 378551;
-			uint32_t a = 63689;
-			uint32_t hash = 0;
-			uint32_t i = 0;
-			uint32_t length = strlen(key);
-
-			// Create the  hash through the messages's content.
-			for (i = 0; i < length; ++i)
-			{
-				hash = hash * a + (key[i]);
-				a = a * b;
-			}
-
-			next_server = hash % n_servers;
-		}
-		else
-		{
-			// Key identifying the current to-be-sent file block.
-			char key[strlen(new_dataset.original_name) + 64];
-			sprintf(key, "%s%c%d", new_dataset.original_name, '$', n_msg);
-
-			uint32_t b = 378551;
-			uint32_t a = 63689;
-			uint32_t hash = 0;
-			uint32_t i = 0;
-			uint32_t length = strlen(key);
-
-			// Create the  hash through the messages's content.
-			for (i = 0; i < length; ++i)
-			{
-				hash = hash * a + (key[i]);
-				a = a * b;
-			}
-
-			next_server = hash % n_servers;
+			next_server = Hashed(n_servers, n_msg, passed_name);
 		}
 	}
 	break;
@@ -231,51 +286,27 @@ find_server(int32_t n_servers,
 	// Following another hashed distribution using Redis's CRC16.
 	case CRC16_:
 	{
-		dataset_info new_dataset;
-		// Dataset metadata request.
-		int32_t stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
-		if (stat_dataset_res == 0)
+		FindNameForPolicy(fname, passed_name, server_type);
+		if (passed_name != NULL)
 		{
-			// Key identifying the current to-be-sent file block.
-			char key[strlen(fname) + 64];
-			sprintf(key, "%s%c%d", fname, '$', n_msg);
-			next_server = crc16(key, strlen(key)) % n_servers;
-		}
-		else
-		{
-			char key[strlen(new_dataset.original_name) + 64];
-			sprintf(key, "%s%c%d", new_dataset.original_name, '$', n_msg);
-			next_server = crc16(key, strlen(key)) % n_servers;
+			next_server = CRC(n_servers, passed_name, 16);
 		}
 	}
-
 	break;
 
 	// Following another hashed distribution using Redis's CRC64.
 	case CRC64_:
 	{
-		dataset_info new_dataset;
-		// Dataset metadata request.
-		int32_t stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
-		if (stat_dataset_res == 0)
+		FindNameForPolicy(fname, passed_name, server_type);
+		if (passed_name != NULL)
 		{
-			// Key identifying the current to-be-sent file block.
-			char key[strlen(fname) + 64];
-			sprintf(key, "%s%c%d", fname, '$', n_msg);
-			next_server = crc64(0, (unsigned char *)key, strlen(key)) % n_servers;
-		}
-		else
-		{
-			char key[strlen(new_dataset.original_name) + 64];
-			sprintf(key, "%s%c%d", new_dataset.original_name, '$', n_msg);
-			next_server = crc64(0, (unsigned char *)key, strlen(key)) % n_servers;
+			next_server = CRC(n_servers, passed_name, 64);
 		}
 	}
-
 	break;
 
 	// Follow a LOCAL distribution.
-	case LOCAL_: 
+	case LOCAL_:
 	// ZERO COPY follows LOCAL distribution but reducing memory copies.
 	case ZCOPY_:
 	{
@@ -332,13 +363,18 @@ find_server(int32_t n_servers,
 	default:
 		break;
 	}
+	slog_debug("session_plcy=%ld, fname=%s, next_server=%d, n_servers=%d, passed_name=%s", session_plcy, fname, next_server, n_servers, passed_name);
+	// slog_debug("fnameadd=%p, passed_nameadd=%p", fname, passed_name);
 
 	// "next_server" must be a value between 0 and n_servers-1.
 	if (next_server < 0 || next_server >= n_servers)
 	{
-		perror("ERR_HERCULES_FIND_SERVER_WRONG_VALUE");
+		char err_msg[MAX_ERR_MSG_LEN];
+		sprintf(err_msg, "ERR_HERCULES_FIND_SERVER_WRONG_VALUE, next_server=%d, n_servers=%d, session_plcy=%d", next_server, n_servers, session_plcy);
+		perror(err_msg);
 		slog_error("ERR_HERCULES_FIND_SERVER_WRONG_VALUE, next_server=%d, n_servers=%d", next_server, n_servers);
-		return -1;
+		// return -1;
+		exit(-1);
 	}
 
 	slog_debug("next_server=%ld", next_server);

@@ -25,7 +25,6 @@ void *recv_buffer;
 
 int ep_timeout = 0;
 
-
 ucs_status_t ucp_mem_alloc(ucp_context_h ucp_context, size_t length, void **address_p)
 {
 	ucp_mem_map_params_t params;
@@ -175,7 +174,6 @@ size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t m
 	ucp_request_param_t send_param;
 	send_req_t ctx;
 
-	// char req[2048];
 	ctx.buffer = (void *)msg;
 	// ctx.buffer = (char *)msg;
 	// ctx.buffer = (char *)malloc(msg_len);
