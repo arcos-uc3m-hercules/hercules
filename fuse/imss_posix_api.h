@@ -46,7 +46,7 @@ void get_iuri(const char *path, /*output*/ char *uri);
 int imss_truncate(const char *path, off_t offset);
 int imss_access(const char *path, int permission);
 int imss_refresh(const char *path);
-int imss_getattr(const char *path, struct stat *stbuf);
+int imss_getattr(char *path, struct stat *stbuf);
 
 int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t offset);
 int imss_open(char *path, uint64_t *fh);
@@ -59,7 +59,7 @@ int imss_vread_2x(const char *path, char *buf, size_t size, off_t offset);
 ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off);
 int imss_split_writev(const char *path, const char *buf, size_t size, off_t off);
 int imss_release(const char *path);
-int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened);
+int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened, char file_type);
 int imss_opendir(const char *path);
 int imss_releasedir(const char *path);
 int imss_flush(const char *path);
@@ -73,7 +73,7 @@ int imss_mkdir(const char *path, mode_t mode);
 int imss_getxattr(const char *path, const char *attr, char *value, size_t s);
 int imss_chmod(const char *path, mode_t mode);
 int imss_chown(const char *path, uid_t uid, gid_t gid);
-int imss_rename(const char *old_path, const char *new_path);
+int imss_rename(char *old_path, char *new_path);
 
 int imss_close(const char *path, int fd);
 

@@ -30,9 +30,12 @@ extern "C"
 		std::pair<std::string, long> value(pathname, offset);
 		std::pair<std::map<int, std::pair<std::string, long>>::iterator, bool> ret;
 		ret = m->insert({fd, value});
-		if(ret.second==false) {
+		if (ret.second == false)
+		{
 			return -1;
-		} else {
+		}
+		else
+		{
 			return 1;
 		}
 	}
@@ -82,7 +85,7 @@ extern "C"
 		// const char *last = pathname + strlen(pathname) - 1;
 		// if (last[0] != '/')
 		size_t len = strlen(pathname);
-if (len > 0 && pathname[len - 1] != '/') 
+		if (len > 0 && pathname[len - 1] != '/')
 		{
 			strcat(aux_path, pathname);
 			strcat(aux_path, "/");
@@ -134,8 +137,8 @@ if (len > 0 && pathname[len - 1] != '/')
 		}
 	}
 
-	/* 
-	Note: this function should also return a pointer to the offset 
+	/*
+	Note: this function should also return a pointer to the offset
 	to avoid to use "map_fd_search", which add extra overhead.
 	*/
 	char *map_fd_search_by_val(void *map, const int fd)

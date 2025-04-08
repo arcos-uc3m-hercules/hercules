@@ -42,6 +42,11 @@
 #define TYPE_DATA_SERVER 'd'
 #define TYPE_METADATA_SERVER 'm'
 
+// File types.
+#define TYPE_HERCULES_INSTANCE 'I' // for regular files
+#define TYPE_REGULAR_FILE 'R' // for regular files
+#define TYPE_DIRECTORY 'D' // for directories
+
 static const ucp_tag_t tag_req = 0x1337a880u;
 static const ucp_tag_t tag_data = 0x2337a880u;
 static const ucp_tag_t tag_reply = 0x3337a880u;

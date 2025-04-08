@@ -1942,6 +1942,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		}
 		case RENAME_OP:
 		{
+			char response_msg[MAX_RESPONSE_MSG_LEN];
+			int ret = -1;
 			std::size_t found = key.find(',');
 			if (found != std::string::npos)
 			{
@@ -1952,23 +1954,36 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				slog_debug("[RENAME] old_key=%s, new_key=%s\n", old_key.c_str(), new_key.c_str());
 
 				// RENAME MAP
-				int32_t result = map->rename_metadata_stat_worker(old_key, new_key);
-				slog_live("rename metadata stat worker=%d", result);
-				if (result == 0)
-				{
-					// printf("0 elements rename from stat_worker");
-					slog_warn("[RENAME] 0 elements rename from stat_worker");
-					break;
-				}
+				ret = map->rename_metadata_stat_worker(old_key, new_key);
+				slog_live("rename metadata stat worker=%d", ret);
+				//if (result == 0)
+				//{
+				//	// printf("0 elements rename from stat_worker");
+				//	slog_warn("[RENAME] 0 elements rename from stat_worker");
+				//	break;
+				//}
 
 				// RENAME TREE
-				pthread_mutex_lock(&tree_mut);
-				int ret = GTree_rename((char *)old_key.c_str(), (char *)new_key.c_str());
-				pthread_mutex_unlock(&tree_mut);
-				slog_debug("[RENAME] GTree_rename=%d", ret);
+				if (ret != -1){
+					pthread_mutex_lock(&tree_mut);
+					ret = GTree_rename((char *)old_key.c_str(), (char *)new_key.c_str());
+					pthread_mutex_unlock(&tree_mut);
+					slog_debug("[RENAME] GTree_rename=%d", ret);
+				}
+				
 			}
 
-			char response_msg[] = "RENAME\0";
+			if (ret == -1)
+			{
+				strncpy(response_msg, "ERROR", strlen("ERROR") + 1);
+			}
+			else
+			{
+				strncpy(response_msg, "RENAME", strlen("RENAME") + 1);
+			}
+
+
+			//char response_msg[] = "RENAME\0";
 			if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 			{
 				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");

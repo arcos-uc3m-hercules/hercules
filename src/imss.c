@@ -1154,7 +1154,9 @@ int32_t create_dataset(char *dataset_uri,
 					   int32_t repl_type,
 					   int32_t n_servers,
 					   char *link,
-					   int opened)
+					   int opened,
+					   char file_type
+					)
 {
 	int ret = 0;
 	ucp_ep_h ep;
@@ -1354,7 +1356,9 @@ int32_t create_dataset(char *dataset_uri,
 	// 	msg_size += info_size;
 	// }
 	// else
-	new_dataset.type = 'D';
+
+	// new_dataset.type = 'D';
+	new_dataset.type = file_type;
 
 	slog_live("[IMSS] new_dataset.type=%c, local_conn=%d, new_dataset.n_servers_when_created=%d", new_dataset.type, associated_imss.conns.matching_server, new_dataset.n_servers_when_created);
 
@@ -2038,8 +2042,7 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	return 0;
 }
 
-int32_t
-rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
+int32_t rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 {
 	ucp_ep_h ep;
 	/*********RENAME GARRAY DATASET*******/
@@ -2049,12 +2052,20 @@ rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 	{
 		dataset_info_ = g_array_index(datasetd, dataset_info, i);
 		//if (!strcmp(old_dataset_uri, dataset_info_.uri_))
+		slog_debug("dataset_info_.uri=%s, old_dataset_uri=%s", dataset_info_.uri_, old_dataset_uri);
 		if(paths_equal(old_dataset_uri, dataset_info_.uri_))
 		{
 			strcpy(dataset_info_.uri_, new_dataset_uri);
 			g_array_remove_index(datasetd, i);
 			g_array_insert_val(datasetd, i, dataset_info_);
+			break;
 		}
+		// if the old name is not in the local g_array we finish this function.
+		if (i+1 == datasetd->len)
+		{
+			return -1;
+		}
+		
 	}
 
 	/*********RENAME METADATA*******/
@@ -2083,7 +2094,7 @@ rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 
 	// Send the request.
 	sprintf(formated_uri, "%" PRIu32 " GET 5 %s,%s", stat_ids[m_srv], old_dataset_uri, new_dataset_uri);
-	slog_live("[rename_dataset_metadata] Request - %s", formated_uri);
+	slog_live("Request - %s", formated_uri);
 	// fprintf(stderr, "Request - %s\n", formated_uri);
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
 	{
@@ -2102,7 +2113,7 @@ rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 
 	size_t msg_length = 0;
 	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
-	slog_live("[rename_dataset_metadata]  get_recv_data_length, msg_length=%lu", msg_length);
+	slog_live(" get_recv_data_length, msg_length=%lu", msg_length);
 	if (msg_length == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -2124,6 +2135,14 @@ rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 		free(result);
 		return -1;
 	}
+
+	if (strncmp((const char *)result, "RENAME", strlen("RENAME")))
+	{ // if the response message is different from "RENAME" it was an error.
+		perror("HERCULES_ERR_RENAME_FILE_FAILED");
+		free(result);
+		return -1;
+	}
+
 
 	free(result);
 	pthread_mutex_unlock(&lock_network);
@@ -3950,7 +3969,7 @@ int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir)
 }
 
 // Method specifying the type (DATASET or IMSS INSTANCE) of a provided URI.
-int32_t get_type(const char *uri)
+char get_type(const char *uri)
 {
 	ucp_ep_h ep;
 	// Formated uri to be sent to the metadata server.
@@ -3978,7 +3997,7 @@ int32_t get_type(const char *uri)
 		pthread_mutex_unlock(&lock_network);
 		perror("HERCULES_ERR_GET_TYPE_SEND_ADDR");
 		slog_error("HERCULES_ERR_GET_TYPE_SEND_ADDR");
-		return -1;
+		return 'E';
 	}
 
 	imss_info *data;
@@ -3991,7 +4010,7 @@ int32_t get_type(const char *uri)
 		pthread_mutex_unlock(&lock_network);
 		perror("HERCULES_ERR_GET_TYPE_GET_RECV_DATA_LENGTH");
 		slog_error("HERCULES_ERR_GET_TYPE_GET_RECV_DATA_LENGTH");
-		return -1;
+		return 'E';
 	}
 	result = malloc(length);
 
@@ -4003,7 +4022,7 @@ int32_t get_type(const char *uri)
 		slog_fatal("HERCULES_ERR_GET_TYPE_RECV_STREAM");
 		free(result);
 		pthread_mutex_unlock(&lock_network);
-		return -1;
+		return 'E';
 	}
 
 	data = (imss_info *)result;
@@ -4015,18 +4034,21 @@ int32_t get_type(const char *uri)
 	slog_debug("data->type=%c", data->type);
 
 	// Determine what was retrieved from the metadata server.
-	if (data->type == 'I')
-	{
-		ret = 1;
-	}
-	else if (data->type == 'D' || data->type == 'L')
-	{
-		ret = 2;
-	}
-	else
-	{
-		ret = 0;
-	}
+	// if (data->type == 'I')
+	// {
+	// 	ret = 1;
+	// }
+	// else if (data->type == 'D' || data->type == 'L')
+	// {
+	// 	ret = 2;
+	// }
+	// else
+	// {
+	// 	ret = 0;
+	// }
+
+	ret = data->type;	
+
 	free(result);
 
 	return ret;

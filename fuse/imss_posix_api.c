@@ -82,7 +82,6 @@ int32_t LOWER_BOUND_SERVERS;
 // const char *TESTX = "imss://wfc1.dat$1";
 // const char *TESTX = "p4x2.save/wfc1.dat";
 
-
 /*
    (*) Mapping for REPL_FACTOR values:
    NONE = 1;
@@ -264,13 +263,13 @@ int imss_refresh(const char *path)
 	return 0;
 }
 
-int imss_getattr(const char *path, struct stat *stbuf)
+int imss_getattr(char *path, struct stat *stbuf)
 {
 	// Needed variables for the call
 	char *buffer;
 	char **refs;
 	int n_ent;
-	const char *imss_path = path; // this pointer should no be free.
+	char *imss_path = path; // this pointer should no be free.
 	struct timespec spec;
 	memset(stbuf, 0, sizeof(struct stat));
 	clock_gettime(CLOCK_REALTIME, &spec);
@@ -283,8 +282,8 @@ int imss_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_blksize = IMSS_DATA_BSIZE; // block size in bytes.
 
 	slog_debug("before get_type, imss_path=%s", imss_path);
-	int32_t type = get_type(imss_path);
-	slog_debug("after get_type(%s):%d", imss_path, type);
+	char type = get_type(imss_path);
+	slog_debug("after get_type(%s):%c", imss_path, type);
 
 	int32_t ds = -1;
 	int fd = -1;
@@ -292,7 +291,7 @@ int imss_getattr(const char *path, struct stat *stbuf)
 	char *aux = NULL;
 	switch (type)
 	{
-	case 0:
+	case '0':
 		// erase dataset from the local maps.
 		pthread_mutex_lock(&lock_file);
 		map_erase(map, imss_path);
@@ -302,7 +301,15 @@ int imss_getattr(const char *path, struct stat *stbuf)
 		map_release_prefetch(map_prefetch, imss_path);
 		slog_debug("Ending release prefetch path = %s", imss_path);
 		return -ENOENT;
-	case 1: // Directory case?
+	case TYPE_DIRECTORY:
+	case TYPE_HERCULES_INSTANCE: // Directory case?
+	{
+		char *last = imss_path + strlen(imss_path) - 1;
+		size_t len = strlen(imss_path);
+		if (len > 0 && imss_path[len - 1] != '/')
+		{
+			strcat(imss_path, "/");
+		}
 		if ((n_ent = get_dir((char *)imss_path, &buffer, &refs)) != -1)
 		{
 			slog_debug("[imss_getattr] n_ent=%d", n_ent);
@@ -320,8 +327,10 @@ int imss_getattr(const char *path, struct stat *stbuf)
 			// fprintf(stderr,"imss_getattr get_dir ERROR\n");
 			return -ENOENT;
 		}
-	case 2: // Case file
-		slog_debug("type=%d, imss_path=%s", type, imss_path);
+	}
+	case TYPE_REGULAR_FILE: // Case file
+	{
+		slog_debug("type=%c, imss_path=%s", type, imss_path);
 		/*if(stat_dataset(imss_path, &metadata) == -1){
 		  fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
 		  return -ENOENT;
@@ -392,7 +401,9 @@ int imss_getattr(const char *path, struct stat *stbuf)
 		print_file_type(*stbuf, path);
 
 		return 0;
+	}
 	default:
+		slog_error("Unkown type", type);
 		return -ENOENT; // to check!
 	}
 }
@@ -2054,7 +2065,7 @@ int imss_close(const char *path, int fd)
 	return ret;
 }
 
-int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
+int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened, char file_type)
 {
 	int ret = 0;
 	struct timespec spec;
@@ -2065,8 +2076,8 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 
 	// Assing file handler and create dataset.
 	int res = 0;
-	res = create_dataset((char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, NO_LINK, opened);
-	slog_debug("create_dataset((char*)rpath:%s, POLICY:%s,  N_BLKS:%ld, IMSS_BLKSIZE:%d, REPL_FACTOR:%ld, REPL_TYPE:%ld, N_SERVERS:%d), res:%d", (char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, res);
+	res = create_dataset((char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, NO_LINK, opened, file_type);
+	slog_debug("create_dataset((char*)rpath:%s, POLICY:%s,  N_BLKS:%ld, IMSS_BLKSIZE:%d, REPL_FACTOR:%ld, REPL_TYPE:%ld, N_SERVERS:%d, FILE_TYPE=%c), res:%d", (char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, file_type, res);
 	if (res < 0)
 	{
 		slog_error("Cannot create new dataset.\n");
@@ -2273,7 +2284,7 @@ int imss_unlink(const char *path)
 	}
 	else
 	{
-		ret = 0;
+		ret = 1; // file was not deleted.
 	}
 
 	// free(imss_path);
@@ -2336,7 +2347,7 @@ int imss_mkdir(const char *path, mode_t mode)
 	uint64_t fi;
 	int ret = -1;
 	// opened is equals to 2 to indicate this was not created with a 'open' syscall.
-	ret = imss_create(path, mode | S_IFDIR, &fi, 2);
+	ret = imss_create(path, mode | S_IFDIR, &fi, 2, TYPE_DIRECTORY);
 	return ret;
 }
 
@@ -2388,14 +2399,14 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 			pthread_mutex_unlock(&lock_file);
 			// free(aux);
 		}
-		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3);
+		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3, TYPE_REGULAR_FILE); // TODO: CHECK file type.
 
 		break;
 	case 1:
 		slog_debug("[FUSE]Entering case 1 ");
 		// rpath1 = new_path_1;
 		get_iuri(new_path_2, rpath2);
-		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3);
+		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3, TYPE_REGULAR_FILE); // TODO: CHECK file type
 		break;
 	default:
 		break;
@@ -2588,17 +2599,16 @@ int imss_chown(const char *path, uid_t uid, gid_t gid)
 	return 0;
 }
 
-int imss_rename(const char *old_path, const char *new_path)
+int imss_rename(char *old_path, char *new_path)
 {
-	// printf("Imss rename\n");
 	struct stat ds_stat_n;
 	int file_desc_o, file_desc_n;
 	int fd = 0;
-	char *old_rpath = (char *)calloc(MAX_PATH, sizeof(char));
-	get_iuri(old_path, old_rpath);
+	char *old_rpath = old_path; //(char *)calloc(MAX_PATH, sizeof(char));
+	//get_iuri(old_path, old_rpath);
 
-	char *new_rpath = (char *)calloc(MAX_PATH, sizeof(char));
-	get_iuri(new_path, new_rpath);
+	char *new_rpath = new_path;//(char *)calloc(MAX_PATH, sizeof(char));
+	//get_iuri(new_path, new_rpath);
 
 	// CHECKING IF IS MV DIR TO DIR
 	// check old_path if it is a directory if it is add / at the end
@@ -2627,7 +2637,7 @@ int imss_rename(const char *old_path, const char *new_path)
 			{
 
 				slog_error("HERCULES_ERR_IMSS_RENAME_CANNOT_OPEN_DATASET");
-				free(new_rpath);
+				//free(new_rpath);
 				return -ENOENT;
 			}
 
@@ -2667,8 +2677,8 @@ int imss_rename(const char *old_path, const char *new_path)
 					rename_dataset_srv_worker_dir_dir(old_rpath, new_rpath, file_desc_o, 0);
 					free(dir_dest);
 					free(rdir_dest);
-					free(old_rpath);
-					free(new_rpath);
+					//free(old_rpath);
+					//free(new_rpath);
 					return 0;
 				}
 			}
@@ -2694,43 +2704,89 @@ int imss_rename(const char *old_path, const char *new_path)
 
 	if (file_desc_o < 0)
 	{
-
-		// fprintf(stderr, "[IMSS-FUSE]    Cannot open dataset.\n");
 		slog_error("Cannot open dataset, old_rpath=%s", old_rpath);
-		free(old_rpath);
-		free(new_rpath);
+		//free(old_rpath);
+		//free(new_rpath);
 		return -ENOENT;
 	}
-	res = imss_getattr(new_path, &ds_stat_n);
 
+	res = imss_getattr(new_path, &ds_stat_n);
+	slog_debug("After imss_getattr, new_path=%s, res=%d", new_path, res);
 	if (res == 0)
 	{
 		// fprintf(stderr, "**************EXISTE EL DESTINO=%s\n", new_path);
 		// printf("new_path[last]=%c\n",new_path[strlen(new_path) -1]);
+		slog_debug("is_dir? =%d", S_ISDIR(ds_stat_n.st_mode));
 		if (S_ISDIR(ds_stat_n.st_mode))
 		{
-			// Because of how the path arrive never get here.
+			// create the new path for the origin file.
+			int pos = 0;
+			for (int c = 0; c < strlen(old_path); ++c)
+			{
+				if (old_path[c] == '/')
+				{
+					if (c + 1 < strlen(old_path))
+						pos = c;
+				}
+			}
+
+			char full_path[PATH_MAX], name[PATH_MAX];
+			strncpy(name,old_path+pos+1,strlen(old_path)-pos);
+			strcpy(full_path,new_path);
+			strcat(full_path,name);
+			printf("%d, %s\n", pos, full_path);
+			slog_debug("%d, new_pat=%s, old_path=%s\n", pos, full_path, old_path);
+
+			// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
+			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
+			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
+			res = rename_dataset_metadata(old_rpath, full_path);
+			if(res < 0) {
+				errno = EEXIST;
+				return res;
+			}
+			// RENAME SRV_WORKER(MAP)
+			rename_dataset_srv_worker(old_rpath, full_path, fd, 0);
+			map_rename(map, old_rpath, full_path);
 		}
 		else
 		{
 			// printf("**************TENGO QUE BORRARLO ES UN FICHERO=%s\n",new_path);
 			imss_unlink(new_path);
+
+			// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
+			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
+			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
+			res = rename_dataset_metadata(old_rpath, new_rpath);
+			if(res < 0) {
+				errno = EEXIST;
+				return res;
+			}
+			// RENAME SRV_WORKER(MAP)
+			rename_dataset_srv_worker(old_rpath, new_rpath, fd, 0);
+			map_rename(map, old_rpath, new_rpath);
 		}
 	}
-	// else
-	// {
-	// 	fprintf(stderr, "**************NO EXISTE EL DESTINO=%s\n", new_path);
-	// }
+	else
+	{
+		/// fprintf(stderr, "**************NO EXISTE EL DESTINO=%s\n", new_path);
+		slog_error("HERCULES_ERR_IMSS_RENAME_DEST_DOES_NOT_EXIST");
+		// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
+			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
+			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
+			res = rename_dataset_metadata(old_rpath, new_rpath);
+			if(res < 0) {
+				errno = EEXIST;
+				return res;
+			}
+			// RENAME SRV_WORKER(MAP)
+			rename_dataset_srv_worker(old_rpath, new_rpath, fd, 0);
+			map_rename(map, old_rpath, new_rpath);
+		// return res;
+	}
 
-	map_rename(map, old_rpath, new_rpath);
-	// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
-	// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
-	// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
-	rename_dataset_metadata(old_rpath, new_rpath);
-	// RENAME SRV_WORKER(MAP)
-	rename_dataset_srv_worker(old_rpath, new_rpath, fd, 0);
-
-	free(old_rpath);
-	free(new_rpath);
+	
+	//free(old_rpath);
+	//free(new_rpath);
 	return 0;
 }

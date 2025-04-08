@@ -416,8 +416,8 @@ int32_t map_records::rename_metadata_stat_worker(std::string old_key, std::strin
 	// Check if the value did exist within the map.
 	if (it == buffer.end())
 	{
-		// 0 if the key does not exist.
-		return 0;
+		// -1 if the key does not exist.
+		return -1;
 	}
 	else
 	{
