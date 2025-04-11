@@ -43,7 +43,7 @@
 #define TYPE_METADATA_SERVER 'm'
 
 // File types.
-#define TYPE_HERCULES_INSTANCE 'I' // for regular files
+#define TYPE_HERCULES_INSTANCE 'I' // for Hercules instances
 #define TYPE_REGULAR_FILE 'R' // for regular files
 #define TYPE_DIRECTORY 'D' // for directories
 

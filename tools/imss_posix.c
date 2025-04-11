@@ -447,11 +447,10 @@ extern "C"
 				else
 				{
 					// slog_live("[HERCULES] after resolve path, pathname=%s, real_pathname=%s", pathname, real_pathname);
-					// new_path = convert_path(pathname);
 					ret = ResolvePath(pathname, absolute_pathname);
-					// fprintf(stderr, "[IMSS] last option, pathname=%s, absolute_pathname_len=%d, workdir=%s\n", pathname, ret, workdir);
+					//fprintf(stderr, "[IMSS] last option, pathname=%s, absolute_pathname=%s, absolute_pathname_len=%d, workdir=%s\n", pathname, absolute_pathname, ret,  workdir);
 					if (ret > 0)
-					{
+					{ // absolute path.
 						// slog_live("[IMSS] absolute_pathname=%s", absolute_pathname);
 						new_path = convert_path(absolute_pathname);
 					}
@@ -460,7 +459,7 @@ extern "C"
 						new_path = convert_path(pathname);
 					}
 
-					// slog_live("[HERCULES] pathname=%s, realpath=%s, new_path=%s", pathname, real_pathname, new_path);
+					//slog_live("[HERCULES] pathname=%s, absolute_pathname=%s, new_path=%s", pathname, absolute_pathname,new_path);
 					// free(real_pathname);
 				}
 			}
@@ -520,6 +519,7 @@ extern "C"
 		char *new_path = (char *)calloc(PATH_MAX, sizeof(char));
 
 		strcpy(path, name);
+		//fprintf(stderr, "Received name=%s\n", name);
 		size_t len = strlen(MOUNT_POINT);
 		// remove MOUNT_POINT prefix from the path.
 		if (len > 0)
@@ -531,7 +531,7 @@ extern "C"
 			}
 		}
 
-		// fprintf(stderr, "name=%s, path=%s\n", name, path);
+		//fprintf(stderr, "name=%s, path=%s\n", name, path);
 
 		// seeks initial slashes "/" in the path.
 		len = strlen(path);
@@ -2700,7 +2700,6 @@ extern "C"
 			slog_live("[POSIX]. Calling Hercules 'mkdir', path=%s, new_path=%s", path, new_path);
 
 			// char *new_path;
-			// new_path = convert_path(path, MOUNT_POINT);
 			ret = imss_mkdir(new_path, mode);
 			if (ret < 0)
 			{
@@ -2758,8 +2757,6 @@ extern "C"
 			if (new_path_1 != NULL && new_path_2 != NULL)
 			{
 				slog_live("[POSIX]. Both new_path_1=%s, new_path_2=%s", new_path_1, new_path_2);
-				// new_path_1 = convert_path(name1, MOUNT_POINT);
-				// new_path_2 = convert_path(name2, MOUNT_POINT);
 				ret = imss_symlinkat(new_path_1, new_path_2, 0);
 				free(new_path_1);
 				free(new_path_2);
@@ -2771,7 +2768,6 @@ extern "C"
 				slog_live("[POSIX]. Only second new_path_2=%s", new_path_2);
 				// new_path_1 = name1;
 				strcpy(new_path_1, name1);
-				// new_path_2 = convert_path(name2, MOUNT_POINT);
 				ret = imss_symlinkat(new_path_1, new_path_2, 1);
 				// free(new_path_1) ?
 				free(new_path_2);

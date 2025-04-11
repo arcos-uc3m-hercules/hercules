@@ -263,6 +263,12 @@ int imss_refresh(const char *path)
 	return 0;
 }
 
+/**
+ * @brief Method to retrieve the file attributes of a given path.
+ * @param path Path to the file.
+ * @param stbuf Pointer to the stat structure where the file attributes will be stored.AF_APPLETALK
+ * @return 0 on success, negative errno value on error.
+ */
 int imss_getattr(char *path, struct stat *stbuf)
 {
 	// Needed variables for the call
@@ -2605,18 +2611,25 @@ int imss_rename(char *old_path, char *new_path)
 	int file_desc_o, file_desc_n;
 	int fd = 0;
 	char *old_rpath = old_path; //(char *)calloc(MAX_PATH, sizeof(char));
-	//get_iuri(old_path, old_rpath);
+	// get_iuri(old_path, old_rpath);
 
-	char *new_rpath = new_path;//(char *)calloc(MAX_PATH, sizeof(char));
-	//get_iuri(new_path, new_rpath);
+	char *new_rpath = new_path; //(char *)calloc(MAX_PATH, sizeof(char));
+	// get_iuri(new_path, new_rpath);
 
 	// CHECKING IF IS MV DIR TO DIR
 	// check old_path if it is a directory if it is add / at the end
-	int res = imss_getattr(old_path, &ds_stat_n);
-	slog_debug("[imss_rename] after imss_getattr=%d, st_nlink=%lu", res, ds_stat_n.st_nlink);
-	if (res == 0)
+	int ret = imss_getattr(old_path, &ds_stat_n);
+	slog_debug("after imss_getattr=%d, st_nlink=%lu", ret, ds_stat_n.st_nlink);
+	if (ret == 0)
 	{
-		slog_debug("[imss_rename] is_dir? =%d", S_ISDIR(ds_stat_n.st_mode));
+		// check if new_path is the same as old_path
+		if (!strcmp(old_path, new_path))
+		{
+			ret = -EPERM;
+			return ret;
+		}
+
+		slog_debug("%s is_dir? =%d", old_path, S_ISDIR(ds_stat_n.st_mode));
 		if (S_ISDIR(ds_stat_n.st_mode))
 		{
 
@@ -2637,7 +2650,7 @@ int imss_rename(char *old_path, char *new_path)
 			{
 
 				slog_error("HERCULES_ERR_IMSS_RENAME_CANNOT_OPEN_DATASET");
-				//free(new_rpath);
+				// free(new_rpath);
 				return -ENOENT;
 			}
 
@@ -2658,8 +2671,8 @@ int imss_rename(char *old_path, char *new_path)
 			char *rdir_dest = (char *)calloc(MAX_PATH, sizeof(char));
 			get_iuri(dir_dest, rdir_dest);
 
-			res = imss_getattr(dir_dest, &ds_stat_n);
-			if (res == 0)
+			ret = imss_getattr(dir_dest, &ds_stat_n);
+			if (ret == 0)
 			{
 				if (S_ISDIR(ds_stat_n.st_mode))
 				{
@@ -2677,8 +2690,8 @@ int imss_rename(char *old_path, char *new_path)
 					rename_dataset_srv_worker_dir_dir(old_rpath, new_rpath, file_desc_o, 0);
 					free(dir_dest);
 					free(rdir_dest);
-					//free(old_rpath);
-					//free(new_rpath);
+					// free(old_rpath);
+					// free(new_rpath);
 					return 0;
 				}
 			}
@@ -2705,45 +2718,50 @@ int imss_rename(char *old_path, char *new_path)
 	if (file_desc_o < 0)
 	{
 		slog_error("Cannot open dataset, old_rpath=%s", old_rpath);
-		//free(old_rpath);
-		//free(new_rpath);
 		return -ENOENT;
 	}
 
-	res = imss_getattr(new_path, &ds_stat_n);
-	slog_debug("After imss_getattr, new_path=%s, res=%d", new_path, res);
-	if (res == 0)
+	ret = imss_getattr(new_path, &ds_stat_n);
+	slog_debug("After imss_getattr, new_path=%s, ret=%d", new_path, ret);
+	if (ret == 0)
 	{
 		// fprintf(stderr, "**************EXISTE EL DESTINO=%s\n", new_path);
 		// printf("new_path[last]=%c\n",new_path[strlen(new_path) -1]);
-		slog_debug("is_dir? =%d", S_ISDIR(ds_stat_n.st_mode));
+		slog_debug("%s is_dir? =%d", new_path, S_ISDIR(ds_stat_n.st_mode));
 		if (S_ISDIR(ds_stat_n.st_mode))
 		{
-			// create the new path for the origin file.
+			// create the new path for the origin file because it will be moved to a directory.
 			int pos = 0;
-			for (int c = 0; c < strlen(old_path); ++c)
+			for (int c = 0; c < strlen(old_rpath); ++c)
 			{
-				if (old_path[c] == '/')
+				if (old_rpath[c] == '/')
 				{
-					if (c + 1 < strlen(old_path))
+					if (c + 1 < strlen(old_rpath))
 						pos = c;
 				}
 			}
 
 			char full_path[PATH_MAX], name[PATH_MAX];
-			strncpy(name,old_path+pos+1,strlen(old_path)-pos);
-			strcpy(full_path,new_path);
-			strcat(full_path,name);
-			printf("%d, %s\n", pos, full_path);
-			slog_debug("%d, new_pat=%s, old_path=%s\n", pos, full_path, old_path);
+			strncpy(name, old_rpath + pos + 1, strlen(old_rpath) - pos);
+			strcpy(full_path, new_path);
+			strcat(full_path, name);
+			//printf("%d, %s\n", pos, full_path);
+			slog_debug("%d, full_path=%s, old_rpath=%s\n", pos, full_path, old_rpath);
+
+			if (!strcmp(old_rpath, full_path))
+			{
+				ret = -EPERM;
+				return ret;
+			}
 
 			// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
 			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
 			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
-			res = rename_dataset_metadata(old_rpath, full_path);
-			if(res < 0) {
-				errno = EEXIST;
-				return res;
+			ret = rename_dataset_metadata(old_rpath, full_path);
+			if (ret < 0)
+			{
+				// errno = EEXIST;
+				return ret;
 			}
 			// RENAME SRV_WORKER(MAP)
 			rename_dataset_srv_worker(old_rpath, full_path, fd, 0);
@@ -2757,10 +2775,11 @@ int imss_rename(char *old_path, char *new_path)
 			// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
 			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
 			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
-			res = rename_dataset_metadata(old_rpath, new_rpath);
-			if(res < 0) {
+			ret = rename_dataset_metadata(old_rpath, new_rpath);
+			if (ret < 0)
+			{
 				errno = EEXIST;
-				return res;
+				return ret;
 			}
 			// RENAME SRV_WORKER(MAP)
 			rename_dataset_srv_worker(old_rpath, new_rpath, fd, 0);
@@ -2772,21 +2791,43 @@ int imss_rename(char *old_path, char *new_path)
 		/// fprintf(stderr, "**************NO EXISTE EL DESTINO=%s\n", new_path);
 		slog_error("HERCULES_ERR_IMSS_RENAME_DEST_DOES_NOT_EXIST");
 		// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
-			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
-			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
-			res = rename_dataset_metadata(old_rpath, new_rpath);
-			if(res < 0) {
-				errno = EEXIST;
-				return res;
+		// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
+		// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
+		char last_parent_dir[URI_];
+		int last_parent_offset = find_last_parent_dir((char *)new_path, last_parent_dir);
+		slog_debug("last_parent_dir=%s, last_parent_offset=%d", last_parent_dir, last_parent_offset);
+		if (strncmp(last_parent_dir, old_rpath, strlen(last_parent_dir)) && last_parent_offset > 0)
+		{ // parent and old_rpath are not the same.
+			// last_parent_offset == 0 means the new_path is on the root directory.
+			// Due origin file (old_rpath) will be moved to a new directory
+			// we check if the new parent directoy exists.
+			ret = imss_getattr(last_parent_dir, &ds_stat_n);
+			if (ret != 0)
+			{
+				slog_error("HERCULES_ERROR_RENAME_DEST_PARENT_DIR_DOES_NOT_EXIST");
+				return ret;
 			}
-			// RENAME SRV_WORKER(MAP)
-			rename_dataset_srv_worker(old_rpath, new_rpath, fd, 0);
-			map_rename(map, old_rpath, new_rpath);
+		}
+
+		if (!strcmp(old_rpath, new_path))
+		{
+			ret = -EPERM;
+			return ret;
+		}
+
+		ret = rename_dataset_metadata(old_rpath, new_rpath);
+		if (ret < 0)
+		{
+			// errno = EEXIST;
+			return ret;
+		}
+		// RENAME SRV_WORKER(MAP)
+		rename_dataset_srv_worker(old_rpath, new_rpath, fd, 0);
+		map_rename(map, old_rpath, new_rpath);
 		// return res;
 	}
 
-	
-	//free(old_rpath);
-	//free(new_rpath);
+	// free(old_rpath);
+	// free(new_rpath);
 	return 0;
 }

@@ -643,6 +643,8 @@ RETURNS:	0 - Resources were released successfully.
 	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
 
 	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
+	int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir);
+
 
 	/**
 	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.

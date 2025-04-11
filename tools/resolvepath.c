@@ -29,6 +29,7 @@
 /* Last Update: 15/Dec/2023 */
 
 #include "resolvepath.h"
+#include <stdio.h>
 
 /*
  * int ResolvePath(const char *path_, char *resolved)
@@ -97,6 +98,7 @@ int ResolvePath(const char *path_, char *resolved)
 		left_len -= s - left;
 		if (p != NULL)
 			memmove(left, s + 1, left_len + 1);
+		// fprintf(stderr, "resolved=%c\t", resolved[resolved_len - 1]);
 		if (resolved[resolved_len - 1] != '/')
 		{
 			if (resolved_len + 1 >= PATH_MAX)
@@ -107,7 +109,9 @@ int ResolvePath(const char *path_, char *resolved)
 			}
 			resolved[resolved_len++] = '/';
 			resolved[resolved_len] = '\0';
+			//fprintf(stderr, "resolved now=%s\n", resolved);
 		}
+
 		if (next_token[0] == '\0')
 			continue;
 		else if (strcmp(next_token, ".") == 0)
@@ -151,9 +155,9 @@ int ResolvePath(const char *path_, char *resolved)
 	 * Remove trailing slash except when the resolved pathname
 	 * is a single "/".
 	 */
-	if (resolved_len > 1 && resolved[resolved_len - 1] == '/')
-	{
-		resolved[resolved_len - 1] = '\0';
-	}
+	// if (resolved_len > 1 && resolved[resolved_len - 1] == '/')
+	// {
+	// 	resolved[resolved_len - 1] = '\0';
+	// }
 	return resolved_len;
 }

@@ -338,6 +338,8 @@ int32_t stat_init(char *stat_hostfile,
 	len_client_node = strlen(client_node);
 
 	struct hostent *host_entry;
+	// TO CHECK: The gethostbyname*(), gethostbyaddr*(), herror(), and hstrerror() functions are obsolete.
+	// https://www.man7.org/linux/man-pages/man3/gethostbyname.3.html
 	if ((host_entry = gethostbyname(client_node)) == NULL)
 	{
 		perror("HERCULES_ERR_GETHOSTBYNAME");
@@ -3966,6 +3968,36 @@ int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir)
 		strcpy(first_parent_dir, dataset_uri);
 	}
 	return first_parent_offset;
+}
+
+int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir)
+{
+	int last_parent_offset = 0;
+	size_t uri_len = strlen(dataset_uri);
+	// for (int j = strlen("imss://"); j < uri_len; ++j)
+	for (int j = uri_len; j > strlen("imss://"); --j)
+	{
+		if (dataset_uri[j] == '/')
+		{
+			// mnt/hercules/dir/subdir/ must return the offset to get /mnt/hercules/dir/subdir/
+			// mnt/hercules/dir/subdir/file.txt must return the offset to get /mnt/hercules/dir/subdir/
+			{ // Search for the last directory offset on the path.
+				last_parent_offset = j;
+				// break;
+			}
+		}
+	}
+
+	if (last_parent_offset > 0)
+	{
+		strncpy(last_parent_dir, dataset_uri, last_parent_offset);
+		last_parent_dir[last_parent_offset] = '\0'; // To ensure null-termination.
+	}
+	else
+	{
+		strcpy(last_parent_dir, dataset_uri);
+	}
+	return last_parent_offset;
 }
 
 // Method specifying the type (DATASET or IMSS INSTANCE) of a provided URI.
