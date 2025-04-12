@@ -297,108 +297,23 @@ int imss_getattr(char *path, struct stat *stbuf)
 	char *aux = NULL;
 	switch (type)
 	{
-	case '0':
-		// erase dataset from the local maps.
-		pthread_mutex_lock(&lock_file);
-		map_erase(map, imss_path);
-		pthread_mutex_unlock(&lock_file);
-		// map_release_prefetch(map_prefetch, path);
-		slog_debug("Calling release prefetch path = %s", imss_path);
-		map_release_prefetch(map_prefetch, imss_path);
-		slog_debug("Ending release prefetch path = %s", imss_path);
-		return -ENOENT;
-	case TYPE_DIRECTORY:
-	case TYPE_HERCULES_INSTANCE: // Directory case?
+	case TYPE_HERCULES_INSTANCE:
 	{
-		char *last = imss_path + strlen(imss_path) - 1;
-		size_t len = strlen(imss_path);
-		if (len > 0 && imss_path[len - 1] != '/')
-		{
-			strcat(imss_path, "/");
-		}
-		if ((n_ent = get_dir((char *)imss_path, &buffer, &refs)) != -1)
-		{
-			slog_debug("[imss_getattr] n_ent=%d", n_ent);
-			stbuf->st_size = 4;
-			slog_debug("is a directy, setting st_nlink to 1");
-			stbuf->st_nlink = 1;
-			stbuf->st_mode = S_IFDIR | 0775;
-			// Free resources
-			// free(buffer);
-			free(refs);
-			return 0;
-		}
-		else
-		{
-			// fprintf(stderr,"imss_getattr get_dir ERROR\n");
-			return -ENOENT;
-		}
+		slog_debug("n_ent=%d", n_ent);
+		stbuf->st_size = 4;
+		slog_debug("is a directy, setting st_nlink to 1");
+		stbuf->st_nlink = 1;
+		stbuf->st_mode = S_IFDIR | 0775;
+		free(refs);
+		return 0;
+		break;
 	}
+	case TYPE_DIRECTORY:
+		break;
 	case TYPE_REGULAR_FILE: // Case file
 	{
-		slog_debug("type=%c, imss_path=%s", type, imss_path);
-		/*if(stat_dataset(imss_path, &metadata) == -1){
-		  fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
-		  return -ENOENT;
-		  }*/
+		break;
 
-		// Get header
-		// FIXME! Not always possible!!!!
-		fd_lookup(imss_path, &fd, &stats, &aux);
-		slog_debug("imss_path=%s, file descriptor=%d", imss_path, fd);
-
-		if (fd >= 0)
-		{
-			ds = fd;
-		}
-		else
-		{
-			ds = open_dataset((char *)imss_path, 0);
-			slog_debug("[imss_getattr] ds=%d", ds);
-			if (ds >= (int32_t)0)
-			{
-				int ret = 0;
-				// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
-				void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
-				// void *data = NULL;
-				//  data is allocated in "get data".
-				ret = get_ndata(ds, 0, data, 0, 0);
-				if (ret < 0)
-				{
-					slog_error("Error getting data: %s", imss_path);
-					return -ENOENT;
-				}
-				memcpy(&stats, data, sizeof(struct stat));
-				pthread_mutex_lock(&lock_file);
-				slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
-				map_put(map, imss_path, ds, stats, (char *)data);
-				pthread_mutex_unlock(&lock_file);
-				// free(aux);
-			}
-			else if (ds == -EEXIST)
-			{
-				// fprintf(stderr, "[imss_getattr] ds=%d, %s\n", ds, strerror(EEXIST));
-				return 0;
-			}
-			else
-			{
-				// fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
-				return -ENOENT;
-			}
-		}
-
-		// fprintf(stderr, "[imss_getattr] path=%s, ds=%d, stats.st_nlink=%lu, stats.st_size=%lu\n", path, ds, stats.st_nlink, stats.st_size);
-		// if (stats.st_nlink != 0)
-		{
-			memcpy(stbuf, &stats, sizeof(struct stat));
-		}
-		// stbuf->st_size = stats.st_size;
-		// else
-		// {
-		// 	// fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
-		// 	slog_error("[imss_getattr] Cannot get dataset metadata");
-		// 	return -ENOENT;
-		// }
 		// stbuf->st_blocks = ceil((double)stbuf->st_size / IMSS_BLKSIZE);
 		stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0); // Number 512-byte blocks allocated.
 		// slog_debug("stats.st_nlink=%lu, stats.st_size=%lu", stats.st_nlink, stats.st_size);
@@ -412,6 +327,69 @@ int imss_getattr(char *path, struct stat *stbuf)
 		slog_error("Unkown type", type);
 		return -ENOENT; // to check!
 	}
+
+	fd_lookup(imss_path, &fd, &stats, &aux);
+	if (fd >= 0)
+	{
+		ds = fd;
+	}
+	else
+	{
+		ds = open_dataset((char *)imss_path, 0);
+		slog_debug("[imss_getattr] ds=%d", ds);
+		if (ds >= (int32_t)0)
+		{
+			int ret = 0;
+			// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
+			void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+			// void *data = NULL;
+			//  data is allocated in "get data".
+			ret = get_ndata(ds, 0, data, 0, 0);
+			if (ret < 0)
+			{
+				slog_error("Error getting data: %s", imss_path);
+				return -ENOENT;
+			}
+			memcpy(&stats, data, sizeof(struct stat));
+			// pthread_mutex_lock(&lock_file);
+			slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
+			map_put(map, imss_path, ds, stats, (char *)data);
+		}
+		else if (ds == -EEXIST)
+		{
+			// fprintf(stderr, "[imss_getattr] ds=%d, %s\n", ds, strerror(EEXIST));
+			return 0;
+		}
+		else
+		{
+			// fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
+			return -ENOENT;
+		}
+	}
+	memcpy(stbuf, &stats, sizeof(struct stat));
+
+	switch (type)
+	{
+	case TYPE_DIRECTORY:
+		if ((n_ent = get_dir((char *)imss_path, &buffer, &refs)) != -1)
+		{
+			stbuf->st_size = 4;
+			slog_debug("is a directy, setting st_nlink to 1");
+			stbuf->st_nlink = 1;
+			stbuf->st_mode = S_IFDIR | 0775;
+			free(refs);
+		}
+	case TYPE_REGULAR_FILE:
+		stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0);
+		break;
+	default:
+		slog_error("Unkown type", type);
+		return -ENOENT; // to check!		
+	}
+
+	// pthread_mutex_unlock(&lock_file);
+	// free(aux);
+	return 0;
 }
 
 /*
@@ -593,7 +571,7 @@ int imss_open(char *path, uint64_t *fh)
 
 		slog_debug("[imss_open] ret=%d, file_desc=%d", ret, file_desc);
 		memcpy(&stats, data, sizeof(struct stat));
-		pthread_mutex_lock(&lock_file);
+		// pthread_mutex_lock(&lock_file);
 		// storing block 0 on the local map.
 		map_put(map, imss_path, file_desc, stats, (char *)data);
 		print_file_type(stats, imss_path);
@@ -602,7 +580,7 @@ int imss_open(char *path, uint64_t *fh)
 			char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
 			map_init_prefetch(map_prefetch, imss_path, buff);
 		}
-		pthread_mutex_unlock(&lock_file);
+		// pthread_mutex_unlock(&lock_file);
 		// free(aux);
 	}
 
@@ -2745,7 +2723,7 @@ int imss_rename(char *old_path, char *new_path)
 			strncpy(name, old_rpath + pos + 1, strlen(old_rpath) - pos);
 			strcpy(full_path, new_path);
 			strcat(full_path, name);
-			//printf("%d, %s\n", pos, full_path);
+			// printf("%d, %s\n", pos, full_path);
 			slog_debug("%d, full_path=%s, old_rpath=%s\n", pos, full_path, old_rpath);
 
 			if (!strcmp(old_rpath, full_path))
@@ -2804,7 +2782,7 @@ int imss_rename(char *old_path, char *new_path)
 			ret = imss_getattr(last_parent_dir, &ds_stat_n);
 			if (ret != 0)
 			{
-				slog_error("HERCULES_ERROR_RENAME_DEST_PARENT_DIR_DOES_NOT_EXIST");
+				slog_error("HERCULES_ERR_RENAME_DEST_PARENT_DIR_DOES_NOT_EXIST");
 				return ret;
 			}
 		}

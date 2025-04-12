@@ -448,7 +448,7 @@ extern "C"
 				{
 					// slog_live("[HERCULES] after resolve path, pathname=%s, real_pathname=%s", pathname, real_pathname);
 					ret = ResolvePath(pathname, absolute_pathname);
-					//fprintf(stderr, "[IMSS] last option, pathname=%s, absolute_pathname=%s, absolute_pathname_len=%d, workdir=%s\n", pathname, absolute_pathname, ret,  workdir);
+					// fprintf(stderr, "[IMSS] last option, pathname=%s, absolute_pathname=%s, absolute_pathname_len=%d, workdir=%s\n", pathname, absolute_pathname, ret,  workdir);
 					if (ret > 0)
 					{ // absolute path.
 						// slog_live("[IMSS] absolute_pathname=%s", absolute_pathname);
@@ -459,8 +459,8 @@ extern "C"
 						new_path = convert_path(pathname);
 					}
 
-					//slog_live("[HERCULES] pathname=%s, absolute_pathname=%s, new_path=%s", pathname, absolute_pathname,new_path);
-					// free(real_pathname);
+					// slog_live("[HERCULES] pathname=%s, absolute_pathname=%s, new_path=%s", pathname, absolute_pathname,new_path);
+					//  free(real_pathname);
 				}
 			}
 		}
@@ -519,7 +519,7 @@ extern "C"
 		char *new_path = (char *)calloc(PATH_MAX, sizeof(char));
 
 		strcpy(path, name);
-		//fprintf(stderr, "Received name=%s\n", name);
+		// fprintf(stderr, "Received name=%s\n", name);
 		size_t len = strlen(MOUNT_POINT);
 		// remove MOUNT_POINT prefix from the path.
 		if (len > 0)
@@ -531,7 +531,7 @@ extern "C"
 			}
 		}
 
-		//fprintf(stderr, "name=%s, path=%s\n", name, path);
+		// fprintf(stderr, "name=%s, path=%s\n", name, path);
 
 		// seeks initial slashes "/" in the path.
 		len = strlen(path);
@@ -3389,34 +3389,50 @@ extern "C"
 		if (new_path != NULL)
 		{
 			slog_live("[POSIX]. Calling Hercules 'unlink', name=%s, new_path=%s", name, new_path);
-			char type = get_type(new_path);
-			switch (type)
+			struct stat ds_stat_n;
+			ret = imss_getattr(new_path, &ds_stat_n);
+			if (ret != 0)
 			{
-			case TYPE_DIRECTORY:
-			case TYPE_HERCULES_INSTANCE: // Directory case?
+				slog_error("HERCULES_ERR_UNLINK_FILE_NOT_FOUND");
+			}
+			else
 			{
-				char *last = new_path + strlen(new_path) - 1;
-				size_t len = strlen(new_path);
-				if (len > 0 && new_path[len - 1] != '/')
+				if (S_ISDIR(ds_stat_n.st_mode))
 				{
-					strcat(new_path, "/");
+					ret = imss_rmdir(new_path);
+				} else {
+					ret = imss_unlink(new_path);
 				}
-				ret = imss_rmdir(new_path);
-				break;
 			}
-			case TYPE_REGULAR_FILE: // is regular file.
-			{
-				ret = imss_unlink(new_path);
-				break;
-			}
-			default:
-			{
-				slog_error("HERCULES_ERR_NOT_SUPPORTED_TYPE");
-				perror("HERCULES_ERR_NOT_SUPPORTED_TYPE");
-				ret = -1;
-				break;
-			}
-			}
+
+			// char type = get_type(new_path);
+			// switch (type)
+			// {
+			// case TYPE_DIRECTORY:
+			// case TYPE_HERCULES_INSTANCE: // Directory case?
+			// {
+			// 	char *last = new_path + strlen(new_path) - 1;
+			// 	size_t len = strlen(new_path);
+			// 	if (len > 0 && new_path[len - 1] != '/')
+			// 	{
+			// 		strcat(new_path, "/");
+			// 	}
+			// 	ret = imss_rmdir(new_path);
+			// 	break;
+			// }
+			// case TYPE_REGULAR_FILE: // is regular file.
+			// {
+			// 	ret = imss_unlink(new_path);
+			// 	break;
+			// }
+			// default:
+			// {
+			// 	slog_error("HERCULES_ERR_NOT_SUPPORTED_TYPE");
+			// 	perror("HERCULES_ERR_NOT_SUPPORTED_TYPE");
+			// 	ret = -1;
+			// 	break;
+			// }
+			// }
 
 			// if (ret == 3)
 			// {
@@ -3477,9 +3493,11 @@ extern "C"
 			{
 				if (map_fd_erase_by_pathname(map_fd, new_path) == -1)
 				{
-					slog_warn("[POSIX]. Hercules Warning, no file descriptor found for the pathname=%s", new_path);
-					ret = -1;
+					// slog_warn("[POSIX]. Hercules Warning, no file descriptor found for the pathname=%s", new_path);
+					// ret = -1;
 					// errno =
+					// file could be deleted but without be opened before.
+					ret = 0;
 				}
 				else
 				{
@@ -3487,7 +3505,7 @@ extern "C"
 				}
 			}
 
-			slog_live("[POSIX]. Ending Hercules 'unlink', type=%d, new_path=%s, ret=%d\n", type, new_path, ret);
+			slog_live("[POSIX]. Ending Hercules 'unlink', new_path=%s, ret=%d\n", new_path, ret);
 			// fprintf(stderr, "[POSIX]. Ending Hercules 'unlink', type=%d, new_path=%s, ret=%d\n", type, new_path, ret);
 			free(new_path);
 		}
@@ -3700,9 +3718,10 @@ extern "C"
 		{ // move from Hercules to Hercules.
 			slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new_pathname=%s, old path=%s, new_pathname=%s", old, new_pathname, old_path, new_path);
 			ret = imss_rename(old_path, new_path);
-			if(ret < 0) {
+			if (ret < 0)
+			{
 				errno = -ret;
-				ret = - 1;
+				ret = -1;
 			}
 			slog_live("[POSIX]. End Hercules 'rename', old path=%s, new_pathname=%s, ret=%d\n", old_path, new_path, ret);
 			free(old_path);
