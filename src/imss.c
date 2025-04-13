@@ -509,10 +509,10 @@ uint32_t discover_stat_srv(const char *_uri)
 // Method retrieving the whole set of elements contained by a specific URI.
 uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 {
-	//char *last = requested_uri + strlen(requested_uri) - 1;
-	//if (last[0] != '/')
+	// char *last = requested_uri + strlen(requested_uri) - 1;
+	// if (last[0] != '/')
 	size_t len = strlen(requested_uri);
-	if (len > 0 && requested_uri[len - 1] != '/') 
+	if (len > 0 && requested_uri[len - 1] != '/')
 	{
 		strcat(requested_uri, "/");
 	}
@@ -1157,8 +1157,7 @@ int32_t create_dataset(char *dataset_uri,
 					   int32_t n_servers,
 					   char *link,
 					   int opened,
-					   char file_type
-					)
+					   char file_type)
 {
 	int ret = 0;
 	ucp_ep_h ep;
@@ -1427,11 +1426,18 @@ int32_t create_dataset(char *dataset_uri,
 	return ret;
 }
 
-// Method creating the required resources in order to READ and WRITE an existing dataset.
+/**
+ * @brief  Method creating the required resources in order to READ and WRITE an existing dataset.
+ * @param dataset_uri Path of the dataset.
+ * @param opened "1" indicates to the remote metadata server if the file is being to be opened by the current process
+ * or "0" if it is a simple request. If "0", the counter of how many process has the file opened will not be increased.
+ * @return If already stored, position where the dataset was stored on the local map "datasetd" is returned,
+ * if not, position where the dataset is inserted on the local map "datasetd" is returned, on error -1 is returned
+ * and -2 for symbolic links.
+ */
 int32_t open_dataset(char *dataset_uri, int opened)
 {
 	int32_t associated_imss_indx = -1;
-	// printf("OPEN DATASET INSIDE dataset_uri=%s",dataset_uri);
 	// Check if the IMSS storing the dataset exists within the clients session.
 	if ((associated_imss_indx = imss_check(dataset_uri)) == -1)
 	{
@@ -1493,23 +1499,27 @@ int32_t open_dataset(char *dataset_uri, int opened)
 			errno = EEXIST;
 
 			// Search for the requested dataset in the local vector.
-			dataset_info dataset_info_;
-			int32_t i = 0;
-			for (i = 0; i < datasetd->len; i++)
-			{
-				dataset_info_ = g_array_index(datasetd, dataset_info, i);
-				// if (!strcmp(dataset_uri, dataset_info_.uri_))
-				if(paths_equal(dataset_uri, dataset_info_.uri_))
-				{
-					slog_live("i=%d, dataset_uri=%s, dataset_info_->uri_=%s", i, dataset_uri, dataset_info_.uri_);
-					// fprintf(stderr, "[IMSS] dataset_uri=%s, dataset_info_->uri_=%s\n", dataset_uri, dataset_info_.uri_);
-					break;
-				}
-			}
-			slog_debug("g_array -> inserting %s in %d", dataset_info_.uri_, i);
-			curr_dataset = g_array_index(datasetd, dataset_info, i);
-			return i;
+			// dataset_info dataset_info_;
+			// int32_t i = 0;
+			// for (i = 0; i < datasetd->len; i++)
+			// {
+			// 	dataset_info_ = g_array_index(datasetd, dataset_info, i);
+			// 	// if (!strcmp(dataset_uri, dataset_info_.uri_))
+			// 	if (paths_equal(dataset_uri, dataset_info_.uri_))
+			// 	{
+			// 		slog_live("i=%d, dataset_uri=%s, dataset_info_->uri_=%s", i, dataset_uri, dataset_info_.uri_);
+			// 		// fprintf(stderr, "[IMSS] dataset_uri=%s, dataset_info_->uri_=%s\n", dataset_uri, dataset_info_.uri_);
+			// 		break;
+			// 	}
+			// }
+			// slog_debug("g_array->inserting %s in %d", dataset_info_.uri_, i);
+			// curr_dataset = g_array_index(datasetd, dataset_info, i);
+
+			curr_dataset = new_dataset;
+
+			// return i;
 			// return GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
+			return -EEXIST;
 		}
 		not_initialized = 1;
 
@@ -1711,9 +1721,9 @@ int32_t clear_dataset(const char *dataset_uri)
 	{
 		dataset_info_ = g_array_index(datasetd, dataset_info, i);
 
-		//if (!strcmp(dataset_uri, dataset_info_.uri_))
-		// if (strstr(dataset_info_.uri_, old_dir) != NULL)
-		if(dataset_uri, dataset_info_.uri_)
+		// if (!strcmp(dataset_uri, dataset_info_.uri_))
+		//  if (strstr(dataset_info_.uri_, old_dir) != NULL)
+		if (dataset_uri, dataset_info_.uri_)
 		{
 			g_array_remove_index(datasetd, i);
 			g_array_insert_val(datasetd, i, empty_dataset);
@@ -2053,9 +2063,9 @@ int32_t rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 	for (int32_t i = 0; i < datasetd->len; i++)
 	{
 		dataset_info_ = g_array_index(datasetd, dataset_info, i);
-		//if (!strcmp(old_dataset_uri, dataset_info_.uri_))
+		// if (!strcmp(old_dataset_uri, dataset_info_.uri_))
 		slog_debug("dataset_info_.uri=%s, old_dataset_uri=%s", dataset_info_.uri_, old_dataset_uri);
-		if(paths_equal(old_dataset_uri, dataset_info_.uri_))
+		if (paths_equal(old_dataset_uri, dataset_info_.uri_))
 		{
 			strcpy(dataset_info_.uri_, new_dataset_uri);
 			g_array_remove_index(datasetd, i);
@@ -2063,11 +2073,10 @@ int32_t rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 			break;
 		}
 		// if the old name is not in the local g_array we finish this function.
-		if (i+1 == datasetd->len)
+		if (i + 1 == datasetd->len)
 		{
 			return -1;
 		}
-		
 	}
 
 	/*********RENAME METADATA*******/
@@ -2144,7 +2153,6 @@ int32_t rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 		free(result);
 		return -1;
 	}
-
 
 	free(result);
 	pthread_mutex_unlock(&lock_network);
@@ -2235,27 +2243,41 @@ int32_t open_local_dataset(const char *dataset_uri, int opened)
 }
 
 // Returns true if paths are the same (with or without trailing '/')
-int paths_equal(const char *a, const char *b) {
-    size_t len_a = strlen(a);
-    size_t len_b = strlen(b);
+int paths_equal(const char *a, const char *b)
+{
+	size_t len_a = strlen(a);
+	size_t len_b = strlen(b);
 
-    // Fast path: exact match (including both with or without '/')
-    if (strcmp(a, b) == 0) {
-        return 1;
-    }
+	// Fast path: exact match (including both with or without '/')
+	if (strcmp(a, b) == 0)
+	{
+		return 1;
+	}
 
-    // Check if one is the other + '/'
-    if (len_a == len_b + 1 && a[len_a - 1] == '/' && strncmp(a, b, len_b) == 0) {
-        return 1;
-    }
-    if (len_b == len_a + 1 && b[len_b - 1] == '/' && strncmp(b, a, len_a) == 0) {
-        return 1;
-    }
+	// Check if one is the other + '/'
+	if (len_a == len_b + 1 && a[len_a - 1] == '/' && strncmp(a, b, len_b) == 0)
+	{
+		return 1;
+	}
+	if (len_b == len_a + 1 && b[len_b - 1] == '/' && strncmp(b, a, len_a) == 0)
+	{
+		return 1;
+	}
 
-    return 0;
+	return 0;
 }
 
-// Method retrieving information related to a certain dataset.
+/**
+ * @brief Method retrieving information related to a certain dataset from the metadata server.
+ * It search first if the dataset has been stored on the local map "datasetd" to avoid extra calls.
+ * The file information is supposed to be stored on this map if it was stated previously.
+ * @param dataset_uri Path of the dataset.
+ * @param dataset_info Pointer to the struct where the dataset information will be stored.
+ * @param opened "1" indicates to the remote metadata server if the file is being to be opened by the current process
+ * or "0" if it is a simple request. If "0", the counter of how many process has the file opened will not be increased.
+ * @return 2 if the dataset is on the local map "datasetd", 1 if the info was retreived from the remote metadata
+ * server, 0 if the dataset does not exist, or -1 on error.
+ */
 int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int opened)
 {
 	int ret = 0;
@@ -2271,7 +2293,7 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 		// fprintf(stderr, "[IMSS] dataset_uri=%s, dataset_info_->uri_=%s\n", dataset_uri, dataset_info_->uri_);
 
 		// if (!strncmp(dataset_uri, dataset_info_->uri_, len))
-		if (paths_equal(dataset_uri, dataset_info_->uri_)) 
+		if (paths_equal(dataset_uri, dataset_info_->uri_))
 		{
 			// fprintf(stderr, "[IMSS] dataset_uri=%s, dataset_info_->uri_=%s\n", dataset_uri, dataset_info_->uri_);
 			slog_live("[IMSS] dataset_uri=%s, dataset_info_->uri_=%s", dataset_uri, dataset_info_->uri_);
@@ -3053,31 +3075,19 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 	int inf_prov = 0;
 	int32_t curr_imss_storages;
 
-	// if the number of server to be used was not provided, we try to obtain
-	// the data location.
-	// if (n_server == -1)
-	// {
+	// if the number of server to be used was not provided, we try to obtain the data location.
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = get_data_location(dataset_id, data_id, GET)) == -1)
+	if ((n_server = TIMING(get_data_location(dataset_id, data_id, GET), "get_data_location", int32_t)) == -1)
 	{
 		return -2;
 	}
 	replication_factor = curr_dataset.repl_factor;
 	curr_imss_storages = curr_imss.info.num_active_storages;
-	// }
-	// else
-	// {
-	// 	inf_prov = 1;
-	// }
 
 	// Servers that the data block is going to be requested to.
 	int32_t repl_servers[replication_factor];
 	int32_t session_policy = curr_dataset.session_plcy; //  get_policy();
 
-	// switch (inf_prov)
-	// {
-	// case 0:
-	// {
 	uint32_t n_server_ = 0;
 	int32_t aux_conn = 0;
 	// Retrieve the corresponding connections to the previous servers.
@@ -3098,19 +3108,6 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 			repl_servers[i] = aux_conn;
 		}
 	}
-	// 	break;
-	// }
-	// case 1:
-	// 	for (int32_t i = 0; i < replication_factor; i++)
-	// 	{
-	// 		// Server storing the current data block.
-	// 		repl_servers[i] = n_server;
-	// 	}
-	// 	break;
-
-	// default:
-	// 	break;
-	// }
 
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
@@ -3140,100 +3137,102 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		slog_debug("[IMSS] Request - '%s' to server %d", key_, repl_servers[i]);
 		// fprintf(stderr,"[IMSS] Request - '%s' to server %d\n", key_, repl_servers[i]);
 
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
+		if (TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), "send_req", size_t) == 0)
 		{
-			pthread_mutex_unlock(&lock_network);
 			perror("HERCULES_ERR_GET_NDATA_SEND_REQ");
 			slog_error("HERCULES_ERR_GET_NDATA_SEND_REQ");
-			return -1;
+			pthread_mutex_unlock(&lock_network);
+			return -2;
 		}
 
-		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
+		msg_length = TIMING( get_recv_data_length(ucp_worker_data, local_data_uid), "get_recv_data_length", size_t);
 		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
 		{
-			pthread_mutex_unlock(&lock_network);
 			perror("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
 			slog_error("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
+			pthread_mutex_unlock(&lock_network);
 			return -EINVAL;
 		}
 
-		void *response_bufer = (void *)malloc(msg_length * sizeof(char));
-		if (response_bufer == NULL)
+		// void *response_buffer = (void *)malloc(msg_length * sizeof(char));
+		void *response_buffer = buffer;
+		if (response_buffer == NULL)
 		{
 			perror("HERCULES_ERR_GET_NDATA_MEMORY_ALLOCATION");
 			slog_error("HERCULES_ERR_GET_NDATA_MEMORY_ALLOCATION");
-			return -1;
+			pthread_mutex_unlock(&lock_network);
+			return -2;
 		}
 
-		// msg_length = recv_data(ucp_worker_data, ep, buffer, msg_length, local_data_uid, 0);
-		msg_length = recv_data(ucp_worker_data, ep, response_bufer, msg_length, local_data_uid, 0);
+		msg_length = TIMING( recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0), "recv_data", size_t);
 
 		slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
 		{
 			if (errno != EAGAIN)
 			{
-				pthread_mutex_unlock(&lock_network);
 				slog_error("ERR_HERCULES_GETDATA_RECV");
 				perror("ERR_HERCULES_GETDATA_RECV");
-				return -1;
+				pthread_mutex_unlock(&lock_network);
+				return -2;
 			}
 			else
 				break;
 		}
 
 		// Check if the requested key was correctly retrieved.
-		if (strncmp((const char *)response_bufer, "$ERRIMSS_NO_KEY_AVAIL$", 22))
+		if (strncmp((const char *)response_buffer, "$ERRIMSS_NO_KEY_AVAIL$", 22))
 		{
 			slog_info("OK!, length=%ld", msg_length);
 
-			if (session_policy == LOCAL_ || session_policy == ZCOPY_)
-			{
-				size_t server_offset = 0;
-				uint32_t size = 0;
-				// key_t key = getKeySM();
-				slog_debug("Getting data from shared memory, id=%d, response_bufer=%s, key=%ld", data_id, response_bufer, shared_memory_key);
-				// msg_length = atoi((const char *)response_bufer);
+			// TODO
+			// if (session_policy == LOCAL_ || session_policy == ZCOPY_)
+			// {
+			// 	size_t server_offset = 0;
+			// 	uint32_t size = 0;
+			// 	// key_t key = getKeySM();
+			// 	slog_debug("Getting data from shared memory, id=%d, response_buffer=%s, key=%ld", data_id, response_buffer, shared_memory_key);
+			// 	// msg_length = atoi((const char *)response_buffer);
 
-				// server_offset = atol((const char *)response_bufer);
-				sscanf((const char *)response_bufer, "%lu %u", &server_offset, &size);
+			// 	// server_offset = atol((const char *)response_buffer);
+			// 	sscanf((const char *)response_buffer, "%lu %u", &server_offset, &size);
 
-				slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_bufer=%s, server_offset=%lu, size=%lu, to_read=%lu", curr_dataset.uri_, data_id, shared_memory_key, response_bufer, server_offset, size, to_read);
+			// 	slog_info("Opening shared memory, name=%s, id=%ld, key=%d, response_buffer=%s, server_offset=%lu, size=%lu, to_read=%lu", curr_dataset.uri_, data_id, shared_memory_key, response_buffer, server_offset, size, to_read);
 
-				slog_debug("msg_length=%ld", msg_length);
-				// SharedMemory *shared_memory;
-				// TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
+			// 	slog_debug("msg_length=%ld", msg_length);
+			// 	// SharedMemory *shared_memory;
+			// 	// TIMING(shared_memory = getContentSM(key, SHM_SIZE), "Getting content from shared memory", SharedMemory *);
 
-				// "to_read" is 0 when block 0 is read, but "msg_length"
-				// is updating according to the current block size.
-				if (to_read == 0)
-				{
-					msg_length = size;
-				}
-				else
-				{
-					msg_length = to_read;
-				}
+			// 	// "to_read" is 0 when block 0 is read, but "msg_length"
+			// 	// is updating according to the current block size.
+			// 	if (to_read == 0)
+			// 	{
+			// 		msg_length = size;
+			// 	}
+			// 	else
+			// 	{
+			// 		msg_length = to_read;
+			// 	}
 
-				slog_debug("shared_memory->size=%ld", shared_memory->size);
-				void *content_pointer = (char *)shared_memory->content + server_offset + offset;
-				if (data_id == 0 || session_policy == LOCAL_)
-				{
-					memcpy(buffer, content_pointer, msg_length);
-				}
-				else if (session_policy == ZCOPY_)
-				{
-					// Not secure.
-					buffer = content_pointer;
-				}
-			}
-			else
-			{
-				memcpy(buffer, response_bufer, msg_length);
-			}
+			// 	slog_debug("shared_memory->size=%ld", shared_memory->size);
+			// 	void *content_pointer = (char *)shared_memory->content + server_offset + offset;
+			// 	if (data_id == 0 || session_policy == LOCAL_)
+			// 	{
+			// 		memcpy(buffer, content_pointer, msg_length);
+			// 	}
+			// 	else if (session_policy == ZCOPY_)
+			// 	{
+			// 		// Not secure.
+			// 		buffer = content_pointer;
+			// 	}
+			// }
+			// else
+			// {
+			// 	memcpy(buffer, response_buffer, msg_length);
+			// }
 
-			free(response_bufer);
+			// free(response_buffer);
 			pthread_mutex_unlock(&lock_network);
 			return (ssize_t)msg_length;
 		}
@@ -3243,7 +3242,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 			sprintf(err_msg, "HERCULES_ERR_NO_KEY_AVAIL, %s$%d", curr_dataset.uri_, data_id);
 			perror(err_msg);
 			slog_error("HERCULES_ERR_NO_KEY_AVAIL");
-			free(response_bufer);
+			// free(response_buffer);
 		}
 	}
 	pthread_mutex_unlock(&lock_network);
@@ -3365,7 +3364,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 	int32_t n_server;
 	size_t msg_length = 0;
 	// Server containing the corresponding data to be written.
-	if ((n_server = get_data_location(dataset_id, data_id, SET)) == -1)
+	if ((n_server = TIMING(get_data_location(dataset_id, data_id, SET),"get_data_location", int32_t)) == -1)
 	{
 		perror("HERCULES_ERR_GET_DATA_LOCATION");
 		slog_error("HERCULES_ERR_GET_DATA_LOCATION");
@@ -3509,7 +3508,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 
 			// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id)
 			// in a dataset (curr_dataset.uri).
-			if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
+			if (TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_),"send_req", size_t) == 0)
 			{
 				fprintf(stderr, "********** current server status = %d\n", curr_imss.info.status[n_server_]);
 				pthread_mutex_unlock(&lock_network);
@@ -3519,7 +3518,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 			}
 
 			// send the data to the data server of the current dataset.
-			if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+			if (TIMING(send_data(ucp_worker_data, ep, buffer, size, local_data_uid),"send_data", size_t) == 0)
 			{
 				pthread_mutex_unlock(&lock_network);
 				perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
@@ -4079,7 +4078,7 @@ char get_type(const char *uri)
 	// 	ret = 0;
 	// }
 
-	ret = data->type;	
+	ret = data->type;
 
 	free(result);
 

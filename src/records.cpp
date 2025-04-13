@@ -239,8 +239,6 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	// Check if the value did exist within the map.
 	if (it == buffer.end())
 	{
-		//const char *last = key.c_str() + strlen(key.c_str()) - 1;
-		//if (last[0] != '/')
 		size_t len = strlen(key.c_str());
 		if (len > 0 && key.c_str()[len - 1] != '/') 
 		{

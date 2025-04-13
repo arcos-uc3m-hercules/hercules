@@ -37,6 +37,7 @@ extern "C"
 	}
 
 	// Insert the element "p = {v,stat,aux}" with key "k" to the map "map".
+	// This info is used by the "fd_lookup" function to avoid extra calls for the block 0.
 	void map_put(void *map, char *k, int v, struct stat stat, char *aux)
 	{
 		std::unique_lock<std::mutex> lck(map_lock);

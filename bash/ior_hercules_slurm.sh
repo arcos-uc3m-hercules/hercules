@@ -113,7 +113,7 @@ TRANSFER_SIZE=$FILE_SIZE_PER_CLIENT
 # -W -R for Write and Read verification. 
 # -k to keep the file (do not delete it after test).
 #COMMAND="$IOR_PATH/ior -w -r -k -W -R -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 1"
-COMMAND="$IOR_PATH/ior -w -r -k -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 3"
+COMMAND="$IOR_PATH/ior -w -r -k -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 1"
 
 if [ "$IOR_FILE_PER_PROCESS" -eq 1 ]; then
 ## -F for File-per-process.
@@ -145,8 +145,8 @@ mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_H
 # 	ipcrm -a
 
 ## Waits some seconds to allow Hercules finishing copying all blocks to disk.
-/beegfs/home/javier.garciablas/hercules/scripts/hercules stop \
-	   -f "$CONFIG_PATH"
+# /beegfs/home/javier.garciablas/hercules/scripts/hercules stop \
+# 	   -f "$HERCULES_CONF"
 
 ## Checksum to the file.
 #HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/data.out

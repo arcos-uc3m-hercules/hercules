@@ -2355,7 +2355,7 @@ extern "C"
 
 		slog_live("[POSIX]. pathname=%s, size to write=%lu, offset=%lu", pathname, size, offset);
 
-		ret = imss_write(pathname, buf, size, offset);
+		ret = TIMING(imss_write(pathname, buf, size, offset),"imss_write", ssize_t);
 
 		if (update_offset)
 		{
@@ -3130,7 +3130,7 @@ extern "C"
 			// {
 			// 	map_fd_update_value(map_fd, pathname, fd, ds_stat_n.st_size + size);
 			// }
-			ret = generalWrite(pathname, fd, buf, size, offset);
+			ret = TIMING(generalWrite(pathname, fd, buf, size, offset),"generalWrite", ssize_t);
 
 			slog_live("[POSIX]. Ending Hercules 'write', pathname=%s, size=%lu, ret=%ld, fd=%d\n", pathname, size, ret, fd);
 		}
@@ -3195,7 +3195,7 @@ extern "C"
 
 			// fprintf(stderr, "[POSIX] Read Hercules size=%ld, offset=%lu\n", size, offset);
 			// ret = imss_read(pathname, buf, size, offset);
-			ret = imss_sread(pathname, buf, size, offset);
+			ret = TIMING(imss_sread(pathname, buf, size, offset),"imss_sread", ssize_t);
 			if (ret > 0)
 			{
 				offset += ret;
@@ -3204,6 +3204,14 @@ extern "C"
 				// slog_live("[POSIX] Updating map_fd, offset=%lu, data_size=%ld", offset, ds_stat_n.st_size);
 				slog_live("[POSIX] Updating map_fd, offset=%lu", offset);
 				map_fd_update_value(map_fd, pathname, fd, offset);
+			}
+			if(ret == -1) {
+				errno = ENOENT;
+			}
+			if(ret == -2) {
+				errno = EIO;
+				// change return value to -1.
+				ret = -1;
 			}
 			// fprintf(stderr, "[POSIX] Hercules read, pathname=%s, ret=%ld\n", pathname, ret);
 			// fprintf(stderr, "[POSIX ] READ HERCULES ret=%ld\n", ret);
@@ -3398,9 +3406,9 @@ extern "C"
 			else
 			{
 				if (S_ISDIR(ds_stat_n.st_mode))
-				{
+				{ // directory case.
 					ret = imss_rmdir(new_path);
-				} else {
+				} else { // regular file case.
 					ret = imss_unlink(new_path);
 				}
 			}

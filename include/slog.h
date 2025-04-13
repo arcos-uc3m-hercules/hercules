@@ -45,6 +45,72 @@ extern "C"
 // #include <sys/types.h>
 #include <unistd.h>
 
+
+
+/**
+ * Macro to measure the time spend by function_to_call.
+ * char*::print_comment: comment to be concatenated to the elapsed time.
+ */
+#define __TIMING__
+
+#ifdef __TIMING__
+#define TIMING(function_to_call, print_comment, type)          \
+	({                                                         \
+		clock_t t;                                             \
+		double time_taken;                                     \
+		type ret;                                              \
+		t = clock();                                           \
+		ret = function_to_call;                                \
+		t = clock() - t;                                       \
+		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
+		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
+		ret;                                                   \
+	})
+#else
+#define TIMING(function_to_call, print_comment, type) \
+	({                                                \
+		function_to_call;                             \
+	})
+#endif
+
+#ifdef TIMING_NO_RETURN
+#define TIMING_NO_RETURN(function_to_call, print_comment)      \
+	({                                                         \
+		clock_t t;                                             \
+		double time_taken;                                     \
+		t = clock();                                           \
+		function_to_call;                                      \
+		t = clock() - t;                                       \
+		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
+		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
+	})
+#else
+#define TIMING_NO_RETURN(function_to_call, print_comment) \
+	({                                                    \
+		function_to_call;                                 \
+	})
+#endif
+
+#ifdef NETWORK_TIMING
+#define NETWORK_TIMING(function_to_call, print_comment, type)  \
+	({                                                         \
+		clock_t t;                                             \
+		double time_taken;                                     \
+		type ret;                                              \
+		t = clock();                                           \
+		ret = function_to_call;                                \
+		t = clock() - t;                                       \
+		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
+		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
+		ret;                                                   \
+	})
+#else
+#define NETWORK_TIMING(function_to_call, print_comment, type) \
+	({                                                        \
+		function_to_call;                                     \
+	})
+#endif
+
 /*
  * SOURCE_THROW_LOCATION macro returns string which
  * points to the file, as well as, the corresponding line

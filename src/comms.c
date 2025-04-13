@@ -181,9 +181,9 @@ size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t m
 	// memcpy (ctx.buffer, msg, msg_len);
 	// memcpy (send_buffer, msg, msg_len);
 	//	ctx.buffer= bb;
-
+	send_param.flags = UCP_OP_ATTR_FLAG_NO_IMM_CMPL; // Ensure async progress
 	send_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-							  UCP_OP_ATTR_FIELD_USER_DATA;
+							  UCP_OP_ATTR_FIELD_USER_DATA | UCP_OP_ATTR_FIELD_FLAGS;
 	send_param.cb.send = send_handler_data;
 	send_param.datatype = ucp_dt_make_contig(1);
 	send_param.memory_type = UCS_MEMORY_TYPE_HOST;
@@ -194,7 +194,7 @@ size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t m
 	request = (struct ucx_context *)ucp_tag_send_nbx(ep, ctx.buffer, msg_len, from, &send_param);
 	// request = (struct ucx_context *)ucp_tag_send_sync_nbx(ep, ctx.buffer, msg_len, from, &send_param);
 	status = ucx_wait(ucp_worker, request, "send", "data"); // original.
-	
+
 	t = clock() - t;
 	double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 	// fprintf(stderr,"********** send data %lu time = %lf\n", msg_len, time_taken);
@@ -337,11 +337,10 @@ size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_
 
 size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest)
 {
-	// pthread_mutex_lock(&lock_ucx_comm);
-
 	ucp_tag_recv_info_t info_tag;
 	ucp_tag_message_h msg_tag;
 	// async = 1;
+	// TODO: Check why this function is too slow in read operations.
 	do
 	{
 		/* Progressing before probe to update the state */
@@ -350,10 +349,51 @@ size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest)
 		msg_tag = ucp_tag_probe_nb(ucp_worker, dest, tag_mask, 0, &info_tag);
 	} while (msg_tag == NULL);
 
-	// pthread_mutex_unlock(&lock_ucx_comm);
-
 	return info_tag.length;
 }
+
+
+// size_t get_recv_data_length(ucp_worker_h ucp_worker, ucp_tag_t expected_tag, uint64_t tag_mask) {
+// size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest)
+// {
+// 	uint64_t tag = dest;
+// 	ucp_tag_recv_info_t info_tag;
+// 	ucp_tag_message_h msg_tag;
+// 	ucs_status_t status;
+
+// 	while (1)
+// 	{
+// 		/* Probing incoming events in non-block mode */
+// 		msg_tag = ucp_tag_probe_nb(ucp_worker, tag, tag_mask, 0, &info_tag);
+// 		if (msg_tag != NULL)
+// 		{
+// 			/* Message arrived */
+// 			break;
+// 		}
+// 		else if (ucp_worker_progress(ucp_worker))
+// 		{
+// 			/* Some events were polled; try again without going to sleep */
+// 			continue;
+// 		}
+// 		/* If we got here, ucp_worker_progress() returned 0, so we can sleep.
+// 		 * Following blocked methods used to polling internal file descriptor
+// 		 * to make CPU idle and don't spin loop
+// 		 */
+// 		// if (ucp_test_mode == TEST_MODE_WAIT)
+// 		{
+// 			/* Polling incoming events*/
+// 			// fprintf(stderr, "Worker waiting to be wake up\n");
+// 			status = ucp_worker_wait(ucp_worker);
+// 			// fprintf(stderr, "Worker continue\n");
+// 		}
+// 		// else if (ucp_test_mode == TEST_MODE_EVENTFD)
+// 		// {
+// 		// 	status = test_poll_wait(ucp_worker);
+// 		// }
+// 	}
+
+// 	return info_tag.length;
+// }
 
 /**
  * @brief Fill "msg" with the message received from the server. "msg" must be allocated.
@@ -394,7 +434,6 @@ size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_len
 		memcpy(msg, recv_buffer, msg_length);
 	}
 
-
 	status = ucx_wait(ucp_worker, request, "recv", "data");
 
 	t = clock() - t;
@@ -405,7 +444,6 @@ size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_len
 		slog_error("[COMM] HERCULES_RECV_DATA_ERR, msg_length=%lu", msg_length);
 		return 0;
 	}
-
 
 	return msg_length;
 }
@@ -812,7 +850,7 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 
 	case DATASET_INFO:
 	{
-		dataset_info *struct_ = (dataset_info *)data_struct;	
+		dataset_info *struct_ = (dataset_info *)data_struct;
 
 		// Calculate the total size of the buffer storing the structure.
 		msg_size = sizeof(dataset_info);
@@ -885,7 +923,6 @@ int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		slog_error("HERCULES_ERR_RECV_STREAM_MEMORY_ALLOC");
 		return -1;
 	}
-	
 
 	slog_info("[COMM] recv_dynamic_stream start, data_type=%d", data_type);
 	// receive the message from the backend.

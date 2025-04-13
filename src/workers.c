@@ -1806,8 +1806,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			int err = map->get(key, &address_, &block_size_rtvd);
 			if (err == 0)
 			{
-				//const char *last = key.c_str() + strlen(key.c_str()) - 1;
-				//if (last[0] != '/')
 				if (!key.empty() && key.back() != '/') 
 				{
 					key += '/';
@@ -2111,8 +2109,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			int err = map->get(key, &address_, &block_size_rtvd);
 			if (err == 0)
 			{
-				//const char *last = key.c_str() + strlen(key.c_str()) - 1;
-				//if (last[0] != '/')
 				if (!key.empty() && key.back() != '/') 
 				{
 					key += '/';

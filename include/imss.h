@@ -58,69 +58,6 @@ static uint64_t BLOCK_SIZE;
 #define DPRINT(...)
 #endif
 
-/**
- * Macro to measure the time spend by function_to_call.
- * char*::print_comment: comment to be concatenated to the elapsed time.
- */
-#define __TIMING__
-
-#ifdef __TIMING__
-#define TIMING(function_to_call, print_comment, type)          \
-	({                                                         \
-		clock_t t;                                             \
-		double time_taken;                                     \
-		type ret;                                              \
-		t = clock();                                           \
-		ret = function_to_call;                                \
-		t = clock() - t;                                       \
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
-		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
-		ret;                                                   \
-	})
-#else
-#define TIMING(function_to_call, print_comment, type) \
-	({                                                \
-		function_to_call;                             \
-	})
-#endif
-
-#ifdef TIMING_NO_RETURN
-#define TIMING_NO_RETURN(function_to_call, print_comment)      \
-	({                                                         \
-		clock_t t;                                             \
-		double time_taken;                                     \
-		t = clock();                                           \
-		function_to_call;                                      \
-		t = clock() - t;                                       \
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
-		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
-	})
-#else
-#define TIMING_NO_RETURN(function_to_call, print_comment) \
-	({                                                    \
-		function_to_call;                                 \
-	})
-#endif
-
-#ifdef NETWORK_TIMING
-#define NETWORK_TIMING(function_to_call, print_comment, type)  \
-	({                                                         \
-		clock_t t;                                             \
-		double time_taken;                                     \
-		type ret;                                              \
-		t = clock();                                           \
-		ret = function_to_call;                                \
-		t = clock() - t;                                       \
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
-		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
-		ret;                                                   \
-	})
-#else
-#define NETWORK_TIMING(function_to_call, print_comment, type) \
-	({                                                        \
-		function_to_call;                                     \
-	})
-#endif
 
 int32_t get_data_location(int32_t, int32_t, int32_t);
 
@@ -501,8 +438,8 @@ The current function does not allocate memory.
 	 * @param buffer     - Memory address where the requested block will be
 	 * received. WARNING: memory must have been allocated.
 	 * @param offset	 - Offset of the requested block.
-	 * @returns 0 if the requested block was successfully retrieved, 0 if the
-	 * requested block was not find in the remote server, or -1 in case of
+	 * @returns "msg_length" if the requested block was successfully retrieved, -1 if the
+	 * requested block was not find in the remote server, or -2 in case of
 	 * error.
 	 */
 	ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);

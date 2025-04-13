@@ -165,7 +165,13 @@ int get_number_of_data_servers(int i_blk, int num_of_blk)
 /*
    -----------	Auxiliar Functions -----------
  */
-
+/**
+ * @brief Seek for the fd and stats of a dataset stored on a local map.
+ * @param path Name of the file to be seek.
+ * @param fd Pointer to the file descriptor of path.
+ * @param s Pointer to the stat structure where the file attributes will be stored.
+ * @param aux Pointer to the block 0 data.
+ */
 void fd_lookup(const char *path, int *fd, struct stat *s, char **aux)
 {
 	pthread_mutex_lock(&lock_file);
@@ -266,7 +272,7 @@ int imss_refresh(const char *path)
 /**
  * @brief Method to retrieve the file attributes of a given path.
  * @param path Path to the file.
- * @param stbuf Pointer to the stat structure where the file attributes will be stored.AF_APPLETALK
+ * @param stbuf Pointer to the stat structure where the file attributes will be stored.
  * @return 0 on success, negative errno value on error.
  */
 int imss_getattr(char *path, struct stat *stbuf)
@@ -309,32 +315,20 @@ int imss_getattr(char *path, struct stat *stbuf)
 		break;
 	}
 	case TYPE_DIRECTORY:
-		break;
 	case TYPE_REGULAR_FILE: // Case file
 	{
 		break;
-
-		// stbuf->st_blocks = ceil((double)stbuf->st_size / IMSS_BLKSIZE);
-		stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0); // Number 512-byte blocks allocated.
-		// slog_debug("stats.st_nlink=%lu, stats.st_size=%lu", stats.st_nlink, stats.st_size);
-		slog_debug("[imss_getattr] path=%s, imss_path=%s, file descriptor=%d, file size=%lu, stbuf->st_blocks=%lu, stbuf->st_nlink=%lu stats.st_nlink=%lu", path, imss_path, fd, stbuf->st_size, stbuf->st_blocks, stbuf->st_nlink, stats.st_nlink);
-		// fprintf(stderr, "[imss_getattr] path=%s, imss_path=%s, file descriptor=%d, file size=%lu, stbuf->st_blocks=%lu\n", path, imss_path, fd, stbuf->st_size, stbuf->st_blocks);
-		print_file_type(*stbuf, path);
-
-		return 0;
 	}
 	default:
 		slog_error("Unkown type", type);
 		return -ENOENT; // to check!
 	}
 
+	// Seek for the dataset on the local map. If it not found,
+	// we open it.
 	fd_lookup(imss_path, &fd, &stats, &aux);
-	if (fd >= 0)
-	{
-		ds = fd;
-	}
-	else
-	{
+	if (fd < 0)
+	{ // not found.
 		ds = open_dataset((char *)imss_path, 0);
 		slog_debug("[imss_getattr] ds=%d", ds);
 		if (ds >= (int32_t)0)
@@ -342,8 +336,7 @@ int imss_getattr(char *path, struct stat *stbuf)
 			int ret = 0;
 			// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
 			void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
-			// void *data = NULL;
-			//  data is allocated in "get data".
+			//  data is filled in "get data".
 			ret = get_ndata(ds, 0, data, 0, 0);
 			if (ret < 0)
 			{
@@ -353,15 +346,31 @@ int imss_getattr(char *path, struct stat *stbuf)
 			memcpy(&stats, data, sizeof(struct stat));
 			// pthread_mutex_lock(&lock_file);
 			slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
+			// Put the file descriptor (ds), stats info and data on the local map.
 			map_put(map, imss_path, ds, stats, (char *)data);
 		}
 		else if (ds == -EEXIST)
-		{
+		{ // file aready exists on the remote metadata server.
+			int ret = 0;
+			// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
+			void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+			//  data is filled in "get data".
+			ret = get_ndata(ds, 0, data, 0, 0);
+			if (ret < 0)
+			{
+				slog_error("Error getting data: %s", imss_path);
+				return -ENOENT;
+			}
+			memcpy(&stats, data, sizeof(struct stat));
+			// pthread_mutex_lock(&lock_file);
+			slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
+			// Put the file descriptor (ds), stats info and data on the local map.
+			map_put(map, imss_path, ds, stats, (char *)data);
 			// fprintf(stderr, "[imss_getattr] ds=%d, %s\n", ds, strerror(EEXIST));
 			return 0;
 		}
 		else
-		{
+		{ // file does not exist on the remote metadata server.
 			// fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
 			return -ENOENT;
 		}
@@ -384,7 +393,7 @@ int imss_getattr(char *path, struct stat *stbuf)
 		break;
 	default:
 		slog_error("Unkown type", type);
-		return -ENOENT; // to check!		
+		return -ENOENT; // to check!
 	}
 
 	// pthread_mutex_unlock(&lock_file);
@@ -739,10 +748,11 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 		// }
 		// else
 		{
-			to_read = get_ndata(ds, curr_blk, (char *)buf + byte_count, to_read, block_offset);
+			to_read = TIMING(get_ndata(ds, curr_blk, (char *)buf + byte_count, to_read, block_offset), "get_ndata", ssize_t);
 		}
 		// Error handling when get_ndata does not found the request data.
-		if (to_read == -1)
+		// if (to_read == -1)
+		if (to_read < 0)
 		{
 			return to_read;
 		}
@@ -1504,7 +1514,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		// }
 		// else
 		{
-			if (set_data(ds, curr_blk, data_pointer, bytes_to_copy, block_offset) < 0)
+			if (TIMING(set_data(ds, curr_blk, data_pointer, bytes_to_copy, block_offset),"set_data", int32_t) < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
 				error_print = -ENOENT;
@@ -1985,7 +1995,7 @@ int imss_release(const char *path)
 	else
 		return -ENOENT;
 
-	char *head = (char *)malloc(IMSS_DATA_BSIZE);
+	// char *head = (char *)malloc(IMSS_DATA_BSIZE);
 
 	// Get time
 	struct timespec spec;
@@ -1997,19 +2007,19 @@ int imss_release(const char *path)
 
 	// write metadata
 	slog_debug("stats.st_nlink=%lu", stats.st_nlink);
-	memcpy(head, &stats, sizeof(struct stat));
+	// memcpy(head, &stats, sizeof(struct stat));
 
 	// Updates the size of the file in the block 0.
-	if (set_data(ds, 0, head, 0, 0) < 0)
+	// if (set_data(ds, 0, head, 0, 0) < 0)
+	if (set_data(ds, 0, (char *)&stats, 0, 0) < 0)
 	{
 		perror("HERCULES_ERR_WRITTING_BLOCK");
 		slog_error("HERCULES_ERR_WRITTING_BLOCK");
-		free(head);
-		// free(rpath);
+		// free(head);
 		return -ENOENT;
 	}
 
-	free(head);
+	// free(head);
 	return ds;
 }
 
@@ -2193,8 +2203,8 @@ int imss_unlink(const char *path)
 		ds = fd;
 	else
 	{
-		pthread_mutex_unlock(&lock);
 		slog_debug("%s not found in lookup", imss_path);
+		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
 
@@ -2202,9 +2212,9 @@ int imss_unlink(const char *path)
 	ret = get_ndata(ds, 0, buff, 0, 0);
 	if (ret < 0)
 	{
-		pthread_mutex_unlock(&lock);
 		perror("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
 		slog_error("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
+		pthread_mutex_unlock(&lock);
 		return -1;
 	}
 	// pthread_mutex_lock(&lock);
