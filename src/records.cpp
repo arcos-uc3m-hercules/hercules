@@ -58,7 +58,7 @@ std::string map_records::get_head_element()
 {
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	it = buffer.begin();
 	// string key = it->first();
 	string key = it->first;
@@ -224,7 +224,7 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 
 	// fprintf(stderr, "GET KEY=%s\n",key.c_str());
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -239,18 +239,18 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	// Check if the value did exist within the map.
 	if (it == buffer.end())
 	{
-		size_t len = strlen(key.c_str());
-		if (len > 0 && key.c_str()[len - 1] != '/') 
-		{
-			key += '/';
-			it = buffer.find(key);
-		}
-		if (it == buffer.end())
-		{
+		// size_t len = strlen(key.c_str());
+		// if (len > 0 && key.c_str()[len - 1] != '/') 
+		// {
+		// 	key += '/';
+		// 	it = buffer.find(key);
+		// }
+		// if (it == buffer.end())
+		// {
 			// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
 			// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
 			return 0;
-		}
+		// }
 	}
 
 	// fprintf(stderr,"GET-%s \n", key.c_str());
@@ -331,7 +331,7 @@ int32_t map_records::update(std::string key, void *add_, uint64_t length)
 {
 
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -405,7 +405,7 @@ int32_t map_records::delete_metadata_stat_worker(std::string key)
 int32_t map_records::rename_metadata_stat_worker(std::string old_key, std::string new_key)
 {
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -437,7 +437,7 @@ int32_t map_records::rename_metadata_stat_worker(std::string old_key, std::strin
 int32_t map_records::rename_data_srv_worker(std::string old_key, std::string new_key)
 {
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -482,7 +482,7 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 {
 	// printf("rename data_dir_dir_srv_worker old_dir=%s dir_dest=%s\n",old_dir.c_str(), rdir_dest.c_str());
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
@@ -529,7 +529,7 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 {
 	// printf("rename_metadata_dir_dir_stat_worker\n");
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;

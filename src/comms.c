@@ -72,15 +72,16 @@ int init_worker(ucp_context_h ucp_context, ucp_worker_h *ucp_worker)
 	memset(&worker_params, 0, sizeof(worker_params));
 
 	worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
-	worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
+	// worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
 	// worker_params.thread_mode = UCS_THREAD_MODE_SERIALIZED;
+	worker_params.thread_mode = UCS_THREAD_MODE_SINGLE;
 
 	status = ucp_worker_create(ucp_context, &worker_params, ucp_worker);
 	if (status != UCS_OK)
 	{
 		// fprintf(stderr, "failed to ucp_worker_create (%s)", ucs_status_string(status));
 		slog_error("failed to ucp_worker_create (%s)", ucs_status_string(status));
-		perror("ERRIMSS_WORKER_INIT");
+		perror("HERCULES_ERR_WORKER_INIT");
 		ret = -1;
 	}
 
@@ -116,13 +117,13 @@ int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h 
 							UCP_PARAM_FIELD_REQUEST_INIT |
 							UCP_PARAM_FIELD_NAME;
 	ucp_params.features = UCP_FEATURE_TAG;
-	ucp_params.features |= UCP_FEATURE_WAKEUP;
+	// ucp_params.features |= UCP_FEATURE_WAKEUP;
 	ucp_params.request_size = sizeof(struct ucx_context);
 	ucp_params.request_init = request_init;
 	ucp_params.name = "hercules";
-	ucp_params.mt_workers_shared = UCS_THREAD_MODE_SERIALIZED;
+	// ucp_params.mt_workers_shared = UCS_THREAD_MODE_SERIALIZED;
 	// ucp_params.mt_workers_shared = UCS_THREAD_MODE_SINGLE;
-	slog_info("Before ucp_init");
+	// slog_info("Before ucp_init");
 	status = ucp_init(&ucp_params, config, ucp_context);
 	// if(errno != 0) {
 	// 	fprintf(stderr, "Error, errno=%d:%s", errno, strerror(errno));
@@ -175,28 +176,27 @@ size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t m
 	send_req_t ctx;
 
 	ctx.buffer = (void *)msg;
-	// ctx.buffer = (char *)msg;
-	// ctx.buffer = (char *)malloc(msg_len);
 	ctx.complete = 0;
-	// memcpy (ctx.buffer, msg, msg_len);
-	// memcpy (send_buffer, msg, msg_len);
-	//	ctx.buffer= bb;
-	send_param.flags = UCP_OP_ATTR_FLAG_NO_IMM_CMPL; // Ensure async progress
-	send_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-							  UCP_OP_ATTR_FIELD_USER_DATA | UCP_OP_ATTR_FIELD_FLAGS;
-	send_param.cb.send = send_handler_data;
-	send_param.datatype = ucp_dt_make_contig(1);
-	send_param.memory_type = UCS_MEMORY_TYPE_HOST;
-	send_param.user_data = &ctx;
 
-	clock_t t;
-	t = clock();
+	ucp_worker_progress(ucp_worker);
+	// send_param.flags = UCP_OP_ATTR_FLAG_NO_IMM_CMPL; // Ensure async progress
+	send_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+							  UCP_OP_ATTR_FIELD_USER_DATA |
+							  UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+	// UCP_OP_ATTR_FIELD_FLAGS;
+	send_param.cb.send = send_handler_data;
+	send_param.user_data = &ctx;
+	// send_param.datatype = ucp_dt_make_contig(1);
+	send_param.memory_type = UCS_MEMORY_TYPE_HOST;
+
+	// clock_t t;
+	// t = clock();
 	request = (struct ucx_context *)ucp_tag_send_nbx(ep, ctx.buffer, msg_len, from, &send_param);
 	// request = (struct ucx_context *)ucp_tag_send_sync_nbx(ep, ctx.buffer, msg_len, from, &send_param);
 	status = ucx_wait(ucp_worker, request, "send", "data"); // original.
 
-	t = clock() - t;
-	double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
+	// t = clock() - t;
+	// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 	// fprintf(stderr,"********** send data %lu time = %lf\n", msg_len, time_taken);
 
 	if (UCS_PTR_IS_ERR(request))
@@ -207,6 +207,8 @@ size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t m
 		perror("HERCULES_ERR_SEND_DATA");
 		return 0;
 	}
+
+	// status = flush_ep(ucp_worker, ep);
 
 	return msg_len;
 }
@@ -352,48 +354,23 @@ size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest)
 	return info_tag.length;
 }
 
+size_t get_recv_data_length_2(ucp_worker_h ucp_worker, uint64_t dest, ucp_tag_recv_info_t *info_tag, ucp_tag_message_h *msg_tag)
+{
+	// ucp_tag_recv_info_t info_tag;
+	//  ucp_tag_message_h msg_tag;
+	//  async = 1;
+	//  TODO: Check why this function is too slow in read operations.
+	do
+	{
+		/* Progressing before probe to update the state */
+		ucp_worker_progress(ucp_worker);
+		/* Probing incoming events in non-block mode */
+		// msg_tag = ucp_tag_probe_nb(ucp_worker, dest, tag_mask, 0, &info_tag);
+		*msg_tag = ucp_tag_probe_nb(ucp_worker, dest, tag_mask, 1, info_tag);
+	} while (*msg_tag == NULL);
 
-// size_t get_recv_data_length(ucp_worker_h ucp_worker, ucp_tag_t expected_tag, uint64_t tag_mask) {
-// size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest)
-// {
-// 	uint64_t tag = dest;
-// 	ucp_tag_recv_info_t info_tag;
-// 	ucp_tag_message_h msg_tag;
-// 	ucs_status_t status;
-
-// 	while (1)
-// 	{
-// 		/* Probing incoming events in non-block mode */
-// 		msg_tag = ucp_tag_probe_nb(ucp_worker, tag, tag_mask, 0, &info_tag);
-// 		if (msg_tag != NULL)
-// 		{
-// 			/* Message arrived */
-// 			break;
-// 		}
-// 		else if (ucp_worker_progress(ucp_worker))
-// 		{
-// 			/* Some events were polled; try again without going to sleep */
-// 			continue;
-// 		}
-// 		/* If we got here, ucp_worker_progress() returned 0, so we can sleep.
-// 		 * Following blocked methods used to polling internal file descriptor
-// 		 * to make CPU idle and don't spin loop
-// 		 */
-// 		// if (ucp_test_mode == TEST_MODE_WAIT)
-// 		{
-// 			/* Polling incoming events*/
-// 			// fprintf(stderr, "Worker waiting to be wake up\n");
-// 			status = ucp_worker_wait(ucp_worker);
-// 			// fprintf(stderr, "Worker continue\n");
-// 		}
-// 		// else if (ucp_test_mode == TEST_MODE_EVENTFD)
-// 		// {
-// 		// 	status = test_poll_wait(ucp_worker);
-// 		// }
-// 	}
-
-// 	return info_tag.length;
-// }
+	return info_tag->length;
+}
 
 /**
  * @brief Fill "msg" with the message received from the server. "msg" must be allocated.
@@ -401,9 +378,6 @@ size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest)
  */
 size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async)
 {
-	// pthread_mutex_lock(&lock_ucx_comm);
-
-	// slog_debug("Init recv_data");
 	// ucp_tag_recv_info_t info_tag;
 	// ucp_tag_message_h msg_tag;
 	ucp_request_param_t recv_param;
@@ -412,18 +386,20 @@ size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_len
 
 	async = 1;
 
-	recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
-							  UCP_OP_ATTR_FIELD_CALLBACK |
-							  UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
-							  UCP_OP_ATTR_FIELD_USER_DATA;
-
+	// recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
+	// 						  UCP_OP_ATTR_FIELD_CALLBACK |
+	// 						  UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+	// 						  UCP_OP_ATTR_FIELD_USER_DATA;
+	recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+							  UCP_OP_ATTR_FIELD_DATATYPE |
+							  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
 	recv_param.datatype = ucp_dt_make_contig(1);
 	recv_param.cb.recv = recv_handler;
 
 	slog_debug("[COMM] Probe tag (%lu bytes)", msg_length);
 	//	t = clock();
-	clock_t t;
-	t = clock();
+	// clock_t t;
+	// t = clock();
 	if (async)
 	{
 		request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
@@ -436,8 +412,54 @@ size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_len
 
 	status = ucx_wait(ucp_worker, request, "recv", "data");
 
-	t = clock() - t;
-	double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
+	// t = clock() - t;
+	// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
+
+	if (status != UCS_OK)
+	{
+		slog_error("[COMM] HERCULES_RECV_DATA_ERR, msg_length=%lu", msg_length);
+		return 0;
+	}
+
+	return msg_length;
+}
+
+size_t recv_data_2(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async, ucp_tag_recv_info_t info_tag, ucp_tag_message_h msg_tag)
+{
+
+	ucp_request_param_t recv_param;
+	struct ucx_context *request;
+	ucs_status_t status;
+
+	async = 1;
+
+	recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
+							  UCP_OP_ATTR_FIELD_CALLBACK |
+							  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+	// UCP_OP_ATTR_FIELD_USER_DATA;
+
+	recv_param.datatype = ucp_dt_make_contig(1);
+	recv_param.cb.recv = recv_handler;
+
+	slog_debug("[COMM] Probe tag (%lu bytes)", msg_length);
+	//	t = clock();
+	// clock_t t;
+	// t = clock();
+	if (async)
+	{
+		// request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
+		request = (struct ucx_context *)ucp_tag_msg_recv_nbx(ucp_worker, msg, info_tag.length, msg_tag, &recv_param);
+	}
+	else
+	{
+		request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
+		memcpy(msg, recv_buffer, msg_length);
+	}
+
+	status = ucx_wait(ucp_worker, request, "recv", "data");
+
+	// t = clock() - t;
+	// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 
 	if (status != UCS_OK)
 	{
@@ -589,7 +611,6 @@ ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request, send_req_t *ct
 static void request_init(void *request)
 {
 	struct ucx_context *contex = (struct ucx_context *)request;
-
 	contex->completed = 0;
 }
 
@@ -820,7 +841,8 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages) + (sizeof(int) * struct_->num_storages) + (sizeof(int) * struct_->num_storages);
 
 		// Reserve the corresponding amount of memory for the previous buffer.
-		info_buffer = (char *)malloc(msg_size * sizeof(char));
+		// info_buffer = (char *)malloc(msg_size * sizeof(char));
+		info_buffer = (char *)mem_type_malloc(msg_size * sizeof(char));
 
 		// Control variables dealing with incomming memory management actions.
 		char *offset_pt = info_buffer;
@@ -860,7 +882,8 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		// 	msg_size += (struct_->num_data_elem * sizeof(uint16_t));
 
 		// Reserve the corresponding amount of memory for the previous buffer.
-		info_buffer = (char *)malloc(msg_size * sizeof(char));
+		// info_buffer = (char *)malloc(msg_size * sizeof(char));
+		info_buffer = (char *)mem_type_malloc(msg_size * sizeof(char));
 
 		// Serialize the provided message into the buffer.
 		char *offset_pt = info_buffer;
@@ -1370,16 +1393,51 @@ err_close_sockfd:
 	goto out_free_res;
 }
 
+// ucs_status_t ucx_wait(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str)
+// {
+// 	ucs_status_t status;
+
+// 	/* if operation was completed immediately */
+// 	if (request == NULL)
+// 	{
+// 		return UCS_OK;
+// 	}
+
+// 	if (UCS_PTR_IS_ERR(request))
+// 	{
+// 		status = UCS_PTR_STATUS(request);
+// 	}
+// 	else if (UCS_PTR_IS_PTR(request))
+// 	{
+// 		while (!request->completed)
+// 		{
+// 			// fprintf(stderr,"Waiting for completed\n");
+// 			ucp_worker_progress(ucp_worker);
+// 		}
+
+// 		request->completed = 0;
+// 		status = ucp_request_check_status(request);
+// 		// fprintf(stderr,"Final status = %s\n", ucs_status_string(status));
+// 		ucp_request_free(request);
+// 	}
+// 	else
+// 	{
+// 		status = UCS_OK;
+// 	}
+
+// 	if (status != UCS_OK)
+// 	{
+// 		fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str,
+// 				ucs_status_string(status));
+// 		slog_error("[COMM][ucx_wait] unable to %s %s (%s)", op_str, data_str, ucs_status_string(status));
+// 	}
+
+// 	return status;
+// }
+
 ucs_status_t ucx_wait(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str)
 {
 	ucs_status_t status;
-
-	/* if operation was completed immediately */
-	if (request == NULL)
-	{
-		return UCS_OK;
-	}
-
 	if (UCS_PTR_IS_ERR(request))
 	{
 		status = UCS_PTR_STATUS(request);
@@ -1388,27 +1446,25 @@ ucs_status_t ucx_wait(ucp_worker_h ucp_worker, struct ucx_context *request, cons
 	{
 		while (!request->completed)
 		{
-			// fprintf(stderr,"Waiting for completed\n");
 			ucp_worker_progress(ucp_worker);
 		}
-
 		request->completed = 0;
 		status = ucp_request_check_status(request);
-		// fprintf(stderr,"Final status = %s\n", ucs_status_string(status));
 		ucp_request_free(request);
 	}
 	else
 	{
 		status = UCS_OK;
 	}
-
 	if (status != UCS_OK)
 	{
 		fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str,
 				ucs_status_string(status));
-		slog_error("[COMM][ucx_wait] unable to %s %s (%s)", op_str, data_str, ucs_status_string(status));
 	}
-
+	// else
+	// {
+	// 	printf("finish to %s %s\n", op_str, data_str);
+	// }
 	return status;
 }
 

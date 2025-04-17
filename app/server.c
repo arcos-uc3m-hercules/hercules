@@ -641,21 +641,33 @@ int32_t main(int32_t argc, char **argv)
 				ready(tmp_file_path, "ERROR");
 				perror("HERCULES_ERR_INIT_WORKER_ON_THREAD");
 				slog_error("HERCULES_ERR_INIT_WORKER_ON_THREAD");
+				ucp_cleanup(ucp_context);
 				return -1;
 			}
 
 			arguments[i].ucp_worker = ucp_worker_threads[aux_idx];
 
 			ucp_worker_attr_t worker_attr;
+			memset(&worker_attr, 0, sizeof(worker_attr));
+
 			worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
 			status = ucp_worker_query(ucp_worker_threads[aux_idx], &worker_attr);
-			slog_debug("Setting address=%lu (len=%lu) to local_addr at %d", worker_attr.address, worker_attr.address_length, aux_idx)
-				local_addr_len[aux_idx] = worker_attr.address_length;
+			if(status != UCS_OK) 
+			{
+				ready(tmp_file_path, "ERROR");
+				slog_error("HERCULES_ERR_UCP_WORKER_QUERY");
+				perror("HERCULES_ERR_UCP_WORKER_QUERY");
+				ucp_worker_destroy(ucp_worker);
+				ucp_cleanup(ucp_context);
+				return -1;
+			}
+			slog_debug("Setting address=%lu (len=%lu) to local_addr at %d", worker_attr.address, worker_attr.address_length, aux_idx);
+
+			local_addr_len[aux_idx] = worker_attr.address_length;
 			local_addr[aux_idx] = worker_attr.address;
 
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
-			// arguments[i].secondary_map = secondary_map;
 			// Specify the address used by each thread to write inside the buffer.
 			arguments[i].pt = (char *)(aux_idx * buffer_segment + buffer_address);
 			arguments[i].thread_id = aux_idx;

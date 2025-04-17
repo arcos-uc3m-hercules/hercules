@@ -12,7 +12,6 @@
 #include <netinet/in.h>
 #include "crc.h"
 #include "imss.h"
-// #include "comms.h"
 #include "map_ep.hpp"
 #include "workers.h"
 #include "policies.h"
@@ -3145,7 +3144,10 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 			return -2;
 		}
 
-		msg_length = TIMING( get_recv_data_length(ucp_worker_data, local_data_uid), "get_recv_data_length", size_t);
+		// msg_length = TIMING( get_recv_data_length(ucp_worker_data, local_data_uid), "get_recv_data_length", size_t);
+		ucp_tag_recv_info_t info_tag;
+		ucp_tag_message_h msg_tag;
+		msg_length = TIMING( get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t);
 		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
 		{
@@ -3165,7 +3167,8 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 			return -2;
 		}
 
-		msg_length = TIMING( recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0), "recv_data", size_t);
+		// msg_length = TIMING( recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0), "recv_data", size_t);
+		msg_length = TIMING( recv_data_2(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0, info_tag, msg_tag), "recv_data_2", size_t);
 
 		slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
@@ -3186,7 +3189,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		{
 			slog_info("OK!, length=%ld", msg_length);
 
-			// TODO
+			// TODO:
 			// if (session_policy == LOCAL_ || session_policy == ZCOPY_)
 			// {
 			// 	size_t server_offset = 0;

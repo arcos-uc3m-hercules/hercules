@@ -183,9 +183,6 @@ void *srv_worker(void *th_argv)
 		double time_taken;
 		t = clock();
 
-		// Register signal handler
-		// signal(SIGUSR1, handle_signal);
-
 		do
 		{
 			/* Progressing before probe to update the state */
@@ -235,17 +232,30 @@ void *srv_worker(void *th_argv)
 		msg = (msg_req_t *)malloc(info_tag.length);
 
 		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FIELD_DATATYPE;
-
+								  UCP_OP_ATTR_FIELD_DATATYPE |
+								  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
 		recv_param.datatype = ucp_dt_make_contig(1);
 		recv_param.cb.recv = recv_handler;
 
 		request = (struct ucx_context *)ucp_tag_msg_recv_nbx(arguments->ucp_worker, msg, info_tag.length, msg_tag, &recv_param);
 
 		status = ucx_wait(arguments->ucp_worker, request, "receive", "srv_worker");
+		if (status != UCS_OK)
+		{
+			// TODO: set actions.
+			free(msg);
+			continue;
+		}
 
 		peer_addr_len = msg->addr_len;
 		peer_addr = (ucp_address *)malloc(peer_addr_len);
+		if (peer_addr == NULL)
+		{
+			fprintf(stderr, "unable to allocate memory for peer address\n");
+			free(msg);
+			continue;
+		}
+
 		req = msg->request;
 
 		memcpy(peer_addr, msg + 1, peer_addr_len);
@@ -387,8 +397,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
 				if (ret < 0)
 				{
-					slog_error("ERR_HERCULES_WORKER_SEND_READ_OP");
-					perror("ERR_HERCULES_WORKER_SEND_READ_OP");
+					slog_error("HERCULES_ERR_WORKER_SEND_READ_OP");
+					perror("HERCULES_ERR_WORKER_SEND_READ_OP");
 					return -1;
 				}
 			}
@@ -1047,10 +1057,10 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			{
 				slog_debug("[WRITE_OP] NO key find %s", key.c_str());
 				clock_t tp;
-				tp = clock();
+				// tp = clock();
 				void *buffer = NULL;
-				tp = clock() - tp;
-				double time_taken2 = ((double)tp) / CLOCKS_PER_SEC; // in seconds
+				// tp = clock() - tp;
+				// double time_taken2 = ((double)tp) / CLOCKS_PER_SEC; // in seconds
 				//  Receive the block into the buffer.
 				clock_t tr;
 				// get the buffer data length.
@@ -1075,11 +1085,11 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						slog_debug("Allocating buffer");
 						if (snapshot_op)
 						{ // Snapshot operation sends data bigger than BLOCK_SIZE.
-							buffer = (void *)malloc(msg_length * sizeof(char));
+							buffer = (void *)mem_type_malloc(msg_length * sizeof(char));
 						}
 						else
 						{
-							buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
+							buffer = (void *)mem_type_malloc(BLOCK_SIZE * sizeof(char));
 						}
 					}
 					else
@@ -1146,7 +1156,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				int32_t insert_successful;
 
 				// Include the new record in the tracking structure.
-				tr = clock();
+				// tr = clock();
 				// fprintf(stderr,"[WRITE_OP] ****[PUT]********* key=%s\n",  key.c_str());
 				slog_debug("[WRITE_OP] ****[PUT, block_size_recv=%ld, BLOCK_SIZE=%lu, msg_length=%lu]********* key=%s", block_size_recv, BLOCK_SIZE, msg_length, key.c_str());
 				// TODO: should this be block_size_recv or a different size? block_size_recv might not be the full block size
@@ -1168,15 +1178,16 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					insert_successful = map->put(key, buffer, size_asigned_to_block);
 				}
 				slog_debug("[WRITE_OP] insert_successful=%d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
-				tr = clock() - tr;
-				double time_taken = ((double)tr) / CLOCKS_PER_SEC; // in seconds
+				// tr = clock() - tr;
+				// double time_taken = ((double)tr) / CLOCKS_PER_SEC; // in seconds
 
 				// Include the new record in the tracking structure.
 				if (insert_successful != 0)
 				{
 					perror("HERCULES_ERR_WORKER_MAPPUT");
 					slog_error("HERCULES_ERR_WORKER_MAPPUT");
-					free(buffer);
+					// free(buffer);
+					mem_type_free(buffer);
 					return -1;
 				}
 
@@ -1741,9 +1752,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
 			if (numelems_indir == -1)
 			{
-				//const char *last = key.c_str() + strlen(key.c_str()) - 1;
-				//if (last[0] != '/')
-				if (!key.empty() && key.back() != '/') 
+				// const char *last = key.c_str() + strlen(key.c_str()) - 1;
+				// if (last[0] != '/')
+				if (!key.empty() && key.back() != '/')
 				{
 					key += '/';
 					buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
@@ -1806,7 +1817,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			int err = map->get(key, &address_, &block_size_rtvd);
 			if (err == 0)
 			{
-				if (!key.empty() && key.back() != '/') 
+				if (!key.empty() && key.back() != '/')
 				{
 					key += '/';
 					err = map->get(key, &address_, &block_size_rtvd);
@@ -1873,9 +1884,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
 			{
-				//const char *last = key.c_str() + strlen(key.c_str()) - 1;
-				//if (last[0] != '/')
-				if (!key.empty() && key.back() != '/') 
+				// const char *last = key.c_str() + strlen(key.c_str()) - 1;
+				// if (last[0] != '/')
+				if (!key.empty() && key.back() != '/')
 				{
 					key += '/';
 					err = map->get(key, &address_, &block_size_rtvd);
@@ -1954,21 +1965,21 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// RENAME MAP
 				ret = map->rename_metadata_stat_worker(old_key, new_key);
 				slog_live("rename metadata stat worker=%d", ret);
-				//if (result == 0)
+				// if (result == 0)
 				//{
 				//	// printf("0 elements rename from stat_worker");
 				//	slog_warn("[RENAME] 0 elements rename from stat_worker");
 				//	break;
-				//}
+				// }
 
 				// RENAME TREE
-				if (ret != -1){
+				if (ret != -1)
+				{
 					pthread_mutex_lock(&tree_mut);
 					ret = GTree_rename((char *)old_key.c_str(), (char *)new_key.c_str());
 					pthread_mutex_unlock(&tree_mut);
 					slog_debug("[RENAME] GTree_rename=%d", ret);
 				}
-				
 			}
 
 			if (ret == -1)
@@ -1980,8 +1991,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				strncpy(response_msg, "RENAME", strlen("RENAME") + 1);
 			}
 
-
-			//char response_msg[] = "RENAME\0";
+			// char response_msg[] = "RENAME\0";
 			if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 			{
 				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
@@ -2109,7 +2119,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			int err = map->get(key, &address_, &block_size_rtvd);
 			if (err == 0)
 			{
-				if (!key.empty() && key.back() != '/') 
+				if (!key.empty() && key.back() != '/')
 				{
 					key += '/';
 					err = map->get(key, &address_, &block_size_rtvd);
@@ -2478,7 +2488,7 @@ void *srv_attached_dispatcher(void *th_argv)
 			slog_error("HERCULES_ERR_DISPATCHER_MEMORY_ALLOC_MSG_LEN");
 			pthread_exit(NULL);
 		}
-		
+
 		// char mode[MODE_SIZE];
 		msg_length = recv_data(ucp_data_worker, server_ep, (char *)req, msg_length, arguments->worker_uid, 0);
 		// msg_length = recv_data_opt(ucp_data_worker, server_ep, (void **)&req, msg_length, arguments->worker_uid, 0);
@@ -2498,7 +2508,7 @@ void *srv_attached_dispatcher(void *th_argv)
 			free(req);
 			pthread_exit(NULL);
 		}
-		
+
 		slog_info("Req=%s", req);
 
 		sscanf(req, "%" PRIu32 " %s", &client_id_, mode);
@@ -2678,7 +2688,7 @@ void *dispatcher(void *th_argv)
 		// Check if the client is requesting connection resources.
 		if (!strncmp(req_content, "HELLO!", 6))
 		{
-			//fprintf(stderr, "HERCULES_THREAD_POOL_SIZE = %d, client=%d\n", hercules_thread_pool_size, client);
+			// fprintf(stderr, "HERCULES_THREAD_POOL_SIZE = %d, client=%d\n", hercules_thread_pool_size, client);
 			ret = send(new_socket, &local_addr_len[(client % hercules_thread_pool_size)], sizeof(local_addr_len[(client % hercules_thread_pool_size)]), 0);
 			if (ret == -1)
 			{

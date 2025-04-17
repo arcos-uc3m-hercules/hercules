@@ -19,10 +19,12 @@ HERCULES_CHECKPOINT_PATH=""
 HERCULES_SNAPSHOT_PATH=""
 DATA_HOSTFILE="\/beegfs\/home\/javier.garciablas\/hercules\/bash\/data_hostfile"
 METADATA_HOSTFILE="\/beegfs\/home\/javier.garciablas\/hercules\/bash\/meta_hostfile"
-DEBUG_LEVEL="SLOG_TIME"
+#DEBUG_LEVEL="SLOG_TIME"
 #DEBUG_LEVEL=none
+DEBUG_LEVEL=SLOG_READ
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="RR"
+export UCX_USE_MT_MUTEX=y
 
 NUM_SERVERS_RANGE=( 1 )
 #NUM_SERVERS_RANGE=( 1 4 8 16 32 )

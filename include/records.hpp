@@ -92,12 +92,12 @@ public:
 	int32_t Snapshot(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator begin()
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator begin()
 	{
 		return buffer.begin();
 	}
 	// Method retrieving a reference to the end of the map.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator end()
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator end()
 	{
 		return buffer.end();
 	}
@@ -111,7 +111,7 @@ public:
 private:
 	// Map structure tracking stored records (by default sorts keys with '<' op).
 	// <key(file uri), <data, lenght>>
-	std::unordered_map<std::string, std::pair<void *, uint64_t>> buffer;
+	std::map<std::string, std::pair<void *, uint64_t>> buffer;
 	std::map<std::string, int> buffer_snapshot;
 	// std::unordered_map<std::string, int> buffer_broadcast;
 	std::map<std::string, std::pair<void *, uint64_t>> buffer_broadcast;
