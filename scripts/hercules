@@ -22,7 +22,8 @@ StopServers() {
     if [[ "$VERBOSE" -eq "1" ]]; then
         echo "# Operation = ${OPERATION}"
     fi
-    echo ${OPERATION} > "${HERCULES_PATH}/tmp/hercules_pkill_operation"
+    echo ${OPERATION} > ${HERCULES_PATH}/tmp/hercules_pkill_operation
+    cat ${HERCULES_PATH}/tmp/hercules_pkill_operation
 
     i=0
     # Sends the pkill operation to each server.
@@ -33,8 +34,10 @@ StopServers() {
         # ( ssh $node  "echo $OPERATION > ./tmp/hercules_pkill_operation" )
         # Kill threads and finish the server.
         echo "[+] Removing temporal files on ${node}"
+        set -x 
         ( ssh $node "$RM" )
         ( ssh ${node} "pkill -SIGUSR1 hercules_server" )
+        set +x
         i=$(($i+1))
     done
     rm "${HERCULES_PATH}/tmp/hercules_pkill_operation"
@@ -126,7 +129,7 @@ if [[ $STATUS != "stop" && $STATUS != "start" && $STATUS != "remove" && $STATUS 
 fi
 
 WAIT_SERVERS=1
-VERBOSE=0
+VERBOSE=1
 
 ## Check if user pass arguments.
 while getopts :m:d:o:c:s:f:k:w:V: flag

@@ -652,7 +652,7 @@ int32_t main(int32_t argc, char **argv)
 
 			worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
 			status = ucp_worker_query(ucp_worker_threads[aux_idx], &worker_attr);
-			if(status != UCS_OK) 
+			if (status != UCS_OK)
 			{
 				ready(tmp_file_path, "ERROR");
 				slog_error("HERCULES_ERR_UCP_WORKER_QUERY");
@@ -1001,6 +1001,7 @@ void handle_signal_server(int signal)
 	if (signal == SIGUSR1) // suspend or shutdown this server.
 	{
 		slog_info("SIGUSR1 received");
+		fprintf(stderr, "SIGUSR1 received\n");
 		int pkill_operation = 0, ret = 0;
 		char buf[10] = {0}, action[20], temporal_path[PATH_MAX];
 		char tmp_file_path[PATH_MAX];
@@ -1054,16 +1055,29 @@ void handle_signal_server(int signal)
 			}
 			else
 			{
-				global_finish_checkpoint = 1;
-				global_finish_snapshot = 1;
+				if (global_finish_snapshot != 1)
+				{ // Snapshot still running.
 
-				pthread_cond_signal(&global_run_snapshot_cond);
-				pthread_cond_signal(&global_run_checkpoint_cond);
+					global_finish_snapshot = 1;
+					pthread_cond_signal(&global_run_snapshot_cond);
+					fprintf(stderr, "Waiting for the mutex global_finish_mut\n");
+					pthread_mutex_lock(&global_finish_mut);
+					fprintf(stderr, "Waiting for global_finish_cond\n");
+					pthread_cond_wait(&global_finish_cond, &global_finish_mut);
+					fprintf(stderr, "Waiting for snapshot in server %d\n", args.id);
+				}
+				if (global_finish_checkpoint != 1)
+				{ // Checkpointing still running.
 
-				pthread_mutex_lock(&global_finish_mut);
-				pthread_cond_wait(&global_finish_cond, &global_finish_mut);
+					global_finish_checkpoint = 1;
+					pthread_cond_signal(&global_run_checkpoint_cond);
+					fprintf(stderr, "Waiting for the mutex global_finish_mut\n");
+					pthread_mutex_lock(&global_finish_mut);
+					fprintf(stderr, "Waiting for global_finish_cond\n");
+					pthread_cond_wait(&global_finish_cond, &global_finish_mut);
+					fprintf(stderr, "Waiting for checkpointing in server %d\n", args.id);
+				}
 
-				fprintf(stderr, "Waiting for snapshot and checkpointing in server %d\n", args.id);
 				// This file is readed by the hercules script to know if this server
 				// was correctly shutting down.
 				sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
@@ -1071,6 +1085,7 @@ void handle_signal_server(int signal)
 
 				pthread_mutex_unlock(&global_finish_mut);
 				fprintf(stderr, "Server %d has been unlocked\n", args.id);
+				global_finish_threads = 1;
 			}
 
 			// Shutdown or close the socket used by the dispatcher pointed

@@ -72,9 +72,9 @@ int init_worker(ucp_context_h ucp_context, ucp_worker_h *ucp_worker)
 	memset(&worker_params, 0, sizeof(worker_params));
 
 	worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
-	// worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
+	worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
 	// worker_params.thread_mode = UCS_THREAD_MODE_SERIALIZED;
-	worker_params.thread_mode = UCS_THREAD_MODE_SINGLE;
+	// worker_params.thread_mode = UCS_THREAD_MODE_SINGLE;
 
 	status = ucp_worker_create(ucp_context, &worker_params, ucp_worker);
 	if (status != UCS_OK)
@@ -125,13 +125,8 @@ int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h 
 	// ucp_params.mt_workers_shared = UCS_THREAD_MODE_SINGLE;
 	// slog_info("Before ucp_init");
 	status = ucp_init(&ucp_params, config, ucp_context);
-	// if(errno != 0) {
-	// 	fprintf(stderr, "Error, errno=%d:%s", errno, strerror(errno));
-	// }
 	slog_info("After ucp_init, status=%s", ucs_status_string(status));
-	// slog_info("Before ucp_config_release");
 	ucp_config_release(config);
-	// slog_info("After ucp_config_release");
 
 	// ucp_context_print_info(*ucp_context,stderr);
 	if (status != UCS_OK)

@@ -748,7 +748,7 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 		// }
 		// else
 		{
-			to_read = TIMING(get_ndata(ds, curr_blk, (char *)buf + byte_count, to_read, block_offset), "get_ndata", ssize_t);
+			to_read = TIMING(get_ndata(ds, curr_blk, (char *)buf + byte_count, to_read, block_offset), "get_ndata", ssize_t, -1);
 		}
 		// Error handling when get_ndata does not found the request data.
 		// if (to_read == -1)
@@ -1514,7 +1514,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		// }
 		// else
 		{
-			if (TIMING(set_data(ds, curr_blk, data_pointer, bytes_to_copy, block_offset),"set_data", int32_t) < 0)
+			if (TIMING(set_data(ds, curr_blk, data_pointer, bytes_to_copy, block_offset),"set_data", int32_t, -1) < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
 				error_print = -ENOENT;

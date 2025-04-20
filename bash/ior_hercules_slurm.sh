@@ -28,7 +28,8 @@ IOR_PATH=/beegfs/home/javier.garciablas/gsanchez/ior/bin
 #spack load openmpi@4.1.5
 spack unload mpich openmpi
 #spack load openmpi@4.1.5%gcc@9.4.0 arch=linux-ubuntu20.04-broadwell
-spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
+#spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
+spack load mpich/5pgpbav
 whereis mpiexec
 # spack load \
 #    cmake@3.24.3%gcc@9.4.0 arch=linux-ubuntu20.04-broadwell \
@@ -52,7 +53,7 @@ whereis mpiexec
 
 ## Local
 # IOR_PATH=/usr/local/bin
-export UCX_TLS=ib
+#export UCX_TLS=ib
 # export UCX_NET_DEVICES=ibs1 # Slow!
 # spack load /sxjvb77
 set -x
@@ -73,7 +74,8 @@ if [ -z "$CONFIG_PATH" ]; then
    source hercules start
 else
    echo "Configuration file pass $CONFIG_PATH"
-   export HERCULES_DEBUG_LEVEL=none
+#   export HERCULES_DEBUG_LEVEL=none
+#   export HERCULES_DEBUG_LEVEL=SLOG_TIME
    source /beegfs/home/javier.garciablas/hercules/scripts/hercules start \
    -f "$CONFIG_PATH" 
    unset HERCULES_DEBUG_LEVEL
@@ -136,9 +138,10 @@ set -x
 mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_HOSTFILE_DEF=$HERCULES_MPI_HOSTFILE_NAME \
    $HERCULES_MPI_ENV_DEF HERCULES_CONF=$HERCULES_CONF \
    $HERCULES_MPI_ENV_DEF LD_PRELOAD=$HERCULES_POSIX_PRELOAD \
-   $HERCULES_MPI_ENV_DEF UCX_USE_MT_MUTEX=y \
+   $HERCULES_MPI_ENV_DEF HERCULES_DEBUG_LEVEL=none \
    $COMMAND
 
+#   $HERCULES_MPI_ENV_DEF UCX_USE_MT_MUTEX=y \
 #LD_PRELOAD=$HERCULES_POSIX_PRELOAD ls -lth /mnt/hercules/
 
 ## Deletes all shared memory segments.

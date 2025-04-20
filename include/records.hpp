@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+// #include <shared_mutex>
 #include "hercules.hpp"
 
 // Structure storing all information related to a certain IMSS.
@@ -120,6 +121,7 @@ private:
 	uint64_t total_size;
 	uint64_t quantity_occupied = 0;
 	std::mutex *mut;
+	// std::shared_mutex mut;
 };
 
 #endif

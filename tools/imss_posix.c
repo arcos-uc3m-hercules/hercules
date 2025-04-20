@@ -743,10 +743,10 @@ extern "C"
 			// t_s = clock();
 			release = -1;
 			slog_live("[POSIX] release_imss()");
-			release_imss("imss://", CLOSE_DETACHED);
+			// release_imss("imss://", CLOSE_DETACHED);
 			//  slog_live("[POSIX] stat_release()");
-			 stat_release();
-			  imss_comm_cleanup();
+			// stat_release();
+			  // imss_comm_cleanup();
 			//   t_s = clock() - t_s;
 			//   time_taken = ((double)t_s) / (CLOCKS_PER_SEC);
 		}
@@ -2355,7 +2355,7 @@ extern "C"
 
 		slog_live("[POSIX]. pathname=%s, size to write=%lu, offset=%lu", pathname, size, offset);
 
-		ret = TIMING(imss_write(pathname, buf, size, offset),"imss_write", ssize_t);
+		ret = TIMING(imss_write(pathname, buf, size, offset),"imss_write", ssize_t, rank);
 
 		if (update_offset)
 		{
@@ -3130,7 +3130,7 @@ extern "C"
 			// {
 			// 	map_fd_update_value(map_fd, pathname, fd, ds_stat_n.st_size + size);
 			// }
-			ret = TIMING(generalWrite(pathname, fd, buf, size, offset),"generalWrite", ssize_t);
+			ret = TIMING(generalWrite(pathname, fd, buf, size, offset),"generalWrite", ssize_t, rank);
 
 			slog_live("[POSIX]. Ending Hercules 'write', pathname=%s, size=%lu, ret=%ld, fd=%d\n", pathname, size, ret, fd);
 		}
@@ -3195,7 +3195,7 @@ extern "C"
 
 			// fprintf(stderr, "[POSIX] Read Hercules size=%ld, offset=%lu\n", size, offset);
 			// ret = imss_read(pathname, buf, size, offset);
-			ret = TIMING(imss_sread(pathname, buf, size, offset),"imss_sread", ssize_t);
+			ret = TIMING(imss_sread(pathname, buf, size, offset),"imss_sread", ssize_t, rank);
 			if (ret > 0)
 			{
 				offset += ret;

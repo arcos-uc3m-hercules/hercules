@@ -56,7 +56,7 @@ ucp_address_t **local_addr;
 size_t *local_addr_len;
 
 int global_finish_threads = 0;
-int global_finish_checkpoint = 0;
+int global_finish_checkpoint = 1; // TODO: change to 0 when finish the implementation.
 int global_finish_snapshot = 0;
 int global_server_fd_thread = -1;
 pthread_cond_t global_broadcast_cond;
@@ -67,6 +67,7 @@ pthread_mutex_t global_finish_mut = PTHREAD_MUTEX_INITIALIZER;
 
 size_t global_offset = 0;
 
+// TODO: check if this variables can be moved to records.cpp
 std::mutex mtx;
 std::condition_variable cv;
 int data_ready = 0;
@@ -167,7 +168,7 @@ void *srv_worker(void *th_argv)
 
 	for (;;)
 	{
-		errno = 0;
+		// errno = 0;
 		size_t peer_addr_len;
 		ucp_address_t *peer_addr;
 		ucs_status_t ep_status = UCS_OK;
@@ -292,7 +293,8 @@ void *srv_worker(void *th_argv)
 		arguments->server_ep = ep;
 		arguments->worker_uid = attr.worker_uid;
 
-		srv_worker_helper(arguments, req, map_server_eps);
+
+		TIMING_NO_RETURN(srv_worker_helper(arguments, req, map_server_eps), "srv_worker_helper %d", arguments->thread_id);
 		t = clock() - t;
 
 		time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
@@ -312,7 +314,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
 
-	// Resources specifying if the ZMQ_SNDMORE flag was set in the sender.
+	// Resources specifying if the request set in the sender.
 	int64_t more;
 	size_t more_size = sizeof(more);
 	int is_shared_memory = 0, snapshot_op = 0;
@@ -330,7 +332,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	size_t to_read = 0;
 	int sender = 0;
 
-	sscanf(req, "%s", mode);
+	TIMING_NO_RETURN(sscanf(req, "%s", mode);, "sscanf mode", arguments->thread_id);
 
 	if (!strcmp(mode, "BROADCAST"))
 	{
@@ -344,29 +346,35 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		return 0;
 	}
 
-	sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read);
+	TIMING_NO_RETURN(sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read);, "sscanf requeest", arguments->thread_id);
 	if (!strcmp(mode, "GET"))
 	{
 		more = GET_OP;
 	}
-	if (!strcmp(mode, "SET"))
+	else if (!strcmp(mode, "SET"))
 	{
 		more = SET_OP;
 	}
-	if (!strcmp(mode, "LOCALGET"))
+	else if (!strcmp(mode, "LOCALGET"))
 	{
 		more = GET_OP;
 		is_shared_memory = 1;
 	}
-	if (!strcmp(mode, "LOCALSET"))
+	else if (!strcmp(mode, "LOCALSET"))
 	{
 		more = SET_OP;
 		is_shared_memory = 1;
 	}
-	if (!strcmp(mode, "SNAPSET"))
+	else if (!strcmp(mode, "SNAPSET"))
 	{
 		more = SET_OP;
 		snapshot_op = 1;
+	}
+	else
+	{
+		perror("HERCULES_ERR_UNSUPPORTED_MODE");
+		slog_error("HERCULES_ERR_UNSUPPORTED_MODE");
+		return -1;
 	}
 
 	slog_debug(" Request - mode '%s', block_size_recv '%" PRIu32 "', block_offset '%" PRIu32 "', uri_ '%s', more %ld", mode, block_size_recv, block_offset, uri_, more);
@@ -788,256 +796,256 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	// More messages will arrive to the socket.
 	case WRITE_OP:
 	{
-		int op;
-		std::size_t found = key.find(' ');
-		std::size_t found2 = key.find("[OP]=");
-		slog_debug("[WRITE_OP] found=%d, found2=%d", found, found2);
-		if (found2 != std::string::npos)
-		{
-			slog_debug("[WRITE_OP] Entra en found2");
-			op = stoi(key.substr(found2 + 5, (found - (found2 + 5))));
-			key.erase(0, found + 1);
-		}
+		// int op;
+		// std::size_t found = key.find(' ');
+		// std::size_t found2 = key.find("[OP]=");
+		// slog_debug("[WRITE_OP] found=%d, found2=%d", found, found2);
+		// if (found2 != std::string::npos)
+		// {
+		// 	slog_debug("[WRITE_OP] Entra en found2");
+		// 	op = stoi(key.substr(found2 + 5, (found - (found2 + 5))));
+		// 	key.erase(0, found + 1);
+		// }
 
-		if (found != std::string::npos && found2 == std::string::npos)
-		{
-			std::string path = key.substr(0, found);
-			key.erase(0, found + 1);
-			// std::cout <<"path:" << key << '';
+		// if (found != std::string::npos && found2 == std::string::npos)
+		// {
+		// 	std::string path = key.substr(0, found);
+		// 	key.erase(0, found + 1);
+		// 	// std::cout <<"path:" << key << '';
 
-			std::size_t found = key.find(' ');
-			int curr_blk = stoi(key.substr(0, found));
-			key.erase(0, found + 1);
+		// 	std::size_t found = key.find(' ');
+		// 	int curr_blk = stoi(key.substr(0, found));
+		// 	key.erase(0, found + 1);
 
-			found = key.find(' ');
-			int end_blk = stoi(key.substr(0, found));
-			key.erase(0, found + 1);
+		// 	found = key.find(' ');
+		// 	int end_blk = stoi(key.substr(0, found));
+		// 	key.erase(0, found + 1);
 
-			found = key.find(' ');
-			int start_offset = stoi(key.substr(0, found));
-			key.erase(0, found + 1);
+		// 	found = key.find(' ');
+		// 	int start_offset = stoi(key.substr(0, found));
+		// 	key.erase(0, found + 1);
 
-			found = key.find(' ');
-			int end_offset = stoi(key.substr(0, found));
-			key.erase(0, found + 1);
+		// 	found = key.find(' ');
+		// 	int end_offset = stoi(key.substr(0, found));
+		// 	key.erase(0, found + 1);
 
-			found = key.find(' ');
-			int IMSS_DATA_BSIZE = stoi(key.substr(0, found));
-			key.erase(0, found + 1);
+		// 	found = key.find(' ');
+		// 	int IMSS_DATA_BSIZE = stoi(key.substr(0, found));
+		// 	key.erase(0, found + 1);
 
-			int size = stoi(key);
+		// 	int size = stoi(key);
 
-			size_t msg_length = 0;
-			msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-			if (msg_length == 0)
-			{
-				slog_error("ERRIMSS_DATA_WORKER_WORKER_OP_1_INVALID_MSG_LENGTH");
-				perror("ERRIMSS_DATA_WORKER_WORKER_OP_1_INVALID_MSG_LENGTH");
-				return -1;
-			}
+		// 	size_t msg_length = 0;
+		// 	msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+		// 	if (msg_length == 0)
+		// 	{
+		// 		slog_error("ERRIMSS_DATA_WORKER_WORKER_OP_1_INVALID_MSG_LENGTH");
+		// 		perror("ERRIMSS_DATA_WORKER_WORKER_OP_1_INVALID_MSG_LENGTH");
+		// 		return -1;
+		// 	}
 
-			char *buf = (char *)malloc(msg_length * sizeof(char));
-			// Receive all blocks into the buffer.
-			msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buf, msg_length, arguments->worker_uid, 0);
-			// msg_length = recv_data_opt(arguments->ucp_worker, arguments->server_ep, (void **)&buf, msg_length, arguments->worker_uid, 0);
-			if (msg_length == 0)
-			{
-				perror("ERRIMSS_DATA_WORKER_WORKER_OP_1_RECV_DATA");
-				slog_error("ERRIMSS_DATA_WORKER_WORKER_OP_1_RECV_DATA");
-				free(buf);
-				return -1;
-			}
+		// 	char *buf = (char *)malloc(msg_length * sizeof(char));
+		// 	// Receive all blocks into the buffer.
+		// 	msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buf, msg_length, arguments->worker_uid, 0);
+		// 	// msg_length = recv_data_opt(arguments->ucp_worker, arguments->server_ep, (void **)&buf, msg_length, arguments->worker_uid, 0);
+		// 	if (msg_length == 0)
+		// 	{
+		// 		perror("ERRIMSS_DATA_WORKER_WORKER_OP_1_RECV_DATA");
+		// 		slog_error("ERRIMSS_DATA_WORKER_WORKER_OP_1_RECV_DATA");
+		// 		free(buf);
+		// 		return -1;
+		// 	}
 
-			int pos = path.find('$');
-			std::string first_element = path.substr(0, pos + 1);
-			first_element = first_element + "0";
-			map->get(first_element, &address_, &block_size_rtvd);
-			// imss_info * data = (imss_info *) address_;
-			// printf("READ_OP SEND data->type=%c",data->type);
-			struct stat *stats = (struct stat *)address_;
+		// 	int pos = path.find('$');
+		// 	std::string first_element = path.substr(0, pos + 1);
+		// 	first_element = first_element + "0";
+		// 	map->get(first_element, &address_, &block_size_rtvd);
+		// 	// imss_info * data = (imss_info *) address_;
+		// 	// printf("READ_OP SEND data->type=%c",data->type);
+		// 	struct stat *stats = (struct stat *)address_;
 
-			// Needed variables
-			size_t byte_count = 0;
-			int first = 0;
-			int ds = 0;
-			int64_t to_copy = 0;
-			uint32_t filled = 0;
-			void *aux = (void *)malloc(IMSS_DATA_BSIZE);
-			int count = 0;
-			// For the rest of blocks
-			while (curr_blk <= end_blk)
-			{
-				// printf("Nodename    - %s current_block=%d", detect.nodename, curr_blk);
-				count = count + 1;
-				// printf("count=%d",count);
-				pos = path.find('$');
-				std::string element = path.substr(0, pos + 1);
-				element = element + std::to_string(curr_blk);
-				// std::cout <<"element:" << element << '';
+		// 	// Needed variables
+		// 	size_t byte_count = 0;
+		// 	int first = 0;
+		// 	int ds = 0;
+		// 	int64_t to_copy = 0;
+		// 	uint32_t filled = 0;
+		// 	void *aux = (void *)malloc(IMSS_DATA_BSIZE);
+		// 	int count = 0;
+		// 	// For the rest of blocks
+		// 	while (curr_blk <= end_blk)
+		// 	{
+		// 		// printf("Nodename    - %s current_block=%d", detect.nodename, curr_blk);
+		// 		count = count + 1;
+		// 		// printf("count=%d",count);
+		// 		pos = path.find('$');
+		// 		std::string element = path.substr(0, pos + 1);
+		// 		element = element + std::to_string(curr_blk);
+		// 		// std::cout <<"element:" << element << '';
 
-				// First fragmented block
-				if (first == 0 && start_offset && stats->st_size != 0)
-				{
-					// Get previous block
-					map->get(element, &aux, &block_size_rtvd); // path por curr_block
-															   // Bytes to write are the minimum between the size parameter and the remaining space in the block (BLOCKSIZE-start_offset)
-					to_copy = (size < IMSS_DATA_BSIZE - start_offset) ? size : IMSS_DATA_BSIZE - start_offset;
+		// 		// First fragmented block
+		// 		if (first == 0 && start_offset && stats->st_size != 0)
+		// 		{
+		// 			// Get previous block
+		// 			map->get(element, &aux, &block_size_rtvd); // path por curr_block
+		// 													   // Bytes to write are the minimum between the size parameter and the remaining space in the block (BLOCKSIZE-start_offset)
+		// 			to_copy = (size < IMSS_DATA_BSIZE - start_offset) ? size : IMSS_DATA_BSIZE - start_offset;
 
-					memcpy((char *)aux + start_offset, buf + byte_count, to_copy);
-				}
-				// Last Block
-				else if (curr_blk == end_blk)
-				{
-					if (end_offset != 0)
-					{
-						to_copy = end_offset;
-					}
-					else
-					{
-						to_copy = IMSS_DATA_BSIZE;
-					}
-					// Only if last block has contents
-					if (curr_blk <= stats->st_blocks && start_offset)
-					{
-						map->get(element, &aux, &block_size_rtvd); // path por curr_block
-					}
-					else
-					{
-						memset(aux, 0, IMSS_DATA_BSIZE);
-					}
-					if (byte_count == size)
-					{
-						to_copy = 0;
-					}
-					// printf("curr_block=%d, end_block=%d, byte_count=%d",curr_blk, end_blk, byte_count);
-					memcpy(aux, buf + byte_count, to_copy);
-				}
-				// middle block
-				else
-				{
-					to_copy = IMSS_DATA_BSIZE;
-					memcpy(aux, buf + byte_count, to_copy);
-				}
+		// 			memcpy((char *)aux + start_offset, buf + byte_count, to_copy);
+		// 		}
+		// 		// Last Block
+		// 		else if (curr_blk == end_blk)
+		// 		{
+		// 			if (end_offset != 0)
+		// 			{
+		// 				to_copy = end_offset;
+		// 			}
+		// 			else
+		// 			{
+		// 				to_copy = IMSS_DATA_BSIZE;
+		// 			}
+		// 			// Only if last block has contents
+		// 			if (curr_blk <= stats->st_blocks && start_offset)
+		// 			{
+		// 				map->get(element, &aux, &block_size_rtvd); // path por curr_block
+		// 			}
+		// 			else
+		// 			{
+		// 				memset(aux, 0, IMSS_DATA_BSIZE);
+		// 			}
+		// 			if (byte_count == size)
+		// 			{
+		// 				to_copy = 0;
+		// 			}
+		// 			// printf("curr_block=%d, end_block=%d, byte_count=%d",curr_blk, end_blk, byte_count);
+		// 			memcpy(aux, buf + byte_count, to_copy);
+		// 		}
+		// 		// middle block
+		// 		else
+		// 		{
+		// 			to_copy = IMSS_DATA_BSIZE;
+		// 			memcpy(aux, buf + byte_count, to_copy);
+		// 		}
 
-				// Write and update variables
-				if (!map->get(element, &address_, &block_size_rtvd))
-				{
-					map->put(element, aux, block_size_rtvd);
+		// 		// Write and update variables
+		// 		if (!map->get(element, &address_, &block_size_rtvd))
+		// 		{
+		// 			map->put(element, aux, block_size_rtvd);
 
-					// printf("Nodename    - %s after put", detect.nodename);
-				}
-				else
-				{
-					memcpy(address_, aux, block_size_rtvd);
-				}
-				// printf("currblock=%d, byte_count=%d",curr_blk, byte_count);
-				byte_count += to_copy;
-				++curr_blk;
-				++first;
-			}
-			int16_t off = (end_blk * IMSS_DATA_BSIZE) - 1 - size;
-			if (size + off > stats->st_size)
-			{
-				stats->st_size = size + off;
-				stats->st_blocks = curr_blk - 1;
-			}
+		// 			// printf("Nodename    - %s after put", detect.nodename);
+		// 		}
+		// 		else
+		// 		{
+		// 			memcpy(address_, aux, block_size_rtvd);
+		// 		}
+		// 		// printf("currblock=%d, byte_count=%d",curr_blk, byte_count);
+		// 		byte_count += to_copy;
+		// 		++curr_blk;
+		// 		++first;
+		// 	}
+		// 	int16_t off = (end_blk * IMSS_DATA_BSIZE) - 1 - size;
+		// 	if (size + off > stats->st_size)
+		// 	{
+		// 		stats->st_size = size + off;
+		// 		stats->st_blocks = curr_blk - 1;
+		// 	}
 
-			free(buf);
-		}
-		else if (found != std::string::npos && op == 2)
-		{
-			std::string path;
-			std::size_t found = key.find(' ');
-			// printf("Nodename	-%s SPLIT WRITEV",detect.nodename);
+		// 	free(buf);
+		// }
+		// else if (found != std::string::npos && op == 2)
+		// {
+		// 	std::string path;
+		// 	std::size_t found = key.find(' ');
+		// 	// printf("Nodename	-%s SPLIT WRITEV",detect.nodename);
 
-			path = key.substr(0, found);
-			key.erase(0, found + 1);
+		// 	path = key.substr(0, found);
+		// 	key.erase(0, found + 1);
 
-			found = key.find(' ');
-			int blocksize = stoi(key.substr(0, found)) * KB;
-			key.erase(0, found + 1);
+		// 	found = key.find(' ');
+		// 	int blocksize = stoi(key.substr(0, found)) * KB;
+		// 	key.erase(0, found + 1);
 
-			found = key.find(' ');
-			int start_offset = stoi(key.substr(0, found));
-			key.erase(0, found + 1);
+		// 	found = key.find(' ');
+		// 	int start_offset = stoi(key.substr(0, found));
+		// 	key.erase(0, found + 1);
 
-			found = key.find(' ');
-			int stats_size = stoi(key.substr(0, found));
-			key.erase(0, found + 1);
+		// 	found = key.find(' ');
+		// 	int stats_size = stoi(key.substr(0, found));
+		// 	key.erase(0, found + 1);
 
-			found = key.find('$');
-			int amount = stoi(key.substr(0, found));
-			int size = amount * blocksize;
-			key.erase(0, found + 1);
+		// 	found = key.find('$');
+		// 	int amount = stoi(key.substr(0, found));
+		// 	int size = amount * blocksize;
+		// 	key.erase(0, found + 1);
 
-			slog_debug("amount=%d", amount);
-			slog_debug("path=%s", path.c_str());
-			slog_debug("blocksize=%d", blocksize);
-			slog_debug("start_offset=%d", start_offset);
-			slog_debug("size=%d", size);
-			slog_debug("rest=%s", key.c_str());
+		// 	slog_debug("amount=%d", amount);
+		// 	slog_debug("path=%s", path.c_str());
+		// 	slog_debug("blocksize=%d", blocksize);
+		// 	slog_debug("start_offset=%d", start_offset);
+		// 	slog_debug("size=%d", size);
+		// 	slog_debug("rest=%s", key.c_str());
 
-			// Receive all blocks into the buffer.
-			size_t msg_length = 0;
-			msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-			if (msg_length == 0)
-			{
-				perror("ERRIMSS_WORKER_DATA_WRITE_OP_2_INVALID_MSG_LENGTH");
-				slog_error("ERRIMSS_WORKER_DATA_WRITE_OP_2_INVALID_MSG_LENGTH");
-				return -1;
-			}
+		// 	// Receive all blocks into the buffer.
+		// 	size_t msg_length = 0;
+		// 	msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+		// 	if (msg_length == 0)
+		// 	{
+		// 		perror("ERRIMSS_WORKER_DATA_WRITE_OP_2_INVALID_MSG_LENGTH");
+		// 		slog_error("ERRIMSS_WORKER_DATA_WRITE_OP_2_INVALID_MSG_LENGTH");
+		// 		return -1;
+		// 	}
 
-			void *buf = malloc(msg_length);
+		// 	void *buf = malloc(msg_length);
 
-			msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buf, msg_length, arguments->worker_uid, 0);
-			// msg_length = recv_data_opt(arguments->ucp_worker, arguments->server_ep, &buf, msg_length, arguments->worker_uid, 0);
-			if (msg_length == 0)
-			{
-				perror("ERRIMSS_WORKER_DATA_WRITE_OP_2_RECV_DATA");
-				slog_error("ERRIMSS_WORKER_DATA_WRITE_OP_2_RECV_DATA");
-				free(buf);
-				return -1;
-			}
+		// 	msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buf, msg_length, arguments->worker_uid, 0);
+		// 	// msg_length = recv_data_opt(arguments->ucp_worker, arguments->server_ep, &buf, msg_length, arguments->worker_uid, 0);
+		// 	if (msg_length == 0)
+		// 	{
+		// 		perror("ERRIMSS_WORKER_DATA_WRITE_OP_2_RECV_DATA");
+		// 		slog_error("ERRIMSS_WORKER_DATA_WRITE_OP_2_RECV_DATA");
+		// 		free(buf);
+		// 		return -1;
+		// 	}
 
-			// size_recv = size; // MIRAR
-			int32_t insert_successful;
+		// 	// size_recv = size; // MIRAR
+		// 	int32_t insert_successful;
 
-			// printf("Nodename	-%s size_recv=%d",detect.nodename,size_recv);
+		// 	// printf("Nodename	-%s size_recv=%d",detect.nodename,size_recv);
 
-			int32_t byte_count = 0;
-			for (int i = 0; i < amount; i++)
-			{
-				// substract current block
-				found = key.find('$');
-				int curr_blk = stoi(key.substr(0, found));
-				key.erase(0, found + 1);
+		// 	int32_t byte_count = 0;
+		// 	for (int i = 0; i < amount; i++)
+		// 	{
+		// 		// substract current block
+		// 		found = key.find('$');
+		// 		int curr_blk = stoi(key.substr(0, found));
+		// 		key.erase(0, found + 1);
 
-				std::string element = path;
-				element = element + '$' + std::to_string(curr_blk);
-				// printf(" element=%s",element.c_str());
+		// 		std::string element = path;
+		// 		element = element + '$' + std::to_string(curr_blk);
+		// 		// printf(" element=%s",element.c_str());
 
-				if (map->get(element, &address_, &block_size_rtvd) == 0)
-				{
-					// If don't exist
-					char *buffer = (char *)aligned_alloc(1024, blocksize);
-					memcpy(buffer, (char *)buf + byte_count, blocksize);
-					insert_successful = map->put(element, buffer, block_size_recv);
-					if (insert_successful != 0)
-					{
-						perror("ERRIMSS_WORKER_MAPPUT");
-						return -1;
-					}
-				}
-				else
-				{
-					// If already exits
-					memcpy(address_, (char *)buf + byte_count, blocksize);
-				}
-				byte_count = byte_count + blocksize;
-			}
-			free(buf);
-		}
-		else
+		// 		if (map->get(element, &address_, &block_size_rtvd) == 0)
+		// 		{
+		// 			// If don't exist
+		// 			char *buffer = (char *)aligned_alloc(1024, blocksize);
+		// 			memcpy(buffer, (char *)buf + byte_count, blocksize);
+		// 			insert_successful = map->put(element, buffer, block_size_recv);
+		// 			if (insert_successful != 0)
+		// 			{
+		// 				perror("ERRIMSS_WORKER_MAPPUT");
+		// 				return -1;
+		// 			}
+		// 		}
+		// 		else
+		// 		{
+		// 			// If already exits
+		// 			memcpy(address_, (char *)buf + byte_count, blocksize);
+		// 		}
+		// 		byte_count = byte_count + blocksize;
+		// 	}
+		// 	free(buf);
+		// }
+		// else
 		{
 			slog_debug("[WRITE_OP] WRITE NORMAL CASE. Size %ld, offset=%ld", block_size_recv, block_offset);
 			// search for the block to know if it was previously stored.
@@ -1049,14 +1057,14 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			}
 			else
 			{
-				ret = map->get(key, &address_, &block_size_rtvd);
+				ret = TIMING(map->get(key, &address_, &block_size_rtvd);, "Does it exist? map->get", int, arguments->thread_id);
 			}
 
 			// if the block was not already stored:
 			if (ret == 0)
 			{
 				slog_debug("[WRITE_OP] NO key find %s", key.c_str());
-				clock_t tp;
+				// clock_t tp;
 				// tp = clock();
 				void *buffer = NULL;
 				// tp = clock() - tp;
@@ -1071,7 +1079,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				{
 					slog_debug("[WRITE_OP] is_shared_memory=%d", is_shared_memory);
 					// Get the length of the data to be received.
-					msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+					msg_length = TIMING(get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);, "[write] get_recv_data_length", size_t, arguments->thread_id);
 					if (msg_length == 0)
 					{
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
@@ -1085,11 +1093,11 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						slog_debug("Allocating buffer");
 						if (snapshot_op)
 						{ // Snapshot operation sends data bigger than BLOCK_SIZE.
-							buffer = (void *)mem_type_malloc(msg_length * sizeof(char));
+							buffer = TIMING((void *)mem_type_malloc(msg_length * sizeof(char));, "[write] mem_type_malloc snapshot", void *, arguments->thread_id);
 						}
 						else
 						{
-							buffer = (void *)mem_type_malloc(BLOCK_SIZE * sizeof(char));
+							buffer = TIMING((void *)mem_type_malloc(BLOCK_SIZE * sizeof(char));, "[write] mem_type_malloc", void *, arguments->thread_id);
 						}
 					}
 					else
@@ -1106,7 +1114,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					size_asigned_to_block = BLOCK_SIZE;
 
 					// Receive the data from the front end.
-					msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
+					msg_length = NETWORK_TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);, "[write] recv_data", size_t);
 					if (msg_length == 0)
 					{
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
@@ -1171,11 +1179,11 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					// Fill buffer_broadcast with the data received from the other servers.
 					// buffer_broadcast[];
 					slog_debug("Snapshot operation, origin server=%s", key.c_str());
-					insert_successful = map->put_broadcast(key, buffer, msg_length);
+					insert_successful = TIMING(map->put_broadcast(key, buffer, msg_length);," new block map-put_broadcast", int, arguments->thread_id);
 				}
 				else
 				{
-					insert_successful = map->put(key, buffer, size_asigned_to_block);
+					insert_successful = TIMING(map->put(key, buffer, size_asigned_to_block);, "new block map->put", int, arguments->thread_id);
 				}
 				slog_debug("[WRITE_OP] insert_successful=%d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
 				// tr = clock() - tr;
@@ -1191,17 +1199,10 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					return -1;
 				}
 
-				// // Only when there is not a snapshot operation.
-				// if (!snapshot_op)
-				// {
-				// 	// The following buffer is used for Sanpshot.
-				// 	// key is the uri, and value is: 0 data will not be copy to disk, and 1 data will be copy to disk. By default, when an element is inserted, value is 1 and it will be set to 0 when the corresponding Snapshot thread copy the data to disk.
-				// 	// fprintf(stderr, "Inserting key = %s\n", key.c_str());
-
-				std::size_t found = key.find("$0");
+				std::size_t found = TIMING(key.find("$0");, "check if block 0", std::size_t, arguments->thread_id);
 				if (found != std::string::npos) // block 0.
 				{
-					insert_successful = map->put_snapshot(key, -1);
+					insert_successful = TIMING(map->put_snapshot(key, -1);, "map->put_snapshot", int, arguments->thread_id); 
 					// Include the new record in the tracking structure.
 					if (insert_successful != 0)
 					{
@@ -1394,7 +1395,7 @@ void *Checkpoint(void *th_argv)
 		slog_debug("Running Checkpoint in %s", checkpoint_dir);
 
 		TIMING_NO_RETURN(
-			ret = map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Checkpoint");
+			ret = map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Checkpoint", arguments->thread_id);
 
 		if (ret != 1)
 		{
@@ -1468,7 +1469,7 @@ void *Snapshot(void *th_argv)
 		slog_debug("Running Snapshot in %s", snapshot_dir);
 
 		TIMING_NO_RETURN(
-			ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot");
+			ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot", arguments->thread_id);
 
 		if (ret != 1)
 		{
@@ -2412,7 +2413,10 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	return 0;
 }
 
-// Server dispatcher thread method.
+/**
+ * @brief Obsolete: Server dispatcher thread method.
+ * 
+ * */ 
 void *srv_attached_dispatcher(void *th_argv)
 {
 	// Cast from generic pointer type to p_argv struct type pointer.
@@ -2544,7 +2548,7 @@ void *srv_attached_dispatcher(void *th_argv)
 			int32_t port_ = arguments->port + 1 + (client_id_ % hercules_thread_pool_size);
 			// Wrap the previous info into the ZMQ message.
 			sprintf(response_, "%d%c%d", port_, '-', client_id_++);
-			slog_info("Seding response_=%s", response_);
+			slog_info("Seding response_=%s", response_);			
 			// Send communication specifications.
 			if (send_data(ucp_data_worker, server_ep, response_, strlen(response_) + 1, arguments->worker_uid) == 0)
 			{
@@ -2687,7 +2691,8 @@ void *dispatcher(void *th_argv)
 
 		// Check if the client is requesting connection resources.
 		if (!strncmp(req_content, "HELLO!", 6))
-		{
+		{ 
+			// Case where a client (front-end) is connecting to the data server.
 			// fprintf(stderr, "HERCULES_THREAD_POOL_SIZE = %d, client=%d\n", hercules_thread_pool_size, client);
 			ret = send(new_socket, &local_addr_len[(client % hercules_thread_pool_size)], sizeof(local_addr_len[(client % hercules_thread_pool_size)]), 0);
 			if (ret == -1)
@@ -2703,12 +2708,13 @@ void *dispatcher(void *th_argv)
 			slog_debug("Replied client.");
 		}
 		else if (!strncmp(req_content, "MAIN!", 5))
-		{
+		{ 
+			// Case where a data server is connecting to the metadata server.
 			// TO FIX: 0 must be a dynamic value depending on the number of
 			// metadata servers.
-			ret = send(new_socket, &local_addr_len[0], sizeof(local_addr_len[0]), 0);
-			ret = send(new_socket, local_addr[0], local_addr_len[0], 0);
-			slog_debug("Sent address %lu (%lu) to the client", local_addr[0], local_addr_len[0]);
+			ret = send(new_socket, &local_addr_len[(client % hercules_thread_pool_size)], sizeof(local_addr_len[(client % hercules_thread_pool_size)]), 0);
+			ret = send(new_socket, local_addr[(client % hercules_thread_pool_size)], local_addr_len[(client % hercules_thread_pool_size)], 0);
+			slog_debug("Sent address %lu (%lu) to the client %d", local_addr[(client % hercules_thread_pool_size)], local_addr_len[(client % hercules_thread_pool_size)], client);
 		}
 		// Check if someone is requesting identity resources.
 		else if (*((int32_t *)req) == WHO)

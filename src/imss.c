@@ -716,6 +716,7 @@ int32_t open_imss(char *imss_uri)
 	local_data_uid = attr.worker_uid;
 
 	// int num_down_storages = 0;
+	fprintf(stderr, "num storages=%d\n", new_imss.info.num_storages);
 	// fprintf(stderr, "NUM_DATA_SERVERS=%d\n", NUM_DATA_SERVERS);
 	// Connect to the requested IMSS.
 	// for (int32_t i = 0; i < new_imss.info.num_storages; i++)
@@ -750,6 +751,7 @@ int32_t open_imss(char *imss_uri)
 		if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
 		{
 			perror("HERCULES_ERR_STAT_HELLO_1");
+			slog_error("HERCULES_ERR_STAT_HELLO_1");
 			return -1;
 		}
 
@@ -757,6 +759,7 @@ int32_t open_imss(char *imss_uri)
 		if (ret < 0)
 		{
 			perror("HERCULES_ERR_RECV_1_HELLO");
+			slog_error("HERCULES_ERR_RECV_1_HELLO");
 			close(oob_sock);
 			return -1;
 		}
@@ -765,6 +768,7 @@ int32_t open_imss(char *imss_uri)
 		if (ret < 0)
 		{
 			perror("HERCULES_ERR_RECV_2_HELLO");
+			slog_error("HERCULES_ERR_RECV_2_HELLO");
 			close(oob_sock);
 			return -1;
 		}
@@ -3076,7 +3080,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 
 	// if the number of server to be used was not provided, we try to obtain the data location.
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = TIMING(get_data_location(dataset_id, data_id, GET), "get_data_location", int32_t)) == -1)
+	if ((n_server = TIMING(get_data_location(dataset_id, data_id, GET), "get_data_location", int32_t, process_rank)) == -1)
 	{
 		return -2;
 	}
@@ -3136,7 +3140,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		slog_debug("[IMSS] Request - '%s' to server %d", key_, repl_servers[i]);
 		// fprintf(stderr,"[IMSS] Request - '%s' to server %d\n", key_, repl_servers[i]);
 
-		if (TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), "send_req", size_t) == 0)
+		if (TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), "send_req", size_t, process_rank) == 0)
 		{
 			perror("HERCULES_ERR_GET_NDATA_SEND_REQ");
 			slog_error("HERCULES_ERR_GET_NDATA_SEND_REQ");
@@ -3147,7 +3151,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		// msg_length = TIMING( get_recv_data_length(ucp_worker_data, local_data_uid), "get_recv_data_length", size_t);
 		ucp_tag_recv_info_t info_tag;
 		ucp_tag_message_h msg_tag;
-		msg_length = TIMING( get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t);
+		msg_length = TIMING( get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t, process_rank);
 		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
 		{
@@ -3168,7 +3172,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		}
 
 		// msg_length = TIMING( recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0), "recv_data", size_t);
-		msg_length = TIMING( recv_data_2(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0, info_tag, msg_tag), "recv_data_2", size_t);
+		msg_length = TIMING( recv_data_2(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0, info_tag, msg_tag), "recv_data_2", size_t, process_rank);
 
 		slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
@@ -3367,7 +3371,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 	int32_t n_server;
 	size_t msg_length = 0;
 	// Server containing the corresponding data to be written.
-	if ((n_server = TIMING(get_data_location(dataset_id, data_id, SET),"get_data_location", int32_t)) == -1)
+	if ((n_server = TIMING(get_data_location(dataset_id, data_id, SET),"get_data_location", int32_t, process_rank)) == -1)
 	{
 		perror("HERCULES_ERR_GET_DATA_LOCATION");
 		slog_error("HERCULES_ERR_GET_DATA_LOCATION");
@@ -3483,7 +3487,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 				if (data_id == 0 || session_policy == LOCAL_)
 				{
 					slog_debug("Copying data to block %d", data_id);
-					TIMING_NO_RETURN(copyContentSM(content_pointer, buffer, size), "Updating buffer to shared memory");
+					TIMING_NO_RETURN(copyContentSM(content_pointer, buffer, size), "Updating buffer to shared memory", process_rank);
 				}
 				else if (session_policy == ZCOPY_)
 				{
@@ -3509,23 +3513,22 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 			slog_info("[IMSS] BLOCK %d SENT TO SERVER %d  with Request: %s (%d)", data_id, n_server_, key_, size);
 			ep = curr_imss.conns.eps[n_server_];
 
-			// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id)
-			// in a dataset (curr_dataset.uri).
-			if (TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_),"send_req", size_t) == 0)
+			// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id) in a dataset (curr_dataset.uri).
+			if (TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_),"send_req", size_t, process_rank) == 0)
 			{
 				fprintf(stderr, "********** current server status = %d\n", curr_imss.info.status[n_server_]);
-				pthread_mutex_unlock(&lock_network);
 				perror("HERCULES_ERR_SET_REQ_SEND_REQ");
 				slog_error("HERCULES_ERR_SET_REQ_SEND_REQ");
+				pthread_mutex_unlock(&lock_network);
 				exit(-1);
 			}
 
 			// send the data to the data server of the current dataset.
-			if (TIMING(send_data(ucp_worker_data, ep, buffer, size, local_data_uid),"send_data", size_t) == 0)
+			if (TIMING(send_data(ucp_worker_data, ep, buffer, size, local_data_uid),"send_data", size_t, process_rank) == 0)
 			{
-				pthread_mutex_unlock(&lock_network);
 				perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
 				slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
+				pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
 		}
