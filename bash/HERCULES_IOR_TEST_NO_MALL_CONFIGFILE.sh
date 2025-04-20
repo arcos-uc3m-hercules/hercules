@@ -19,8 +19,8 @@ HERCULES_CHECKPOINT_PATH=""
 HERCULES_SNAPSHOT_PATH=""
 DATA_HOSTFILE="\/beegfs\/home\/javier.garciablas\/hercules\/bash\/data_hostfile"
 METADATA_HOSTFILE="\/beegfs\/home\/javier.garciablas\/hercules\/bash\/meta_hostfile"
-DEBUG_LEVEL="SLOG_TIME"
-#DEBUG_LEVEL=none
+#DEBUG_LEVEL="SLOG_TIME"
+DEBUG_LEVEL=none
 #DEBUG_LEVEL=SLOG_READ
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="RR"
@@ -40,7 +40,7 @@ MAX_ITERATIONS=1
 # set -o xtrace
 #set -x
 
-jid=1
+jid=-1
 
 for loop_number in $(seq 1 $MAX_ITERATIONS);
 do
@@ -103,12 +103,13 @@ do
 				set -x
 
 				## The first job does not have dependencie (do not wait for another job to end). 
-				if [ "$jid" -eq 1 ]; then
-					jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
-				## The following jobs wait for the previous job to finish.
-				else
+#				if [ "$jid" -eq 1 ]; then
+#					jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
+#				## The following jobs wait for the previous job to finish.
+#				else
+					# --cpus-per-task=16		
 					jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT"  "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
-				fi
+#				fi
 				echo $jid
 				### exit 0
 				set +x

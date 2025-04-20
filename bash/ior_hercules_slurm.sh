@@ -2,12 +2,14 @@
 #SBATCH --job-name=hercules    # Job name
 #SBATCH --time=01:00:00               # Time limit hrs:min:sec
 #SBATCH --output=logs/hercules/%j.log   # Standard output and error log
-#SBATCH --mem=0
+##SBATCH --mem=0
+##SBATCH --oversubscribe
+##SBATCH --overcommit
 ##SBATCH --exclude=broadwell-008,broadwell-010
 ##SBATCH --nodelist=broadwell-[012-027]
 ###SBATCH --exclusive=user
-##SBATCH --overcommit
-##SBATCH --oversubscribe
+#
+#
 
 CONFIG_PATH=$1
 FILE_SIZE_PER_CLIENT=$2
@@ -132,6 +134,7 @@ COMMAND="$COMMAND -o /mnt/hercules/data.out"
 
 ## Removes the data.out file from the checkpointing folder.
 rm ./HerculesCheckpoint/*
+
 
 # MPIEXEC="mpiexec"
 set -x

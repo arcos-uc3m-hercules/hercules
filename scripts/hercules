@@ -104,7 +104,7 @@ WaitForServers() {
             fi
         else # if slurm is available.
         set -x
-            ret=$(srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
+            ret=$(srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
         fi
         ret=$?
         
@@ -129,7 +129,7 @@ if [[ $STATUS != "stop" && $STATUS != "start" && $STATUS != "remove" && $STATUS 
 fi
 
 WAIT_SERVERS=1
-VERBOSE=1
+VERBOSE=0
 
 ## Check if user pass arguments.
 while getopts :m:d:o:c:s:f:k:w:V: flag
@@ -616,10 +616,10 @@ do
             echo "[+] Removing temporal files on ${node}"
         fi
         set -x
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${RM} 2> /dev/null
+        srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${RM} 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         echo "[+] Starting metadata server $i on $node..."
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
+        srun  -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
         set +x
     fi
     i=$(($i+1))
@@ -694,12 +694,17 @@ do
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "[+] Removing temporal files on $node"
         fi
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
+        srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         if [[ "$VERBOSE" -eq "1" ]]; then
             echo "[+] Starting data server $i on $node..."
         fi
-        srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
+        #srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
+        #max_cores=$(sinfo -n $node -o "%C" | tail -n 1 | awk -F'/' '{print $4}')
+        set -x
+        sinfo -n $node -o "%C"
+        set +x
+        srun  -N 1 -n 1 -c 8 -m block:block:block --mem=0G -w $node -- $COMMAND &
     fi
     i=$(($i+1))
 done

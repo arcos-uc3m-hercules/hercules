@@ -33,7 +33,7 @@
 #define KB 1024
 #define GB 1073741824
 
-#define MAX_THREAD_POOL_SIZE 16
+//#define MAX_THREAD_POOL_SIZE 16
 
 // Set of arguments passed to each server thread.
 typedef struct
