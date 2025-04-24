@@ -1,6 +1,9 @@
 #!/bin/bash
-## Last modification: 30/01/2025
+## Hercules ad hoc file system deployment script.
+## Last modification: 21/04/2025
 ## Genaro Sanchez-Gallegos
+## Javier Garcia-Blas
+## Jesus Carretero
 #set -x
 #######################################################
 #######################################################
@@ -52,7 +55,6 @@ WakeUpServers() {
     # Wake up desired servers.
     for node in "${hosts[@]}"
     do
-        ### echo "ssh $node pkill hercules_server"
         ( ssh $node "pkill -SIGUSR2 hercules_server" )
     done
     #set -x
@@ -619,7 +621,8 @@ do
         srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${RM} 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         echo "[+] Starting metadata server $i on $node..."
-        srun  -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
+        #srun  -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
+        srun  -N 1 -n 1 --exclusive --cpus-per-task=18 -w $node -- $COMMAND &
         set +x
     fi
     i=$(($i+1))
@@ -701,10 +704,11 @@ do
         fi
         #srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
         #max_cores=$(sinfo -n $node -o "%C" | tail -n 1 | awk -F'/' '{print $4}')
-        set -x
-        sinfo -n $node -o "%C"
-        set +x
-        srun  -N 1 -n 1 -c 8 -m block:block:block --mem=0G -w $node -- $COMMAND &
+        # set -x
+        # sinfo -n $node -o "%C"
+        # set +x
+        #srun  -N 1 -n 1 -c 8 -m block:block:block --mem=0G -w $node -- $COMMAND &
+        srun  -N 1 -n 1 --exclusive --cpus-per-task=18 -w $node -- $COMMAND &
     fi
     i=$(($i+1))
 done

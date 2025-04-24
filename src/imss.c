@@ -716,7 +716,7 @@ int32_t open_imss(char *imss_uri)
 	local_data_uid = attr.worker_uid;
 
 	// int num_down_storages = 0;
-	fprintf(stderr, "num storages=%d\n", new_imss.info.num_storages);
+	// fprintf(stderr, "num storages=%d\n", new_imss.info.num_storages);
 	// fprintf(stderr, "NUM_DATA_SERVERS=%d\n", NUM_DATA_SERVERS);
 	// Connect to the requested IMSS.
 	// for (int32_t i = 0; i < new_imss.info.num_storages; i++)
@@ -3115,7 +3115,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
 	clock_t t;
-	double time_taken;
+	// double time_taken;
 	ucp_ep_h ep;
 	size_t msg_length = 0;
 	char mode[10];
