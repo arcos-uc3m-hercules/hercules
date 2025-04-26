@@ -26,10 +26,10 @@
 /**********************************************************************************/
 /******************************** GLOBAL VARIABLES ********************************/
 /**********************************************************************************/
-
-int32_t __thread current_dataset;	// Dataset whose policy has been set last.
-dataset_info __thread curr_dataset; // Currently managed dataset.
-imss __thread curr_imss;
+// __thread
+int32_t  current_dataset;	// Dataset whose policy has been set last.
+dataset_info curr_dataset; // Currently managed dataset.
+imss  curr_imss;
 
 uint32_t process_rank; // Process identifier within the deployment.
 
@@ -70,7 +70,7 @@ int32_t IMSS_WRITE_ASYNC = 1;
 /* UCP objects */
 ucp_context_h ucp_context_client;
 ucp_worker_h ucp_worker_meta;
-ucp_worker_h ucp_worker_data;
+ucp_worker_h ucp_worker_data = (ucp_worker_h)NULL;
 
 // void *map_ep;		   // map_ep used for async write
 // int32_t is_client = 1; // also used for async write
@@ -78,13 +78,13 @@ ucp_worker_h ucp_worker_data;
 static ucp_address_t *local_addr_meta;
 static size_t local_addr_len_meta;
 
-static ucp_address_t *local_addr_data;
-static size_t local_addr_len_data;
+static ucp_address_t *local_addr_data = NULL;
+static size_t local_addr_len_data = 0;
 
 uint64_t local_meta_uid;
 uint64_t local_data_uid;
 
-ucp_address_t **stat_addr;
+ucp_address_t **stat_addr = NULL;
 ucp_ep_h *stat_eps;
 
 extern char POLICY[MAX_POLICY_LEN];
@@ -99,13 +99,23 @@ key_t shared_memory_key;
 int32_t imss_comm_cleanup()
 {
 	// ep_close(ucp_worker_meta, stat_eps[0], 0);
+	ucp_worker_flush(ucp_worker_meta);
+	ucp_worker_flush(ucp_worker_data);
+
+	// ucp_mem_free(ucp_context, send_buffer);
+	// ucp_mem_free(ucp_context, recv_buffer);
+
 	ucp_worker_release_address(ucp_worker_meta, local_addr_meta);
 	ucp_worker_release_address(ucp_worker_data, local_addr_data);
 
-	// Following lines were comment.
+	ucp_worker_flush(ucp_worker_meta);
+	ucp_worker_flush(ucp_worker_data);
+
+	// To release ucx resources.
+	// workers.
 	ucp_worker_destroy(ucp_worker_meta);
 	ucp_worker_destroy(ucp_worker_data);
-
+	// context.
 	ucp_cleanup(ucp_context_client);
 
 	return 0;
@@ -282,6 +292,7 @@ int32_t stat_init(char *stat_hostfile,
 	{
 		slog_error("HERCULES_ERR_INIT_CONTEXT");
 		perror("HERCULES_ERR_INIT_CONTEXT");
+		free(stat_addr);
 		return -1;
 	}
 
@@ -290,6 +301,7 @@ int32_t stat_init(char *stat_hostfile,
 	{
 		slog_error("HERCULES_ERR_INIT_WORKER");
 		perror("HERCULES_ERR_INIT_WORKER");
+		free(stat_addr);
 		return -1;
 	}
 
@@ -301,23 +313,27 @@ int32_t stat_init(char *stat_hostfile,
 	if ((imssd = g_array_sized_new(FALSE, FALSE, sizeof(imss), ELEMENTS)) == NULL)
 	{
 		perror("HERCULES_ERR_STATINIT_GARRAYIMSS");
+		free(stat_addr);
 		return -1;
 	}
 	if ((free_imssd = g_array_sized_new(FALSE, FALSE, sizeof(int32_t), ELEMENTS)) == NULL)
 	{
 		perror("HERCULES_ERR_STATINIT_GARRAYIMSSREG");
+		free(stat_addr);
 		return -1;
 	}
 
 	if ((datasetd = g_array_sized_new(FALSE, FALSE, sizeof(dataset_info), ELEMENTS)) == NULL)
 	{
 		perror("HERCULES_ERR_STATINIT_GARRAYDATASET");
+		free(stat_addr);
 		return -1;
 	}
 
 	if ((free_datasetd = g_array_sized_new(FALSE, FALSE, sizeof(int32_t), ELEMENTS)) == NULL)
 	{
 		perror("HERCULES_ERR_STATINIT_GARRAYDATASETREG");
+		free(stat_addr);
 		return -1;
 	}
 
@@ -332,6 +348,7 @@ int32_t stat_init(char *stat_hostfile,
 	if (gethostname(client_node, 512) == -1)
 	{
 		perror("HERCULES_ERR_GETHOSTNAME");
+		free(stat_addr);
 		return -1;
 	}
 	len_client_node = strlen(client_node);
@@ -342,22 +359,24 @@ int32_t stat_init(char *stat_hostfile,
 	if ((host_entry = gethostbyname(client_node)) == NULL)
 	{
 		perror("HERCULES_ERR_GETHOSTBYNAME");
+		free(stat_addr);
 		return -1;
 	}
 
 	strcpy(client_ip, inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0])));
 
 	// FILE entity managing the IMSS metadata hostfile.
-	FILE *stat_nodes;
+	FILE *stat_nodes_struct;
 	// Number of characters successfully read from the line.
 	int n_chars;
 
 	// Open the file containing the IMSS metadata server nodes.
-	if ((stat_nodes = fopen(stat_hostfile, "r+")) == NULL)
+	if ((stat_nodes_struct = fopen(stat_hostfile, "r+")) == NULL)
 	{
 		char error_msg[MAX_ERR_MSG_LEN];
 		sprintf(error_msg, "HERCULES_ERR_OPEN_STATFILE: %s", stat_hostfile);
 		perror(error_msg);
+		free(stat_addr);
 		return -1;
 	}
 
@@ -382,7 +401,7 @@ int32_t stat_init(char *stat_hostfile,
 		size_t addr_len;
 
 		// Save IMSS metadata deployment.
-		n_chars = getline(&stat_node, &l_size, stat_nodes);
+		n_chars = getline(&stat_node, &l_size, stat_nodes_struct);
 
 		// Erase the new line character ('') from the string.
 		if (stat_node[n_chars - 1] == '\n')
@@ -399,6 +418,7 @@ int32_t stat_init(char *stat_hostfile,
 			char err_msg[MAX_ERR_MSG_LEN];
 			sprintf(err_msg, "HERCULES_ERR_CONNECT-%s:%ld", stat_node, port);
 			perror(err_msg);
+			free(stat_addr);
 			return -1;
 		}
 
@@ -409,6 +429,7 @@ int32_t stat_init(char *stat_hostfile,
 			char err_msg[MAX_ERR_MSG_LEN];
 			sprintf(err_msg, "HERCULES_ERR_STAT_HELLO_2-%s:%ld", stat_node, port);
 			perror(err_msg);
+			free(stat_addr);
 			return -1;
 		}
 
@@ -422,8 +443,10 @@ int32_t stat_init(char *stat_hostfile,
 		client_create_ep_metadata(ucp_worker_meta, &stat_eps[i], stat_addr[i]);
 		slog_debug("[IMSS]created ep with %s:%ld", stat_node, port);
 	}
+
+	free(stat_node);
 	// Close the file.
-	if (fclose(stat_nodes) != 0)
+	if (fclose(stat_nodes_struct) != 0)
 	{
 		perror("HERCULES_ERR_CLOSE_STATFILE");
 		return -1;
@@ -449,10 +472,10 @@ int32_t stat_release()
 		iself if something was stored or NULL otherwise.
 	 */
 
-	g_array_free(imssd, FALSE);
-	g_array_free(free_imssd, FALSE);
-	g_array_free(datasetd, FALSE);
-	g_array_free(free_datasetd, FALSE);
+	g_array_free(imssd, TRUE);
+	g_array_free(free_imssd, TRUE);
+	g_array_free(datasetd, TRUE);
+	g_array_free(free_datasetd, TRUE);
 
 	pthread_mutex_lock(&lock_network);
 
@@ -478,6 +501,7 @@ int32_t stat_release()
 		// ucp_context_destroy(ucp_worker_meta);
 		// ep_close(ucp_worker_meta, ep, 0);
 		free(stat_addr[i]);
+		free(stat_addr);
 	}
 
 	// Optionally, flush the worker
@@ -487,9 +511,10 @@ int32_t stat_release()
 		fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
 	}
 	// Destroy the worker
-	ucp_worker_destroy(ucp_worker_meta);
+	// ucp_worker_destroy(ucp_worker_meta);
 
 	free(stat_eps);
+
 	pthread_mutex_unlock(&lock_network);
 	return 0;
 }
@@ -660,8 +685,8 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 /***************** IN-MEMORY STORAGE SYSTEM MANAGEMENT FUNCTIONS  *****************/
 /**********************************************************************************/
 
-// Method initializing the required resources to make use of an existing IMSS.
-// return: number of active storage servers.
+// Method initializing the required resources to make use of an existing HERCULES instance.
+// return: number of active data storage servers.
 int32_t open_imss(char *imss_uri)
 {
 	// New IMSS structure storing the entity to be created.
@@ -730,7 +755,7 @@ int32_t open_imss(char *imss_uri)
 		// 	continue;
 		// }
 
-		int oob_sock;
+		int oob_sock = -1;
 		size_t addr_len;
 		int ret = 0;
 
@@ -744,7 +769,7 @@ int32_t open_imss(char *imss_uri)
 			return -1;
 		}
 
-		char request[REQUEST_SIZE];
+		char request[REQUEST_SIZE] = {0};
 		sprintf(request, "%" PRIu32 " GET %s", process_rank, "HELLO!JOIN");
 		slog_live("ip_address=%s:%d", new_imss.info.ips[i], new_imss.info.conn_port);
 
@@ -845,10 +870,10 @@ void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
 	// ucp_worker_progress(worker);
 }
 
-void ucx_cleanup()
-{
-	ucp_worker_destroy(ucp_worker_data);
-}
+// void ucx_cleanup()
+// {
+// 	ucp_worker_destroy(ucp_worker_data);
+// }
 
 // Method releasing client-side and/or server-side resources related to a certain IMSS instance.
 int32_t release_imss(const char *imss_uri, uint32_t release_op)
@@ -895,7 +920,10 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 				pthread_mutex_unlock(&lock_network);
 				perror("HERCULES_ERR_RELEASE_IMSS_SEND_REQ");
 				slog_error("HERCULES_ERR_RELEASE_IMSS_SEND_REQ");
-				return -1;
+				free(imss_.info.ips[i]);
+				free(imss_.conns.peer_addr[i]);
+				// return -1;
+				continue;
 			}
 
 			size_t msg_length = 0;
@@ -905,7 +933,10 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 				pthread_mutex_unlock(&lock_network);
 				perror("ERR_HERCULES_RLSHERCULES_INVALID_MSG_LENGTH");
 				slog_error("ERR_HERCULES_RLSHERCULES_INVALID_MSG_LENGTH");
-				return -1;
+				free(imss_.info.ips[i]);
+				free(imss_.conns.peer_addr[i]);
+				// return -1;
+				continue;
 			}
 
 			// char result[msg_length];
@@ -917,21 +948,27 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 				perror("ERR_HERCULES_RLSHERCULES_RECV_DATA");
 				slog_error("ERR_HERCULES_RLSHERCULES_RECV_DATA");
 				free(result);
-				return -1;
+				free(imss_.info.ips[i]);
+				free(imss_.conns.peer_addr[i]);
+				// return -1;
+				continue;
 			}
 
 			slog_debug(" result=%s, msg_length=%d", (const char *)result, msg_length);
 			if (!strncmp((const char *)result, "RELEASE", strlen("RELEASE")))
 			{
 				// free the message received from the metadata server.
-				free(result);
 				pthread_mutex_unlock(&lock_network);
-				return 1;
+				free(result);
+				free(imss_.info.ips[i]);
+				free(imss_.conns.peer_addr[i]);
+				// return 1;
+				continue;
 			}
 			// free the message received from the metadata server.
 			free(result);
 
-			// close_ucx_endpoint(ucp_worker_data, ep);
+			close_ucx_endpoint(ucp_worker_data, ep);
 
 			// ep_close(ucp_worker_data, ep, 0);
 			//  // ep_close(ucp_worker_data, ep, UCP_EP_CLOSE_MODE_FLUSH);
@@ -943,6 +980,7 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 		// ep_flush(ep, ucp_worker_data);
 		// ep_flush(imss_.conns.eps_[i], ucp_worker_data);
 		free(imss_.info.ips[i]);
+		free(imss_.conns.peer_addr[i]);
 	}
 	// Optionally, flush the worker
 	ucs_status_t status = ucp_worker_flush(ucp_worker_data);
@@ -951,7 +989,7 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 		fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
 	}
 	// Destroy the worker
-	ucp_worker_destroy(ucp_worker_data);
+	// ucp_worker_destroy(ucp_worker_data);
 
 	free(imss_.info.ips);
 	free(curr_imss.conns.eps);
@@ -1038,19 +1076,27 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 		slog_error("HERCULES_ERR_STAT_IMSS_GET_RECV_DATA_LENGTH");
 		return -1;
 	}
-	void *request = malloc(length);
-	ret = recv_dynamic_stream(ucp_worker_meta, ep, request, IMSS_INFO, local_meta_uid, length);
+	//void *request = malloc(length);
+//	ret = recv_dynamic_stream(ucp_worker_meta, ep, request, IMSS_INFO, local_meta_uid, length);
+	// ret = recv_dynamic_stream(ucp_worker_meta, ep, &imss_info_, IMSS_INFO, local_meta_uid, length);
+	ret = recv_dynamic_stream(ucp_worker_meta, ep, imss_info_, IMSS_INFO, local_meta_uid, length);
+
 	slog_debug("[IMSS] End, ret=%d", ret);
 
 	if (ret == -1)
 	{
 		pthread_mutex_unlock(&lock_network);
-		free(request);
+		// free(request);
 		return 0;
 	}
 	// imss_info_ = (imss_info *)request;
-	memcpy(imss_info_, request, sizeof(imss_info));
-	free(request);
+	// memcpy(imss_info_, request, sizeof(imss_info));
+	// imss_info *aux = (imss_info *)request;
+	// free(aux->ips);
+	// free(aux->status);
+	// free(aux->arr_num_active_storages);
+	
+	// free(request);
 	pthread_mutex_unlock(&lock_network);
 	return 1;
 }
@@ -2430,7 +2476,7 @@ int32_t get_data_location(int32_t dataset_id, int32_t data_id, int32_t op_type)
 	}
 
 	int32_t server = -1;
-	slog_live("[IMSS] curr_dataset.uri=%s, curr_imss.info.num_storages=%d, curr_dataset.n_servers=%d, curr_imss.info.num_active_storages=%d, curr_dataset.n_servers_when_created=%d", curr_dataset.uri_, curr_imss.info.num_storages, curr_dataset.n_servers, curr_imss.info.num_active_storages, curr_dataset.n_servers_when_created);
+	slog_live("curr_dataset.uri=%s, curr_imss.info.num_storages=%d, curr_dataset.n_servers=%d, curr_imss.info.num_active_storages=%d, curr_dataset.n_servers_when_created=%d", curr_dataset.uri_, curr_imss.info.num_storages, curr_dataset.n_servers, curr_imss.info.num_active_storages, curr_dataset.n_servers_when_created);
 	// Search for the server that is supposed to have the specified data element.
 	// slog_debug("curr_dataset.uri_=%s", curr_dataset.uri_);
 	if (curr_imss.info.num_active_storages > 1)
@@ -3087,12 +3133,21 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 	replication_factor = curr_dataset.repl_factor;
 	curr_imss_storages = curr_imss.info.num_active_storages;
 
+	if (replication_factor < 0 || curr_imss_storages < 0)
+	{
+		fprintf(stderr, "HERCULES_ERR_GET_NDATA_BAD_PARAMS");
+		slog_error("HERCULES_ERR_GET_NDATA_BAD_PARAMS");
+		return -1;
+	}
+	
+
 	// Servers that the data block is going to be requested to.
 	int32_t repl_servers[replication_factor];
 	int32_t session_policy = curr_dataset.session_plcy; //  get_policy();
 
 	uint32_t n_server_ = 0;
 	int32_t aux_conn = 0;
+	slog_debug("replication_factor=%d, curr_imss_storages=%d", replication_factor, curr_imss_storages);
 	// Retrieve the corresponding connections to the previous servers.
 	for (int32_t i = 0; i < replication_factor; i++)
 	{
@@ -3151,7 +3206,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		// msg_length = TIMING( get_recv_data_length(ucp_worker_data, local_data_uid), "get_recv_data_length", size_t);
 		ucp_tag_recv_info_t info_tag;
 		ucp_tag_message_h msg_tag;
-		msg_length = TIMING( get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t, process_rank);
+		msg_length = TIMING(get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t, process_rank);
 		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
 		{
@@ -3172,7 +3227,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		}
 
 		// msg_length = TIMING( recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0), "recv_data", size_t);
-		msg_length = TIMING( recv_data_2(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0, info_tag, msg_tag), "recv_data_2", size_t, process_rank);
+		msg_length = TIMING(recv_data_2(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0, info_tag, msg_tag), "recv_data_2", size_t, process_rank);
 
 		slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
@@ -3371,7 +3426,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 	int32_t n_server;
 	size_t msg_length = 0;
 	// Server containing the corresponding data to be written.
-	if ((n_server = TIMING(get_data_location(dataset_id, data_id, SET),"get_data_location", int32_t, process_rank)) == -1)
+	if ((n_server = TIMING(get_data_location(dataset_id, data_id, SET), "get_data_location", int32_t, process_rank)) == -1)
 	{
 		perror("HERCULES_ERR_GET_DATA_LOCATION");
 		slog_error("HERCULES_ERR_GET_DATA_LOCATION");
@@ -3514,7 +3569,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 			ep = curr_imss.conns.eps[n_server_];
 
 			// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id) in a dataset (curr_dataset.uri).
-			if (TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_),"send_req", size_t, process_rank) == 0)
+			if (TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), "send_req", size_t, process_rank) == 0)
 			{
 				fprintf(stderr, "********** current server status = %d\n", curr_imss.info.status[n_server_]);
 				perror("HERCULES_ERR_SET_REQ_SEND_REQ");
@@ -3524,7 +3579,7 @@ int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t
 			}
 
 			// send the data to the data server of the current dataset.
-			if (TIMING(send_data(ucp_worker_data, ep, buffer, size, local_data_uid),"send_data", size_t, process_rank) == 0)
+			if (TIMING(send_data(ucp_worker_data, ep, buffer, size, local_data_uid), "send_data", size_t, process_rank) == 0)
 			{
 				perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
 				slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");

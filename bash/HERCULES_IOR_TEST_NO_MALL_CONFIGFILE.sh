@@ -1,12 +1,12 @@
 #!/bin/bash
 
 SCRIPT_NAME="ior_hercules_slurm.sh"
-FILE_SIZE=$((1024*1024*100))
+FILE_SIZE=$((1024*1024*50))
 
-ATTACHED=1
+ATTACHED=0
 
 # 0 = Shared single file, 1 = File per process.
-IOR_FILE_PER_PROCESS=1
+IOR_FILE_PER_PROCESS=0
 # 0 = Do not avoid cache, 1 = Avoid cache (recommend by https://ior.readthedocs.io/en/latest/userDoc/tutorial.html).
 IOR_AVOID_CACHE=0
 
@@ -23,18 +23,19 @@ METADATA_HOSTFILE="\/beegfs\/home\/javier.garciablas\/hercules\/bash\/meta_hostf
 #DEBUG_LEVEL=all
 #DEBUG_LEVEL=SLOG_READ
 DEBUG_LEVEL=none
+
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="RR"
 #export UCX_USE_MT_MUTEX=y
 
 NUM_SERVERS_RANGE=( 16 )
 #NUM_SERVERS_RANGE=( 1 4 8 16 32 )
-NODES_FOR_CLIENTS_RANGE=( 16 )
+NODES_FOR_CLIENTS_RANGE=( 8 )
 #NODES_FOR_CLIENTS_RANGE=( 1 4 8 16 32 )
 #CLIENTS_PER_NODE_RANGE=( 1 2 4 8 16 32 )
-CLIENTS_PER_NODE_RANGE=( 16 )
+CLIENTS_PER_NODE_RANGE=( 8 )
 BLOCK_SIZE_RANGE=( 512 )
-THREAD_POOL=8
+export THREAD_POOL=8
 
 MAX_ITERATIONS=1
 

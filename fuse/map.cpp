@@ -148,4 +148,31 @@ extern "C"
 		return 1;
 	}
 
+	void map_free(void *map)
+	{
+		std::unique_lock<std::mutex> lck(map_lock);
+		Map *m = reinterpret_cast<Map *>(map);
+		// auto search = m->find(std::string(k));
+
+		for (auto it = m->cbegin(); it != m->cend(); ++it)
+		{
+			free(it->second.aux);
+		}
+
+		m->clear();
+
+		// if (search != m->end())
+		// {
+		// 	free(search->second.aux);
+		// 	slog_debug("[map] erasing element with key %s", k);
+		// }
+		// else
+		// {
+		// 	slog_debug("[map] element with key %s was not find", k);
+		// }
+		// int num_elements_erased = m->erase(std::string(k));
+		// slog_debug("[map] finish map_erase, num_elements_erased=%d", num_elements_erased);
+		// return ret;
+	}
+
 } // extern "C"

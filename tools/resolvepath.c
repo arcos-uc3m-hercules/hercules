@@ -26,7 +26,8 @@
  * SUCH DAMAGE.
  */
 
-/* Last Update: 15/Dec/2023 */
+/* First version: 15/Dec/2023 */
+/* Last Update: 11/Apr/2025 */
 
 #include "resolvepath.h"
 #include <stdio.h>

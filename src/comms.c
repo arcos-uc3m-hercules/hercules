@@ -20,8 +20,8 @@ extern void *map_ep; // map_ep used for async write
 pthread_mutex_t map_ep_mutex;
 pthread_mutex_t lock_ucx_comm = PTHREAD_MUTEX_INITIALIZER;
 
-void *send_buffer;
-void *recv_buffer;
+// void *send_buffer;
+// void *recv_buffer;
 
 int ep_timeout = 0;
 
@@ -60,6 +60,16 @@ ucs_status_t ucp_mem_alloc(ucp_context_h ucp_context, size_t length, void **addr
 	return UCS_OK;
 }
 
+// ucs_status_t ucp_mem_destroy(ucp_context_h ucp_context, void **address_p)
+// {
+
+// 	ucs_status_t status;
+
+// 	ucp_mem_free(ucp_context, address_p);
+
+// 	return UCS_OK;
+// }
+
 /**
  * Create a ucp worker on the given ucp context.
  */
@@ -80,8 +90,9 @@ int init_worker(ucp_context_h ucp_context, ucp_worker_h *ucp_worker)
 	if (status != UCS_OK)
 	{
 		// fprintf(stderr, "failed to ucp_worker_create (%s)", ucs_status_string(status));
-		slog_error("failed to ucp_worker_create (%s)", ucs_status_string(status));
 		perror("HERCULES_ERR_WORKER_INIT");
+		slog_error("HERCULES_ERR_WORKER_INIT: failed to ucp_worker_create (%s)", ucs_status_string(status));
+
 		ret = -1;
 	}
 
@@ -133,29 +144,31 @@ int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h 
 	{
 		slog_error("failed to ucp_init (%s)", ucs_status_string(status));
 		slog_error("HERCULES_INIT_CONTEXT_UCP_INIT");
-		ret = -1;
-		goto err;
+		ucp_cleanup(*ucp_context);
+		return -1;
+		// goto err;
 	}
 	// slog_info("Before init worker");
 	ret = init_worker(*ucp_context, ucp_worker);
 	// slog_info("After init worker");
 	if (ret != 0)
 	{
-		goto err_cleanup;
+		ucp_cleanup(*ucp_context);
+		// goto err_cleanup;
 	}
 
 	// slog_info("Before ucp_mem_alloc for send buffer");
-	ucp_mem_alloc(*ucp_context, 4 * 1024 * 1024, (void **)&send_buffer);
+	// ucp_mem_alloc(*ucp_context, 4 * 1024 * 1024, (void **)&send_buffer);
 	// slog_info("After ucp_mem_alloc for send buffer");
-	ucp_mem_alloc(*ucp_context, 4 * 1024 * 1024, (void **)&recv_buffer);
+	// ucp_mem_alloc(*ucp_context, 4 * 1024 * 1024, (void **)&recv_buffer);
 	// slog_info("After ucp_mem_alloc for recv buffer");
 
 	// slog_debug("[COMM] Inicializated context result: %d", ret);
-	return ret;
+	// return ret;
 
-err_cleanup:
-	ucp_cleanup(*ucp_context);
-err:
+	// err_cleanup:
+	// 	ucp_cleanup(*ucp_context);
+	// err:
 	return ret;
 }
 
@@ -392,23 +405,17 @@ size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_len
 	recv_param.cb.recv = recv_handler;
 
 	slog_debug("[COMM] Probe tag (%lu bytes)", msg_length);
-	//	t = clock();
-	// clock_t t;
-	// t = clock();
-	if (async)
+	// if (async)
 	{
 		request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
 	}
-	else
-	{
-		request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
-		memcpy(msg, recv_buffer, msg_length);
-	}
+	// else
+	// {
+	// 	request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
+	// 	memcpy(msg, recv_buffer, msg_length);
+	// }
 
 	status = ucx_wait(ucp_worker, request, "recv", "data");
-
-	// t = clock() - t;
-	// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 
 	if (status != UCS_OK)
 	{
@@ -437,24 +444,18 @@ size_t recv_data_2(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_l
 	recv_param.cb.recv = recv_handler;
 
 	slog_debug("[COMM] Probe tag (%lu bytes)", msg_length);
-	//	t = clock();
-	// clock_t t;
-	// t = clock();
-	if (async)
+	// if (async)
 	{
 		// request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
 		request = (struct ucx_context *)ucp_tag_msg_recv_nbx(ucp_worker, msg, info_tag.length, msg_tag, &recv_param);
 	}
-	else
-	{
-		request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
-		memcpy(msg, recv_buffer, msg_length);
-	}
+	// else
+	// {
+	// 	request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
+	// 	memcpy(msg, recv_buffer, msg_length);
+	// }
 
 	status = ucx_wait(ucp_worker, request, "recv", "data");
-
-	// t = clock() - t;
-	// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 
 	if (status != UCS_OK)
 	{
@@ -533,15 +534,15 @@ size_t recv_data_opt(ucp_worker_h ucp_worker, ucp_ep_h ep, void **msg, size_t ms
 	recv_param.cb.recv = recv_handler;
 
 	//	t = clock();
-	if (async)
+	// if (async)
 	{
 		request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, *msg, msg_length, dest, tag_mask, &recv_param);
 	}
-	else
-	{
-		request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
-		memcpy(*msg, recv_buffer, msg_length);
-	}
+	// else
+	// {
+	// 	request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
+	// 	memcpy(*msg, recv_buffer, msg_length);
+	// }
 
 	// if (errno != 0)
 	// {
@@ -822,6 +823,7 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 	char *info_buffer;
 	// Buffer size.
 	size_t msg_size;
+	int to_free = 0;
 
 	slog_debug("[COMM] send_dynamic start, data_type=%d", data_type);
 	// Formalize the information to be sent.
@@ -838,6 +840,15 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		// Reserve the corresponding amount of memory for the previous buffer.
 		// info_buffer = (char *)malloc(msg_size * sizeof(char));
 		info_buffer = (char *)mem_type_malloc(msg_size * sizeof(char));
+
+		if (info_buffer == NULL)
+		{
+			perror("HERCULES_ERR_COMMS_IMSS_INFO_SEND_DYNAMIC_STREAM_MEMORY");
+			slog_error("HERCULES_ERR_COMMS_IMSS_INFO_SEND_DYNAMIC_STREAM_MEMORY");
+			return -1;
+		}
+
+		to_free = 1;
 
 		// Control variables dealing with incomming memory management actions.
 		char *offset_pt = info_buffer;
@@ -879,6 +890,14 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		// Reserve the corresponding amount of memory for the previous buffer.
 		// info_buffer = (char *)malloc(msg_size * sizeof(char));
 		info_buffer = (char *)mem_type_malloc(msg_size * sizeof(char));
+		if (info_buffer == NULL)
+		{
+			perror("HERCULES_ERR_COMMS_DATASET_INFO_SEND_DYNAMIC_STREAM_MEMORY");
+			slog_error("HERCULES_ERR_DATASET_INFO_COMMS_SEND_DYNAMIC_STREAM_MEMORY");
+			return -1;
+		}
+
+		to_free = 1;
 
 		// Serialize the provided message into the buffer.
 		char *offset_pt = info_buffer;
@@ -918,6 +937,11 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		slog_error("HERCULES_ERR_SENDDYNAMSTRUCT");
 		perror("HERCULES_ERR_SENDDYNAMSTRUCT");
 		return -1;
+	}
+
+	if (to_free)
+	{
+		free(info_buffer);
 	}
 
 	slog_debug("[COMM] send_dynamic end %lu ", msg_size);

@@ -446,7 +446,7 @@ GTree_getdir(char *desired_dir,
 	// TO CHECK!
 	slog_info("serialize_dir_childrens(dir_node=%s, num_children=%d, &aux_dir_elem)", dir_node->data, num_children);
 	serialize_dir_childrens(dir_node, num_children, &aux_dir_elem);
-	slog_info("ending serialize_dir_childrens, aux_dir_elem=%s", aux_dir_elem);
+	slog_info("ending serialize_dir_childrens, aux_dir_elem=%s", *aux_dir_elem);
 
 	return dir_elements;
 }

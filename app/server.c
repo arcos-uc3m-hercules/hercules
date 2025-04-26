@@ -18,7 +18,7 @@ extern GNode *tree_root;
 extern pthread_mutex_t tree_mut;
 // extern int32_t __thread current_dataset;   // Dataset whose policy has been set last.
 // extern dataset_info __thread curr_dataset; // Currently managed dataset.
-extern imss __thread curr_imss;
+extern imss curr_imss;
 
 // Initial buffer address.
 extern char *buffer_address;

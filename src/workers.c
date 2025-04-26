@@ -293,7 +293,6 @@ void *srv_worker(void *th_argv)
 		arguments->server_ep = ep;
 		arguments->worker_uid = attr.worker_uid;
 
-
 		TIMING_NO_RETURN(srv_worker_helper(arguments, req, map_server_eps), "srv_worker_helper %d", arguments->thread_id);
 		t = clock() - t;
 
@@ -347,6 +346,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	}
 
 	TIMING_NO_RETURN(sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read);, "sscanf requeest", arguments->thread_id);
+	// GET = read operation.
+	// SET = write operation.
 	if (!strcmp(mode, "GET"))
 	{
 		more = GET_OP;
@@ -390,7 +391,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	// Differentiate between READ and WRITE operations.
 	switch (more)
 	{
-	// No more messages will arrive to the socket.
 	case READ_OP:
 	{
 		switch (block_size_recv)
@@ -1079,7 +1079,10 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				{
 					slog_debug("[WRITE_OP] is_shared_memory=%d", is_shared_memory);
 					// Get the length of the data to be received.
-					msg_length = TIMING(get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);, "[write] get_recv_data_length", size_t, arguments->thread_id);
+					ucp_tag_recv_info_t info_tag;
+					ucp_tag_message_h msg_tag;
+					// msg_length = TIMING(get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);, "[write] get_recv_data_length", size_t, arguments->thread_id);
+					msg_length = TIMING(get_recv_data_length_2(arguments->ucp_worker, arguments->worker_uid, &info_tag, &msg_tag), "[write] get_recv_data_length_2", size_t, arguments->thread_id);
 					if (msg_length == 0)
 					{
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
@@ -1114,7 +1117,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					size_asigned_to_block = BLOCK_SIZE;
 
 					// Receive the data from the front end.
-					msg_length = NETWORK_TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);, "[write] recv_data", size_t);
+					// msg_length = NETWORK_TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);, "[write] recv_data", size_t);
+					msg_length = TIMING(recv_data_2(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 0, info_tag, msg_tag), "[write] recv_data_2", size_t, arguments->thread_id);
 					if (msg_length == 0)
 					{
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
@@ -1179,7 +1183,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					// Fill buffer_broadcast with the data received from the other servers.
 					// buffer_broadcast[];
 					slog_debug("Snapshot operation, origin server=%s", key.c_str());
-					insert_successful = TIMING(map->put_broadcast(key, buffer, msg_length);," new block map-put_broadcast", int, arguments->thread_id);
+					insert_successful = TIMING(map->put_broadcast(key, buffer, msg_length);, " new block map-put_broadcast", int, arguments->thread_id);
 				}
 				else
 				{
@@ -1202,7 +1206,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				std::size_t found = TIMING(key.find("$0");, "check if block 0", std::size_t, arguments->thread_id);
 				if (found != std::string::npos) // block 0.
 				{
-					insert_successful = TIMING(map->put_snapshot(key, -1);, "map->put_snapshot", int, arguments->thread_id); 
+					insert_successful = TIMING(map->put_snapshot(key, -1);, "map->put_snapshot", int, arguments->thread_id);
 					// Include the new record in the tracking structure.
 					if (insert_successful != 0)
 					{
@@ -2415,8 +2419,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 /**
  * @brief Obsolete: Server dispatcher thread method.
- * 
- * */ 
+ *
+ * */
 void *srv_attached_dispatcher(void *th_argv)
 {
 	// Cast from generic pointer type to p_argv struct type pointer.
@@ -2548,7 +2552,7 @@ void *srv_attached_dispatcher(void *th_argv)
 			int32_t port_ = arguments->port + 1 + (client_id_ % hercules_thread_pool_size);
 			// Wrap the previous info into the ZMQ message.
 			sprintf(response_, "%d%c%d", port_, '-', client_id_++);
-			slog_info("Seding response_=%s", response_);			
+			slog_info("Seding response_=%s", response_);
 			// Send communication specifications.
 			if (send_data(ucp_data_worker, server_ep, response_, strlen(response_) + 1, arguments->worker_uid) == 0)
 			{
@@ -2691,7 +2695,7 @@ void *dispatcher(void *th_argv)
 
 		// Check if the client is requesting connection resources.
 		if (!strncmp(req_content, "HELLO!", 6))
-		{ 
+		{
 			// Case where a client (front-end) is connecting to the data server.
 			// fprintf(stderr, "HERCULES_THREAD_POOL_SIZE = %d, client=%d\n", hercules_thread_pool_size, client);
 			ret = send(new_socket, &local_addr_len[(client % hercules_thread_pool_size)], sizeof(local_addr_len[(client % hercules_thread_pool_size)]), 0);
@@ -2708,7 +2712,7 @@ void *dispatcher(void *th_argv)
 			slog_debug("Replied client.");
 		}
 		else if (!strncmp(req_content, "MAIN!", 5))
-		{ 
+		{
 			// Case where a data server is connecting to the metadata server.
 			// TO FIX: 0 must be a dynamic value depending on the number of
 			// metadata servers.

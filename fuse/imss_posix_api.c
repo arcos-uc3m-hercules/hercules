@@ -331,11 +331,20 @@ int imss_getattr(char *path, struct stat *stbuf)
 	{ // not found.
 		ds = open_dataset((char *)imss_path, 0);
 		slog_debug("[imss_getattr] ds=%d", ds);
-		if (ds >= (int32_t)0)
+		if (ds >= (int32_t)0) // TODO: add ds == -EEXIST in the condition and remove the else.
 		{
 			int ret = 0;
 			// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
-			void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+			void *data = NULL;
+			data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+
+			if (data == NULL)
+			{
+				perror("HERCULES_ERR_GETATTR_MEMORY_ALLOC_1");
+				slog_error("HERCULES_ERR_GETATTR_MEMORY_ALLOC_1");
+				return -ENOMEM;
+			}
+
 			//  data is filled in "get data".
 			ret = get_ndata(ds, 0, data, 0, 0);
 			if (ret < 0)
@@ -353,7 +362,14 @@ int imss_getattr(char *path, struct stat *stbuf)
 		{ // file aready exists on the remote metadata server.
 			int ret = 0;
 			// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
-			void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+			void *data = NULL;
+			data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+			if (data == NULL)
+			{
+				perror("HERCULES_ERR_GETATTR_MEMORY_ALLOC_2");
+				slog_error("HERCULES_ERR_GETATTR_MEMORY_ALLOC_2");
+				return -ENOMEM;
+			}
 			//  data is filled in "get data".
 			ret = get_ndata(ds, 0, data, 0, 0);
 			if (ret < 0)
@@ -586,8 +602,8 @@ int imss_open(char *path, uint64_t *fh)
 		print_file_type(stats, imss_path);
 		if (PREFETCH != 0)
 		{
-			char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
-			map_init_prefetch(map_prefetch, imss_path, buff);
+			// char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
+			map_init_prefetch(map_prefetch, imss_path, PREFETCH * IMSS_DATA_BSIZE);
 		}
 		// pthread_mutex_unlock(&lock_file);
 		// free(aux);
@@ -1514,7 +1530,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		// }
 		// else
 		{
-			if (TIMING(set_data(ds, curr_blk, data_pointer, bytes_to_copy, block_offset),"set_data", int32_t, -1) < 0)
+			if (TIMING(set_data(ds, curr_blk, data_pointer, bytes_to_copy, block_offset), "set_data", int32_t, -1) < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
 				error_print = -ENOENT;
@@ -2128,8 +2144,8 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened, char fi
 	slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath, *fh, ds_stat.st_blksize);
 	if (PREFETCH != 0)
 	{
-		char *buff = (char *)malloc(PREFETCH * IMSS_BLKSIZE * KB);
-		map_init_prefetch(map_prefetch, rpath, buff);
+		// char *buff = (char *)malloc(PREFETCH * IMSS_BLKSIZE * KB);
+		map_init_prefetch(map_prefetch, rpath, PREFETCH * IMSS_BLKSIZE * KB);
 		slog_debug("PREFETCH:%ld, map_init_prefetch(map_prefetch, rpath:%s)", PREFETCH, rpath);
 	}
 	pthread_mutex_unlock(&lock_file); // unlock.
@@ -2388,7 +2404,7 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 			if (PREFETCH != 0)
 			{
 				char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
-				map_init_prefetch(map_prefetch, new_path_1, buff);
+				map_init_prefetch(map_prefetch, new_path_1, PREFETCH * IMSS_DATA_BSIZE);
 			}
 			pthread_mutex_unlock(&lock_file);
 			// free(aux);

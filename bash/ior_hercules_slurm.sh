@@ -90,7 +90,8 @@ end_=$(date +%s.%N)
 runtime=$(echo "$end_ - $start_" | bc -l)
 echo "Hercules started in $runtime seconds, start=$start_, end=$end_"
 
-echo "DATA SERVERS $HERCULES_NUM_DATA"
+echo "DATASERVERS $HERCULES_NUM_DATA"
+echo "THREADS $THREAD_POOL"
 
 echo "Running clients"
 #TRANSFER_SIZE=$((1024 * 16))
@@ -160,13 +161,23 @@ mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_H
 ## Waits some seconds to allow Hercules finishing copying all blocks to disk.
 # /beegfs/home/javier.garciablas/hercules/scripts/hercules stop \
 # 	   -f "$HERCULES_CONF"
+HERCULES_DEBUG_LEVEL=all HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/
+#exit 0
+
+# Copy the file to the disk.
+#HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  cp /mnt/hercules/data.out ./data-beegfs.out
+#md5sum data-beegfs.out
 
 ## Checksum to the file.
 #HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/data.out
 #HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  md5sum /mnt/hercules/data.out
 #HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  md5sum /mnt/hercules/data.out
 
+
+HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  diff /mnt/hercules/data.out data-beegfs.out
+
 #mpiexec -np=8 $HERCULES_MPI_PPN=1 $HERCULES_MPI_HOSTFILE_DEF=./data_hostfile \
 #	cat /tmp/hercules_pkill_operation
 
 echo "done!"
+exit 0

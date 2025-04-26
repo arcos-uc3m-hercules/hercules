@@ -79,6 +79,8 @@ uint32_t get_policy_number(const char *policy_string)
 		return -1;
 	}
 
+	slog_debug("policy_string=%s, session_policy=%d", policy_string, session_policy);
+
 	return session_policy;
 }
 

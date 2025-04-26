@@ -22,9 +22,10 @@ using std::string;
 
 extern StsHeader *mem_pool;
 
-extern int32_t __thread current_dataset;   // Dataset whose policy has been set last.
-extern dataset_info __thread curr_dataset; // Currently managed dataset.
-extern imss __thread curr_imss;
+// __thread
+extern int32_t  current_dataset;   // Dataset whose policy has been set last.
+extern dataset_info curr_dataset; // Currently managed dataset.
+extern imss curr_imss;
 
 extern std::mutex mtx;
 extern std::condition_variable cv;
