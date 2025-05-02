@@ -528,7 +528,6 @@ if [[ "$VERBOSE" -eq "1" ]]; then
     echo "SERVERS_HOSTFILES_OPTION=$SERVERS_HOSTFILES_OPTION"
 fi
 if [[ $SERVERS_HOSTFILES_OPTION -eq "0" ]]; then
-    #srun -pernode hostname |sort > hostfile
     scontrol show hostnames "${SLURM_JOB_NODELIST}" > ${FULL_HOSTFILE}
     # scontrol show hostnames "$SLURM_JOB_NODELIST"
 fi
@@ -680,7 +679,7 @@ start=`date +%s.%N`
 for node in ${data_hosts[@]}
 do
     RM="rm ${HERCULES_PATH}/tmp/d-hercules-$i-start"
-    COMMAND="$HERCULES_BUILD_PATH/hercules_server d $i ${meta_hosts[0]} $INIT_HERCULES_NUM_DATA"
+    COMMAND="$HERCULES_BUILD_PATH/hercules_server d $i $INIT_HERCULES_NUM_DATA"
     if [[ "$SLURM" -eq "0" ]]; then
         # ssh $node "$RM; cd $HERCULES_BASH_PATH &&  $COMMAND &"
         if [[ "$VERBOSE" -eq "1" ]]; then

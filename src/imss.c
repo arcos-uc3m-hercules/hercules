@@ -90,8 +90,7 @@ ucp_ep_h *stat_eps;
 extern char POLICY[MAX_POLICY_LEN];
 
 pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
-// To synchronize network operations.
-pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
+
 
 SharedMemory *shared_memory;
 key_t shared_memory_key;
@@ -266,6 +265,7 @@ int32_t stat_init(char *stat_hostfile,
 				  uint32_t rank)
 {
 	slog_debug("[IMSS] Calling stat_init.");
+	fprintf(stderr, "[IMSS] Calling stat_init.\n");
 
 	// Number of metadata servers to connect to.
 	n_stat_servers = num_stat_servers;
@@ -485,12 +485,12 @@ int32_t stat_release()
 		ucp_ep_h ep = stat_eps[i];
 		char release_msg[REQUEST_SIZE];
 		sprintf(release_msg, "%" PRIu32 " GET 2 RELEASE", process_rank);
-		// slog_live("Request - %s", release_msg);
+		slog_live("Request - %s", release_msg);
 		if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, release_msg) == 0)
 		{
-			pthread_mutex_unlock(&lock_network);
 			slog_error("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
 			perror("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
+			pthread_mutex_unlock(&lock_network);
 			return -1;
 		}
 
@@ -549,7 +549,6 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 	uint32_t m_srv = 0;
 	int number_metadata_servers = 0;
 	int first_parent_offset = find_first_parent_dir(requested_uri, first_parent_dir);
-	slog_debug("requested_uri=%s, first_parent_dir=%s, first_parent_offset=%d", requested_uri, first_parent_dir, first_parent_offset);
 	if (first_parent_offset > 0)
 	{
 		m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
@@ -559,14 +558,14 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 	{
 		number_metadata_servers = n_stat_servers;
 	}
-
+	
+	slog_debug("requested_uri=%s, first_parent_dir=%s, first_parent_offset=%d, number_metadata_servers=%d", requested_uri, first_parent_dir, first_parent_offset, number_metadata_servers);
 	pthread_mutex_lock(&lock_network);
 	char getdir_req[REQUEST_SIZE] = {0};
 	uint32_t total_num_elements = 0;
 
 	char **arr_elements = (char **)malloc(number_metadata_servers * sizeof(char *));
 	int arr_lengths[number_metadata_servers] = {0};
-	// int root_found = 0;
 
 	// Search in all servers.
 	for (int i = m_srv; i < m_srv + number_metadata_servers; i++)

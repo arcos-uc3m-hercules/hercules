@@ -62,6 +62,7 @@ typedef struct
 } p_argv;
 
 // Thread method attending client data requests.
+void *hercules_ucx_server(void *th_argv);
 void *srv_worker(void *th_argv);
 int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps);
 void *Checkpoint(void *th_argv);

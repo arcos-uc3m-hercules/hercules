@@ -436,8 +436,9 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 	char **refs;
 	int n_ent = 0;
 
-	char *imss_path = (char *)calloc(MAX_PATH, sizeof(char));
-	get_iuri(path, imss_path);
+	char *imss_path = (char *)path; // this pointer should not be free. // (char *)calloc(MAX_PATH, sizeof(char));
+	// char *imss_path = (char *)calloc(MAX_PATH, sizeof(char));
+	// get_iuri(path, imss_path);
 
 	// Add "/" at the end of the path if it does not have it.
 	// FIX: "ls" when there is more than one "/".
@@ -509,7 +510,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 		}
 	}
 	// Free resources
-	free(imss_path);
+	// free(imss_path);
 	free(refs);
 	return 0;
 

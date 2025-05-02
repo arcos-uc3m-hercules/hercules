@@ -25,7 +25,7 @@ void map_server_eps_put(void *map, uint64_t uuid, ucp_ep_h ep)
 
 	m->insert(std::pair<uint64_t, ucp_ep_h>(uuid, ep));
 
-	slog_debug("\t[map_server_eps]['%" PRIu64 "'] Adding new connection, #%ld", uuid, m->size());
+	slog_debug("\t['%" PRIu64 "'] Adding new connection, #%ld", uuid, m->size());
 	// fprintf(stderr, "\t[%c]['%" PRIu64 "'] Adding new connection, #%ld\n", server_type, uuid, m->size());
 }
 

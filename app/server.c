@@ -37,7 +37,6 @@ struct arguments args;
 std::shared_ptr<map_records> g_map;
 
 /* UCP objects */
-ucp_context_h ucp_context;
 ucp_worker_h ucp_worker;
 
 // ucp_ep_h pub_ep;
@@ -124,6 +123,9 @@ int32_t main(int32_t argc, char **argv)
 	pthread_cond_init(&global_run_snapshot_cond, NULL);
 	pthread_cond_init(&global_finish_cond, NULL);
 
+	/* UCP objects */
+	ucp_context_h ucp_context;
+
 	// clock_t t;
 	double time_taken;
 	int init_number_of_server = 1;
@@ -177,7 +179,7 @@ int32_t main(int32_t argc, char **argv)
 	}
 
 	// Checks arguments for metadata and data servers.
-	if ((argc != 3 && args.type == TYPE_METADATA_SERVER) || (argc != 5 && args.type == TYPE_DATA_SERVER))
+	if ((argc != 3 && args.type == TYPE_METADATA_SERVER) || (argc != 4 && args.type == TYPE_DATA_SERVER))
 	{
 		print_usage("Wrong number of arguments");
 		return 0;
@@ -218,12 +220,12 @@ int32_t main(int32_t argc, char **argv)
 	slog_debug("[SERVER] Starting server.");
 	if (args.type == TYPE_DATA_SERVER)
 	{
-		args.stat_host = argv[3];
-		slog_debug("imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_host, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
+		// args.stat_host = argv[3];
+		slog_debug("imss_uri = %s, stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
 		// fprintf(stderr, "imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "\n", args.imss_uri, args.stat_host, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
 		// bind port number.
 		bind_port = args.data_port;
-		init_number_of_server = atoi(argv[4]);
+		init_number_of_server = atoi(argv[3]);
 	}
 	else
 	{
@@ -267,12 +269,12 @@ int32_t main(int32_t argc, char **argv)
 	// figure out how many blocks we need and allocate them
 	num_blocks = max_storage_size / (args.block_size * KB);
 	slog_info("[main] num_blocks=%lu", num_blocks);
-	for (int i = 0; i < num_blocks; ++i)
-	{
-		void *buffer = (void *)calloc(args.block_size * KB, sizeof(char));
-		// memset(buffer, 0, args.block_size * KB);
-		StsQueue.push(mem_pool, buffer);
-	}
+	// for (int i = 0; i < num_blocks; ++i)
+	// {
+	// 	void *buffer = (void *)calloc(args.block_size * KB, sizeof(char));
+	// 	// memset(buffer, 0, args.block_size * KB);
+	// 	StsQueue.push(mem_pool, buffer);
+	// }
 
 	/* CHECK THIS OUT!
 	 ***************************************************
@@ -282,7 +284,7 @@ int32_t main(int32_t argc, char **argv)
 	if (args.type == TYPE_DATA_SERVER)
 	{
 		// machine name where the metadata server is being executed.
-		stat_add = args.stat_host;
+		// stat_add = args.stat_host;
 		// port that the metadata server is listening on.
 		stat_port = args.stat_port;
 		// number of servers conforming the HERCULES deployment.
@@ -672,30 +674,39 @@ int32_t main(int32_t argc, char **argv)
 			arguments[i].pt = (char *)(aux_idx * buffer_segment + buffer_address);
 			arguments[i].thread_id = aux_idx;
 
-			// HERCULES data server.
-			if (args.type == TYPE_DATA_SERVER)
+			// HERCULES server.	Metadata and data servers use the same "hercules_ucx_server" method,
+			// we differenced between them inside.
+			slog_debug("[SERVER] Creating server thread.");
+			if (pthread_create(&threads[i], NULL, hercules_ucx_server, (void *)&arguments[i]) == -1)
 			{
-				slog_debug("[SERVER] Creating data thread.");
-				if (pthread_create(&threads[i], NULL, srv_worker, (void *)&arguments[i]) == -1)
-				{
-					// Notify thread error deployment.
-					perror("HERCULES_ERR_SRV_WORKER_DEPLOY");
-					slog_fatal("HERCULES_ERR_SRV_WORKER_DEPLOY");
-					return -1;
-				}
+				// Notify thread error deployment.
+				perror("HERCULES_ERR_UCX_SERVER_DEPLOY");
+				slog_fatal("HERCULES_ERR_UCX_SERVER_DEPLOY");
+				return -1;
 			}
-			// HERCULES Metadata server.
-			else
-			{
-				slog_debug("[SERVER] Creating metadata thread.");
-				if (pthread_create(&threads[i], NULL, stat_worker, (void *)&arguments[i]) == -1)
-				{
-					// Notify thread error deployment.
-					perror("HERCULES_ERR_STAT_WORKER_DEPLOY");
-					slog_fatal("HERCULES_ERR_STAT_WORKER_DEPLOY");
-					return -1;
-				}
-			}
+			// if (args.type == TYPE_DATA_SERVER)
+			// {
+			// 	slog_debug("[SERVER] Creating data thread.");
+			// 	if (pthread_create(&threads[i], NULL, srv_worker, (void *)&arguments[i]) == -1)
+			// 	{
+			// 		// Notify thread error deployment.
+			// 		perror("HERCULES_ERR_SRV_WORKER_DEPLOY");
+			// 		slog_fatal("HERCULES_ERR_SRV_WORKER_DEPLOY");
+			// 		return -1;
+			// 	}
+			// }
+			// // HERCULES Metadata server.
+			// else
+			// {
+			// 	slog_debug("[SERVER] Creating metadata thread.");
+			// 	if (pthread_create(&threads[i], NULL, stat_worker, (void *)&arguments[i]) == -1)
+			// 	{
+			// 		// Notify thread error deployment.
+			// 		perror("HERCULES_ERR_STAT_WORKER_DEPLOY");
+			// 		slog_fatal("HERCULES_ERR_STAT_WORKER_DEPLOY");
+			// 		return -1;
+			// 	}
+			// }
 		}
 	}
 
@@ -835,15 +846,23 @@ int32_t main(int32_t argc, char **argv)
 	for (int32_t i = 0; i < total_threads; i++)
 	{
 		// final deployment time.
+		int *ret_thread = NULL;
 		t = clock() - t;
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
-		if (pthread_join(threads[i], NULL) != 0)
+		if (pthread_join(threads[i], (void **)&ret_thread) != 0)
 		{
 			perror("HERCULES_ERR_SERVER_THREAD_JOIN");
 			return -1;
 		}
-		fprintf(stderr, "Server %d, ending thread %d/%d\n", args.id, i + 1, total_threads);
+		if (ret_thread != 0)
+		{
+			fprintf(stdout, "Server %d, ending thread %d/%d with errors\n", args.id, i + 1, total_threads);
+		}
+		else
+		{
+			fprintf(stdout, "Server %d, ending thread %d/%d\n", args.id, i + 1, total_threads);
+		}
 		// fprintf(stderr,"Ending %c server %d\n", args.type, args.id);
 		unlink(tmp_file_path);
 	}
@@ -880,7 +899,8 @@ int32_t main(int32_t argc, char **argv)
 	// Close publisher socket.
 	// ep_close(ucp_worker, pub_ep, UCP_EP_CLOSE_MODE_FORCE);
 	// ep_close(ucp_worker, metadata_endpoints, UCP_EP_CLOSE_MODE_FORCE);
-	// ucp_cleanup(ucp_context);
+	ucp_worker_destroy(ucp_worker);
+	ucp_cleanup(ucp_context);
 
 	// sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-stop", args.hercules_path, args.type, args.id);
 	// ready(tmp_file_path, "OK");

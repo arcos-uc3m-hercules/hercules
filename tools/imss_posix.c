@@ -544,12 +544,12 @@ extern "C"
 			// t_s = clock();
 			release = -1;
 			slog_live("[POSIX] release_imss()");
-			release_imss("imss://", CLOSE_DETACHED);
-			//  slog_live("[POSIX] stat_release()");
-			stat_release();
-			free_prefetch(map_prefetch);
-			map_free(map);
-			imss_comm_cleanup();
+			// release_imss("imss://", CLOSE_DETACHED);
+			// //  slog_live("[POSIX] stat_release()");
+			// stat_release();
+			// free_prefetch(map_prefetch);
+			// map_free(map);
+			// imss_comm_cleanup();
 			//   t_s = clock() - t_s;
 			//   time_taken = ((double)t_s) / (CLOCKS_PER_SEC);
 		}

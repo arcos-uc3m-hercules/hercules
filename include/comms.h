@@ -57,6 +57,9 @@ static const ucp_tag_t tag_mask = UINT64_MAX;
 #define MAX_RESPONSE_MSG_LEN 10
 static char empty_directory_msg[] = "EMPTY_DIRECTORY\0";
 
+// To synchronize network operations.
+static pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
+
 
 /**
  * Macro to measure the time spend by function_to_call.
@@ -199,6 +202,7 @@ size_t send_stream_addr(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *add
 
 static void request_init(void *request);
 
+void failure_handler(void *arg, ucp_ep_h ep, ucs_status_t status); 
 void flush_cb(void *request, ucs_status_t status);
 
 ucs_status_t flush_ep(ucp_worker_h worker, ucp_ep_h ep);

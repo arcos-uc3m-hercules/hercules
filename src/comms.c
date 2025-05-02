@@ -95,6 +95,9 @@ int init_worker(ucp_context_h ucp_context, ucp_worker_h *ucp_worker)
 
 		ret = -1;
 	}
+	// ucp_context_attr_t attr; //(ucp_context_attr_t *)malloc(sizeof(ucp_context_attr_t));
+	// ucp_context_query(ucp_context, &attr);
+	// fprintf(stderr, "ucx thread_mode=%d, %d\n", attr.thread_mode, UCS_THREAD_MODE_SERIALIZED);
 
 	// slog_debug("[COMM] Inicializated worker result: %d", ret);
 	return ret;
@@ -113,14 +116,12 @@ int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h 
 	// status = ucp_config_read(NULL, NULL, &config);
 	// ucp_config_print(config, stdout, NULL, UCS_CONFIG_PRINT_CONFIG);
 
-	slog_info("Before memset");
 	memset(&ucp_params, 0, sizeof(ucp_params));
-	slog_info("After memset");
 
 	/* UCP initialization */
-	slog_info("Before ucp_config_read");
-	status = ucp_config_read(NULL, NULL, &config);
-	slog_info("After ucp_config_read, status=%s", ucs_status_string(status));
+	// slog_info("Before ucp_config_read");
+	// status = ucp_config_read(NULL, NULL, &config);
+	// slog_info("After ucp_config_read, status=%s", ucs_status_string(status));
 	// ucp_config_print(config, stdout, NULL, UCS_CONFIG_PRINT_CONFIG);
 
 	ucp_params.field_mask = UCP_PARAM_FIELD_FEATURES |
@@ -132,13 +133,24 @@ int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h 
 	ucp_params.request_size = sizeof(struct ucx_context);
 	ucp_params.request_init = request_init;
 	ucp_params.name = "hercules";
-	// ucp_params.mt_workers_shared = UCS_THREAD_MODE_SERIALIZED;
+	ucp_params.mt_workers_shared = UCS_THREAD_MODE_SERIALIZED;
 	// ucp_params.mt_workers_shared = UCS_THREAD_MODE_SINGLE;
 	// slog_info("Before ucp_init");
-	status = ucp_init(&ucp_params, config, ucp_context);
+	// status = ucp_init(&ucp_params, config, ucp_context);
+	status = ucp_init(&ucp_params, NULL, ucp_context);
 	slog_info("After ucp_init, status=%s", ucs_status_string(status));
-	ucp_config_release(config);
+	// fprintf(stderr, "After ucp_init, status=%s, stderr=%s\n", ucs_status_string(status), strerror(errno));
+	if (status != UCS_OK)
+	{
+		fprintf(stderr, "failed to ucp_init (%s)\n", ucs_status_string(status));
+		return -1;
+	}
 
+	// ucp_context_attr_t attr; //(ucp_context_attr_t *)malloc(sizeof(ucp_context_attr_t));
+	// ucp_context_query(*ucp_context, &attr);
+	// fprintf(stderr, "ucx thread_mode=%d, %d\n", attr.thread_mode, UCS_THREAD_MODE_SERIALIZED);
+
+	// ucp_config_release(config);
 	// ucp_context_print_info(*ucp_context,stderr);
 	if (status != UCS_OK)
 	{
@@ -148,6 +160,7 @@ int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h 
 		return -1;
 		// goto err;
 	}
+
 	// slog_info("Before init worker");
 	ret = init_worker(*ucp_context, ucp_worker);
 	// slog_info("After init worker");
@@ -684,6 +697,15 @@ void err_cb_server(void *arg, ucp_ep_h ep, ucs_status_t status)
 		// fprintf(stderr, "\t [COMM]['%" PRIu64 "'] Server error handling callback was invoked with status %d (%s)\n", worker_uid, status, ucs_status_string(status));
 	}
 	slog_error("[COMM]['%" PRIu64 "'] server error handling callback was invoked with status %d (%s)", worker_uid, status, ucs_status_string(status));
+}
+
+void failure_handler(void *arg, ucp_ep_h ep, ucs_status_t status)
+{
+	ucs_status_t *arg_status = (ucs_status_t *)arg;
+
+	fprintf(stderr, "[0x%x] failure handler called with status %d (%s)\n", (unsigned int)pthread_self(), status, ucs_status_string(status));
+
+	*arg_status = status;
 }
 
 void common_cb(void *user_data, const char *type_str)
@@ -1477,8 +1499,7 @@ ucs_status_t ucx_wait(ucp_worker_h ucp_worker, struct ucx_context *request, cons
 	}
 	if (status != UCS_OK)
 	{
-		fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str,
-				ucs_status_string(status));
+		fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str, ucs_status_string(status));
 	}
 	// else
 	// {

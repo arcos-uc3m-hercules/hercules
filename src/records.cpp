@@ -232,14 +232,17 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	// struct utsname detect;
 	// uname(&detect);
 
-	if (buffer.empty())
+	if (buffer.empty()) {
+		slog_debug("map is empty");
 		return 0;
+	}
 
 	// Search for the address related to the key.
 	it = buffer.find(key);
 	// Check if the value did exist within the map.
 	if (it == buffer.end())
 	{
+		slog_debug("%s not found in the map", key.c_str());
 		// size_t len = strlen(key.c_str());
 		// if (len > 0 && key.c_str()[len - 1] != '/') 
 		// {
@@ -643,6 +646,7 @@ int32_t map_records::cleaning()
 
 int32_t map_records::cleaning_specific(std::string new_key)
 {
+	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
 
 	// borrar todos los bloques con mismo path/key
@@ -674,19 +678,19 @@ int32_t map_records::cleaning_specific(std::string new_key)
 	}
 
 	// Block the access to the map structure.
-	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string>::iterator i;
 	for (i = vec.begin(); i != vec.end(); i++)
 	{
 		// std::cout << "Garbage Collector: Deleting " << *i << "\n";
 		auto item = buffer.find(*i);
 		// push the memory pointer of this block inside the mem pool to be reused.
-		StsQueue.push(mem_pool, item->second.first);
+		// StsQueue.push(mem_pool, item->second.first);
 		quantity_occupied = quantity_occupied - item->second.second;
 		// fprintf(stderr, "quantity_occupied = %lu\n", quantity_occupied);
-		// free(item->second.first);
+		free(item->second.first); // free the memory of this block.
 		// erase the dataset information from the map.
 		// fprintf(stderr, "Erasing element with key %s\n", i);
+		slog_debug("Erasing element with key %s", item->first.c_str());
 		buffer.erase(*i);
 		buffer_snapshot.erase(*i);
 	}
