@@ -265,7 +265,7 @@ int32_t stat_init(char *stat_hostfile,
 				  uint32_t rank)
 {
 	slog_debug("[IMSS] Calling stat_init.");
-	fprintf(stderr, "[IMSS] Calling stat_init.\n");
+	// fprintf(stderr, "[IMSS] Calling stat_init.\n");
 
 	// Number of metadata servers to connect to.
 	n_stat_servers = num_stat_servers;

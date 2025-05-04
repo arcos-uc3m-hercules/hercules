@@ -684,10 +684,10 @@ int32_t map_records::cleaning_specific(std::string new_key)
 		// std::cout << "Garbage Collector: Deleting " << *i << "\n";
 		auto item = buffer.find(*i);
 		// push the memory pointer of this block inside the mem pool to be reused.
-		// StsQueue.push(mem_pool, item->second.first);
+		StsQueue.push(mem_pool, item->second.first);
 		quantity_occupied = quantity_occupied - item->second.second;
 		// fprintf(stderr, "quantity_occupied = %lu\n", quantity_occupied);
-		free(item->second.first); // free the memory of this block.
+		// free(item->second.first); // free the memory of this block.
 		// erase the dataset information from the map.
 		// fprintf(stderr, "Erasing element with key %s\n", i);
 		slog_debug("Erasing element with key %s", item->first.c_str());

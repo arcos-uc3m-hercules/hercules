@@ -61,6 +61,7 @@ whereis mpiexec
 #export UCX_RNDV_SCHEME=put_zcopy
 # export UCX_NET_DEVICES=ibs1 # Slow!
 # spack load /sxjvb77
+export UCX_TLS=ib
 set -x
 #export UCX_NET_DEVICES="opap6s0:1"
 #export UCX_NET_DEVICES=all
@@ -161,7 +162,7 @@ mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_H
 ## Waits some seconds to allow Hercules finishing copying all blocks to disk.
 # /beegfs/home/javier.garciablas/hercules/scripts/hercules stop \
 # 	   -f "$HERCULES_CONF"
-HERCULES_DEBUG_LEVEL=all HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/
+HERCULES_DEBUG_LEVEL=none HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/
 #exit 0
 
 # Copy the file to the disk.
@@ -174,7 +175,7 @@ HERCULES_DEBUG_LEVEL=all HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX
 #HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  md5sum /mnt/hercules/data.out
 
 
-HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  diff /mnt/hercules/data.out data-beegfs.out
+#HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  diff /mnt/hercules/data.out data-beegfs.out
 
 #mpiexec -np=8 $HERCULES_MPI_PPN=1 $HERCULES_MPI_HOSTFILE_DEF=./data_hostfile \
 #	cat /tmp/hercules_pkill_operation

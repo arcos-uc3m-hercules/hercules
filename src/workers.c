@@ -153,10 +153,10 @@ void *hercules_ucx_server(void *th_argv)
 	switch (arguments->args.type)
 	{
 	case TYPE_DATA_SERVER:
-		sprintf(server_name,"data");
+		sprintf(server_name, "data");
 		break;
 	case TYPE_METADATA_SERVER:
-		sprintf(server_name,"metadata");
+		sprintf(server_name, "metadata");
 		break;
 	default:
 		fprintf(stderr, "HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args.type);
@@ -558,17 +558,17 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// Check if there was an associated block to the key.
 			if (ret == 0)
 			{
-				pthread_mutex_lock(&lock_network);
-				// Send the error code block.
+				// pthread_mutex_lock(&lock_network);
+				//  Send the error code block.
 				ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
 				if (ret < 0)
 				{
 					slog_error("HERCULES_ERR_WORKER_SEND_READ_OP");
 					perror("HERCULES_ERR_WORKER_SEND_READ_OP");
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 			}
 			else
 			{
@@ -601,15 +601,15 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					size_t ret_send_data = 0;
 					if (is_shared_memory)
 					{
-						pthread_mutex_lock(&lock_network);
+						// pthread_mutex_lock(&lock_network);
 						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_, block_size_rtvd, arguments->worker_uid);
-						pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_unlock(&lock_network);
 					}
 					else
 					{
-						pthread_mutex_lock(&lock_network);
+						// pthread_mutex_lock(&lock_network);
 						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
-						pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_unlock(&lock_network);
 					}
 					slog_debug("[READ_OP][READ_OP] send_data, ret_send_data=%lu", ret_send_data);
 					if (ret_send_data == 0)
@@ -627,9 +627,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			slog_debug("[READ_OP][RELEASE]");
 			char response_msg[] = "RELEASE\0";
-			pthread_mutex_lock(&lock_network);
+			// pthread_mutex_lock(&lock_network);
 			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send release", int);
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 			if (ret == 0)
 			{
 				perror("HERCULES_ERR_SRV_SEND_DATA_RELEASE");
@@ -651,9 +651,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			}
 
 			char response_msg[] = "DELETE\0";
-			pthread_mutex_lock(&lock_network);
+			// pthread_mutex_lock(&lock_network);
 			ret = send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid);
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 			if (ret == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_DELETEOP");
@@ -688,9 +688,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			}
 
 			char response_msg[] = "RENAME\0";
-			pthread_mutex_lock(&lock_network);
+			// pthread_mutex_lock(&lock_network);
 			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send rename", int);
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 			if (ret == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
@@ -714,9 +714,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			}
 
 			char response_msg[] = "RENAME\0";
-			pthread_mutex_lock(&lock_network);
+			// pthread_mutex_lock(&lock_network);
 			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_DIR_DIR_OP] Send rename", int);
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 			if (ret == 0)
 			{
 				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
@@ -959,9 +959,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		case WHO:
 		{
 			// Provide the uri of this instance.
-			pthread_mutex_lock(&lock_network);
+			// pthread_mutex_lock(&lock_network);
 			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, arguments->my_uri, strlen(arguments->my_uri) + 1, arguments->worker_uid), ("[READ_OP][WHO] send uri: %s", arguments->my_uri), int);
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 			if (ret == 0)
 			{
 				perror("ERR_HERCULES_WHOREQUEST");
@@ -1230,7 +1230,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		// else
 		{
 			slog_debug("[WRITE_OP] WRITE NORMAL CASE. Size %ld, offset=%ld", block_size_recv, block_offset);
-			pthread_mutex_lock(&memory_protect);
 			//  search for the block to know if it was previously stored.
 			int ret = 0;
 			// Checks if it is data for the Snapshot operation or regular data.
@@ -1262,21 +1261,21 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				{ // Data is not in shared memory.
 					slog_debug("[WRITE_OP] is_shared_memory=%d", is_shared_memory);
 					// Get the length of the data to be received.
-					pthread_mutex_lock(&lock_network);
+					// pthread_mutex_lock(&lock_network);
 					msg_length = TIMING(get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);, "[write] get_recv_data_length", size_t, arguments->thread_id);
 					// ucp_tag_recv_info_t info_tag;
 					// ucp_tag_message_h msg_tag;
 					// msg_length = TIMING(get_recv_data_length_2(arguments->ucp_worker, arguments->worker_uid, &info_tag, &msg_tag), "[write] get_recv_data_length_2", size_t, arguments->thread_id);
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					if (msg_length == 0)
 					{
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
-						pthread_mutex_unlock(&memory_protect);
+						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
 					slog_debug("[WRITE_OP] msg_length=%lu", msg_length);
-					// buffer = (void *)StsQueue.pop(mem_pool);
+					buffer = (void *)StsQueue.pop(mem_pool);
 					if (buffer == NULL)
 					{
 						if (snapshot_op)
@@ -1299,21 +1298,21 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					{
 						perror("HERCULES_ERR_MEMORY_ALLOCATION");
 						slog_error("HERCULES_ERR_MEMORY_ALLOCATION");
-						pthread_mutex_unlock(&memory_protect);
+						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
 					size_asigned_to_block = BLOCK_SIZE;
 
 					// Receive the data from the front end.
-					pthread_mutex_lock(&lock_network);
+					// pthread_mutex_lock(&lock_network);
 					msg_length = NETWORK_TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);, "[write] recv_data", size_t);
 					// msg_length = TIMING(recv_data_2(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 0, info_tag, msg_tag), "[write] recv_data_2", size_t, arguments->thread_id);
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					if (msg_length == 0)
 					{
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
-						pthread_mutex_unlock(&memory_protect);
+						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
 				}
@@ -1323,14 +1322,14 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					char answer[RESPONSE_SIZE] = {0};
 					sprintf(answer, "NEW %ld", global_offset);
 					slog_info("Answer=%s", answer);
-					pthread_mutex_lock(&lock_network);
+					// pthread_mutex_lock(&lock_network);
 					ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					if (ret < 0)
 					{
 						perror("ERR_HERCULES_WORKER_SEND_DYNAMIC_SHM_LOCAL");
 						slog_error("ERR_HERCULES_WORKER_SEND_DYNAMIC_SHM_LOCAL");
-						pthread_mutex_unlock(&memory_protect);
+						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
 
@@ -1341,7 +1340,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					{
 						perror("HERCULES_ERR_MEMORY_ALLOCATION_SHM");
 						slog_error("HERCULES_ERR_MEMORY_ALLOCATION_SHM");
-						pthread_mutex_unlock(&memory_protect);
+						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
 
@@ -1351,7 +1350,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					{
 						perror("HERCULES_ERR_ENCODING");
 						slog_error("HERCULES_ERR_ENCODING");
-						pthread_mutex_unlock(&memory_protect);
+						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
 
@@ -1361,7 +1360,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					global_offset += block_size_recv;
 				}
 
-				int32_t insert_successful;
+				int32_t insert_successful = -1;
 
 				// Include the new record in the tracking structure.
 				// tr = clock();
@@ -1439,15 +1438,15 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					{ // non shared memory method.
 						ucp_tag_recv_info_t info_tag;
 						ucp_tag_message_h msg_tag;
-						pthread_mutex_lock(&lock_network);
-						// msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+						// pthread_mutex_lock(&lock_network);
+						//  msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
 						msg_length = TIMING(get_recv_data_length_2(arguments->ucp_worker, arguments->worker_uid, &info_tag, &msg_tag), "[write] get_recv_data_length_2", size_t, arguments->thread_id);
-						pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_unlock(&lock_network);
 						if (msg_length == 0)
 						{
 							perror("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
 							slog_error("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
-							pthread_mutex_unlock(&memory_protect);
+							// pthread_mutex_unlock(&memory_protect);
 							return -1;
 						}
 						slog_live("msg_length=%lu", msg_length);
@@ -1457,23 +1456,23 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						{
 							perror("HERCULES_ERR_SRV_WORKER_MEMORY_ALLOCATION");
 							slog_error("HERCULES_ERR_SRV_WORKER_MEMORY_ALLOCATION");
-							pthread_mutex_unlock(&memory_protect);
+							// pthread_mutex_unlock(&memory_protect);
 							return -1;
 						}
 
-						pthread_mutex_lock(&lock_network);
-						// msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buffer, msg_length, arguments->worker_uid, 0);
+						// pthread_mutex_lock(&lock_network);
+						//  msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buffer, msg_length, arguments->worker_uid, 0);
 						msg_length = TIMING(recv_data_2(arguments->ucp_worker, arguments->server_ep, (char *)buffer, msg_length, arguments->worker_uid, 0, info_tag, msg_tag), "[write] recv_data_2", size_t, arguments->thread_id);
-						pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_unlock(&lock_network);
 						if (msg_length == 0)
 						{
 							perror("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
 							slog_error("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
 							free(buffer);
-							pthread_mutex_unlock(&memory_protect);
+							// pthread_mutex_unlock(&memory_protect);
 							return -1;
 						}
-
+						pthread_mutex_lock(&memory_protect);
 						old = (struct stat *)address_;
 						latest = (struct stat *)buffer;
 						slog_debug(" File size new %ld old %ld", latest->st_size, old->st_size);
@@ -1482,6 +1481,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						slog_debug(" buffer->st_size: %ld, block_offset=%ld, old->st_nlink: %ld, new->st_nlink: %ld", latest->st_size, block_offset, old->st_nlink, latest->st_nlink);
 						// Overwrite block 0 data.
 						memcpy((char *)address_ + block_offset, buffer, msg_length);
+						pthread_mutex_unlock(&memory_protect);
 
 						// TODO: should we update this block's size in the map?
 						// map->update(key, address_, msg_length);
@@ -1495,14 +1495,14 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						char answer[RESPONSE_SIZE] = {0};
 						// "address_" is the shared memory offset.
 						sprintf(answer, "TOUPDATE %s", (char *)address_);
-						pthread_mutex_lock(&lock_network);
+						// pthread_mutex_lock(&lock_network);
 						ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
-						pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_unlock(&lock_network);
 						if (ret < 0)
 						{
 							slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_BLOCK_0_WRITE_OP");
 							perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_BLOCK_0_WRITE_OP");
-							pthread_mutex_unlock(&memory_protect);
+							// pthread_mutex_unlock(&memory_protect);
 							return -1;
 						}
 					}
@@ -1513,27 +1513,29 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					size_t msg_length = 0;
 					if (!is_shared_memory)
 					{ // non shared memory.
-						pthread_mutex_lock(&lock_network);
+						// pthread_mutex_lock(&lock_network);
 						msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-						pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_unlock(&lock_network);
 						if (msg_length == 0)
 						{
 							slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
 							perror("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
-							pthread_mutex_unlock(&memory_protect);
+							// pthread_mutex_unlock(&memory_protect);
 							return -1;
 						}
 						// Verify if the new size (msg_length + block_offset) is greater than the old size (block_size_rtvd).
 						slog_debug("msg_length=%lu, block_offset=%d, msg_length=%d", msg_length, block_offset, msg_length);
-						pthread_mutex_lock(&lock_network);
+						// pthread_mutex_lock(&lock_network);
+						pthread_mutex_lock(&memory_protect);
 						msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, msg_length, arguments->worker_uid, 1);
-						pthread_mutex_unlock(&lock_network);
-						// msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
+						pthread_mutex_unlock(&memory_protect);
+						// pthread_mutex_unlock(&lock_network);
+						//  msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
 						if (msg_length == 0)
 						{
 							slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
 							perror("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
-							pthread_mutex_unlock(&memory_protect);
+							// pthread_mutex_unlock(&memory_protect);
 							return -1;
 						}
 
@@ -1546,20 +1548,20 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						char answer[RESPONSE_SIZE] = {0};
 						// "address_" is the shared memory offset.
 						sprintf(answer, "TOUPDATE %s", (char *)address_);
-						pthread_mutex_lock(&lock_network);
+						// pthread_mutex_lock(&lock_network);
 						ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
-						pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_unlock(&lock_network);
 						if (ret < 0)
 						{
 							slog_error("ERR_HERCULES_WORKER_SEND_DYNAMIC_NON_BLOCK_0_WRITE_OP");
 							perror("ERR_HERCULES_WORKER_SEND_DYNAMIC_NON_BLOCK_0_WRITE_OP");
-							pthread_mutex_unlock(&memory_protect);
+							// pthread_mutex_unlock(&memory_protect);
 							return -1;
 						}
 					}
 				}
 			}
-			pthread_mutex_unlock(&memory_protect);
+			// pthread_mutex_unlock(&memory_protect);
 		}
 		break;
 	}
@@ -1964,26 +1966,26 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 			if (numelems_indir == -1)
 			{ // error case.
-				pthread_mutex_lock(&lock_network);
+				// pthread_mutex_lock(&lock_network);
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STATWORKER_NODIR");
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 				break;
 			}
 			if (numelems_indir == 0)
 			{ // empty directory case.
-				pthread_mutex_lock(&lock_network);
+				// pthread_mutex_lock(&lock_network);
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, empty_directory_msg, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STATWORKER_NODIR");
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 				break;
 			}
 
@@ -1993,14 +1995,14 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			m.data = buffer;
 
 			slog_info("numelems_indir=%ld, size=%ld", numelems_indir, m.size);
-			pthread_mutex_lock(&lock_network);
+			// pthread_mutex_lock(&lock_network);
 			if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid) < 0)
 			{
 				perror("HERCULES_ERR_WORKER_SEND_STREAM_GETDIR");
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 
 			slog_debug("[workers] buffer=%s", buffer);
 
@@ -2035,18 +2037,17 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			if (err == 0)
 			{
 				// Send the error code block.
-				pthread_mutex_lock(&lock_network);
+				// pthread_mutex_lock(&lock_network);
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_ERR");
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 			}
 			else
 			{
-				pthread_mutex_lock(&lock_network);
 				// dataset_info *dataset = (dataset_info*) address_;
 				// printf("[STAT_SERVER] dataset.original=%s",dataset->original_name);
 				// imss_info * data = (imss_info *) address_;
@@ -2059,7 +2060,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				switch (operation)
 				{
 				case 1: // file opened.
+					pthread_mutex_lock(&memory_protect);
 					dataset->n_open += 1;
+					pthread_mutex_unlock(&memory_protect);
 					slog_debug("File opened");
 					break;
 				default:
@@ -2067,17 +2070,22 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 
 				slog_debug("After dataset->n_open=%d", dataset->n_open);
+				pthread_mutex_lock(&memory_protect);
 				msg_t m;
 				m.data = address_;
 				m.size = block_size_rtvd;
+				// pthread_mutex_lock(&lock_network);
 				err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
+				pthread_mutex_unlock(&memory_protect);
+
 				if (err < 0)
 				{
 					perror("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_STREAM");
-					pthread_mutex_unlock(&lock_network);
+					slog_error("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_STREAM");
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 			}
 			break;
 		}
@@ -2108,18 +2116,18 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			if (err == 0)
 			{
 				// Send the error code block.
-				pthread_mutex_lock(&lock_network);
+				// pthread_mutex_lock(&lock_network);
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
 				{
 					perror("ERRIMSS_WORKER_SENDERR");
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 			}
 			else
 			{
-				pthread_mutex_lock(&lock_network);
+				pthread_mutex_lock(&memory_protect);
 				dataset = (dataset_info *)address_;
 
 				// Checks if the clients wants to unlink the file.
@@ -2145,6 +2153,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					pthread_mutex_unlock(&tree_mut);
 					slog_debug("delete_metadata_stat_worker=%d, GTree_delete=%d", ret_map, ret_tree);
 				}
+				pthread_mutex_unlock(&memory_protect);
 
 				if (ret_map && ret_tree)
 				{
@@ -2156,14 +2165,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 
 				slog_debug("response_msg=%s", response_msg);
+				// pthread_mutex_lock(&lock_network);
 				if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 				{
 					perror("ERR_HERCULES_PUBLISH_DELETEMSG");
 					slog_error("ERR_HERCULES_PUBLISH_DELETEMSG");
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 			}
 			break;
 		}
@@ -2183,12 +2193,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// RENAME MAP
 				ret = map->rename_metadata_stat_worker(old_key, new_key);
 				slog_live("rename metadata stat worker=%d", ret);
-				// if (result == 0)
-				//{
-				//	// printf("0 elements rename from stat_worker");
-				//	slog_warn("[RENAME] 0 elements rename from stat_worker");
-				//	break;
-				// }
 
 				// RENAME TREE
 				if (ret != -1)
@@ -2210,15 +2214,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 
 			// char response_msg[] = "RENAME\0";
-			pthread_mutex_lock(&lock_network);
+			// pthread_mutex_lock(&lock_network);
 			if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
 				slog_error("HERCULES_ERR_PUBLISH_RENAMEMSG");
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 			break;
 		}
 		case RENAME_DIR_DIR_OP:
@@ -2269,15 +2273,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			{
 				strncpy(response_msg, "RENAME", strlen("RENAME") + 1);
 			}
-			pthread_mutex_lock(&lock_network);
+			// pthread_mutex_lock(&lock_network);
 			if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
 				slog_error("HERCULES_ERR_PUBLISH_RENAMEMSG");
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 			break;
 		}
 		case CLOSE_OP:
@@ -2288,19 +2292,19 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			if (err == 0)
 			{
 				// Send the error code block.
-				pthread_mutex_lock(&lock_network);
+				// pthread_mutex_lock(&lock_network);
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STAT_CLOSE_OP");
 					slog_error("HERCULES_ERR_STAT_CLOSE_OP");
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 			}
 			else
 			{
-				pthread_mutex_lock(&lock_network);
+				pthread_mutex_lock(&memory_protect);
 				dataset = (dataset_info *)address_;
 				// Checks if the clients wants to open the file.
 				// switch (operation)
@@ -2329,16 +2333,19 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{
 					strncpy(response_msg, "CLOSE", strlen("CLOSE") + 1);
 				}
+				pthread_mutex_unlock(&memory_protect);
+
 				// int32_t result = map->delete_metadata_stat_worker(key);
 				// slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
+				// pthread_mutex_lock(&lock_network);
 				if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 				{
 					perror("HERCULES_ERR_PUBLISH_DELETEMSG");
 					slog_error("HERCULES_ERR_PUBLISH_DELETEMSG");
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 			}
 			break;
 		}
@@ -2359,44 +2366,31 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			if (err == 0)
 			{
 				// Send the error code block.
-				pthread_mutex_lock(&lock_network);
+				// pthread_mutex_lock(&lock_network);
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STAT_OPEN_OP_SEND_STREAM");
 					slog_error("HERCULES_ERR_STAT_OPEN_OP_SEND_STREAM");
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 			}
 			else
 			{
-				pthread_mutex_lock(&lock_network);
 				dataset = (dataset_info *)address_;
-				// Checks if the clients wants to open the file.
-				// switch (operation)
-				// {
-				// case 1: // file opened.
 				slog_debug("Before dataset->n_open=%d", dataset->n_open);
+				pthread_mutex_lock(&memory_protect);
 				dataset->n_open += 1;
-				// slog_debug("File closed");
-				// break;
-				// default:
-				// 	break;
-				// }
 				slog_debug("After dataset->n_open=%d, status=%s", dataset->n_open, dataset->status);
+				pthread_mutex_unlock(&memory_protect);
 				char response_msg[] = "OPEN\0";
-				// strncpy(response_msg, "OPEN", strlen("OPEN") + 1);
-				// int32_t result = map->delete_metadata_stat_worker(key);
-				// slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
 				if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
 				{
 					perror("HERCULES_ERR_PUBLISH_DELETEMSG");
 					slog_error("HERCULES_ERR_PUBLISH_DELETEMSG");
-					pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				pthread_mutex_unlock(&lock_network);
 			}
 			break;
 		}
@@ -2410,7 +2404,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	{
 		slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
 		// TO CHECK: this mutex can be removed cause' map->get has another mutex.
-		pthread_mutex_lock(&memory_protect);
+		// pthread_mutex_lock(&memory_protect);
 		// If the record was not already stored, add the block.
 		if (!map->get(key, &address_, &block_size_rtvd))
 		{
@@ -2419,14 +2413,14 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			// Get the length of the message to be received.
 			size_t length = 0;
 			int32_t ret = -1;
-			pthread_mutex_lock(&lock_network);
+			// pthread_mutex_lock(&lock_network);
 			length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
 			if (length == 0)
 			{
 				perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
 				slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
-				pthread_mutex_unlock(&memory_protect);
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&memory_protect);
+				// pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
 			// Receive the block into the buffer.
@@ -2435,12 +2429,12 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			{
 				perror("HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC");
 				slog_error("HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC");
-				pthread_mutex_unlock(&memory_protect);
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&memory_protect);
+				// pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
 			ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 
 			dataset_info *struct_ = (dataset_info *)buffer;
 
@@ -2451,7 +2445,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				perror("HERCULES_ERR_STAT_WORKER_HELPER_RECV_DYNAMIC_STREAM");
 				slog_error("HERCULES_ERR_STAT_WORKER_HELPER_RECV_DYNAMIC_STREAM");
 				free(buffer);
-				pthread_mutex_unlock(&memory_protect);
+				// pthread_mutex_unlock(&memory_protect);
 				return -1;
 			}
 
@@ -2464,7 +2458,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				slog_error("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
 				perror("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
 				free(buffer);
-				pthread_mutex_unlock(&memory_protect);
+				// pthread_mutex_unlock(&memory_protect);
 				return -1;
 			}
 
@@ -2479,7 +2473,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				slog_error("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
 				perror("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
 				free(buffer);
-				pthread_mutex_unlock(&memory_protect);
+				// pthread_mutex_unlock(&memory_protect);
 				return -1;
 			}
 
@@ -2497,15 +2491,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			// Update where the blocks of a LOCAL dataset have been stored.
 			case LOCAL_DATASET_UPDATE:
 			{
-				pthread_mutex_lock(&lock_network);
+				// pthread_mutex_lock(&lock_network);
 				size_t msg_length = 0;
 				msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
 				if (msg_length == 0)
 				{
 					perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
 					slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
-					pthread_mutex_unlock(&memory_protect);
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&memory_protect);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
 				// // void data_ref[msg_length];
@@ -2514,8 +2508,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{
 					perror("HERCULES_ERR_STAT_LOCAL_DATASET_UPDATE");
 					slog_error("HERCULES_ERR_STAT_LOCAL_DATASET_UPDATE");
-					pthread_mutex_unlock(&memory_protect);
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&memory_protect);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
 				// void *data_ref;
@@ -2526,8 +2520,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					perror("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP");
 					slog_error("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP");
 					free(data_ref);
-					pthread_mutex_unlock(&memory_protect);
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&memory_protect);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
 
@@ -2538,6 +2532,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// Positions to be updated.
 				uint32_t *update_positions = (uint32_t *)data_ref;
 
+				pthread_mutex_lock(&memory_protect);
 				// Set of positions that are going to be updated (those are just under the concerned dataset but not pointed by it).
 				uint16_t *data_locations = (uint16_t *)((char *)address_ + sizeof(dataset_info));
 
@@ -2557,7 +2552,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					perror("HERCULES_ERR_METADATA_WORKER_SEND_DATA_SET_OP");
 					// perror("ERRIMSS_WORKER_DATALOCATANSWER2");
 					free(data_ref);
-					pthread_mutex_unlock(&memory_protect);
+					// pthread_mutex_unlock(&memory_protect);
 					pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
@@ -2599,6 +2594,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					unsigned long num_active_storages = atol(number);
 					int delete_dataserver_indx = operation;
 					slog_debug("[STAT_WORKER] Updating existing dataset %s, number_active_storage_servers=%lu.", key.c_str(), num_active_storages);
+					pthread_mutex_lock(&memory_protect);
 					char *address_aux = (char *)address_;
 					// fprintf(stderr, "block_size_rtvd=%lu\n", block_size_rtvd);
 					imss_info *imss_info_ = (imss_info *)malloc(block_size_rtvd * sizeof(imss_info));
@@ -2635,18 +2631,19 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					imss_info_->arr_num_active_storages[delete_dataserver_indx] = imss_info_->num_active_storages;
 					memcpy(address_aux, imss_info_->arr_num_active_storages, imss_info_->num_storages * sizeof(int));
 					free(imss_info_);
+					pthread_mutex_unlock(&memory_protect);
 				}
 				else
 				{
-					pthread_mutex_lock(&lock_network);
+					// pthread_mutex_lock(&lock_network);
 					size_t length = -1;
 					length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
 					if (length == 0)
 					{
 						slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_UPDATE_DATASET");
 						perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_UPDATE_DATASET");
-						pthread_mutex_unlock(&memory_protect);
-						pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_unlock(&memory_protect);
+						// pthread_mutex_unlock(&lock_network);
 						return -1;
 					}
 					// Clear the corresponding memory region.
@@ -2655,8 +2652,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					{
 						perror("HERCULES_ERR_STAT_MEMORY_ALLOC");
 						slog_error("HERCULES_ERR_STAT_MEMORY_ALLOC");
-						pthread_mutex_unlock(&memory_protect);
-						pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_unlock(&memory_protect);
+						// pthread_mutex_unlock(&lock_network);
 						return -1;
 					}
 					// Receive the block into the buffer.
@@ -2665,12 +2662,12 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					{
 						perror("HERCULES_ERR_STAT_SET_OP_RECV_STREAM");
 						slog_error("HERCULES_ERR_STAT_SET_OP_RECV_STREAM");
-						pthread_mutex_unlock(&memory_protect);
-						pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_unlock(&memory_protect);
+						// pthread_mutex_unlock(&lock_network);
 						return -1;
 					}
 
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					free(buffer);
 					slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 				}
@@ -2680,7 +2677,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 			}
 		}
-		pthread_mutex_unlock(&memory_protect);
+		// pthread_mutex_unlock(&memory_protect);
 		break;
 	}
 	default:
