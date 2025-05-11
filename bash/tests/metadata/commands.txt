@@ -1,0 +1,32 @@
+HERCULES_THREAD_POOL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf ~/hercules/build/hercules_server m 0
+HERCULES_THREAD_POOL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf ~/hercules/build/hercules_server d 0 1
+
+# MDTEST
+HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so /beegfs/home/javier.garciablas/gsanchez/ior/bin/mdtest -n 512 -d /mnt/hercules/
+
+# IOR multi iterations
+spack load mpich
+HERCULES_THREAD_POOL=1 HERCULES_DEBUG_LEVEL=none mpiexec -np=8 -ppn=8 -env HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf -env LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so /beegfs/home/javier.garciablas/gsanchez/ior/bin/ior -w -r -k -W -R -t 100M -b 100M -s 1 -i 100 -o /mnt/hercules/data.out
+
+# IOR 100 MB
+HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so ~/gsanchez/ior/bin/ior -t 100MB -b 100MB -o /mnt/hercules/file.out -k
+
+## IOR 100 MB with strace
+HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so strace -k -v -o strace_hercules.out ~/gsanchez/ior/bin/ior -t 100MB -b 100MB -o /mnt/hercules/directory/file.out
+
+# First short test (size < block size)
+HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so cp myfile.txt /mnt/hercules/myfile.txt
+
+# First large test (2.7 Gb)
+HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so cp rms3_d03_20201130Z0000.nc /mnt/hercules/
+
+# Memory leak
+spack load valgrind 
+##HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so valgrind --leak-check=full  ~/gsanchez/ior/bin/ior -t 100MB -b 100MB -o /mnt/hercules/file.out -k > run_output_full 2>&1
+HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so valgrind --leak-check=full --track-origins=yes --show-leak-kinds=all  ~/gsanchez/ior/bin/ior -i 5 -t 100MB -b 100MB -o /mnt/hercules/file.out -k > run_output_full 2>&1
+
+# List directory.
+HERCULES_THREAD_LEVEL=16 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so ls -l /mnt/hercules/
+
+# Stop all
+~/hercules/scripts/hercules stop -f /beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf

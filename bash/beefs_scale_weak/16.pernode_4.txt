@@ -1,0 +1,68 @@
+IOR-3.3.0: MPI Coordinated Test of Parallel I/O
+Began               : Wed Feb 15 07:03:41 2023
+Command line        : /beegfs/home/javier.garciablas/opt/spack/linux-ubuntu20.04-zen/gcc-9.4.0/ior-3.3.0-ssyaxpxjajmhy3v5icfqoo63kaeii6wv/bin/ior -o /beegfs/home/javier.garciablas/imss/bash/data.out -t 100m -b 100m -s 1 -i 10 -F
+Machine             : Linux broadwell-000
+TestID              : 0
+StartTime           : Wed Feb 15 07:03:41 2023
+Path                : /beegfs/home/javier.garciablas/imss/bash
+FS                  : 46.1 TiB   Used FS: 42.4%   Inodes: 0.0 Mi   Used Inodes: -nan%
+
+Options: 
+api                 : POSIX
+apiVersion          : 
+test filename       : /beegfs/home/javier.garciablas/imss/bash/data.out
+access              : file-per-process
+type                : independent
+segments            : 1
+ordering in a file  : sequential
+ordering inter file : no tasks offsets
+nodes               : 4
+tasks               : 16
+clients per node    : 4
+repetitions         : 10
+xfersize            : 100 MiB
+blocksize           : 100 MiB
+aggregate filesize  : 1.56 GiB
+
+Results: 
+
+access    bw(MiB/s)  IOPS       Latency(s)  block(KiB) xfer(KiB)  open(s)    wr/rd(s)   close(s)   total(s)   iter
+------    ---------  ----       ----------  ---------- ---------  --------   --------   --------   --------   ----
+write     4878       49.51      0.322177    102400     102400     0.064751   0.323184   0.079344   0.328026   0   
+read      6759       68.48      0.217542    102400     102400     0.005883   0.233657   0.034437   0.236722   0   
+remove    -          -          -           -          -          -          -          -          0.036753   0   
+write     4698       47.60      0.221849    102400     102400     0.231181   0.336134   0.126451   0.340598   1   
+read      6784       68.91      0.218002    102400     102400     0.004846   0.232182   0.039504   0.235845   1   
+remove    -          -          -           -          -          -          -          -          0.037771   1   
+write     4882       49.46      0.246180    102400     102400     0.252133   0.323463   0.091703   0.327759   2   
+read      6781       69.02      0.211637    102400     102400     0.005430   0.231816   0.025386   0.235962   2   
+remove    -          -          -           -          -          -          -          -          0.033462   2   
+write     5786       59.03      0.267138    102400     102400     0.035965   0.271031   0.014839   0.276521   3   
+read      6506       66.31      0.228403    102400     102400     0.007846   0.241296   0.041248   0.245944   3   
+remove    -          -          -           -          -          -          -          -          0.034817   3   
+write     5581       56.66      0.267482    102400     102400     0.011606   0.282399   0.048767   0.286679   4   
+read      6701       68.82      0.217681    102400     102400     0.006903   0.232506   0.029863   0.238767   4   
+remove    -          -          -           -          -          -          -          -          0.029139   4   
+write     5814       58.99      0.254907    102400     102400     0.047266   0.271224   0.032597   0.275185   5   
+read      6771       69.00      0.230059    102400     102400     0.005878   0.231898   0.049533   0.236308   5   
+remove    -          -          -           -          -          -          -          -          0.035728   5   
+write     4897       49.78      0.245955    102400     102400     0.015233   0.321397   0.081066   0.326737   6   
+read      6693       68.50      0.217329    102400     102400     0.006089   0.233563   0.030193   0.239043   6   
+remove    -          -          -           -          -          -          -          -          0.032823   6   
+write     4494       45.59      0.346372    102400     102400     0.254250   0.350932   0.117245   0.355995   7   
+read      6818       69.11      0.209521    102400     102400     0.004362   0.231525   0.041179   0.234677   7   
+remove    -          -          -           -          -          -          -          -          0.035697   7   
+write     4932       50.00      0.227685    102400     102400     0.229441   0.320010   0.106901   0.324414   8   
+read      6714       68.43      0.221462    102400     102400     0.005578   0.233829   0.037550   0.238319   8   
+remove    -          -          -           -          -          -          -          -          0.039916   8   
+write     5119       51.98      0.225105    102400     102400     0.236319   0.307806   0.083298   0.312534   9   
+read      6764       68.58      0.219001    102400     102400     0.004255   0.233298   0.033872   0.236538   9   
+remove    -          -          -           -          -          -          -          -          0.037424   9   
+Max Write: 5814.27 MiB/sec (6096.70 MB/sec)
+Max Read:  6817.88 MiB/sec (7149.07 MB/sec)
+
+Summary of all tests:
+Operation   Max(MiB)   Min(MiB)  Mean(MiB)     StdDev   Max(OPs)   Min(OPs)  Mean(OPs)     StdDev    Mean(s) Stonewall(s) Stonewall(MiB) Test# #Tasks tPN reps fPP reord reordoff reordrand seed segcnt   blksiz    xsize aggs(MiB)   API RefNum
+write        5814.27    4494.45    5108.13     436.74      58.14      44.94      51.08       4.37    0.31544         NA            NA     0     16   4   10   1     0        1         0    0      1 104857600 104857600    1600.0 POSIX      0
+read         6817.88    6505.54    6729.05      83.50      68.18      65.06      67.29       0.83    0.23781         NA            NA     0     16   4   10   1     0        1         0    0      1 104857600 104857600    1600.0 POSIX      0
+Finished            : Wed Feb 15 07:03:47 2023

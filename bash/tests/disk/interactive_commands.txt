@@ -1,0 +1,6 @@
+HERCULES_DEBUG_LEVEL=none HERCULES_CONF=./configurations_hercules/hercules.conf ~/hercules/build/hercules_server m 0
+
+Modify meta_hostfile and data_hostfile
+
+gdb --args env HERCULES_CONF=./configurations_hercules/hercules.conf ~/hercules/build/hercules_server d 0 broadwell-xxx 2
+gdb --args env HERCULES_CONF=./configurations_hercules/hercules.conf ~/hercules/build/hercules_server d 1 broadwell-xxx 2
