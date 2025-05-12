@@ -544,12 +544,12 @@ extern "C"
 			// t_s = clock();
 			release = -1;
 			slog_live("[POSIX] release_imss()");
-			// release_imss("imss://", CLOSE_DETACHED);
+			release_imss("imss://", CLOSE_DETACHED);
 			// //  slog_live("[POSIX] stat_release()");
-			// stat_release();
-			// free_prefetch(map_prefetch);
-			// map_free(map);
-			// imss_comm_cleanup();
+			stat_release();
+			free_prefetch(map_prefetch);
+			map_free(map);
+			imss_comm_cleanup();
 			//   t_s = clock() - t_s;
 			//   time_taken = ((double)t_s) / (CLOCKS_PER_SEC);
 		}
@@ -2140,7 +2140,7 @@ extern "C"
 			update_offset = 1;
 			map_fd_search(map_fd, pathname, fd, &offset);
 			int fd_lkup = -1;
-			fd_lookup(pathname, &fd_lkup, &ds_stat_n, &aux);
+			fd_lookup((char *)pathname, &fd_lkup, &ds_stat_n, &aux);
 			slog_live("current size=%ld", ds_stat_n.st_size);
 
 			// imss_getattr(pathname, &ds_stat_n);
@@ -3350,7 +3350,7 @@ extern "C"
 		char *new_path = checkHerculesPath(path);
 		if (new_path != NULL)
 		{
-			char *last = new_path + strlen(new_path) - 1;
+			// char *last = new_path + strlen(new_path) - 1;
 			// if (last[0] != '/')
 			size_t len = strlen(new_path);
 			if (len > 0 && new_path[len - 1] != '/')
@@ -3364,6 +3364,7 @@ extern "C"
 			{ // special case io500
 				ret = real_unlinkat(0, path, 0);
 			}
+			slog_live("[POSIX]. Ending Hercules 'rmdir', new_path=%s, ret=%d\n", new_path, ret);
 			free(new_path);
 		}
 		else if (!strncmp(path, "imss://", strlen("imss://"))) // TO REVIEW!
@@ -3457,7 +3458,6 @@ extern "C"
 			case TYPE_DIRECTORY:
 			case TYPE_HERCULES_INSTANCE: // Directory case?
 			{
-				char *last = new_path + strlen(new_path) - 1;
 				size_t len = strlen(new_path);
 				if (len > 0 && new_path[len - 1] != '/')
 				{
@@ -3916,7 +3916,6 @@ extern "C"
 		struct dirent *entry = NULL;
 		if (pathname != NULL)
 		{
-			char *last = pathname + strlen(pathname) - 1;
 			size_t len = strlen(pathname);
 			if (len > 0 && pathname[len - 1] != '/')
 			{
@@ -4070,8 +4069,6 @@ extern "C"
 		char *pathname = map_fd_search_by_val(map_fd, fd);
 		if (pathname != NULL)
 		{
-			char *last = pathname + strlen(pathname) - 1;
-			// if (last[0] != '/')
 			size_t len = strlen(pathname);
 			if (len > 0 && pathname[len - 1] != '/')
 			{
@@ -4428,7 +4425,83 @@ extern "C"
 		return ret;
 	}
 
-	// int (*real_faccessat)(int dir_fd, const char *pathname, int mode, int flags) = NULL;
+	int GeneralFAccessAt(int dir_fd, const char *pathname, int mode, int flags, char *pathname_dir)
+	{
+		int ret = -1;
+		int is_absolute_path = IsAbsolutePath(pathname);
+
+		// If pathname is absolute, then dir_fd is ignored.
+		if (is_absolute_path == 1)
+		{
+			// char *new_path = checkHerculesPath(pathname);
+			slog_live("[POSIX] is absolute, 'faccessat2', pathname=%s", pathname);
+			ret = access(pathname, mode);
+		}
+		else if (is_absolute_path == 0) // pathname is relative.
+		{
+			if (dir_fd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
+			{						// TO CHECK!
+				slog_live("[POSIX] is relative, current directory, 'faccessat2', pathname=%s", pathname);
+				ret = access(pathname, mode);
+			}
+			else
+			{
+				char absolute_pathname[PATH_MAX];
+				char *dirr = pathname_dir + strlen("imss://");
+				sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
+
+				slog_live("[POSIX] is relative, 'faccessat2', absolute_pathname=%s", absolute_pathname);
+				ret = access(absolute_pathname, mode);
+			}
+		}
+		return ret;
+	}
+
+	int faccessat2(int dir_fd, const char *pathname, int mode, int flags)
+	{
+		if (!real_faccessat2)
+		{
+			real_faccessat2 = (int (*)(int, const char *, int, int))dlsym(RTLD_NEXT, __func__);
+		}
+
+		if (!init)
+		{
+			return real_faccessat2(dir_fd, pathname, mode, flags);
+		}
+
+		errno = 0;
+		int ret = 0;
+		char *pathname_dir = NULL, *new_path = NULL;
+		if (dir_fd == AT_FDCWD)
+		{
+			new_path = checkHerculesPath(pathname);
+			pathname_dir = NULL;
+		}
+		else
+		{
+			pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
+		}
+
+		if (pathname_dir != NULL || new_path != NULL)
+		{
+			slog_live("[POSIX] Calling Hercules 'faccessat2' flags=%d, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, dir_fd, pathname_dir, pathname);
+
+			ret = GeneralFAccessAt(dir_fd, pathname, mode, flags, pathname_dir);
+
+			slog_live("[POSIX] Ending Hercules 'faccessat2', ret=%d, errno=%d:%s\n", ret, errno, strerror(errno));
+			if (new_path != NULL)
+				free(new_path);
+		}
+		else
+		{
+			slog_full("[POSIX] Calling real 'faccessat2' flags=%d, dir_fd=%d, pathname=%s", flags, dir_fd, pathname);
+			ret = real_faccessat2(dir_fd, pathname, mode, flags);
+			slog_full("[POSIX] Ending real 'faccessat2' flags=%d, dir_fd=%d, pathname=%s, errno=%d:%s", flags, dir_fd, pathname, errno, strerror(errno));
+		}
+
+		return ret;
+	}
+
 	int faccessat(int dir_fd, const char *pathname, int mode, int flags)
 	{
 		if (!real_faccessat)
@@ -4442,9 +4515,9 @@ extern "C"
 		}
 
 		errno = 0;
-		int saved_errno;
+		// int saved_errno;
 		int ret = 0;
-		char *pathname_dir, *new_path = NULL;
+		char *pathname_dir = NULL, *new_path = NULL;
 		if (dir_fd == AT_FDCWD)
 		{
 			// pathname_dir = getenv("PWD");
@@ -4461,54 +4534,8 @@ extern "C"
 		if (pathname_dir != NULL || new_path != NULL)
 		{
 			slog_live("[POSIX] Calling Hercules 'faccessat' flags=%d, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, dir_fd, pathname_dir, pathname);
-			int is_absolute_path = IsAbsolutePath(pathname);
 
-			// If pathname is absolute, then dir_fd is ignored.
-			if (is_absolute_path == 1)
-			{
-				// char *new_path = checkHerculesPath(pathname);
-				slog_live("[POSIX] is absolute, 'faccessat', pathname=%s", pathname);
-				ret = access(pathname, mode);
-
-				// ret = generalOpen(new_path, flags, mode);
-				// free(new_path);
-			}
-			else if (is_absolute_path == 0) // pathname is relative.
-			{
-				if (dir_fd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
-				{						// TO CHECK!
-					// char *new_path = checkHerculesPath(pathname);
-					// slog_live("[POSIX] is relative, current directory, 'faccessat', new_path=%s", new_path);
-					slog_live("[POSIX] is relative, current directory, 'faccessat', pathname=%s", pathname);
-					// pathname is interpreted relative to the current working directory of the calling process (like real_open).
-					// ret = generalOpen(new_path, flags, mode);
-					ret = access(pathname, mode);
-					// free(new_path);
-				}
-				else
-				{
-					// // get the pathname of the directory pointed by dir_fd if it is storage in the local map "map_fd".
-					// char *pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
-					// if (pathname_dir == NULL)
-					// { // if dir_fd is not storage locally
-					// 	// search dir_fd on the metadata server.
-					// 	slog_error("[POSIX] dir_fd=%d could not be resolved.");
-					// 	return -1;
-					// }
-
-					char absolute_pathname[PATH_MAX];
-					char *dirr = pathname_dir + strlen("imss://");
-					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
-
-					// char *new_path = checkHerculesPath(absolute_pathname);
-					//  slog_live("[POSIX] is relative, 'faccessat', new_path=%s", new_path);
-					slog_live("[POSIX] is relative, 'faccessat', absolute_pathname=%s", absolute_pathname);
-					ret = access(absolute_pathname, mode);
-
-					// ret = generalOpen(new_path, flags, mode);
-					// free(new_path);
-				}
-			}
+			ret = GeneralFAccessAt(dir_fd, pathname, mode, flags, pathname_dir);
 
 			slog_live("[POSIX] Ending Hercules 'faccessat', ret=%d, errno=%d:%s\n", ret, errno, strerror(errno));
 			if (new_path != NULL)
@@ -4701,7 +4728,6 @@ extern "C"
 
 		if (!init)
 		{
-			// slog_live("[POSIX %d] Calling Real '__fxstat64'", rank);
 			return real__fxstat64(ver, fd, buf);
 		}
 

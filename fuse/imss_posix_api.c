@@ -172,24 +172,44 @@ int get_number_of_data_servers(int i_blk, int num_of_blk)
  * @param s Pointer to the stat structure where the file attributes will be stored.
  * @param aux Pointer to the block 0 data.
  */
-void fd_lookup(const char *path, int *fd, struct stat *s, char **aux)
+void fd_lookup(char *path, int *fd, struct stat *s, char **aux)
 {
 	pthread_mutex_lock(&lock_file);
 	*fd = -1;
-	// TODO: check for directories ending with "/"
+	// Seek for the fd on the map.
 	int found = map_search(map, path, fd, s, aux);
+	pthread_mutex_unlock(&lock_file);
+
 	if (found == -1)
-	{
+	{	
+		// if the file was not find with the current name, 
+		// try again adding an extra slash if they does not have it.
 		slog_warn("file not found, %s", path);
-		slog_debug("path=%s, found=%d, fd=%d", path, found, *fd);
-		*fd = -1;
+		size_t len = strlen(path);
+		char aux_path[MAX_PATH] = {'\0'};
+		if (len > 0 && path[len - 1] != '/')
+		{
+			strcpy(aux_path, path);
+			strcat(aux_path, "/");
+			found = map_search(map, aux_path, fd, s, aux);
+		}
+
+		if (found == -1)
+		{
+			*fd = -1;
+			slog_warn("file not found, %s", path);
+		}
+		else
+		{
+			// if the fd was find with the extra slash,
+			// we add it to the permant path.
+			strcat(path, "/");
+		}
 	}
-	else
+	if (*fd != -1)
 	{
 		slog_debug("path=%s, found=%d, fd=%d, stat.st_nlink=%lu", path, found, *fd, s->st_nlink);
 	}
-
-	pthread_mutex_unlock(&lock_file);
 }
 
 void get_iuri(const char *path, /*output*/ char *uri)
@@ -240,7 +260,7 @@ int imss_refresh(const char *path)
 	void *aux = NULL;
 	const char *imss_path = path; // this pointer should not be free.
 	// Lookup the current file on the local front-end map.
-	fd_lookup(imss_path, &fd, &old_stats, (char **)&aux);
+	fd_lookup((char *)imss_path, &fd, &old_stats, (char **)&aux);
 	if (fd >= 0)
 	{
 		ds = fd;
@@ -326,7 +346,7 @@ int imss_getattr(char *path, struct stat *stbuf)
 
 	// Seek for the dataset on the local map. If it not found,
 	// we open it.
-	fd_lookup(imss_path, &fd, &stats, &aux);
+	fd_lookup((char *)imss_path, &fd, &stats, &aux);
 	if (fd < 0)
 	{ // not found.
 		ds = open_dataset((char *)imss_path, 0);
@@ -542,7 +562,7 @@ int imss_open(char *path, uint64_t *fh)
 	struct stat stats;
 	char *aux = NULL;
 	// Look for the 'file descriptor' of 'imss_path' in the local map.
-	fd_lookup(imss_path, &fd, &stats, &aux);
+	fd_lookup((char *)imss_path, &fd, &stats, &aux);
 	slog_info("[FUSE]imss_path=%s, fd looked up=%d", imss_path, fd);
 	// fprintf(stderr, "[FUSE]imss_path=%s, fd looked up=%d\n", imss_path, fd);
 	if (fd >= 0)
@@ -653,7 +673,7 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 	struct stat stats;
 	char *aux;
 
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	if (fd >= 0)
 		ds = fd;
 	else if (fd == -1)
@@ -821,7 +841,7 @@ int imss_vread_prefetch(const char *path, char *buf, size_t size, off_t offset)
 	struct stat stats;
 	char *aux;
 	// printf("imss_read aux before %p\n", aux);
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	// printf("imss_read aux after %p\n", aux);
 	if (fd >= 0)
 		ds = fd;
@@ -1047,7 +1067,7 @@ int imss_vread_no_prefetch(const char *path, char *buf, size_t size, off_t offse
 	struct stat stats;
 	char *aux;
 	// printf("imss_read aux before %p\n", aux);
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 
 	// printf("imss_read aux after %p\n", aux);
 	if (fd >= 0)
@@ -1191,7 +1211,7 @@ int imss_vread_2x(const char *path, char *buf, size_t size, off_t offset)
 	struct stat stats;
 	char *aux;
 	// printf("imss_read aux before %p\n", aux);
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	// printf("imss_read aux after %p\n", aux);
 	if (fd >= 0)
 		ds = fd;
@@ -1452,7 +1472,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 
 	int fd = -1;
 	struct stat stats;
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	if (fd >= 0)
 		ds = fd;
 	else if (fd == -1)
@@ -1590,7 +1610,7 @@ int imss_split_writev(const char *path, const char *buf, size_t size, off_t off)
 
 	int fd;
 	struct stat stats;
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	if (fd >= 0)
 		ds = fd;
 	else if (fd == -2)
@@ -1756,7 +1776,7 @@ int imss_split_readv(const char *path, char *buf, size_t size, off_t offset)
 	struct stat stats;
 	char *aux;
 
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	// printf("stats_size=%ld\n",stats.st_size);
 	if (stats.st_size < size)
 	{
@@ -2006,7 +2026,7 @@ int imss_release(const char *path)
 
 	struct stat stats;
 	char *aux = NULL;
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	if (fd >= 0)
 		ds = fd;
 	else
@@ -2215,7 +2235,7 @@ int imss_unlink(const char *path)
 	char *buff = NULL;
 	int ret = 0;
 	pthread_mutex_lock(&lock);
-	fd_lookup(imss_path, &fd, &stats, &buff);
+	fd_lookup((char *)imss_path, &fd, &stats, &buff);
 	if (fd >= 0)
 		ds = fd;
 	else
@@ -2316,7 +2336,7 @@ int imss_utimens(const char *path, const struct timespec tv[2])
 	int fd;
 	struct stat stats;
 	char *buff;
-	fd_lookup(rpath, &fd, &stats, &buff);
+	fd_lookup((char *)rpath, &fd, &stats, &buff);
 
 	if (fd >= 0)
 		file_desc = fd;
@@ -2574,7 +2594,7 @@ int imss_chown(const char *path, uid_t uid, gid_t gid)
 	int fd;
 	struct stat stats;
 	char *buff;
-	fd_lookup(rpath, &fd, &stats, &buff);
+	fd_lookup((char *)rpath, &fd, &stats, &buff);
 
 	if (fd >= 0)
 		file_desc = fd;
@@ -2638,11 +2658,15 @@ int imss_rename(char *old_path, char *new_path)
 		if (S_ISDIR(ds_stat_n.st_mode))
 		{
 
-			strcat(old_rpath, "/");
+			size_t len = strlen(old_rpath);
+			if (len > 0 && old_rpath[len - 1] != '/')
+			{
+				strcat(old_rpath, "/");
+			}
 
-			int fd;
+			int fd = -1;
 			struct stat stats;
-			char *aux;
+			char *aux = NULL;
 			fd_lookup(old_rpath, &fd, &stats, &aux);
 			if (fd >= 0)
 				file_desc_o = fd;
@@ -2671,11 +2695,13 @@ int imss_rename(char *old_path, char *new_path)
 				}
 			}
 			char *dir_dest = (char *)calloc(MAX_PATH, sizeof(char));
-			memcpy(dir_dest, &new_path[0], pos + 1);
+			// memcpy(dir_dest, &new_path[0], pos + 1);
+			memcpy(dir_dest, &new_path[0], pos);
 
 			char *rdir_dest = (char *)calloc(MAX_PATH, sizeof(char));
 			get_iuri(dir_dest, rdir_dest);
 
+			slog_debug("dir_dest=%s", dir_dest);
 			ret = imss_getattr(dir_dest, &ds_stat_n);
 			if (ret == 0)
 			{

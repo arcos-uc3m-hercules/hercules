@@ -27,9 +27,9 @@
 /******************************** GLOBAL VARIABLES ********************************/
 /**********************************************************************************/
 // __thread
-int32_t  current_dataset;	// Dataset whose policy has been set last.
+int32_t current_dataset;   // Dataset whose policy has been set last.
 dataset_info curr_dataset; // Currently managed dataset.
-imss  curr_imss;
+imss curr_imss;
 
 uint32_t process_rank; // Process identifier within the deployment.
 
@@ -90,7 +90,6 @@ ucp_ep_h *stat_eps;
 extern char POLICY[MAX_POLICY_LEN];
 
 pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
-
 
 SharedMemory *shared_memory;
 key_t shared_memory_key;
@@ -558,7 +557,7 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 	{
 		number_metadata_servers = n_stat_servers;
 	}
-	
+
 	slog_debug("requested_uri=%s, first_parent_dir=%s, first_parent_offset=%d, number_metadata_servers=%d", requested_uri, first_parent_dir, first_parent_offset, number_metadata_servers);
 	pthread_mutex_lock(&lock_network);
 	char getdir_req[REQUEST_SIZE] = {0};
@@ -1075,8 +1074,8 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 		slog_error("HERCULES_ERR_STAT_IMSS_GET_RECV_DATA_LENGTH");
 		return -1;
 	}
-	//void *request = malloc(length);
-//	ret = recv_dynamic_stream(ucp_worker_meta, ep, request, IMSS_INFO, local_meta_uid, length);
+	// void *request = malloc(length);
+	//	ret = recv_dynamic_stream(ucp_worker_meta, ep, request, IMSS_INFO, local_meta_uid, length);
 	// ret = recv_dynamic_stream(ucp_worker_meta, ep, &imss_info_, IMSS_INFO, local_meta_uid, length);
 	ret = recv_dynamic_stream(ucp_worker_meta, ep, imss_info_, IMSS_INFO, local_meta_uid, length);
 
@@ -1094,7 +1093,7 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 	// free(aux->ips);
 	// free(aux->status);
 	// free(aux->arr_num_active_storages);
-	
+
 	// free(request);
 	pthread_mutex_unlock(&lock_network);
 	return 1;
@@ -2029,6 +2028,7 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 
 			strcpy(dataset_info_.uri_, new_path);
 			g_array_remove_index(datasetd, i);
+			slog_debug("inserted dataset=%s", dataset_info_.uri_);
 			g_array_insert_val(datasetd, i, dataset_info_);
 		}
 	}
@@ -2059,7 +2059,7 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	pthread_mutex_lock(&lock_network);
 
 	// Send the request.
-	sprintf(formated_uri, "%" PRIu32 " GET 6 %s %s", stat_ids[m_srv], old_dir, rdir_dest);
+	sprintf(formated_uri, "%" PRIu32 " GET 6 %s,%s", stat_ids[m_srv], old_dir, rdir_dest);
 	slog_debug("Request to metadata %d - %s", m_srv, formated_uri);
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
 	{
@@ -2093,7 +2093,8 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 
 	if (strncmp((const char *)result, "RENAME", strlen("RENAME")))
 	{ // if the response message is different from "RENAME" it was an error.
-		perror("HERCULES_ERR_RENAME_DIR_FAILED");
+		perror("HERCULES_ERR_METADATA_RENAME_DIR_FAILED");
+		slog_error("HERCULES_ERR_METADATA_RENAME_DIR_FAILED");
 		free(result);
 		return -1;
 	}
@@ -2562,6 +2563,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 		ucp_ep_h ep = curr_imss.conns.eps[i];
 
 		sprintf(key_, "GET 6 0 %s,%s", old_dir, rdir_dest);
+		slog_debug("Request to data %d - %s", i, key_);
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -2599,6 +2601,14 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 			slog_error("ERRIMSS_REN_DATASET_DATA_DIR_DIR_RECV_DATA");
 			free(result);
 			return -1;
+		}
+
+		if (strncmp((const char *)result, "RENAME", strlen("RENAME")))
+		{ // if the response message is different from "RENAME" it was an error.
+			perror("HERCULES_ERR_DATA_RENAME_DIR_FAILED");
+			slog_error("HERCULES_ERR_DATA_RENAME_DIR_FAILED");
+			// free(result);
+			// return -1;
 		}
 
 		free(result);
@@ -3138,7 +3148,6 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		slog_error("HERCULES_ERR_GET_NDATA_BAD_PARAMS");
 		return -1;
 	}
-	
 
 	// Servers that the data block is going to be requested to.
 	int32_t repl_servers[replication_factor];

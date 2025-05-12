@@ -82,8 +82,7 @@ extern "C"
 		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
 		char aux_path[PATH_MAX] = {0};
-		// const char *last = pathname + strlen(pathname) - 1;
-		// if (last[0] != '/')
+		
 		size_t len = strlen(pathname);
 		if (len > 0 && pathname[len - 1] != '/')
 		{

@@ -24,8 +24,11 @@ PROCESS_PER_NODE=$4
 ## Uncomment when working in Unito.
 ## MDTEST is part of the IOR package.
 MDTEST_PATH=/beegfs/home/javier.garciablas/gsanchez/ior/bin
-spack unload mpich openmpi
-spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
+#spack unload mpich openmpi
+#spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
+spack load mpich
+whereis mpirun
+
 
 ## Uncomment when working in MN4.
 # IOR_PATH=/apps/IOR/3.3.0/INTEL/IMPI/bin
@@ -47,14 +50,14 @@ spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
 set -x
 # export UCX_NET_DEVICES="opap6s0:1"
 #export UCX_IB_RCACHE_MAX_REGIONS="100"
-export UCX_TLS=rc,sm
+#export UCX_TLS=rc,sm
 
 
 # mpiexec -env UCX_NET_DEVICES "opap6s0:1" -n=1 ucx_info -T
 #mpiexec -n=1 ucx_info -T
 set +x
 
-echo "temporal dir $TMPDIR"
+#echo "temporal dir $TMPDIR"
 
 
 echo "Starting Hercules with $POLICY policy"
@@ -65,7 +68,7 @@ if [ -z "$CONFIG_PATH" ]; then
 else
    echo "Configuration file pass $CONFIG_PATH"
 #   export HERCULES_DEBUG_LEVEL=SLOG_TIME
-   export HERCULES_DEBUG_LEVEL=SLOG_LIVE
+#   export HERCULES_DEBUG_LEVEL=SLOG_LIVE
    source /beegfs/home/javier.garciablas/hercules/scripts/hercules start \
    -f "$CONFIG_PATH" 
    unset HERCULES_DEBUG_LEVEL
@@ -122,7 +125,7 @@ mpiexec -np="$NUMBER_OF_PROCESS" "$HERCULES_MPI_PPN"="$HERCULES_NCPN"           
 
 echo "listing directory"
 ## Checksum to the file.
-HERCULES_DEBUG_LEVEL=all HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/
+HERCULES_DEBUG_LEVEL=none HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/
 #HERCULES_DEBUG_LEVEL=none HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -R /mnt/hercules/
 #HERCULES_DEBUG_LEVEL=all HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/directory_
 #HERCULES_DEBUG_LEVEL=all HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  md5sum /mnt/hercules/data.out

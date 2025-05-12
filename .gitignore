@@ -29,7 +29,9 @@ hostfiles
 bash/tests/data
 tmp/*
 !tmp/.emptyfile
-bash/tests/malleability/sink
-bash/tests/malleability/source
-bash/tests/metadata/Benchmarks/HerculesConfigurations/Detach/
-bash/tests/metadata/Benchmarks/HerculesConfigurations/Attach/
+bash/tests/malleability/sink/*
+bash/tests/malleability/source/*
+bash/tests/metadata/Benchmarks/HerculesConfigurations/Detach/*
+bash/tests/metadata/Benchmarks/HerculesConfigurations/Attach/*
+*.nc
+*.conf_*

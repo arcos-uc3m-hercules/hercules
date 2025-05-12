@@ -243,12 +243,12 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	if (it == buffer.end())
 	{
 		slog_debug("%s not found in the map", key.c_str());
-		// size_t len = strlen(key.c_str());
-		// if (len > 0 && key.c_str()[len - 1] != '/') 
-		// {
-		// 	key += '/';
-		// 	it = buffer.find(key);
-		// }
+		size_t len = strlen(key.c_str());
+		if (len > 0 && key.c_str()[len - 1] != '/') 
+		{
+			key += '/';
+			it = buffer.find(key);
+		}
 		// if (it == buffer.end())
 		// {
 			// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());

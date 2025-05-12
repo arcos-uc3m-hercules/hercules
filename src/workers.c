@@ -665,6 +665,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		}
 		case RENAME_OP:
 		{
+			char response_msg[MAX_RESPONSE_MSG_LEN];
 			std::size_t found = key.find(',');
 			slog_debug("[RENAME_OP], key=%s, found=%d", key.c_str(), found);
 			if (found != std::string::npos)
@@ -681,13 +682,23 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				{
 					break;
 				}
+				ret = 1;
 			}
 			else
 			{
 				slog_debug("[RENAME_OP], found == npos");
+				ret = -1;
 			}
 
-			char response_msg[] = "RENAME\0";
+			// char response_msg[] = "RENAME\0";
+			if (ret == -1)
+			{
+				strncpy(response_msg, "ERROR", strlen("ERROR") + 1);
+			}
+			else
+			{
+				strncpy(response_msg, "RENAME", strlen("RENAME") + 1);
+			}
 			// pthread_mutex_lock(&lock_network);
 			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send rename", int);
 			// pthread_mutex_unlock(&lock_network);
@@ -1921,7 +1932,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	uint64_t block_size_recv = (uint64_t)atoi(number);
 
-	slog_info("operation=%d, number=%s, uri=%s, block_size_recv=%ld, num_characters_read=%d", operation, number, uri_, block_size_recv, num_characters_read);
+	slog_info("mode=%s, operation=%d, number=%s, uri=%s, block_size_recv=%ld, num_characters_read=%d", mode, operation, number, uri_, block_size_recv, num_characters_read);
 
 	// Create an std::string in order to be managed by the map structure.
 	std::string key;
@@ -2229,21 +2240,29 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			char response_msg[MAX_RESPONSE_MSG_LEN];
 			int ret = -1;
-			if (req[num_characters_read] != '\0')
+			// if (req[num_characters_read] != '\0')
+			// {
+			// 	char new_uri_[URI_];
+			// 	slog_live("Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
+			// 	// fprintf(stderr, "Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
+			// 	// get the server status to be set.
+			// 	sscanf(&req[num_characters_read], "%s", new_uri_);
+			// 	// flag = 1;
+			// 	// std::size_t found = key.find(' ');
+			// 	// if (found != std::string::npos)
+			// 	// {
+			// 	std::string old_dir = key; // key.substr(0, found);
+			std::size_t found = key.find(',');
+			if (found != std::string::npos)
 			{
-				char new_uri_[URI_];
-				slog_live("Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
-				// fprintf(stderr, "Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
-				// get the server status to be set.
-				sscanf(&req[num_characters_read], "%s", new_uri_);
-				// flag = 1;
-				// std::size_t found = key.find(' ');
-				// if (found != std::string::npos)
-				// {
-				std::string old_dir = key; // key.substr(0, found);
+				std::string old_dir = key.substr(0, found);
+				// std::string new_key = key.substr(found + 1, key.length());
+				std::string rdir_dest = key.substr(found + 1);
+
+				slog_debug("[RENAME_DIR_DIR_OP] old_key=%s, new_key=%s\n", old_dir.c_str(), rdir_dest.c_str());
 				// std::string rdir_dest = key.substr(found + 1, key.length());
-				std::string rdir_dest;
-				rdir_dest.assign((const char *)new_uri_);
+				// std::string rdir_dest;
+				// rdir_dest.assign((const char *)new_uri_);
 
 				// RENAME MAP
 				ret = map->rename_metadata_dir_stat_worker(old_dir, rdir_dest);

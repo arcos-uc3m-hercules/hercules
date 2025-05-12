@@ -47,6 +47,8 @@ extern "C"
     char *convert_path(const char *name);
     int generalOpen(char *new_path, int flags, mode_t mode, int createFd);
     ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, size_t offset);
+	int GeneralFAccessAt(int dirfd, const char *pathname, int mode, int flags, char *pathname_dir);
+    
     int IsAbsolutePath(const char *pathname);
     int ResolvePath(const char *path_, char *resolved);
 	void WarnOperationNotSupported(const char *call_name, const char *pathname);
@@ -169,6 +171,8 @@ extern "C"
     static int (*real_posix_fadvise)(int fd, off_t offset, off_t len, int advice) = NULL;
     // static int (*real_posix_fadvise64)(int fd, off64_t offset, off64_t len, int advice) = NULL;
     static int (*real_faccessat)(int dir_fd, const char *pathname, int mode, int flags) = NULL;
+    static int (*real_faccessat2)(int dirfd, const char *pathname, int mode, int flags) = NULL;
+
     static int (*real_unlinkat)(int fd, const char *name, int flag) = NULL;
     static int (*real_renameat2)(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags) = NULL;
     // static int (*real_fstatat)(int dir_fd, const char *pathname, struct stat *buf, int flags) = NULL;
@@ -185,6 +189,8 @@ extern "C"
     static ssize_t (*real_readlink)(const char *pathname, char *buf, size_t bufsiz) = NULL;
     static ssize_t (*real_readlinkat)(int dirfd, const char *pathname, char *buf, size_t bufsiz) = NULL;
     static int (*real_utimensat)(int dirfd, const char *pathname, const struct timespec times[_Nullable 2], int flags) = NULL;
+
+    // static int (*real_syscall)(SYS_faccessat2, int dirfd, const char *path, int mode, int flags) = NULL;
 
 #ifdef __cplusplus
 }

@@ -185,10 +185,11 @@ GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 						memmove(p, p + len, strlen(p + len) + 1);
 					}
 				}
-				char *new_path = (char *)malloc(256);
+				char *new_path = (char *)malloc(PATH_MAX);
 				strcpy(new_path, rdir_dest);
 				strcat(new_path, "/");
 				strcat(new_path, path);
+				slog_debug("new_path to be inserted=%s", new_path);
 
 				GTree_insert(new_path);
 			}
@@ -222,7 +223,6 @@ int32_t GTree_delete(char *desired_data)
 	else
 	{
 		// add recursive search.
-		// const char *last = desired_data + strlen(desired_data) - 1;
 		size_t len = strlen(desired_data);
 		if (len > 0 && desired_data[len - 1] != '/') 
 		{
@@ -446,7 +446,7 @@ GTree_getdir(char *desired_dir,
 	// TO CHECK!
 	slog_info("serialize_dir_childrens(dir_node=%s, num_children=%d, &aux_dir_elem)", dir_node->data, num_children);
 	serialize_dir_childrens(dir_node, num_children, &aux_dir_elem);
-	slog_info("ending serialize_dir_childrens, aux_dir_elem=%s", *aux_dir_elem);
+	// slog_info("ending serialize_dir_childrens, aux_dir_elem=%s", *aux_dir_elem);
 
 	return dir_elements;
 }

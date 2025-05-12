@@ -544,7 +544,7 @@ if [ -z "${HERCULES_MPI_HOSTFILE_NAME}" ]; then
     fi
     ## Creates a client hostfile using some of the allocates nodes.
     if [[ $SLURM -eq "1" ]]; then
-        HERCULES_MPI_HOSTFILE_NAME="client_hostfile_"$SLURM_JOB_ID
+        HERCULES_MPI_HOSTFILE_NAME="${HERCULES_PATH}/tmp/client_hostfile_${SLURM_JOB_ID}"
         if [[ $ATTACHED -eq "1" ]]; then
             tail -n +$((HERCULES_NUM_METADATA+1)) $FULL_HOSTFILE | head -n $NUM_NODES_FOR_CLIENTS > $HERCULES_MPI_HOSTFILE_NAME
         else
