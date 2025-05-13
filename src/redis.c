@@ -20,12 +20,12 @@ redisContext* redis_init(const char *hostname, int port)
     {
         if (context)
         {
-            slog_error("Error: %s\n", context->errstr);
+            slog_error("redis_init: failed to connect to Redis at %s:%d — %s", hostname, port, context->errstr);
             return context;
         }
         else
         {
-            slog_error("Error: Cannot allocate context\n");
+            slog_error("redis_init: could not allocate Redis context for %s:%d", hostname, port);
             return NULL;
         }
     }
@@ -40,10 +40,12 @@ void redis_close(redisContext *context)
         // Flush all data from all databases
         redisReply *reply = (redisReply *)redisCommand(context, "FLUSHALL");
         if (reply == NULL) {
-            slog_error("Error: %s\n", context->errstr);
+            slog_error("redis_close: FLUSHALL failed — %s", context->errstr);
         } else {
             freeReplyObject(reply);
         }
+    } else if (context && context->err) {
+        slog_info("redis_close: Redis context was in error state — closing without flush. %s", context->errstr);
     }
     redisFree(context);
 }
@@ -55,7 +57,7 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
     char *data_to_insert = get_path_last_part(desired_data); // This can be either a file or a dir
 
     if (!parent_dir || !data_to_insert){
-        slog_error("Error inserting");
+        slog_error("Error : failed to extract parent or child from path '%s'", desired_data);
         free(parent_dir);
         free(data_to_insert);
         return -1;
@@ -68,7 +70,7 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
         int32_t insert_parent_result = redis_insert_data(context, parent_dir);
         if (insert_parent_result == -1)
         {
-            slog_error("Error inserting directory\n");
+            slog_error("redis_insert_data: failed to recursively insert parent directory '%s'", parent_dir);
             free(parent_dir);
             free(data_to_insert);
             return -1;
@@ -80,7 +82,7 @@ int32_t redis_insert_data(redisContext *context, const char *desired_data)
     free(parent_dir);
     if (reply == NULL)
     {
-        slog_error("Error: %s\n", context->errstr);
+        slog_error("redis_insert_data: redisCommand failed while inserting '%s' into '%s': %s", data_to_insert, parent_dir, context->errstr);
         free(data_to_insert);
         freeReplyObject(reply);
         return -1;
@@ -206,8 +208,7 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     char *data_to_insert = get_path_last_part(desired_data); // This can be either a file or a dir
 
     if (!parent_dir || !data_to_insert) {
-        slog_error("Error deleting");
-        free(parent_dir);
+        slog_error("redis_delete_data: failed to split path '%s' into parent and child", desired_data);
         free(data_to_insert);
         return -1;
     }
@@ -218,7 +219,7 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     free(data_to_insert);
     if (reply == NULL)
     {
-        slog_error("Error: %s\n", context->errstr);
+        slog_info("redis_delete_data: attempting to remove '%s' from parent directory", desired_data);
         return -1;
     }
 
@@ -232,7 +233,7 @@ int32_t redis_delete_data(redisContext *context, const char *desired_data) {
     reply = (redisReply *)redisCommand(context, "DEL %s", desired_data);
     if (reply == NULL)
     {
-        slog_error("Error: %s\n", context->errstr);
+        slog_error("redis_delete_data: DEL command failed for '%s': %s", desired_data, context->errstr);
         return -1;
     }
     // If the deleted element was a dir, the return value will be 1, so delete all subdirs
@@ -277,7 +278,7 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     // Retrieve the contents of the directory
     redisReply *reply = (redisReply *)redisCommand(context, "SMEMBERS %s", desired_dir);
     if (reply == NULL || reply->type != REDIS_REPLY_ARRAY) {
-        slog_error("Error: %s\n", context->errstr);
+        slog_error("redis_getdir: SMEMBERS failed for directory '%s': %s", desired_dir, context->errstr);
         return NULL;
     }
 
@@ -296,7 +297,7 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
     
     for (int32_t i = 0; i < num_children; i++) {
         // Copy the whole path into the buffer
-        sprintf(sub_dir, "%s/%s", desired_dir, reply->element[i]->str);
+        sprintf(sub_dir, "%s%s", desired_dir, reply->element[i]->str);
         memcpy(aux_dir_elements, sub_dir, URI_);
         aux_dir_elements += URI_;
     } 
@@ -309,12 +310,12 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
 int32_t redis_rename(redisContext *context, const char *old_path, const char *new_path) {
     int32_t delete_result = redis_delete_data(context, old_path);
     if (delete_result == -1) {
-        slog_error("Error deleting old path\n");
+        slog_error("redis_rename: failed to delete original path '%s'", old_path);
         return -1;
     }
     int32_t insert_result = redis_insert_data(context, new_path);
     if (insert_result == -1) {
-        slog_error("Error inserting new path\n");
+        slog_error("redis_rename: failed to insert new path '%s'", new_path);
         return -1;
     }
     return 0;
@@ -326,26 +327,31 @@ int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const c
 
     int exists = dir_exists(context, old_dir);
     if (exists <= 0) {
+        slog_error("redis_rename_dir_dir: source directory '%s' does not exist or could not be verified", old_dir);
         return exists;
     }
 
     // Rename the parent directory first
     if (rename_key(context, old_dir, new_dir) < 0) {
+        slog_error("redis_rename_dir_dir: failed to rename base key from '%s' to '%s'", old_dir, new_dir);
         return -1;
     }
 
     // Rename all its subdirectories
     if (rename_subdirectories(context, old_dir, new_dir) != 0) {
+        slog_error("redis_rename_dir_dir: failed to rename subdirectories from '%s' to '%s'", old_dir, new_dir);
         return -1;
     }
 
     // Delete the old file/dir from the parent
     if (redis_delete_data(context, old_dir) < 0) {
+        slog_error("redis_rename_dir_dir: failed to remove old reference to '%s'", old_dir);
         return -1;
     }
 
     // Insert the file/dir in the new parent directory key
     if (redis_insert_data(context, new_dir) != 0) {
+        slog_error("redis_rename_dir_dir: failed to insert new reference to '%s'", new_dir);
         return -1;
     }
 
