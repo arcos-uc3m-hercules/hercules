@@ -189,6 +189,23 @@ extern "C"
 		}
 	}
 
+	void ResolvePathsAndFD(const int fd_dir, const char *path_to_check, char **directory_path, char **file_path)
+	{
+		// int ret = 0;
+		// AT_FDCWD (fd = -100) means current working directory.
+		if (fd_dir == AT_FDCWD)
+		{ // checks if the path_to_check is from Hercules.
+			*file_path = checkHerculesPath(path_to_check);
+			directory_path = NULL;
+		}
+		else
+		{ // checks if the file descriptor is from a Hercules directory.
+			*directory_path = map_fd_search_by_val(map_fd, fd_dir);
+			file_path = NULL;
+		}
+		// return ret;
+	}
+
 	char *checkHerculesPath(const char *pathname)
 	{
 		char *new_path = NULL;
@@ -543,12 +560,12 @@ extern "C"
 			// t_s = clock();
 			release = -1;
 			slog_live("[POSIX] release_imss()");
-			// release_imss("imss://", CLOSE_DETACHED);
+			release_imss("imss://", CLOSE_DETACHED);
 			// // //  slog_live("[POSIX] stat_release()");
-			// stat_release();
+			stat_release();
 			// free_prefetch(map_prefetch);
 			map_free(map);
-			imss_comm_cleanup();
+			// imss_comm_cleanup();
 			//   t_s = clock() - t_s;
 			//   time_taken = ((double)t_s) / (CLOCKS_PER_SEC);
 		}
@@ -947,7 +964,7 @@ extern "C"
 	int stat(const char *pathname, struct stat *buf)
 	{
 		if (!real_stat)
-			real_stat = (int (*)(const char *, struct stat *))dlsym(RTLD_NEXT, __func__);
+			real_stat = (int (*)(const char *, struct stat *))dlsym(RTLD_NEXT, "stat");
 
 		if (!init)
 		{
@@ -972,9 +989,9 @@ extern "C"
 		}
 		else
 		{
-			slog_live("[POSIX]. Calling Real 'stat', pathname=%s.", pathname);
+			slog_live("[POSIX]. Calling Real 'stat', pathname=%s", pathname);
 			ret = real_stat(pathname, buf);
-			slog_live("[POSIX]. Ending Real 'stat', pathname=%s.", pathname);
+			// slog_live("[POSIX]. Ending Real 'stat', pathname=%s", pathname);
 		}
 
 		return ret;
@@ -3543,30 +3560,91 @@ extern "C"
 		else if (old_path == NULL && new_path != NULL)
 		{ // move from file system to Hercules.
 			slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s", old, new_pathname, new_path);
-
+			ret = hercules_move(old, new_path);
 			// open both files.
-			int fd_old = open(old, O_RDONLY);
-			int fd_new = open(new_pathname, O_WRONLY | O_APPEND | O_CREAT, 0644);
+			// from file system.
+			// int fd_old = open(old, O_RDONLY);
+			// if (fd_old < 0)
+			// {
+			// 	slog_error("HERCULES_ERR_RENAME_OPEN_SYSTEM_FILE");
+			// 	return -1;
+			// }
 
-			// get old file stat.
-			struct stat *old_file_stat;
-			old_file_stat = (struct stat *)malloc(sizeof(struct stat));
-			ret = __fxstat(1, fd_old, old_file_stat);
-			// old file size.
-			off_t old_file_size = old_file_stat->st_size;
+			// // from hercules because it begins with the mount point.
+			// int fd_new = open(new_pathname, O_WRONLY | O_APPEND | O_CREAT, 0644);
+			// if (fd_new < 0)
+			// {
+			// 	slog_error("HERCULES_ERR_RENAME_OPEN_HERCULES_FILE");
+			// 	close(fd_old);
+			// 	return -1;
+			// }
 
-			// read old file.
-			char *old_file_buffer = NULL;
-			old_file_buffer = (char *)malloc(old_file_size * sizeof(char));
-			ssize_t ret = read(fd_old, old_file_buffer, old_file_size);
-			slog_info("[POSIX]. bytes read from %s = %ld/%ld", old, ret, old_file_size);
+			// // get old file stat.
+			// struct stat old_file_stat;
+			// // old_file_stat = (struct stat *)malloc(sizeof(struct stat));
+			// ret = __fxstat(1, fd_old, &old_file_stat);
+			// // old file size.
+			// off_t old_file_size = old_file_stat.st_size;
 
-			ret = write(fd_new, old_file_buffer, ret);
+			// // read old file.
+			// char *old_file_buffer = NULL;
+			// old_file_buffer = (char *)malloc(old_file_size * sizeof(char));
+			// // if(old_file_buffer == NULL) {
+			// // 	perror("HERCULES_ERR_RENAME_MEMORY_ALLOC");
+			// // 	slog_error("HERCULES_ERR_RENAME_MEMORY_ALLOC");
+			// // 	// errno = ENOSPC;
+			// // 	return -1;
+			// // }
 
-			slog_info("[POSIX]. bytes write to %s = %ld/%ld", new_pathname, ret, old_file_size);
+			// ssize_t bytes_read = -1, bytes_write, total_bytes = -1;
+			// while ((bytes_read = read(fd_old, old_file_buffer, old_file_size)) > 0)
+			// {
+			// 	slog_info("[POSIX]. bytes read from %s = %ld/%ld", old, bytes_read, old_file_size);
+			// 	// writes to Hercules.
+			// 	bytes_write = write(fd_new, old_file_buffer, bytes_read);
+			// 	if (bytes_write < 0)
+			// 	{
+			// 		perror("HERCULES_ERR_RENAME_WRITE_FILE");
+			// 		slog_error("HERCULES_ERR_RENAME_WRITE_FILE: %s, fd_new=%d", old, fd_new);
+			// 		break;
+			// 	}
+			// 	total_bytes += bytes_write;
+			// }
 
-			close(fd_new);
-			close(fd_old);
+			// if (bytes_read == -1)
+			// {
+			// 	perror("HERCULES_ERR_READ_FILE");
+			// 	slog_error("HERCULES_ERR_READ_FILE: %s", old);
+			// }
+
+			// slog_info("[POSIX]. bytes write to %s = %ld/%ld", new_pathname, total_bytes, old_file_size);
+			// if (total_bytes != old_file_size)
+			// {
+			// 	slog_warn("Original file has %ld bytes but Hercules only wrote %ld", old_file_size, total_bytes);
+			// }
+
+			// // close both files.
+			// if (close(fd_old) == -1)
+			// {
+			// 	slog_error("HERCULES_ERR_RENAME_CLOSE_FILE_OLD: %s", old);
+			// 	perror("HERCULES_ERR_RENAME_CLOSE_FILE_OLD");
+			// }
+			// if (close(fd_new) == -1)
+			// {
+			// 	slog_error("HERCULES_ERR_RENAME_CLOSE_FILE_NEW: %s", new_pathname);
+			// 	perror("HERCULES_ERR_RENAME_CLOSE_FILE_NEW");
+			// }
+
+			// // unlink the file from the file system.
+			// if (unlink(old) == -1)
+			// {
+			// 	perror("HERCULES_ERR_RENAME_UNLINK_FILE_OLD");
+			// 	slog_error("HERCULES_ERR_RENAME_UNLINK_FILE_OLD: %s", new_pathname);
+			// }
+
+			// // free memory.
+			// free(old_file_buffer);
+			slog_live("[POSIX]. End Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s", old, new_pathname, new_path);
 			free(new_path);
 		}
 		else
@@ -4182,9 +4260,9 @@ extern "C"
 		}
 		else
 		{
-			slog_live("[POSIX]. Calling Real 'stat', pathname=%s.", pathname);
+			slog_live("[POSIX]. Calling Real 'stat64', pathname=%s.", pathname);
 			ret = real_stat64(pathname, buf);
-			slog_live("[POSIX]. Ending Real 'stat', pathname=%s.", pathname);
+			slog_live("[POSIX]. Ending Real 'stat64', pathname=%s.", pathname);
 		}
 
 		return ret;
@@ -4642,7 +4720,6 @@ extern "C"
 		return ret;
 	}
 
-	// TODO: move from filesystem to HERCULES. Check the rename method.
 	int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags)
 	{
 		if (!real_renameat2)
@@ -4657,36 +4734,45 @@ extern "C"
 
 		errno = 0;
 		int ret = 0;
-		char *pathname_dir, *new_path = NULL;
-		if (olddirfd == AT_FDCWD)
-		{
-			// pathname_dir = getenv("PWD");
-			// new_path = checkHerculesPath(pathname_dir);
-			// pathname_dir = NULL;
-			new_path = checkHerculesPath(oldpath);
-			pathname_dir = NULL;
-		}
-		else
-		{
-			pathname_dir = map_fd_search_by_val(map_fd, olddirfd);
-		}
+		char *old_pathname_dir = NULL;
+		char *old_new_path = NULL;
+		char *new_pathname_dir = NULL;
+		char *new_new_path = NULL;
+		// int to_free_old_path = 0, to_free_new_path = 0;
 
-		if (pathname_dir != NULL || new_path != NULL)
+		// ResolvePathsAndFD(olddirfd, old_path, old_pathname_dir, old_new_path);
+		ResolvePathsAndFD(olddirfd, oldpath, &old_pathname_dir, &old_new_path);
+		ResolvePathsAndFD(newdirfd, newpath, &new_pathname_dir, &new_new_path);
+
+		// if (pathname_dir != NULL || new_path != NULL)
+		if (old_new_path || old_pathname_dir || new_new_path || new_pathname_dir)
+		// if (old_new_path || new_new_path)
 		{
-			slog_live("[POSIX] Calling Hercules 'renameat2', flags=%d, olddirfd=%d, oldpath=%s, newdirfd=%d, newpath=%s", flags, olddirfd, oldpath, newdirfd, newpath);
+
+			// size_t len = strlen(new_new_path);
+			// if (len > 0 && new_new_path[len - 1] == '/')
+			// {
+			// 	strcat(new_new_path, old_new_path);
+			// }
+
+			// TODO: check if old path is directory.
+
+			// TODO: check if new path is directory.
+
+			slog_live("[POSIX] Calling Hercules 'renameat2', flags=%d, newdirfd=%d, oldpath=%s, newdirfd=%d, newpath=%s", flags, newdirfd, oldpath, newdirfd, newpath);
 			int is_absolute_path = IsAbsolutePath(oldpath);
 
-			// If pathname is absolute, then dir_fd is ignored.
+			// If newpath is absolute, then newdirfd is ignored.
 			if (is_absolute_path == 1)
 			{
 				slog_live("[POSIX] is absolute, 'renameat2', oldpath=%s", oldpath);
 				ret = rename(oldpath, newpath);
 			}
-			else if (is_absolute_path == 0) // pathname is relative.
+			else if (is_absolute_path == 0) // newpath is relative.
 			{
-				if (olddirfd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
+				if (newdirfd == AT_FDCWD) // newdirfd is the special value AT_FDCWD.
 				{						  // TO CHECK!
-					slog_live("[POSIX] is relative, current directory, 'renameat2', oldpath=%s", oldpath);
+					slog_live("[POSIX] is relative, current directory, 'renameat2', newpath=%s", newpath);
 					// pathname is interpreted relative to the current working directory of the calling process (like real_open).
 					ret = rename(oldpath, newpath);
 				}
@@ -4694,8 +4780,8 @@ extern "C"
 				{
 					// // get the pathname of the directory pointed by dir_fd if it is storage in the local map "map_fd".
 					char absolute_pathname[PATH_MAX];
-					char *dirr = pathname_dir + strlen("imss://");
-					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, oldpath);
+					char *dirr = new_pathname_dir + strlen("imss://");
+					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, newpath);
 
 					// char *new_path = checkHerculesPath(absolute_pathname);
 					//  slog_live("[POSIX] is relative, 'renameat2', new_path=%s", new_path);
@@ -4704,9 +4790,11 @@ extern "C"
 				}
 			}
 
-			slog_live("[POSIX] Ending Hercules 'renameat2', ret=%d, errno=%d:%s\n", ret, errno, strerror(errno));
-			if (new_path != NULL)
-				free(new_path);
+			slog_live("[POSIX] Ending Hercules 'renameat2', ret=%d\n", ret);
+			if (old_new_path)
+				free(old_new_path);
+			if (new_new_path)
+				free(new_new_path);
 		}
 		else
 		{

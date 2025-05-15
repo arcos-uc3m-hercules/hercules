@@ -528,7 +528,6 @@ uint32_t discover_stat_srv(const char *_uri)
 	return crc_ % n_stat_servers;
 }
 
-
 /**
  * @brief Method retrieving the whole set of elements contained by a specific URI.
  * @return Number of entries/files for a specific URI.
@@ -563,9 +562,15 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 
 	char getdir_req[REQUEST_SIZE] = {0};
 	uint32_t total_num_elements = 0;
-	
-	
+
 	char **arr_elements = (char **)malloc(number_metadata_servers * sizeof(char *));
+
+	if(arr_elements == NULL) {
+		perror("HERCULES_ERR_GETDIR_ALLOC_MEMORY_ELEMENTS");
+		slog_error("HERCULES_ERR_GETDIR_ALLOC_MEMORY_ELEMENTS");
+		exit(0);
+	}
+
 	int arr_lengths[number_metadata_servers] = {0};
 	pthread_mutex_lock(&lock_network);
 
@@ -624,6 +629,7 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 			// slog_error("HERCULES_ERR_GET_DIR_NODIR");
 			slog_debug("Empty directory for metadata server %d", i);
 			arr_lengths[i] = 0;
+			arr_elements[i] = NULL;
 			free(elements);
 			continue;
 		}
@@ -638,8 +644,25 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 
 	// Identify each element within the buffer provided.
 	total_num_elements++;
+	slog_debug("Finish calls to servers for %s with len=%d, URI_=%d, total_num_elements=%d", requested_uri, strlen(requested_uri), URI_, total_num_elements);
 	*items = (char **)calloc(total_num_elements, sizeof(char *));
-	(*items)[0] = (char *)calloc(URI_, 1);
+	if (*items == NULL)
+	{
+		perror("HERCULES_ERR_GETDIR_MEMORY_ALLOC_1");
+		slog_error("HERCULES_ERR_GETDIR_MEMORY_ALLOC_1");
+		exit(1);
+	}
+
+	(*items)[0] = (char *)calloc(URI_, sizeof(char));
+	if ((*items)[0] == NULL)
+	{
+		perror("HERCULES_ERR_GETDIR_MEMORY_ALLOC_2");
+		slog_error("HERCULES_ERR_GETDIR_MEMORY_ALLOC_2");
+		free(*items);
+		// free(arr_elements);
+		exit(1);
+	}
+	// fprintf(stderr, "Request uri=%s, URI=%d\n", requested_uri, URI_);
 	memcpy((*items)[0], requested_uri, URI_);
 
 	int pos = 1;
@@ -650,11 +673,18 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 		slog_debug("arr_lengths[%d]=%d, total_num_elements=%d", i, arr_lengths[i], total_num_elements);
 		// fprintf(stderr, "Elements in metadata server %d=%d/total_num_elements=%d\n", i, arr_lengths[i], total_num_elements);
 		char *curr = (char *)arr_elements[i];
+		if (curr == NULL)
+		{
+			slog_debug("arr_elements[%d] is NULL", i);
+			// fprintf(stderr, "arr_elements[%d] is NULL\n", i);
+			continue;
+		}
+
 		for (int32_t j = 0; j < arr_lengths[i]; j++)
 		{
 
 			// slog_debug("[IMSS] item %d -- calloc", j);
-			(*items)[pos] = (char *)calloc(URI_, 1);
+			(*items)[pos] = (char *)calloc(URI_, sizeof(char));
 			// slog_debug("[IMSS] item %d -- memcpy", j);
 
 			// if (!root_found && !strncmp(curr, "imss://", URI_))
@@ -674,10 +704,31 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 		// free(arr_elements[m_srv]);
 	}
 
-	// free(elements);
-	free(arr_elements);
+	// fprintf(stderr, "*arr_elements=%p, arr_elements=%p\n", &*arr_elements, &arr_elements);
+	if (arr_elements != NULL)
+	{
+		// fprintf(stderr, "Freeing arr_elements\n");
+		for (int i = m_srv; i < m_srv + number_metadata_servers; i++)
+		{
+			// fprintf(stderr, "Freeing pos %d, m_srv=%d, number_metadata_servers=%d\n", i, m_srv, number_metadata_servers);
+			if (arr_elements[i] != NULL)
+			{
+				free(arr_elements[i]);
+				arr_elements[i] = NULL;
+			}
+		}
+		// free(arr_elements);
+		arr_elements = NULL;
+	}
 
-	slog_debug("[IMSS] Ending, total_num_elements=%d", total_num_elements);
+	// free(elements);
+
+	// free(*arr_elements);
+
+	// if (pos > 1)
+	// 	free(arr_elements);
+
+	slog_debug("Ending, total_num_elements=%d", total_num_elements);
 	pthread_mutex_unlock(&lock_network);
 	return total_num_elements;
 }
@@ -2605,8 +2656,8 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 			free(result);
 			return -1;
 		}
-
-		if (strncmp((const char *)result, "RENAME", strlen("RENAME")))
+		// fprintf(stderr, "RESPONSE MSG=%s\n", (char *)result);
+		if (strncmp((const char *)result, MSG_RENAME_OP, strlen(MSG_RENAME_OP)))
 		{ // if the response message is different from "RENAME" it was an error.
 			perror("HERCULES_ERR_DATA_RENAME_DIR_FAILED");
 			slog_error("HERCULES_ERR_DATA_RENAME_DIR_FAILED");

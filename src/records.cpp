@@ -21,7 +21,7 @@ using std::pair;
 using std::string;
 
 extern StsHeader *mem_pool;
-size_t MAX_POOL_SIZE = 10 * GB;
+size_t MAX_POOL_SIZE = 10L * GB;
 
 // __thread
 extern int32_t current_dataset;	  // Dataset whose policy has been set last.
@@ -464,6 +464,12 @@ int32_t map_records::rename_data_srv_worker(std::string old_key, std::string new
 		}
 	}
 
+	// check if the vector is empty, meaning that the old_dir key is not valid.
+	if (vec.size() == 0)
+	{
+		return 1;
+	}
+
 	std::vector<string>::iterator i;
 	for (i = vec.begin(); i < vec.end(); i++)
 	{
@@ -480,7 +486,7 @@ int32_t map_records::rename_data_srv_worker(std::string old_key, std::string new
 	}
 
 	// Return the address associated to the record.
-	return 1;
+	return 0;
 }
 
 // Method renaming from srv_worker
@@ -514,7 +520,7 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 	// check if the vector is empty, meaning that the old_dir key is not valid.
 	if (vec.size() == 0)
 	{
-		return -1;
+		return 1;
 	}
 
 	std::vector<string>::iterator i;
@@ -533,7 +539,7 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 		buffer.insert(std::move(node));
 	}
 
-	return 1;
+	return 0;
 }
 
 // Method renaming from stat_worker
@@ -567,7 +573,7 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 	// check if the vector is empty, meaning that the old key is not valid.
 	if (vec.size() == 0)
 	{
-		return -1;
+		return 1;
 	}
 
 	std::vector<string>::iterator i;
@@ -584,7 +590,7 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 		buffer.insert(std::move(node));
 	}
 
-	return 1;
+	return 0;
 }
 
 /**
@@ -656,7 +662,7 @@ int32_t map_records::cleaning_specific(std::string new_key)
 {
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
-	int32_t ret = -1;
+	int32_t ret = 1;
 
 	// borrar todos los bloques con mismo path/key
 	for (const auto &it2 : buffer)

@@ -518,7 +518,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			slog_debug("Cleaning %s", key.c_str());
 			const char *response_msg = NULL;
 			ret = map->cleaning_specific(key);
-			if (ret == -1)
+			if (ret != 0)
 			{
 				fprintf(stderr, "HERCULES_ERR_CLEANING_DATASET: %s\n", key.c_str());
 				slog_error("HERCULES_ERR_CLEANING_DATASET: %s", key.c_str());
@@ -543,27 +543,32 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		{
 			std::size_t found = key.find(',');
 			slog_debug("[RENAME_OP], key=%s, found=%d", key.c_str(), found);
+			ret = -1;
 			if (found != std::string::npos)
 			{
 				std::string old_key = key.substr(0, found);
 				std::string new_key = key.substr(found + 1);
 				slog_debug("[RENAME_OP], old_key=%s, new_key=%s", old_key.c_str(), new_key.c_str());
 				// RENAME MAP
-				map->cleaning_specific(new_key);
-				int32_t result = map->rename_data_srv_worker(old_key, new_key);
-				if (result == 0)
+				ret = map->cleaning_specific(new_key);
+				if (ret == 0)
 				{
-					response_msg = MSG_ERROR_OP;
+					ret = map->rename_data_srv_worker(old_key, new_key);
 				}
-				else
-				{
-					response_msg = MSG_OK_OP;
-				}
+			}
+			// else
+			// {
+			// 	slog_debug("[RENAME_OP], found == npos");
+			// 	response_msg = MSG_ERROR_OP;
+			// }
+
+			if (ret != 0)
+			{
+				response_msg = MSG_ERROR_OP;
 			}
 			else
 			{
-				slog_debug("[RENAME_OP], found == npos");
-				response_msg = MSG_ERROR_OP;
+				response_msg = MSG_OK_OP;
 			}
 
 			ret = SendConfirmationMessage(arguments, response_msg);
@@ -579,6 +584,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		{
 			slog_debug("[RENAME_DIR_DIR_OP]");
 			std::size_t found = key.find(',');
+			ret = -1;
 			// check if the old key and new key has been passed in the string separed by a comma.
 			if (found != std::string::npos)
 			{
@@ -1951,7 +1957,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 			// pthread_mutex_lock(&lock_network);
 			ret = SendConfirmationMessage(arguments, response_msg);
-			if(ret == 0)
+			if (ret == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
 				slog_error("HERCULES_ERR_PUBLISH_RENAMEMSG");
@@ -2018,7 +2024,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 			// pthread_mutex_lock(&lock_network);
 			ret = SendConfirmationMessage(arguments, response_msg);
-			if(ret == 0)
+			if (ret == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
 				slog_error("HERCULES_ERR_PUBLISH_RENAMEMSG");
@@ -2593,7 +2599,7 @@ void *srv_attached_dispatcher(void *th_argv)
 		{
 			ret = SendConfirmationMessage(arguments, arguments->my_uri);
 			// Provide the uri of this instance.
-			if(ret == 0)
+			if (ret == 0)
 			{
 				perror("HERCULES_ERR_WHOREQUEST");
 				slog_error("HERCULES_ERR_WHOREQUEST");
