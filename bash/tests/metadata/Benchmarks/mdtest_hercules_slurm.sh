@@ -47,7 +47,7 @@ whereis mpirun
 # export UCX_TLS=ib
 # export UCX_NET_DEVICES=ibs1 # Slow!
 # spack load /sxjvb77
-set -x
+#set -x
 # export UCX_NET_DEVICES="opap6s0:1"
 #export UCX_IB_RCACHE_MAX_REGIONS="100"
 #export UCX_TLS=rc,sm
@@ -55,7 +55,7 @@ set -x
 
 # mpiexec -env UCX_NET_DEVICES "opap6s0:1" -n=1 ucx_info -T
 #mpiexec -n=1 ucx_info -T
-set +x
+#set +x
 
 #echo "temporal dir $TMPDIR"
 
@@ -107,8 +107,6 @@ COMMAND="$COMMAND -i 5"
 COMMAND="$COMMAND -u -d /mnt/hercules/"
 # COMMAND="$COMMAND -d /mnt/hercules/"
 
-
-
 ## Removes the data.out file from the checkpointing folder.
 #rm ./HerculesCheckpoint/*
 #rm /beegfs/home/javier.garciablas/hercules/bash/tests/disk/HerculesSnapshot/*
@@ -118,7 +116,8 @@ set -x
 # COMMAND=hostname
 
 #mpiexec -np="$NUMBER_OF_PROCESS" --map-by node "$HERCULES_MPI_PPN"="$HERCULES_NCPN"  "$HERCULES_MPI_HOSTFILE_DEF"="$HERCULES_MPI_HOSTFILE_NAME" \
-mpiexec -np="$NUMBER_OF_PROCESS" "$HERCULES_MPI_PPN"="$HERCULES_NCPN"              "$HERCULES_MPI_HOSTFILE_DEF"="$HERCULES_MPI_HOSTFILE_NAME" \
+mpiexec -np="$NUMBER_OF_PROCESS" "$HERCULES_MPI_PPN"="$HERCULES_NCPN" \
+   "$HERCULES_MPI_HOSTFILE_DEF"="$HERCULES_MPI_HOSTFILE_NAME" \
    "$HERCULES_MPI_ENV_DEF" HERCULES_CONF="$HERCULES_CONF" \
    "$HERCULES_MPI_ENV_DEF" LD_PRELOAD="$HERCULES_POSIX_PRELOAD" \
    ${COMMAND}

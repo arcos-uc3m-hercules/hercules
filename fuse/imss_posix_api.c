@@ -621,12 +621,12 @@ int imss_open(char *path, uint64_t *fh)
 		// storing block 0 on the local map.
 		map_put(map, imss_path, file_desc, stats, (char *)data);
 		print_file_type(stats, imss_path);
-		if (PREFETCH != 0)
-		{
-			// char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
-			map_init_prefetch(map_prefetch, imss_path, PREFETCH * IMSS_DATA_BSIZE);
-		}
-		// pthread_mutex_unlock(&lock_file);
+		// if (PREFETCH != 0)
+		// {
+		// 	// char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
+		// 	map_init_prefetch(map_prefetch, imss_path, PREFETCH * IMSS_DATA_BSIZE);
+		// }
+		// // pthread_mutex_unlock(&lock_file);
 		// free(aux);
 	}
 
@@ -1441,7 +1441,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		return ret;
 	}
 
-	char *aux_block;
+	// char *aux_block = NULL;
 
 	// Compute offsets to write
 	int64_t curr_blk, end_blk, start_offset, end_offset, block_offset, i_blk, num_of_blk;
@@ -1464,7 +1464,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 	uint64_t space_in_block;
 	uint32_t filled = 0;
 	struct stat header;
-	char *aux;
+	char *aux = NULL;
 	// char *data_pointer = (char *)buf; // points to the buffer containing all bytes to be stored
 	const void *data_pointer = buf; // points to the buffer containing all bytes to be stored
 	const char *rpath = path;		// this pointer should not be free.
@@ -2163,12 +2163,12 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened, char fi
 	pthread_mutex_lock(&lock_file); // lock.
 	map_put(map, rpath, *fh, ds_stat, (char *)buff);
 	slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath, *fh, ds_stat.st_blksize);
-	if (PREFETCH != 0)
-	{
-		// char *buff = (char *)malloc(PREFETCH * IMSS_BLKSIZE * KB);
-		map_init_prefetch(map_prefetch, rpath, PREFETCH * IMSS_BLKSIZE * KB);
-		slog_debug("PREFETCH:%ld, map_init_prefetch(map_prefetch, rpath:%s)", PREFETCH, rpath);
-	}
+	// if (PREFETCH != 0)
+	// {
+	// 	// char *buff = (char *)malloc(PREFETCH * IMSS_BLKSIZE * KB);
+	// 	map_init_prefetch(map_prefetch, rpath, PREFETCH * IMSS_BLKSIZE * KB);
+	// 	slog_debug("PREFETCH:%ld, map_init_prefetch(map_prefetch, rpath:%s)", PREFETCH, rpath);
+	// }
 	pthread_mutex_unlock(&lock_file); // unlock.
 	// free(rpath);
 	return 0;
@@ -2292,8 +2292,7 @@ int imss_unlink(const char *path)
 			pthread_mutex_unlock(&lock_file);
 
 			slog_debug("Calling map_release_prefetch %s", path);
-			// map_release_prefetch(map_prefetch, path);
-			map_release_prefetch(map_prefetch, imss_path);
+			// map_release_prefetch(map_prefetch, imss_path);
 			slog_debug("Finish map_release_prefetch %s", path);
 			// *******************************
 			ret = release_dataset(ds);
@@ -2422,11 +2421,11 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 			memcpy(&stats, aux, sizeof(struct stat));
 			pthread_mutex_lock(&lock_file);
 			map_put(map, new_path_1, file_desc, stats, aux);
-			if (PREFETCH != 0)
-			{
-				char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
-				map_init_prefetch(map_prefetch, new_path_1, PREFETCH * IMSS_DATA_BSIZE);
-			}
+			// if (PREFETCH != 0)
+			// {
+			// 	char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
+			// 	map_init_prefetch(map_prefetch, new_path_1, PREFETCH * IMSS_DATA_BSIZE);
+			// }
 			pthread_mutex_unlock(&lock_file);
 			// free(aux);
 		}
@@ -2633,13 +2632,10 @@ int imss_chown(const char *path, uid_t uid, gid_t gid)
 int imss_rename(char *old_path, char *new_path)
 {
 	struct stat ds_stat_n;
-	int file_desc_o, file_desc_n;
+	int file_desc_o = -1, file_desc_n = -1;
 	int fd = 0;
-	char *old_rpath = old_path; //(char *)calloc(MAX_PATH, sizeof(char));
-	// get_iuri(old_path, old_rpath);
-
-	char *new_rpath = new_path; //(char *)calloc(MAX_PATH, sizeof(char));
-	// get_iuri(new_path, new_rpath);
+	char *old_rpath = old_path; 
+	char *new_rpath = new_path; 
 
 	// CHECKING IF IS MV DIR TO DIR
 	// check old_path if it is a directory if it is add / at the end

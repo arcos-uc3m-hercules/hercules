@@ -25,6 +25,10 @@ pthread_mutex_t mutex_garbage = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_snapshot = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_checkpoint = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t memory_protect = PTHREAD_MUTEX_INITIALIZER;
+// if malleability_on = 1, new requests will be not handled and server will
+// respond with a "malleability" string.
+// int malleability_on = 0;
+#define MALLEABILITY_MESSAGE = "MALLEABILITY";
 // To synchronize network operations.
 // pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
@@ -129,10 +133,17 @@ int ready(char *tmp_file_path, const char *msg)
 	return 0;
 }
 
-// if malleability_on = 1, new requests will be not handled and server will
-// respond with a "malleability" string.
-// int malleability_on = 0;
-#define MALLEABILITY_MESSAGE = "MALLEABILITY";
+/**
+ * Send a default confirmation message to the client side.
+ * @param value 0 for OK message, any other value send the ERROR message.
+ * @return number of bytes sent on success, on error, 0 is returned.
+ */
+int SendConfirmationMessage(const p_argv *arguments, const char *msg)
+{
+	int ret = 0;
+	ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, (const void *)msg, strlen(msg) + 1, arguments->worker_uid);, "Send data", int);
+	return ret;
+}
 
 void *hercules_ucx_server(void *th_argv)
 {
@@ -148,15 +159,18 @@ void *hercules_ucx_server(void *th_argv)
 	p_argv *arguments = (p_argv *)th_argv;
 	// Map that stores server side endpoints
 	void *map_server_eps = NULL;
-	char server_name[PATH_MAX] = {'0'};
+	char server_name[PATH_MAX] = {'\0'};
+	char server_tag[PATH_MAX] = {'\0'};
 
 	switch (arguments->args.type)
 	{
 	case TYPE_DATA_SERVER:
 		sprintf(server_name, "data");
+		sprintf(server_tag, "srv_worker");
 		break;
 	case TYPE_METADATA_SERVER:
 		sprintf(server_name, "metadata");
+		sprintf(server_tag, "stat_worker");
 		break;
 	default:
 		fprintf(stderr, "HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args.type);
@@ -181,7 +195,7 @@ void *hercules_ucx_server(void *th_argv)
 		char *req;
 		ucp_tag_recv_info_t info_tag;
 		ucp_tag_message_h msg_tag;
-		msg_req_t *msg;
+		msg_req_t *msg = NULL;
 		ucp_request_param_t recv_param;
 
 		do
@@ -219,7 +233,7 @@ void *hercules_ucx_server(void *th_argv)
 
 		request = (struct ucx_context *)ucp_tag_msg_recv_nbx(arguments->ucp_worker, msg, info_tag.length, msg_tag, &recv_param);
 
-		status = ucx_wait(arguments->ucp_worker, request, "receive", "srv_worker");
+		status = ucx_wait(arguments->ucp_worker, request, "receive", server_tag);
 		if (status != UCS_OK)
 		{
 			perror("HERCULES_ERR_SRV_WORKER_UCX_WAIT");
@@ -250,6 +264,7 @@ void *hercules_ucx_server(void *th_argv)
 
 		//  look for this peer_addr in the map and get the ep
 		ret = map_server_eps_search(map_server_eps, attr.worker_uid, &ep);
+		// ret = -1;
 		// create ep if it's not in the map
 		if (ret < 0)
 		{
@@ -260,7 +275,8 @@ void *hercules_ucx_server(void *th_argv)
 								   UCP_EP_PARAM_FIELD_ERR_HANDLER |
 								   UCP_EP_PARAM_FIELD_USER_DATA;
 			ep_params.address = peer_addr;
-			ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+			ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 			// ep_params.err_handler.cb = err_cb_server;
 			ep_params.err_handler.cb = failure_handler;
 			ep_params.err_handler.arg = NULL;
@@ -311,153 +327,12 @@ void *hercules_ucx_server(void *th_argv)
 		slog_info("Serving time %f s\n", time_taken);
 
 		status = flush_ep(arguments->ucp_worker, ep);
+		slog_debug("flush_ep completed with status %d (%s)\n", status, ucs_status_string(status));
 
-		free(peer_addr);
 		free(msg);
-	}
-}
-
-// Thread method attending client read-write data requests.
-void *srv_worker(void *th_argv)
-{
-
-	// Enable thread cancellation
-	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-
-	// Set the cancellation type to deferred
-	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
-
-	ucp_ep_params_t ep_params;
-
-	ucp_am_handler_param_t param;
-	ucs_status_t status;
-	int ret = 0;
-	p_argv *arguments = (p_argv *)th_argv;
-
-	ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
-						   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
-						   UCP_EP_PARAM_FIELD_ERR_HANDLER |
-						   UCP_EP_PARAM_FIELD_USER_DATA;
-	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-	ep_params.err_handler.cb = err_cb_server;
-	// ep_params.err_handler.arg = NULL;
-
-	// Map that stores server side endpoints
-	void *map_server_eps = NULL;
-
-	// if (!arguments->thread_id)
-	{ // thread 0.
-		map_server_eps = map_server_eps_create();
-		BLOCK_SIZE = arguments->blocksize * 1024;
-	}
-
-	for (;;)
-	{
-		// errno = 0;
-		size_t peer_addr_len;
-		ucp_address_t *peer_addr;
-		ucs_status_t ep_status = UCS_OK;
-		ucp_ep_h ep;
-		struct ucx_context *request = NULL;
-		char *req;
-		ucp_tag_recv_info_t info_tag;
-		ucp_tag_message_h msg_tag;
-		msg_req_t *msg;
-		ucp_request_param_t recv_param;
-
-		do
-		{
-			/* Progressing before probe to update the state */
-			ucp_worker_progress(arguments->ucp_worker);
-			/* Probing incoming events in non-block mode */
-			msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, tag_req, tag_mask, 1, &info_tag);
-			if (global_finish_threads == 1)
-			{
-				fprintf(stderr, "Ending data server thread.\n");
-				pthread_exit(NULL);
-			}
-		} while (msg_tag == NULL);
-		// ucs_status_t status;
-
-		clock_t t;
-		double time_taken;
-		t = clock();
-
-		slog_debug("Message length=%ld bytes.", info_tag.length);
-		msg = (msg_req_t *)malloc(info_tag.length);
-
-		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FIELD_DATATYPE |
-								  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
-		recv_param.datatype = ucp_dt_make_contig(1);
-		recv_param.cb.recv = recv_handler;
-
-		request = (struct ucx_context *)ucp_tag_msg_recv_nbx(arguments->ucp_worker, msg, info_tag.length, msg_tag, &recv_param);
-
-		status = ucx_wait(arguments->ucp_worker, request, "receive", "srv_worker");
-		if (status != UCS_OK)
-		{
-			perror("HERCULES_ERR_SRV_WORKER_UCX_WAIT");
-			slog_error("HERCULES_ERR_SRV_WORKER_UCX_WAIT");
-			free(msg);
-			continue;
-		}
-
-		peer_addr_len = msg->addr_len;
-		peer_addr = (ucp_address *)malloc(peer_addr_len);
-		if (peer_addr == NULL)
-		{
-			// fprintf(stderr, "unable to allocate memory for peer address\n");
-			perror("unable to allocate memory for peer address\n");
-			slog_error("unable to allocate memory for peer address\n");
-			free(msg);
-			continue;
-		}
-
-		req = msg->request;
-
-		memcpy(peer_addr, msg + 1, peer_addr_len);
-
-		ucp_worker_address_attr_t attr;
-		attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
-		ucp_worker_address_query(peer_addr, &attr);
-		slog_debug(" Receiving request from %" PRIu64 ".", attr.worker_uid);
-
-		//  look for this peer_addr in the map and get the ep
-		ret = map_server_eps_search(map_server_eps, attr.worker_uid, &ep);
-		// create ep if it's not in the map
-		if (ret < 0)
-		{
-			// ucp_ep_h new_ep;
-			ep_params.address = peer_addr;
-			ep_params.user_data = &ep_status;
-			// struct worker_info *worker_info = (struct worker_info*)malloc(sizeof(struct worker_info));
-			// worker_info->worker_uid = attr.worker_uid;
-			// worker_info->server_type = 'd';
-			// ep_params.err_handler.arg = &worker_info;
-			ep_params.err_handler.arg = &attr.worker_uid;
-
-			status = ucp_ep_create(arguments->ucp_worker, &ep_params, &ep);
-			// add ep to the map
-			map_server_eps_put(map_server_eps, attr.worker_uid, ep);
-		}
-		else
-		{
-			slog_debug("\t['%" PRIu64 "] Endpoint already exist'", attr.worker_uid);
-		}
-
-		arguments->peer_address = peer_addr;
-		arguments->server_ep = ep;
-		arguments->worker_uid = attr.worker_uid;
-
-		TIMING_NO_RETURN(srv_worker_helper(arguments, req, map_server_eps), "srv_worker_helper %d", arguments->thread_id);
-		t = clock() - t;
-
-		time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
-		slog_info("Serving time %f s\n", time_taken);
-
 		free(peer_addr);
-		free(msg);
+		// ep_close_err_mode(arguments->ucp_worker, ep);
+		// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
 	}
 }
 
@@ -478,6 +353,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 	char mode[MODE_SIZE];
+	const char *response_msg = NULL;
 
 	// Save the request to be served.
 	slog_debug(" request to be served %s", req);
@@ -611,7 +487,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
 						// pthread_mutex_unlock(&lock_network);
 					}
-					slog_debug("[READ_OP][READ_OP] send_data, ret_send_data=%lu", ret_send_data);
+					slog_debug("[READ_OP][READ_OP] ret_send_data=%lu", ret_send_data);
 					if (ret_send_data == 0)
 					{
 						slog_error("HERCULES_ERR_WORKER_SENDBLOCK");
@@ -626,10 +502,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		{
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			slog_debug("[READ_OP][RELEASE]");
-			char response_msg[] = "RELEASE\0";
-			// pthread_mutex_lock(&lock_network);
-			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send release", int);
-			// pthread_mutex_unlock(&lock_network);
+			response_msg = MSG_RELEASE_OP;
+			ret = SendConfirmationMessage(arguments, response_msg);
 			if (ret == 0)
 			{
 				perror("HERCULES_ERR_SRV_SEND_DATA_RELEASE");
@@ -642,18 +516,20 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		{
 			slog_debug("DELETE_OP");
 			slog_debug("Cleaning %s", key.c_str());
+			const char *response_msg = NULL;
 			ret = map->cleaning_specific(key);
 			if (ret == -1)
 			{
 				fprintf(stderr, "HERCULES_ERR_CLEANING_DATASET: %s\n", key.c_str());
 				slog_error("HERCULES_ERR_CLEANING_DATASET: %s", key.c_str());
-				return -1;
+				response_msg = MSG_ERROR_OP;
+			}
+			else
+			{
+				response_msg = MSG_OK_OP;
 			}
 
-			char response_msg[] = "DELETE\0";
-			// pthread_mutex_lock(&lock_network);
-			ret = send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid);
-			// pthread_mutex_unlock(&lock_network);
+			ret = SendConfirmationMessage(arguments, response_msg);
 			if (ret == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_DELETEOP");
@@ -665,14 +541,11 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		}
 		case RENAME_OP:
 		{
-			char response_msg[MAX_RESPONSE_MSG_LEN];
 			std::size_t found = key.find(',');
 			slog_debug("[RENAME_OP], key=%s, found=%d", key.c_str(), found);
 			if (found != std::string::npos)
 			{
-				slog_debug("[RENAME_OP], found != npos");
 				std::string old_key = key.substr(0, found);
-				// std::string new_key = key.substr(found + 1, key.length());
 				std::string new_key = key.substr(found + 1);
 				slog_debug("[RENAME_OP], old_key=%s, new_key=%s", old_key.c_str(), new_key.c_str());
 				// RENAME MAP
@@ -680,28 +553,20 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				int32_t result = map->rename_data_srv_worker(old_key, new_key);
 				if (result == 0)
 				{
-					break;
+					response_msg = MSG_ERROR_OP;
 				}
-				ret = 1;
+				else
+				{
+					response_msg = MSG_OK_OP;
+				}
 			}
 			else
 			{
 				slog_debug("[RENAME_OP], found == npos");
-				ret = -1;
+				response_msg = MSG_ERROR_OP;
 			}
 
-			// char response_msg[] = "RENAME\0";
-			if (ret == -1)
-			{
-				strncpy(response_msg, "ERROR", strlen("ERROR") + 1);
-			}
-			else
-			{
-				strncpy(response_msg, "RENAME", strlen("RENAME") + 1);
-			}
-			// pthread_mutex_lock(&lock_network);
-			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_OP] Send rename", int);
-			// pthread_mutex_unlock(&lock_network);
+			ret = SendConfirmationMessage(arguments, response_msg);
 			if (ret == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
@@ -712,22 +577,28 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		}
 		case RENAME_DIR_DIR_OP:
 		{
-			// printf("SRV_WORKER RENAME_DIR_DIR_OP");
+			slog_debug("[RENAME_DIR_DIR_OP]");
 			std::size_t found = key.find(',');
+			// check if the old key and new key has been passed in the string separed by a comma.
 			if (found != std::string::npos)
 			{
 				std::string old_dir = key.substr(0, found);
-				// std::string rdir_dest = key.substr(found + 1, key.length());
 				std::string rdir_dest = key.substr(found + 1);
 
 				// RENAME MAP
-				map->rename_data_dir_srv_worker(old_dir, rdir_dest);
+				ret = map->rename_data_dir_srv_worker(old_dir, rdir_dest);
 			}
 
-			char response_msg[] = "RENAME\0";
-			// pthread_mutex_lock(&lock_network);
-			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid), "[READ_OP][RENAME_DIR_DIR_OP] Send rename", int);
-			// pthread_mutex_unlock(&lock_network);
+			if (ret != 0)
+			{
+				response_msg = MSG_ERROR_OP;
+			}
+			else
+			{
+				response_msg = MSG_RENAME_OP;
+			}
+
+			ret = SendConfirmationMessage(arguments, response_msg);
 			if (ret == 0)
 			{
 				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
@@ -970,9 +841,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		case WHO:
 		{
 			// Provide the uri of this instance.
-			// pthread_mutex_lock(&lock_network);
-			ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, arguments->my_uri, strlen(arguments->my_uri) + 1, arguments->worker_uid), ("[READ_OP][WHO] send uri: %s", arguments->my_uri), int);
-			// pthread_mutex_unlock(&lock_network);
+			ret = SendConfirmationMessage(arguments, arguments->my_uri);
 			if (ret == 0)
 			{
 				perror("ERR_HERCULES_WHOREQUEST");
@@ -1751,151 +1620,11 @@ void *Snapshot(void *th_argv)
 	pthread_exit(NULL);
 }
 
-// Thread method attending client read-write metadata requests.
-void *stat_worker(void *th_argv)
-{
-
-	// Enable thread cancellation
-	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-
-	// Set the cancellation type to deferred
-	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
-
-	ucp_am_handler_param_t param;
-	ucs_status_t status;
-	int ret = 0;
-
-	p_argv *arguments = (p_argv *)th_argv;
-
-	// Map that stores server side endpoints
-	void *map_server_eps;
-
-	// if (!arguments->thread_id)
-	{ // thread 0.
-		map_server_eps = map_server_eps_create();
-	}
-
-	ucp_ep_params_t ep_params;
-
-	// ep_params = (ucp_ep_params_t *)malloc(sizeof(ucp_ep_params_t));
-	ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
-						   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
-						   UCP_EP_PARAM_FIELD_ERR_HANDLER |
-						   UCP_EP_PARAM_FIELD_USER_DATA;
-	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-	ep_params.err_handler.cb = err_cb_server;
-
-	fprintf(stderr, "Starting metadata thread %d\n", arguments->thread_id);
-
-	for (;;)
-	{
-		// mtrace();
-
-		size_t peer_addr_len;
-		ucp_address_t *peer_addr;
-		ucs_status_t ep_status = UCS_OK;
-		ucp_ep_h ep;
-		struct ucx_context *request = NULL;
-		char *req;
-		ucp_tag_recv_info_t info_tag;
-		ucp_tag_message_h msg_tag;
-		msg_req_t *msg;
-		ucp_request_param_t recv_param;
-
-		ucs_status_t status;
-		/* Receive test string from server */
-		do
-		{
-			/* Progressing before probe to update the state */
-			ucp_worker_progress(arguments->ucp_worker);
-			/* Probing incoming events in non-block mode */
-			msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, tag_req, tag_mask, 1, &info_tag);
-			if (global_finish_threads == 1)
-			{
-				fprintf(stderr, "Ending metadata thread.\n");
-				pthread_exit(NULL);
-			}
-		} while (msg_tag == NULL);
-
-		msg = (msg_req_t *)malloc(info_tag.length);
-		if (msg == NULL)
-		{
-			perror("HERCULES_ERR_STAT_WORKER_MEMORY_ALLOC");
-			slog_error("HERCULES_ERR_STAT_WORKER_MEMORY_ALLOC");
-			continue;
-		}
-
-		// memset(msg, 0, info_tag.length);
-
-		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FIELD_DATATYPE |
-								  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
-		recv_param.datatype = ucp_dt_make_contig(1);
-		recv_param.cb.recv = recv_handler;
-
-		request = (struct ucx_context *)ucp_tag_msg_recv_nbx(arguments->ucp_worker, msg, info_tag.length, msg_tag, &recv_param);
-
-		status = ucx_wait(arguments->ucp_worker, request, "receive", "stat_worker");
-
-		peer_addr_len = msg->addr_len;
-		peer_addr = (ucp_address *)malloc(peer_addr_len);
-		req = msg->request;
-
-		memcpy(peer_addr, msg + 1, peer_addr_len);
-
-		ucp_worker_address_attr_t attr;
-		attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
-		ucp_worker_address_query(peer_addr, &attr);
-		slog_debug("[stat_worker] Receiving request from %" PRIu64 ".", attr.worker_uid);
-
-		//  look for this peer_addr in the map and get the ep
-		ret = map_server_eps_search(map_server_eps, attr.worker_uid, &ep);
-		// create ep if it's not in the map
-		if (ret < 0)
-		{
-
-			// ep_params->err_handler.arg = NULL;
-
-			// struct worker_info *worker_info = (struct worker_info*)malloc(sizeof(struct worker_info));
-			// worker_info->worker_uid = attr.worker_uid;
-			// worker_info->server_type = 'm';
-			// ep_params->err_handler.arg = &worker_info;
-			ep_params.err_handler.arg = &attr.worker_uid;
-
-			// ucp_ep_h new_ep;
-			ep_params.address = peer_addr;
-			ep_params.user_data = &ep_status;
-			status = ucp_ep_create(arguments->ucp_worker, &ep_params, &ep);
-			// ucp_ep_print_info(ep, stderr);
-			//  add ep to the map
-			map_server_eps_put(map_server_eps, attr.worker_uid, ep);
-		}
-		else
-		{
-			// fprintf(stderr, "\t[m]['%" PRIu64 "'] Endpoint already exist\n", attr.worker_uid);
-			slog_debug("\t[stat_worker]['%" PRIu64 "'] Endpoint already exist", attr.worker_uid);
-		}
-
-		arguments->peer_address = peer_addr;
-		arguments->server_ep = ep;
-		arguments->worker_uid = attr.worker_uid;
-		// muntrace();
-
-		// arguments->worker_uid = attr.worker_uid;
-		stat_worker_helper(arguments, req, map_server_eps);
-
-		// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
-		free(peer_addr);
-		free(msg);
-
-		// ep_close(arguments->ucp_worker, arguments->server_ep, UCP_EP_CLOSE_MODE_FLUSH);
-	}
-}
-
 int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 {
 	ucs_status_t status;
 	int ret = 0;
+	const char *response_msg = NULL;
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
@@ -1921,8 +1650,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	// Save the request to be served.
 	slog_info("Request - '%s'", req);
-	// num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
-	// num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
 	num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
 
 	if (!strcmp(mode, "GET"))
@@ -1962,8 +1689,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			pthread_mutex_unlock(&tree_mut);
 			if (numelems_indir == -1)
 			{
-				// const char *last = key.c_str() + strlen(key.c_str()) - 1;
-				// if (last[0] != '/')
+				// Add an extra slash to check if it a directory.
 				if (!key.empty() && key.back() != '/')
 				{
 					key += '/';
@@ -1990,7 +1716,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			if (numelems_indir == 0)
 			{ // empty directory case.
 				// pthread_mutex_lock(&lock_network);
-				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, empty_directory_msg, STRING, arguments->worker_uid) < 0)
+				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, MSG_EMPTY_DIRECTORY, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STATWORKER_NODIR");
 					// pthread_mutex_unlock(&lock_network);
@@ -2153,7 +1879,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 
 				slog_debug("dataset->n_open=%d, dataset->status=%s", dataset->n_open, dataset->status);
-				char response_msg[MAX_RESPONSE_MSG_LEN]; //= "DELETE\0";
 				int32_t ret_map = 0, ret_tree = 0;
 				if (dataset->n_open == 0) // if no more process has the file opened.
 				{
@@ -2168,16 +1893,17 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 				if (ret_map && ret_tree)
 				{
-					strncpy(response_msg, "DELETE", strlen("DELETE") + 1);
+					response_msg = MSG_DELETE_OP;
 				}
 				else
 				{
-					strncpy(response_msg, "NODELETE", strlen("NODELETE") + 1);
+					response_msg = MSG_NODELETE_OP;
 				}
 
 				slog_debug("response_msg=%s", response_msg);
 				// pthread_mutex_lock(&lock_network);
-				if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
+				ret = SendConfirmationMessage(arguments, response_msg);
+				if (ret == 0)
 				{
 					perror("ERR_HERCULES_PUBLISH_DELETEMSG");
 					slog_error("ERR_HERCULES_PUBLISH_DELETEMSG");
@@ -2190,7 +1916,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		}
 		case RENAME_OP:
 		{
-			char response_msg[MAX_RESPONSE_MSG_LEN];
 			int ret = -1;
 			std::size_t found = key.find(',');
 			if (found != std::string::npos)
@@ -2217,16 +1942,16 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 			if (ret == -1)
 			{
-				strncpy(response_msg, "ERROR", strlen("ERROR") + 1);
+				response_msg = MSG_ERROR_OP;
 			}
 			else
 			{
-				strncpy(response_msg, "RENAME", strlen("RENAME") + 1);
+				response_msg = MSG_RENAME_OP;
 			}
 
-			// char response_msg[] = "RENAME\0";
 			// pthread_mutex_lock(&lock_network);
-			if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
+			ret = SendConfirmationMessage(arguments, response_msg);
+			if(ret == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
 				slog_error("HERCULES_ERR_PUBLISH_RENAMEMSG");
@@ -2238,7 +1963,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		}
 		case RENAME_DIR_DIR_OP:
 		{
-			char response_msg[MAX_RESPONSE_MSG_LEN];
 			int ret = -1;
 			// if (req[num_characters_read] != '\0')
 			// {
@@ -2286,14 +2010,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 			if (ret == -1)
 			{
-				strncpy(response_msg, "ERROR", strlen("ERROR") + 1);
+				response_msg = MSG_ERROR_OP;
 			}
 			else
 			{
-				strncpy(response_msg, "RENAME", strlen("RENAME") + 1);
+				response_msg = MSG_RENAME_OP;
 			}
 			// pthread_mutex_lock(&lock_network);
-			if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
+			ret = SendConfirmationMessage(arguments, response_msg);
+			if(ret == 0)
 			{
 				perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
 				slog_error("HERCULES_ERR_PUBLISH_RENAMEMSG");
@@ -2336,8 +2061,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 
 				slog_debug("After dataset->n_open=%d, status=%s", dataset->n_open, dataset->status);
-				char response_msg[MAX_RESPONSE_MSG_LEN]; //= "DELETE\0";
-														 // if file status is marked as "dest", it is delete after close.
+				// if file status is marked as "dest", it is delete after close.
 				if (!strncmp(dataset->status, "dest", strlen("dest")) && dataset->n_open == 0)
 				{
 					slog_debug("Deleting %s", key.c_str());
@@ -2346,18 +2070,18 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					pthread_mutex_lock(&tree_mut);
 					GTree_delete((char *)key.c_str());
 					pthread_mutex_unlock(&tree_mut);
-					strncpy(response_msg, "DELETE", strlen("DELETE") + 1);
+					response_msg = MSG_DELETE_OP;
 				}
 				else
 				{
-					strncpy(response_msg, "CLOSE", strlen("CLOSE") + 1);
+					response_msg = MSG_CLOSE_OP;
 				}
 				pthread_mutex_unlock(&memory_protect);
 
 				// int32_t result = map->delete_metadata_stat_worker(key);
-				// slog_debug("[stat_worker_thread][READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
 				// pthread_mutex_lock(&lock_network);
-				if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
+				ret = SendConfirmationMessage(arguments, response_msg);
+				if (ret == 0)
 				{
 					perror("HERCULES_ERR_PUBLISH_DELETEMSG");
 					slog_error("HERCULES_ERR_PUBLISH_DELETEMSG");
@@ -2376,6 +2100,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			{
 				if (!key.empty() && key.back() != '/')
 				{
+					//  Adds an extra slash to check if it is a directory.
 					key += '/';
 					err = map->get(key, &address_, &block_size_rtvd);
 				}
@@ -2403,8 +2128,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				dataset->n_open += 1;
 				slog_debug("After dataset->n_open=%d, status=%s", dataset->n_open, dataset->status);
 				pthread_mutex_unlock(&memory_protect);
-				char response_msg[] = "OPEN\0";
-				if (send_data(arguments->ucp_worker, arguments->server_ep, response_msg, strlen(response_msg) + 1, arguments->worker_uid) == 0)
+				response_msg = MSG_OPEN_OP;
+				ret = SendConfirmationMessage(arguments, response_msg);
+				if (ret == 0)
 				{
 					perror("HERCULES_ERR_PUBLISH_DELETEMSG");
 					slog_error("HERCULES_ERR_PUBLISH_DELETEMSG");
@@ -2564,20 +2290,20 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 				// Answer the client with the update.
 				slog_debug("[STAT_WORKER] Updating existing dataset %s.", key.c_str());
-				char answer[] = "UPDATED!\0";
-				if (send_data(arguments->ucp_worker, arguments->server_ep, answer, strlen(answer) + 1, arguments->worker_uid) == 0)
+				// char answer[] = "UPDATED!\0";
+				response_msg = MSG_UPDATED_OP;
+				ret = SendConfirmationMessage(arguments, response_msg);
+				if (ret == 0)
 				{
 					slog_error("HERCULES_ERR_METADATA_WORKER_SEND_DATA_SET_OP");
 					perror("HERCULES_ERR_METADATA_WORKER_SEND_DATA_SET_OP");
-					// perror("ERRIMSS_WORKER_DATALOCATANSWER2");
 					free(data_ref);
-					// pthread_mutex_unlock(&memory_protect);
-					pthread_mutex_unlock(&lock_network);
+					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
 				free(data_ref);
 
-				pthread_mutex_unlock(&lock_network);
+				// pthread_mutex_unlock(&lock_network);
 				break;
 			}
 
@@ -2841,11 +2567,12 @@ void *srv_attached_dispatcher(void *th_argv)
 			memset(response_, '\0', RESPONSE_SIZE);
 			// Port that the new client will be forwarded to.
 			int32_t port_ = arguments->port + 1 + (client_id_ % hercules_thread_pool_size);
-			// Wrap the previous info into the ZMQ message.
+			// Wrap the previous info into the UCX message.
 			sprintf(response_, "%d%c%d", port_, '-', client_id_++);
 			slog_info("Seding response_=%s", response_);
 			// Send communication specifications.
-			if (send_data(ucp_data_worker, server_ep, response_, strlen(response_) + 1, arguments->worker_uid) == 0)
+			ret = SendConfirmationMessage(arguments, response_);
+			if (ret == 0)
 			{
 				perror("HERCULES_ERR_SRVDISP_SENDBLOCK");
 				slog_error("HERCULES_ERR_SRVDISP_SENDBLOCK");
@@ -2864,8 +2591,9 @@ void *srv_attached_dispatcher(void *th_argv)
 		// Check if someone is requesting identity resources.
 		else if (*((int32_t *)req) == WHO) // MIRAR
 		{
+			ret = SendConfirmationMessage(arguments, arguments->my_uri);
 			// Provide the uri of this instance.
-			if (send_data(ucp_data_worker, server_ep, arguments->my_uri, strlen(arguments->my_uri) + 1, arguments->worker_uid) == 0) // MIRAR
+			if(ret == 0)
 			{
 				perror("HERCULES_ERR_WHOREQUEST");
 				slog_error("HERCULES_ERR_WHOREQUEST");
@@ -3027,4 +2755,289 @@ void *dispatcher(void *th_argv)
 	close(global_server_fd_thread);
 
 	pthread_exit(NULL);
+}
+
+// Thread method attending client read-write data requests.
+void *srv_worker(void *th_argv)
+{
+
+	// Enable thread cancellation
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
+	// Set the cancellation type to deferred
+	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
+	ucp_ep_params_t ep_params;
+
+	ucp_am_handler_param_t param;
+	ucs_status_t status;
+	int ret = 0;
+	p_argv *arguments = (p_argv *)th_argv;
+
+	ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
+						   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
+						   UCP_EP_PARAM_FIELD_ERR_HANDLER |
+						   UCP_EP_PARAM_FIELD_USER_DATA;
+	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	ep_params.err_handler.cb = err_cb_server;
+	// ep_params.err_handler.arg = NULL;
+
+	// Map that stores server side endpoints
+	void *map_server_eps = NULL;
+
+	// if (!arguments->thread_id)
+	{ // thread 0.
+		map_server_eps = map_server_eps_create();
+		BLOCK_SIZE = arguments->blocksize * 1024;
+	}
+
+	for (;;)
+	{
+		// errno = 0;
+		size_t peer_addr_len;
+		ucp_address_t *peer_addr;
+		ucs_status_t ep_status = UCS_OK;
+		ucp_ep_h ep;
+		struct ucx_context *request = NULL;
+		char *req;
+		ucp_tag_recv_info_t info_tag;
+		ucp_tag_message_h msg_tag;
+		msg_req_t *msg;
+		ucp_request_param_t recv_param;
+
+		do
+		{
+			/* Progressing before probe to update the state */
+			ucp_worker_progress(arguments->ucp_worker);
+			/* Probing incoming events in non-block mode */
+			msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, tag_req, tag_mask, 1, &info_tag);
+			if (global_finish_threads == 1)
+			{
+				fprintf(stderr, "Ending data server thread.\n");
+				pthread_exit(NULL);
+			}
+		} while (msg_tag == NULL);
+		// ucs_status_t status;
+
+		clock_t t;
+		double time_taken;
+		t = clock();
+
+		slog_debug("Message length=%ld bytes.", info_tag.length);
+		msg = (msg_req_t *)malloc(info_tag.length);
+
+		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+								  UCP_OP_ATTR_FIELD_DATATYPE |
+								  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+		recv_param.datatype = ucp_dt_make_contig(1);
+		recv_param.cb.recv = recv_handler;
+
+		request = (struct ucx_context *)ucp_tag_msg_recv_nbx(arguments->ucp_worker, msg, info_tag.length, msg_tag, &recv_param);
+
+		status = ucx_wait(arguments->ucp_worker, request, "receive", "srv_worker");
+		if (status != UCS_OK)
+		{
+			perror("HERCULES_ERR_SRV_WORKER_UCX_WAIT");
+			slog_error("HERCULES_ERR_SRV_WORKER_UCX_WAIT");
+			free(msg);
+			continue;
+		}
+
+		peer_addr_len = msg->addr_len;
+		peer_addr = (ucp_address *)malloc(peer_addr_len);
+		if (peer_addr == NULL)
+		{
+			// fprintf(stderr, "unable to allocate memory for peer address\n");
+			perror("unable to allocate memory for peer address\n");
+			slog_error("unable to allocate memory for peer address\n");
+			free(msg);
+			continue;
+		}
+
+		req = msg->request;
+
+		memcpy(peer_addr, msg + 1, peer_addr_len);
+
+		ucp_worker_address_attr_t attr;
+		attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
+		ucp_worker_address_query(peer_addr, &attr);
+		slog_debug(" Receiving request from %" PRIu64 ".", attr.worker_uid);
+
+		//  look for this peer_addr in the map and get the ep
+		ret = map_server_eps_search(map_server_eps, attr.worker_uid, &ep);
+		// create ep if it's not in the map
+		if (ret < 0)
+		{
+			// ucp_ep_h new_ep;
+			ep_params.address = peer_addr;
+			ep_params.user_data = &ep_status;
+			// struct worker_info *worker_info = (struct worker_info*)malloc(sizeof(struct worker_info));
+			// worker_info->worker_uid = attr.worker_uid;
+			// worker_info->server_type = 'd';
+			// ep_params.err_handler.arg = &worker_info;
+			ep_params.err_handler.arg = &attr.worker_uid;
+
+			status = ucp_ep_create(arguments->ucp_worker, &ep_params, &ep);
+			// add ep to the map
+			map_server_eps_put(map_server_eps, attr.worker_uid, ep);
+		}
+		else
+		{
+			slog_debug("\t['%" PRIu64 "] Endpoint already exist'", attr.worker_uid);
+		}
+
+		arguments->peer_address = peer_addr;
+		arguments->server_ep = ep;
+		arguments->worker_uid = attr.worker_uid;
+
+		TIMING_NO_RETURN(srv_worker_helper(arguments, req, map_server_eps), "srv_worker_helper %d", arguments->thread_id);
+		t = clock() - t;
+
+		time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
+		slog_info("Serving time %f s\n", time_taken);
+
+		free(peer_addr);
+		free(msg);
+	}
+}
+
+// Thread method attending client read-write metadata requests.
+void *stat_worker(void *th_argv)
+{
+
+	// Enable thread cancellation
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
+	// Set the cancellation type to deferred
+	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
+	ucp_am_handler_param_t param;
+	ucs_status_t status;
+	int ret = 0;
+
+	p_argv *arguments = (p_argv *)th_argv;
+
+	// Map that stores server side endpoints
+	void *map_server_eps;
+
+	// if (!arguments->thread_id)
+	{ // thread 0.
+		map_server_eps = map_server_eps_create();
+	}
+
+	ucp_ep_params_t ep_params;
+
+	// ep_params = (ucp_ep_params_t *)malloc(sizeof(ucp_ep_params_t));
+	ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
+						   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
+						   UCP_EP_PARAM_FIELD_ERR_HANDLER |
+						   UCP_EP_PARAM_FIELD_USER_DATA;
+	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	ep_params.err_handler.cb = err_cb_server;
+
+	fprintf(stderr, "Starting metadata thread %d\n", arguments->thread_id);
+
+	for (;;)
+	{
+		// mtrace();
+
+		size_t peer_addr_len;
+		ucp_address_t *peer_addr;
+		ucs_status_t ep_status = UCS_OK;
+		ucp_ep_h ep;
+		struct ucx_context *request = NULL;
+		char *req;
+		ucp_tag_recv_info_t info_tag;
+		ucp_tag_message_h msg_tag;
+		msg_req_t *msg;
+		ucp_request_param_t recv_param;
+
+		ucs_status_t status;
+		/* Receive test string from server */
+		do
+		{
+			/* Progressing before probe to update the state */
+			ucp_worker_progress(arguments->ucp_worker);
+			/* Probing incoming events in non-block mode */
+			msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, tag_req, tag_mask, 1, &info_tag);
+			if (global_finish_threads == 1)
+			{
+				fprintf(stderr, "Ending metadata thread.\n");
+				pthread_exit(NULL);
+			}
+		} while (msg_tag == NULL);
+
+		msg = (msg_req_t *)malloc(info_tag.length);
+		if (msg == NULL)
+		{
+			perror("HERCULES_ERR_STAT_WORKER_MEMORY_ALLOC");
+			slog_error("HERCULES_ERR_STAT_WORKER_MEMORY_ALLOC");
+			continue;
+		}
+
+		// memset(msg, 0, info_tag.length);
+
+		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+								  UCP_OP_ATTR_FIELD_DATATYPE |
+								  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+		recv_param.datatype = ucp_dt_make_contig(1);
+		recv_param.cb.recv = recv_handler;
+
+		request = (struct ucx_context *)ucp_tag_msg_recv_nbx(arguments->ucp_worker, msg, info_tag.length, msg_tag, &recv_param);
+
+		status = ucx_wait(arguments->ucp_worker, request, "receive", "stat_worker");
+
+		peer_addr_len = msg->addr_len;
+		peer_addr = (ucp_address *)malloc(peer_addr_len);
+		req = msg->request;
+
+		memcpy(peer_addr, msg + 1, peer_addr_len);
+
+		ucp_worker_address_attr_t attr;
+		attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
+		ucp_worker_address_query(peer_addr, &attr);
+		slog_debug("[stat_worker] Receiving request from %" PRIu64 ".", attr.worker_uid);
+
+		//  look for this peer_addr in the map and get the ep
+		ret = map_server_eps_search(map_server_eps, attr.worker_uid, &ep);
+		// create ep if it's not in the map
+		if (ret < 0)
+		{
+
+			// ep_params->err_handler.arg = NULL;
+
+			// struct worker_info *worker_info = (struct worker_info*)malloc(sizeof(struct worker_info));
+			// worker_info->worker_uid = attr.worker_uid;
+			// worker_info->server_type = 'm';
+			// ep_params->err_handler.arg = &worker_info;
+			ep_params.err_handler.arg = &attr.worker_uid;
+
+			// ucp_ep_h new_ep;
+			ep_params.address = peer_addr;
+			ep_params.user_data = &ep_status;
+			status = ucp_ep_create(arguments->ucp_worker, &ep_params, &ep);
+			// ucp_ep_print_info(ep, stderr);
+			//  add ep to the map
+			map_server_eps_put(map_server_eps, attr.worker_uid, ep);
+		}
+		else
+		{
+			// fprintf(stderr, "\t[m]['%" PRIu64 "'] Endpoint already exist\n", attr.worker_uid);
+			slog_debug("\t[stat_worker]['%" PRIu64 "'] Endpoint already exist", attr.worker_uid);
+		}
+
+		arguments->peer_address = peer_addr;
+		arguments->server_ep = ep;
+		arguments->worker_uid = attr.worker_uid;
+		// muntrace();
+
+		// arguments->worker_uid = attr.worker_uid;
+		stat_worker_helper(arguments, req, map_server_eps);
+
+		// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
+		free(peer_addr);
+		free(msg);
+
+		// ep_close(arguments->ucp_worker, arguments->server_ep, UCP_EP_CLOSE_MODE_FLUSH);
+	}
 }

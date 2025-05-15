@@ -21,9 +21,10 @@ using std::pair;
 using std::string;
 
 extern StsHeader *mem_pool;
+size_t MAX_POOL_SIZE = 10 * GB;
 
 // __thread
-extern int32_t  current_dataset;   // Dataset whose policy has been set last.
+extern int32_t current_dataset;	  // Dataset whose policy has been set last.
 extern dataset_info curr_dataset; // Currently managed dataset.
 extern imss curr_imss;
 
@@ -232,7 +233,8 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	// struct utsname detect;
 	// uname(&detect);
 
-	if (buffer.empty()) {
+	if (buffer.empty())
+	{
 		slog_debug("map is empty");
 		return 0;
 	}
@@ -244,16 +246,16 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	{
 		slog_debug("%s not found in the map", key.c_str());
 		size_t len = strlen(key.c_str());
-		if (len > 0 && key.c_str()[len - 1] != '/') 
+		if (len > 0 && key.c_str()[len - 1] != '/')
 		{
 			key += '/';
 			it = buffer.find(key);
 		}
 		// if (it == buffer.end())
 		// {
-			// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
-			// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
-			return 0;
+		// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
+		// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
+		return 0;
 		// }
 	}
 
@@ -389,10 +391,10 @@ int32_t map_records::delete_metadata_stat_worker(std::string key)
 	int num_elements_erased = buffer.erase(key);
 	if (num_elements_erased == 0)
 	{
-		//const char *last = key.c_str() + strlen(key.c_str()) - 1;
-		//if (last[0] != '/')
+		// const char *last = key.c_str() + strlen(key.c_str()) - 1;
+		// if (last[0] != '/')
 		size_t len = strlen(key.c_str());
-		if (len > 0 && key.c_str()[len - 1] != '/') 
+		if (len > 0 && key.c_str()[len - 1] != '/')
 		{
 			key += '/';
 			num_elements_erased = delete_metadata_stat_worker(key);
@@ -507,6 +509,12 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 			string new_path = rdir_dest;
 			new_path.append(key);
 		}
+	}
+
+	// check if the vector is empty, meaning that the old_dir key is not valid.
+	if (vec.size() == 0)
+	{
+		return -1;
 	}
 
 	std::vector<string>::iterator i;
@@ -648,6 +656,7 @@ int32_t map_records::cleaning_specific(std::string new_key)
 {
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
+	int32_t ret = -1;
 
 	// borrar todos los bloques con mismo path/key
 	for (const auto &it2 : buffer)
@@ -666,28 +675,37 @@ int32_t map_records::cleaning_specific(std::string new_key)
 
 	if (vec.size() == 0)
 	{
-		//const char *last = new_key.c_str() + strlen(new_key.c_str()) - 1;
-		//if (last[0] != '/')
 		size_t len = strlen(new_key.c_str());
-		if (len > 0 && new_key.c_str()[len - 1] != '/') 
+		if (len > 0 && new_key.c_str()[len - 1] != '/')
 		{
 			new_key += '/';
-			cleaning_specific(new_key);
+			ret = cleaning_specific(new_key);
 		}
-		return -1;
+		return ret;
 	}
 
 	// Block the access to the map structure.
 	std::vector<string>::iterator i;
+	uint64_t item_mem_size = 0;
 	for (i = vec.begin(); i != vec.end(); i++)
 	{
 		// std::cout << "Garbage Collector: Deleting " << *i << "\n";
 		auto item = buffer.find(*i);
-		// push the memory pointer of this block inside the mem pool to be reused.
-		StsQueue.push(mem_pool, item->second.first);
-		quantity_occupied = quantity_occupied - item->second.second;
+		item_mem_size = item->second.second;
+		// checks if the mem pool has a slot.
+		if (StsQueue.size(mem_pool) + item_mem_size >= MAX_POOL_SIZE)
+		{
+			slog_debug("Freeing memory of key %s", item->first.c_str());
+			free(item->second.first); // free the memory of this block.
+		}
+		else
+		{
+			slog_debug("Pushing memory of key %s into mem_pool", item->first.c_str());
+			// push the memory pointer of this block inside the mem pool to be reused.
+			StsQueue.push(mem_pool, item->second.first);
+		}
+		quantity_occupied = quantity_occupied - item_mem_size;
 		// fprintf(stderr, "quantity_occupied = %lu\n", quantity_occupied);
-		// free(item->second.first); // free the memory of this block.
 		// erase the dataset information from the map.
 		// fprintf(stderr, "Erasing element with key %s\n", i);
 		slog_debug("Erasing element with key %s", item->first.c_str());

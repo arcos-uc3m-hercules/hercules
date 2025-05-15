@@ -528,12 +528,13 @@ uint32_t discover_stat_srv(const char *_uri)
 	return crc_ % n_stat_servers;
 }
 
-// FIXME: fix implementation for multiple servers.
-// Method retrieving the whole set of elements contained by a specific URI.
+
+/**
+ * @brief Method retrieving the whole set of elements contained by a specific URI.
+ * @return Number of entries/files for a specific URI.
+ */
 uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 {
-	// char *last = requested_uri + strlen(requested_uri) - 1;
-	// if (last[0] != '/')
 	size_t len = strlen(requested_uri);
 	if (len > 0 && requested_uri[len - 1] != '/')
 	{
@@ -559,12 +560,14 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 	}
 
 	slog_debug("requested_uri=%s, first_parent_dir=%s, first_parent_offset=%d, number_metadata_servers=%d", requested_uri, first_parent_dir, first_parent_offset, number_metadata_servers);
-	pthread_mutex_lock(&lock_network);
+
 	char getdir_req[REQUEST_SIZE] = {0};
 	uint32_t total_num_elements = 0;
-
+	
+	
 	char **arr_elements = (char **)malloc(number_metadata_servers * sizeof(char *));
 	int arr_lengths[number_metadata_servers] = {0};
+	pthread_mutex_lock(&lock_network);
 
 	// Search in all servers.
 	for (int i = m_srv; i < m_srv + number_metadata_servers; i++)
@@ -614,7 +617,7 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 			return -1;
 		}
 
-		if (!strncmp(empty_directory_msg, (const char *)elements, strlen(empty_directory_msg)))
+		if (!strncmp(MSG_EMPTY_DIRECTORY, (const char *)elements, strlen(MSG_EMPTY_DIRECTORY)))
 		{
 			// pthread_mutex_unlock(&lock_network);
 			// perror("HERCULES_ERR_GET_DIR_NODIR");
@@ -1850,7 +1853,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	pthread_mutex_unlock(&lock_network);
 	// if the file descriptor was the last reference to a file which has been removed using
 	// unlink, the file is deleted.
-	if (!strncmp((const char *)result, "DELETE", strlen("DELETE")))
+	if (!strncmp((const char *)result, MSG_DELETE_OP, strlen(MSG_DELETE_OP)))
 	{
 		// pthread_mutex_unlock(&lock_network);
 		delete_dataset_srv_worker(dataset_uri, fd, 0);
@@ -3175,13 +3178,13 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 		}
 	}
 
-	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
 	clock_t t;
 	// double time_taken;
 	ucp_ep_h ep;
 	size_t msg_length = 0;
 	char mode[10];
+	pthread_mutex_lock(&lock_network);
 
 	// Request the concerned block to the involved servers.
 	for (int32_t i = 0; i < replication_factor; i++)
@@ -3198,10 +3201,8 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 
 		//  Key related to the requested data element.
 		sprintf(key_, "%s %lu %ld %s$%d %ld", mode, 0l, offset, curr_dataset.uri_, data_id, to_read);
-		// sprintf(key_, "GET %lu %ld %s$%d %zd", 0l, offset, curr_dataset.original_name, data_id, to_read);
 		ep = curr_imss.conns.eps[repl_servers[i]];
-		slog_debug("[IMSS] Request - '%s' to server %d", key_, repl_servers[i]);
-		// fprintf(stderr,"[IMSS] Request - '%s' to server %d\n", key_, repl_servers[i]);
+		slog_debug("[IMSS] Request to data %d - '%s' to server %d", n_server_, key_, repl_servers[i]);
 
 		if (TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), "send_req", size_t, process_rank) == 0)
 		{

@@ -133,14 +133,14 @@ int32_t main(int32_t argc, char **argv)
 	uint64_t bind_port;
 	char *stat_add = NULL;
 	char *deployfile = NULL;
-	int64_t buffer_size, stat_port, num_servers;
+	int64_t buffer_size = 0, stat_port = 0, num_servers = 0;
 	ucp_ep_params_t ep_params;
 	ucp_address_t *peer_addr;
-	size_t addr_len;
+	size_t addr_len = 0;
 
 	// memory pool stuff
-	size_t block_size;	   // In KB
-	uint64_t storage_size; // In GB
+	size_t block_size = 0;	   // In KB
+	uint64_t storage_size = 0; // In GB
 
 	ucs_status_t status;
 
@@ -149,10 +149,10 @@ int32_t main(int32_t argc, char **argv)
 	ucp_config_t *config;
 	ucp_worker_address_attr_t attr;
 
-	uint64_t max_system_ram_allowed;
-	uint64_t max_storage_size; // memory pool size
-	uint32_t num_blocks;
-	u_int16_t hercules_thread_pool_size;
+	uint64_t max_system_ram_allowed = 0;
+	uint64_t max_storage_size = 0; // memory pool size
+	uint32_t num_blocks = 0;
+	u_int16_t hercules_thread_pool_size = 0;
 
 	// shared memory.
 	int shm_data_id = 0;
@@ -255,6 +255,8 @@ int32_t main(int32_t argc, char **argv)
 	max_storage_size = args.storage_size * GB;
 	// get max RAM we could use for storage
 	max_system_ram_allowed = (uint64_t)sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGESIZE) * RAM_STORAGE_USE_PCT;
+
+	fprintf(stderr, "max_system_ram_allowed=%lu\n", max_system_ram_allowed);
 
 	// make sure we don't use more memory than available
 	if (max_storage_size >= max_system_ram_allowed || max_storage_size < 0)
@@ -378,7 +380,8 @@ int32_t main(int32_t argc, char **argv)
 								   UCP_EP_PARAM_FIELD_ERR_HANDLER |
 								   UCP_EP_PARAM_FIELD_USER_DATA;
 			ep_params.address = peer_addr;
-			ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+			ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 			ep_params.err_handler.cb = err_cb_client;
 			ep_params.err_handler.arg = NULL;
 			ep_params.user_data = &ep_status;

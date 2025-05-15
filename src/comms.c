@@ -294,7 +294,7 @@ size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_
 	ucp_request_param_t send_param;
 	send_req_t ctx;
 
-	msg_req_t *msg;
+	msg_req_t *msg = NULL;
 
 	msg_len = sizeof(uint64_t) + REQUEST_SIZE + addr_len;
 	// slog_info("[COMM][send_req] msg_len=%ld", msg_len);
@@ -760,7 +760,8 @@ ucs_status_t server_create_ep(ucp_worker_h data_worker,
 	ep_params.field_mask = UCP_EP_PARAM_FIELD_ERR_HANDLER | UCP_EP_PARAM_FIELD_CONN_REQUEST;
 	ep_params.conn_request = conn_request;
 	ep_params.err_handler.cb = err_cb_server;
-	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 	ep_params.err_handler.arg = NULL;
 
 	status = ucp_ep_create(data_worker, &ep_params, server_ep);
@@ -789,7 +790,8 @@ ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_addres
 						   UCP_EP_PARAM_FIELD_ERR_HANDLER |
 						   UCP_EP_PARAM_FIELD_USER_DATA;
 	ep_params.address = peer_addr;
-	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 	ep_params.err_handler.cb = err_cb_client;
 	ep_params.err_handler.arg = NULL;
 	// ep_params.err_handler.arg = &server_status;
@@ -822,7 +824,8 @@ ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_ad
 						   UCP_EP_PARAM_FIELD_ERR_HANDLER |
 						   UCP_EP_PARAM_FIELD_USER_DATA;
 	ep_params.address = peer_addr;
-	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 	ep_params.err_handler.cb = err_cb_client;
 	ep_params.err_handler.arg = NULL;
 	ep_params.user_data = &ep_status;
@@ -1513,4 +1516,17 @@ ucs_status_t worker_flush(ucp_worker_h worker)
 	ucp_worker_fence(worker);
 	ucp_worker_flush_nb(worker, 0, flush_cb);
 	return UCS_OK;
+}
+
+void ep_close_err_mode(ucp_worker_h ucp_worker, ucp_ep_h ucp_ep)
+{
+    uint64_t ep_close_flags = 0;
+
+    // if (err_handling_opt.ucp_err_mode == UCP_ERR_HANDLING_MODE_PEER) {
+    //     ep_close_flags = UCP_EP_CLOSE_FLAG_FORCE;
+    // } else {
+    //     ep_close_flags = 0;
+    // }
+
+    ep_close(ucp_worker, ucp_ep, ep_close_flags);
 }

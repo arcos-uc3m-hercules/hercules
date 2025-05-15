@@ -500,7 +500,7 @@ extern "C"
 		// 	}
 		// }
 
-		map_prefetch = map_create_prefetch();
+		// map_prefetch = map_create_prefetch();
 		map = map_create();
 		if (MULTIPLE_READ == 1)
 		{
@@ -534,7 +534,6 @@ extern "C"
 	void __attribute__((destructor)) run_me_last()
 	{
 		errno = 0;
-		// fprintf(stderr, "Calling 'run_me_last', pid=%d, rank=%d, release=%d\n", g_pid, rank, release);
 		slog_live("Calling 'run_me_last', pid=%d, rank=%d, release=%d", g_pid, rank, release);
 		release--;
 		// if (release == 0) // TODO: uncomment this line.
@@ -544,10 +543,10 @@ extern "C"
 			// t_s = clock();
 			release = -1;
 			slog_live("[POSIX] release_imss()");
-			release_imss("imss://", CLOSE_DETACHED);
-			// //  slog_live("[POSIX] stat_release()");
-			stat_release();
-			free_prefetch(map_prefetch);
+			// release_imss("imss://", CLOSE_DETACHED);
+			// // //  slog_live("[POSIX] stat_release()");
+			// stat_release();
+			// free_prefetch(map_prefetch);
 			map_free(map);
 			imss_comm_cleanup();
 			//   t_s = clock() - t_s;
@@ -2151,7 +2150,6 @@ extern "C"
 				errno = ENOENT;
 				ret = -1;
 				slog_error("[POSIX] Error Hercules 'write'	: %d:%s", errno, strerror(errno));
-				// pthread_mutex_unlock(&system_lock);
 				return ret;
 			}
 		}
@@ -4644,6 +4642,7 @@ extern "C"
 		return ret;
 	}
 
+	// TODO: move from filesystem to HERCULES. Check the rename method.
 	int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags)
 	{
 		if (!real_renameat2)

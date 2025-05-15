@@ -3,8 +3,10 @@
 #SBATCH --time=01:00:00               # Time limit hrs:min:sec
 #SBATCH --output=logs/hercules/%j.log   # Standard output and error log
 #SBATCH --cpus-per-task=32
+
+##SBATCH --hint=compute_bound
+##SBATCH --mem=100G
 ##SBATCH --mem-per-cpu=16GB
-##SBATCH --mem=0
 ##SBATCH --oversubscribe
 ##SBATCH --overcommit
 ##SBATCH --exclude=broadwell-008,broadwell-010
@@ -62,14 +64,14 @@ whereis mpiexec
 # export UCX_NET_DEVICES=ibs1 # Slow!
 # spack load /sxjvb77
 export UCX_TLS=ib
-set -x
+#set -x
 #export UCX_NET_DEVICES="opap6s0:1"
 #export UCX_NET_DEVICES=all
 #export UCX_IB_RCACHE_MAX_REGIONS="100"
 
 # mpiexec -env UCX_NET_DEVICES "opap6s0:1" -n=1 ucx_info -T
 #mpiexec -n=1 ucx_info -T
-set +x
+#set +x
 
 #echo "temporal dir $TMPDIR"
 
