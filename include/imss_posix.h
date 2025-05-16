@@ -48,6 +48,7 @@ extern "C"
     int generalOpen(char *new_path, int flags, mode_t mode, int createFd);
     ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, size_t offset);
 	int GeneralFAccessAt(int dirfd, const char *pathname, int mode, int flags, char *pathname_dir);
+	void SetErrno(int value);
     
     int IsAbsolutePath(const char *pathname);
     int ResolvePath(const char *path_, char *resolved);

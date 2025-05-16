@@ -4090,6 +4090,12 @@ int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir)
 	return first_parent_offset;
 }
 
+/**
+ * @brief Finds the last parent directory conforming the "dataset_uri".
+ * @param dataset_uri pointer to the string to find the last parent directory.
+ * @param last_parent_dir pointer to the last parent directory.
+ * @return 0 if the dataset_uri points to root of Hercules, positive integer for subdirectories.
+ */
 int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir)
 {
 	int last_parent_offset = 0;

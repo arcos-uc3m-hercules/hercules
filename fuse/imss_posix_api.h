@@ -74,7 +74,7 @@ int imss_getxattr(const char *path, const char *attr, char *value, size_t s);
 int imss_chmod(const char *path, mode_t mode);
 int imss_chown(const char *path, uid_t uid, gid_t gid);
 int imss_rename(char *old_path, char *new_path);
-int hercules_move(const char *old_path, const char *new_path);
+int HerculesMove(const char *given_old_path, const char *given_new_pathname, const char *hercules_path);
 
 int imss_close(const char *path, int fd);
 

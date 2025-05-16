@@ -85,6 +85,15 @@ extern "C"
 	// prefech.
 	char *buf_pref = NULL;
 
+	void SetErrno(int value) {
+		if (value >= 0)
+		{
+			// expected negative errno value.
+			return;
+		}
+		errno = -value;
+	}
+
 	void copy_stat_to_statx(const struct stat *src, struct statx *dest)
 	{
 		if (!src || !dest)
@@ -3560,7 +3569,8 @@ extern "C"
 		else if (old_path == NULL && new_path != NULL)
 		{ // move from file system to Hercules.
 			slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s", old, new_pathname, new_path);
-			ret = hercules_move(old, new_path);
+			ret = HerculesMove(old, new_pathname, new_path);
+			SetErrno(ret);
 			// open both files.
 			// from file system.
 			// int fd_old = open(old, O_RDONLY);
@@ -3644,7 +3654,7 @@ extern "C"
 
 			// // free memory.
 			// free(old_file_buffer);
-			slog_live("[POSIX]. End Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s", old, new_pathname, new_path);
+			slog_live("[POSIX]. End Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s, ret=%d", old, new_pathname, new_path, ret);
 			free(new_path);
 		}
 		else
