@@ -68,7 +68,7 @@ extern "C"
 	void *map;
 	void *map_prefetch;
 	char *MOUNT_POINT;
-	size_t MOUNT_POINT_LEN;
+	size_t MOUNT_POINT_LEN = 0;
 
 	char *HERCULES_PATH;
 	void *map_fd;
@@ -85,7 +85,8 @@ extern "C"
 	// prefech.
 	char *buf_pref = NULL;
 
-	void SetErrno(int value) {
+	void SetErrno(int value)
+	{
 		if (value >= 0)
 		{
 			// expected negative errno value.
@@ -427,6 +428,9 @@ extern "C"
 		IMSS_DATA_BSIZE = IMSS_BLKSIZE * KB; // block size in bytes.
 		MOUNT_POINT = args.mount_point;
 		MOUNT_POINT_LEN = strlen(MOUNT_POINT);
+		// if(MOUNT_POINT[MOUNT_POINT_LEN-1] != '/') {
+		// 	MOUNT_POINT_LEN--;
+		// }
 		IMSS_ROOT = args.imss_uri;
 		IMSS_HOSTFILE = args.data_hostfile;
 		N_SERVERS = args.num_data_servers;
@@ -596,7 +600,6 @@ extern "C"
 
 	int close(int fd)
 	{
-
 		if (!real_close)
 			real_close = (int (*)(int))dlsym(RTLD_NEXT, "close");
 
@@ -611,6 +614,14 @@ extern "C"
 		if (pathname != NULL)
 		{
 			slog_live("[POSIX]. Calling Hercules 'close', pathname=%s, fd=%d", pathname, fd);
+			if (!strcmp(pathname, MOUNT_POINT))
+			{
+				slog_debug("Trying to close the mount point %s", pathname);
+				// stores the file descriptor "ret" into the map "map_fd".
+				slog_live("[POSIX] Erasing fd %d from map", ret);
+				map_fd_erase(map_fd, fd);
+				return ret;
+			}
 			// fprintf(stderr, "[POSIX]. Calling Hercules 'close', pathname=%s, fd=%d\n", pathname, fd);
 			ret = imss_close(pathname, fd);
 			if (ret)
@@ -2201,6 +2212,18 @@ extern "C"
 		int ret = 0;
 		uint64_t ret_ds = 0;
 		long p = 0;
+		int is_mount_point = 0;
+
+		if (!strcmp(new_path, "imss://"))
+		{
+			slog_debug("Trying to open the mount point %s", new_path);
+			ret = real_open("/dev/null", 0); // Get a file descriptor
+			// stores the file descriptor "ret" into the map "map_fd".
+			slog_live("[POSIX] Puting fd %d into map", ret);
+			map_fd_put(map_fd, new_path, ret, p);
+			return ret;
+		}
+
 		// Search for the path "new_path" on the map "map_fd".
 		slog_live("[POSIX] Searching for the %s on the map", new_path);
 		int exist = map_fd_search_by_pathname(map_fd, new_path, &ret, &p);
@@ -2367,9 +2390,9 @@ extern "C"
 		const char *file_name_without_prefix;
 		int ret = -1;
 
-		file_name_without_prefix = pathname + MOUNT_POINT_LEN;
-
-		if (file_name_without_prefix[0] == '/') // path is absolute.
+		// file_name_without_prefix = pathname + MOUNT_POINT_LEN;
+		// if (file_name_without_prefix[0] == '/') // path is absolute.
+		if (pathname[0] == '/') // path is absolute.
 		{
 			ret = 1;
 		}
@@ -3402,63 +3425,6 @@ extern "C"
 		return ret;
 	}
 
-	// int unlinkat(int fd, const char *name, int flag)
-	// { // rm & rm -r
-	// 	// fprintf(stderr, "Starting unlinkat, name=%s\n", name);
-	// 	if (!real_unlinkat)
-	// 		real_unlinkat = dlsym(RTLD_NEXT, "unlinkat");
-
-	// 	if (!init)
-	// 	{
-	// 		return real_unlinkat(fd, name, flag);
-	// 	}
-
-	// 	errno = 0;
-	// 	int ret = 0;
-	// 	char *new_path = checkHerculesPath(name);
-	// 	if (new_path != NULL)
-	// 	{
-	// 		slog_live("[POSIX]. Calling Hercules 'unlinkat', new_path=%s", new_path);
-	// 		// char *new_path;
-	// 		// new_path = convert_path(name, MOUNT_POINT);
-	// 		int n_ent = 0;
-	// 		char *buffer;
-	// 		char **refs;
-
-	// 		if ((n_ent = get_dir((char *)new_path, &buffer, &refs)) < 0)
-	// 		{
-	// 			strcat(new_path, "/");
-	// 			if ((n_ent = get_dir((char *)new_path, &buffer, &refs)) < 0)
-	// 			{
-	// 				return -ENOENT;
-	// 			}
-	// 		}
-
-	// 		for (int i = n_ent - 1; i > -1; --i)
-	// 		{
-	// 			char *last = refs[i] + strlen(refs[i]) - 1;
-
-	// 			if (refs[i][strlen(refs[i]) - 1] == '/')
-	// 			{
-	// 				rmdir(refs[i]);
-	// 			}
-	// 			else
-	// 			{
-	// 				unlink(refs[i]);
-	// 			}
-	// 		}
-	// 		slog_live("[POSIX]. Calling Hercules 'unlinkat', new_path=%s", new_path);
-	// 		free(new_path);
-	// 	}
-	// 	else
-	// 	{
-	// 		slog_live("[POSIX]. Calling real 'unlinkat', pathname=%s", name);
-	// 		ret = real_unlinkat(fd, name, flag);
-	// 	}
-	// 	// fprintf(stderr, "Ending unlinkat, name=%s\n", name);
-	// 	return ret;
-	// }
-
 	int remove(const char *name)
 	{
 		if (!real_remove)
@@ -3571,91 +3537,17 @@ extern "C"
 			slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s", old, new_pathname, new_path);
 			ret = HerculesMove(old, new_pathname, new_path);
 			SetErrno(ret);
-			// open both files.
-			// from file system.
-			// int fd_old = open(old, O_RDONLY);
-			// if (fd_old < 0)
-			// {
-			// 	slog_error("HERCULES_ERR_RENAME_OPEN_SYSTEM_FILE");
-			// 	return -1;
-			// }
-
-			// // from hercules because it begins with the mount point.
-			// int fd_new = open(new_pathname, O_WRONLY | O_APPEND | O_CREAT, 0644);
-			// if (fd_new < 0)
-			// {
-			// 	slog_error("HERCULES_ERR_RENAME_OPEN_HERCULES_FILE");
-			// 	close(fd_old);
-			// 	return -1;
-			// }
-
-			// // get old file stat.
-			// struct stat old_file_stat;
-			// // old_file_stat = (struct stat *)malloc(sizeof(struct stat));
-			// ret = __fxstat(1, fd_old, &old_file_stat);
-			// // old file size.
-			// off_t old_file_size = old_file_stat.st_size;
-
-			// // read old file.
-			// char *old_file_buffer = NULL;
-			// old_file_buffer = (char *)malloc(old_file_size * sizeof(char));
-			// // if(old_file_buffer == NULL) {
-			// // 	perror("HERCULES_ERR_RENAME_MEMORY_ALLOC");
-			// // 	slog_error("HERCULES_ERR_RENAME_MEMORY_ALLOC");
-			// // 	// errno = ENOSPC;
-			// // 	return -1;
-			// // }
-
-			// ssize_t bytes_read = -1, bytes_write, total_bytes = -1;
-			// while ((bytes_read = read(fd_old, old_file_buffer, old_file_size)) > 0)
-			// {
-			// 	slog_info("[POSIX]. bytes read from %s = %ld/%ld", old, bytes_read, old_file_size);
-			// 	// writes to Hercules.
-			// 	bytes_write = write(fd_new, old_file_buffer, bytes_read);
-			// 	if (bytes_write < 0)
-			// 	{
-			// 		perror("HERCULES_ERR_RENAME_WRITE_FILE");
-			// 		slog_error("HERCULES_ERR_RENAME_WRITE_FILE: %s, fd_new=%d", old, fd_new);
-			// 		break;
-			// 	}
-			// 	total_bytes += bytes_write;
-			// }
-
-			// if (bytes_read == -1)
-			// {
-			// 	perror("HERCULES_ERR_READ_FILE");
-			// 	slog_error("HERCULES_ERR_READ_FILE: %s", old);
-			// }
-
-			// slog_info("[POSIX]. bytes write to %s = %ld/%ld", new_pathname, total_bytes, old_file_size);
-			// if (total_bytes != old_file_size)
-			// {
-			// 	slog_warn("Original file has %ld bytes but Hercules only wrote %ld", old_file_size, total_bytes);
-			// }
-
-			// // close both files.
-			// if (close(fd_old) == -1)
-			// {
-			// 	slog_error("HERCULES_ERR_RENAME_CLOSE_FILE_OLD: %s", old);
-			// 	perror("HERCULES_ERR_RENAME_CLOSE_FILE_OLD");
-			// }
-			// if (close(fd_new) == -1)
-			// {
-			// 	slog_error("HERCULES_ERR_RENAME_CLOSE_FILE_NEW: %s", new_pathname);
-			// 	perror("HERCULES_ERR_RENAME_CLOSE_FILE_NEW");
-			// }
-
-			// // unlink the file from the file system.
-			// if (unlink(old) == -1)
-			// {
-			// 	perror("HERCULES_ERR_RENAME_UNLINK_FILE_OLD");
-			// 	slog_error("HERCULES_ERR_RENAME_UNLINK_FILE_OLD: %s", new_pathname);
-			// }
 
 			// // free memory.
 			// free(old_file_buffer);
 			slog_live("[POSIX]. End Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s, ret=%d", old, new_pathname, new_path, ret);
 			free(new_path);
+		}
+		else if (old_path != NULL && new_path == NULL)
+		{ // move from Hercules to file system.
+			slog_live("[POSIX] Calling Hercules 'rename', Hercules %s to file system %s", old_path, new_path);
+			ret = HerculesMove(old, new_pathname, old_path);
+			slog_live("[POSIX] Ending Hercules 'rename', Hercules %s to file system %s, ret=%d", old_path, new_path, ret);
 		}
 		else
 		{
@@ -3985,7 +3877,7 @@ extern "C"
 		strcat((char *)buf, "$");
 		return 1;
 	}
-
+	static struct dirent entry;
 	struct dirent *readdir(DIR *dirp)
 	{
 		if (!real_readdir)
@@ -3999,7 +3891,8 @@ extern "C"
 		errno = 0;
 		size_t ret;
 		char *pathname = map_fd_search_by_val(map_fd, dirfd(dirp));
-		struct dirent *entry = NULL;
+		// struct dirent *entry = NULL;
+
 		if (pathname != NULL)
 		{
 			size_t len = strlen(pathname);
@@ -4009,7 +3902,14 @@ extern "C"
 			}
 
 			slog_live("[POSIX]. Calling Hercules 'readdir', pathname=%s", pathname);
-			entry = (struct dirent *)malloc(sizeof(struct dirent));
+			// entry = (struct dirent *)malloc(sizeof(struct dirent));
+			// if (entry == NULL)
+			// {
+			// 	perror("HERCULES_ERR_READDIR_MEMORY_ALLOC");
+			// 	slog_error("HERCULES_ERR_READDIR_MEMORY_ALLOC: %s", pathname;
+			// 	return NULL;
+			// }
+
 			char buf[KB * KB] = {0};
 			char *token;
 			imss_readdir(pathname, buf, myfiller, 0);
@@ -4023,11 +3923,11 @@ extern "C"
 				if (i == pos)
 				{
 					slog_live("[POSIX] current token=%s, i=%d, pos=%d", token, i, pos);
-					entry->d_ino = 0;
-					entry->d_off = pos;
+					entry.d_ino = 0;
+					entry.d_off = pos;
 
 					// name of file
-					strcpy(entry->d_name, token);
+					strcpy(entry.d_name, token);
 
 					char path_search[256] = {0};
 					// sprintf(path_search, "imss://%s", token); // original
@@ -4047,12 +3947,12 @@ extern "C"
 					if (!strncmp(token, ".", strlen(token)))
 					{
 						// sprintf(path_search, "imss://%s", token);
-						entry->d_type = DT_DIR;
+						entry.d_type = DT_DIR;
 					}
 					else if (!strncmp(token, "..", strlen(token)))
 					{
 						// sprintf(path_search, "imss://%s", token);
-						entry->d_type = DT_DIR;
+						entry.d_type = DT_DIR;
 					}
 					else
 					{
@@ -4064,10 +3964,10 @@ extern "C"
 						{
 						case TYPE_DIRECTORY:
 						case TYPE_HERCULES_INSTANCE: // Directory case?
-							entry->d_type = DT_DIR;
+							entry.d_type = DT_DIR;
 							break;
 						case TYPE_REGULAR_FILE: // is regular file.
-							entry->d_type = DT_REG;
+							entry.d_type = DT_REG;
 							break;
 						default:
 							slog_error("HERCULES_ERR_NOT_SUPPORTED_TYPE");
@@ -4079,11 +3979,11 @@ extern "C"
 					// length of this record
 					if (strlen(token) < 5)
 					{
-						entry->d_reclen = 24;
+						entry.d_reclen = 24;
 					}
 					else
 					{
-						entry->d_reclen = ceil((double)(strlen(token) - 4) / 8) * 8 + 24;
+						entry.d_reclen = ceil((double)(strlen(token) - 4) / 8) * 8 + 24;
 					}
 					slog_live("[imss_posix] path_searched = %s", path_search);
 					break;
@@ -4094,18 +3994,22 @@ extern "C"
 			seekdir(dirp, pos + 1);
 			if (token == NULL)
 			{
-				entry = NULL;
+				// free(entry);
+				// entry = NULL;
+				return NULL;
 			}
+			return &entry;
 			slog_live("[POSIX]. Ending Hercules 'readdir',  pathname=%s\n", pathname);
 		}
 		else
 		{
 			slog_full("[POSIX]. Calling real 'readdir', fd=%d.", dirfd(dirp));
-			entry = real_readdir(dirp);
+			// entry = real_readdir(dirp);
+			return real_readdir(dirp);
 			slog_full("[POSIX]. Ending real 'readdir'");
 		}
 
-		return entry;
+		// return &entry;
 	}
 
 	struct dirent64 *readdir64(DIR *dirp)
@@ -4164,7 +4068,6 @@ extern "C"
 			slog_live("[POSIX] Calling Hercules 'closedir', pathname=%s, fd=%d.", pathname, fd);
 
 			// Closes the dataset on the backend and delete it when the dataset status is "dest" and no more process has the file open.
-			// ret = imss_close(pathname, fd);
 			ret = map_fd_search_by_val_close(map_fd, fd);
 
 			if (ret != 0)

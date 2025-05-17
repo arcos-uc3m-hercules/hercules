@@ -845,9 +845,9 @@ ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_ad
 int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_struct, int32_t data_type, uint64_t from)
 {
 	// Buffer containing the structures' information.
-	char *info_buffer;
+	char *info_buffer = NULL;
 	// Buffer size.
-	size_t msg_size;
+	size_t msg_size = 0;
 	int to_free = 0;
 
 	slog_debug("[COMM] send_dynamic start, data_type=%d", data_type);

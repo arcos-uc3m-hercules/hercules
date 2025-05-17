@@ -425,6 +425,15 @@ int imss_getattr(char *path, struct stat *stbuf)
 			slog_debug("is a directy, setting st_nlink to 1");
 			stbuf->st_nlink = 1;
 			stbuf->st_mode = S_IFDIR | 0775;
+			// TODO: free al memory in refs.
+			// for (char *aux_mem = refs[0]; aux_mem != NULL; aux_mem++)
+			// {
+			// 	for (char *aux_2 = aux_mem; aux_2 != NULL; aux_2++)
+			// 	{
+			// 		free(aux_2);
+			// 	}
+			// 	free(aux_mem);
+			// }
 			free(refs);
 		}
 	case TYPE_REGULAR_FILE:
@@ -529,7 +538,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 				filler(buf, refs[i] + offset + 1, NULL, 0);
 				// filler(buf, refs[i], NULL, 0);
 			}
-			free(refs[i]);
+			// free(refs[i]);
 		}
 	}
 	// Free resources
@@ -618,7 +627,7 @@ int imss_open(char *path, uint64_t *fh)
 			return -1;
 		}
 
-		slog_debug("[imss_open] ret=%d, file_desc=%d", ret, file_desc);
+		slog_debug("ret=%d, file_desc=%d", ret, file_desc);
 		memcpy(&stats, data, sizeof(struct stat));
 		// pthread_mutex_lock(&lock_file);
 		// storing block 0 on the local map.
@@ -2860,11 +2869,8 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 		return -1;
 	}
 
-	// if ()
-	// { // old path is directory.
 	old_is_dir = S_ISDIR(old_file_stat.st_mode);
 	slog_debug("old path %s is_dir? =%d", given_old_path, old_is_dir);
-	// }
 
 	// check if the parent directory of the new path exists.
 	char last_parent_dir[URI_] = {'\0'};
@@ -2891,21 +2897,40 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 
 	// checks if the new path exists.
 	int new_exists = 0;
-	if (imss_getattr((char *)hercules_path, &new_file_stat) == 0)
+	int fd_new = open(given_new_pathname, O_RDONLY);
+	if (fd_new < 0)
+	{ // file does not exist.
+		// if the new path does not exists, new_is_dir takes the value of old_is_dir.
+		new_is_dir = old_is_dir;
+	}
+	else
 	{
+		slog_debug("%s exists", given_new_pathname);	
+		if (__fxstat(1, fd_new, &new_file_stat) < 0)
+		{
+			perror("HERCULES_ERR_MOVE_STAT_NEW_FILE");
+			slog_error("HERCULES_ERR_MOVE_STAT_NEW_FILE: %s", hercules_path);
+			return -1;
+		}
 		new_exists = 1;
 		// if new path exists, checks if it directory.
 		new_is_dir = S_ISDIR(new_file_stat.st_mode);
 	}
-	else
-	{
-		// if the new path does not exists, new_is_dir takes the value of old_is_dir.
-		new_is_dir = old_is_dir;
-	}
+
+	// if (imss_getattr((char *)hercules_path, &new_file_stat) == 0)
+	// if (__fxstat(1, fd_new, &new_file_stat) < 0)
+	// {
+	// 	new_exists = 1;
+	// 	// if new path exists, checks if it directory.
+	// 	new_is_dir = S_ISDIR(new_file_stat.st_mode);
+	// }
+	// else
+	// {
+	// }
 
 	// if (ret == 0)
 	// { // new path already exists.
-	slog_debug("new path %s is_dir? =%d", hercules_path, new_is_dir);
+	slog_debug("new path %s is_dir? =%d", given_new_pathname, new_is_dir);
 
 	// get the name of the directory.
 	int pos = 0;
@@ -2916,8 +2941,9 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 	}
 	else
 	{
-		aux_path = hercules_path;
+		aux_path = given_new_pathname;
 	}
+	slog_debug("new_exists=%d, aux_path=%s", new_exists, aux_path);
 
 	for (int c = 0; c < strlen(aux_path); ++c)
 	{
@@ -2937,6 +2963,7 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 	strcat(full_path, name);
 
 	slog_debug("pos=%d, full_path=%s, given_old_path=%s, hercules_path=%s, last_parent_dir=%s\n", pos, full_path, given_old_path, hercules_path, last_parent_dir);
+	// return -1;
 	// }
 	int op_not_allowed = 0;
 	if (old_is_dir && new_is_dir)
@@ -3012,7 +3039,7 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 		errno = EPERM;
 		return -EPERM;
 	}
-
+	// TODO: checks for errors.
 	return 0;
 
 	// else

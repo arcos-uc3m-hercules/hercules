@@ -26,7 +26,7 @@
 #define MODE_SIZE 4
 #define BUFFER_SIZE 4 * 1024 * 1024
 
-#define CLOSE_EP 9999999
+// #define CLOSE_EP 9999999
 
 #define SHM_SIZE 50L * 1024L * 1024L * 1024L
 

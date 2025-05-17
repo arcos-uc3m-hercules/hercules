@@ -18,6 +18,8 @@
 #define CLOSE_OP 7
 #define OPEN_OP 8
 // #define STATFS			  7
+#define DATASET_OP 8
+#define INSTANCE_OP 9
 
 #define WRITE_OP 1
 #define WRITEV 7

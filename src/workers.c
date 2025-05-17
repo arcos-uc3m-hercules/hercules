@@ -1638,18 +1638,18 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	uint16_t current_offset = 0;
 
 	// Resources specifying if the ZMQ_SNDMORE flag was set in the sender.
-	int64_t more;
+	int64_t more = -1;
 	size_t more_size = sizeof(more);
 
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 
 	uint32_t operation = 0; // server id.
-	char mode[MODE_SIZE];
+	char mode[MODE_SIZE] = {'\0'};
 	int32_t req_size = 0;
-	char raw_msg[req_size + 1];
-	char number[16];
-	char uri_[URI_];
+	char raw_msg[req_size + 1] = {'\0'};
+	char number[16] = {'\0'};
+	char uri_[URI_] = {'\0'};
 	int extra_info = 0;
 	int num_characters_read = 0;
 	int num_input_read = 0;
@@ -1687,7 +1687,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		case GETDIR:
 		{
 			char *buffer = NULL;
-			int32_t numelems_indir;
+			int32_t numelems_indir = -1;
 			// Retrieve all elements inside the requested directory.
 			pthread_mutex_lock(&tree_mut);
 			slog_info("Calling GTree_getdir, key=%s", key.c_str());
@@ -1713,6 +1713,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STATWORKER_NODIR");
+					slog_error("HERCULES_ERR_STATWORKER_NODIR");
 					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
@@ -1725,6 +1726,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, MSG_EMPTY_DIRECTORY, STRING, arguments->worker_uid) < 0)
 				{
 					perror("HERCULES_ERR_STATWORKER_NODIR");
+					slog_error("HERCULES_ERR_STATWORKER_NODIR");
 					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
@@ -1742,6 +1744,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid) < 0)
 			{
 				perror("HERCULES_ERR_WORKER_SEND_STREAM_GETDIR");
+				slog_error("HERCULES_ERR_WORKER_SEND_STREAM_GETDIR");
 				// pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
@@ -1763,7 +1766,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			break;
 		}
 		case READ_OP:
-		{
+		{ // case 0.
 			slog_debug("[READ_OP]");
 			// Check if there was an associated block to the key.
 			int err = map->get(key, &address_, &block_size_rtvd);
@@ -2153,6 +2156,19 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// Write operations.
 	case SET_OP:
 	{
+		switch (operation)
+		{
+		case INSTANCE_OP:
+		{
+			slog_debug("NEW INSTANCE OPERATION");
+			slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
+			/* code */
+			break;
+		}
+		default:
+			break;
+		}
+
 		slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
 		// TO CHECK: this mutex can be removed cause' map->get has another mutex.
 		// pthread_mutex_lock(&memory_protect);
@@ -2218,7 +2234,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			// slog_debug("Inserting %s into directory tree", key.c_str());
 			insert_successful = GTree_insert((char *)key.c_str());
 			pthread_mutex_unlock(&tree_mut);
-
+			slog_debug("insert_successful=%d", insert_successful);
 			if (insert_successful == -1)
 			{
 				slog_error("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
@@ -2420,7 +2436,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 					// pthread_mutex_unlock(&lock_network);
 					free(buffer);
-					slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
+					// slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 				}
 
 				slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());

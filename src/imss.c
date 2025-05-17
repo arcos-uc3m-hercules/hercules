@@ -367,7 +367,7 @@ int32_t stat_init(char *stat_hostfile,
 	// FILE entity managing the IMSS metadata hostfile.
 	FILE *stat_nodes_struct;
 	// Number of characters successfully read from the line.
-	int n_chars;
+	int n_chars = 0;
 
 	// Open the file containing the IMSS metadata server nodes.
 	if ((stat_nodes_struct = fopen(stat_hostfile, "r+")) == NULL)
@@ -384,7 +384,7 @@ int32_t stat_init(char *stat_hostfile,
 
 	char *stat_node = (char *)malloc(LINE_LENGTH);
 	// Connect to all servers.
-	char request[REQUEST_SIZE];
+	char request[REQUEST_SIZE] = {'\0'};
 
 	status = ucp_worker_get_address(ucp_worker_meta, &local_addr_meta, &local_addr_len_meta);
 	ucp_worker_address_attr_t attr;
@@ -396,8 +396,8 @@ int32_t stat_init(char *stat_hostfile,
 	{
 		ucs_status_t status;
 		size_t l_size = LINE_LENGTH;
-		int oob_sock;
-		size_t addr_len;
+		int oob_sock = -1;
+		size_t addr_len = 0;
 
 		// Save IMSS metadata deployment.
 		n_chars = getline(&stat_node, &l_size, stat_nodes_struct);
@@ -568,7 +568,7 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 	if(arr_elements == NULL) {
 		perror("HERCULES_ERR_GETDIR_ALLOC_MEMORY_ELEMENTS");
 		slog_error("HERCULES_ERR_GETDIR_ALLOC_MEMORY_ELEMENTS");
-		exit(0);
+		exit(-1);
 	}
 
 	int arr_lengths[number_metadata_servers] = {0};
@@ -650,7 +650,8 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 	{
 		perror("HERCULES_ERR_GETDIR_MEMORY_ALLOC_1");
 		slog_error("HERCULES_ERR_GETDIR_MEMORY_ALLOC_1");
-		exit(1);
+		free(arr_elements);
+		exit(-1);
 	}
 
 	(*items)[0] = (char *)calloc(URI_, sizeof(char));
@@ -659,8 +660,8 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 		perror("HERCULES_ERR_GETDIR_MEMORY_ALLOC_2");
 		slog_error("HERCULES_ERR_GETDIR_MEMORY_ALLOC_2");
 		free(*items);
-		// free(arr_elements);
-		exit(1);
+		free(arr_elements);
+		exit(-1);
 	}
 	// fprintf(stderr, "Request uri=%s, URI=%d\n", requested_uri, URI_);
 	memcpy((*items)[0], requested_uri, URI_);
@@ -705,25 +706,23 @@ uint32_t get_dir(char *requested_uri, char **buffer, char ***items)
 	}
 
 	// fprintf(stderr, "*arr_elements=%p, arr_elements=%p\n", &*arr_elements, &arr_elements);
-	if (arr_elements != NULL)
-	{
-		// fprintf(stderr, "Freeing arr_elements\n");
-		for (int i = m_srv; i < m_srv + number_metadata_servers; i++)
-		{
-			// fprintf(stderr, "Freeing pos %d, m_srv=%d, number_metadata_servers=%d\n", i, m_srv, number_metadata_servers);
-			if (arr_elements[i] != NULL)
-			{
-				free(arr_elements[i]);
-				arr_elements[i] = NULL;
-			}
-		}
-		// free(arr_elements);
-		arr_elements = NULL;
-	}
+	// if (arr_elements != NULL)
+	// {
+	// 	// fprintf(stderr, "Freeing arr_elements\n");
+	// 	for (int i = m_srv; i < m_srv + number_metadata_servers; i++)
+	// 	{
+	// 		// fprintf(stderr, "Freeing pos %d, m_srv=%d, number_metadata_servers=%d\n", i, m_srv, number_metadata_servers);
+	// 		if (arr_elements[i] != NULL)
+	// 		{
+	// 			free(arr_elements[i]);
+	// 			arr_elements[i] = NULL;
+	// 		}
+	// 	}
+	// 	// free(arr_elements);
+	// 	// arr_elements = NULL;
+	// }
 
-	// free(elements);
-
-	// free(*arr_elements);
+	free(arr_elements);
 
 	// if (pos > 1)
 	// 	free(arr_elements);
@@ -1065,7 +1064,7 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 {
 	// Check for the IMSS info structure in the local vector.
-	int32_t imss_found_in;
+	int32_t imss_found_in = -1;
 	imss searched_imss;
 	int ret = 0;
 	ucp_ep_h ep;
@@ -1086,23 +1085,16 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 	}
 
 	// Formated imss uri to be sent to the metadata server.
-	char formated_uri[REQUEST_SIZE];
+	char formated_uri[REQUEST_SIZE] = {'\0'};
 
 	// Discover the metadata server that handles the IMSS instance.
 	// uint32_t m_srv = discover_stat_srv(imss_uri);
 	// uint32_t m_srv = find_server(n_stat_servers, 0, imss_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-	char first_parent_dir[URI_];
+	char first_parent_dir[URI_] = {'\0'};
 	uint32_t m_srv = 0;
-	// int number_data_servers = 0;
 	int first_parent_offset = find_first_parent_dir(imss_uri, first_parent_dir);
 	slog_debug("imss_uri=%s, first_parent_dir=%s, first_parent_offset=%d", imss_uri, first_parent_dir, first_parent_offset);
-	// if (first_parent_offset > 0)
-	// {
 	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-	// number_data_servers = 1;
-	// } else {
-	// number_data_servers = n_stat_servers;
-	// }
 
 	ep = stat_eps[m_srv];
 
@@ -1379,7 +1371,7 @@ int32_t create_dataset(char *dataset_uri,
 	new_dataset.local_conn = associated_imss.conns.matching_server;
 	new_dataset.size = 0;
 
-	char first_parent_dir[PATH_MAX];
+	char first_parent_dir[PATH_MAX] = {'\0'};
 	find_first_parent_dir(new_dataset.uri_, first_parent_dir);
 
 	// if (first_parent_offset > 0)
@@ -1660,7 +1652,7 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	// If the struct was found within the vector but uninitialized, once updated, store it in the same position.
 	if (not_initialized)
 	{
-		slog_live("[IMSS][open_dataset] not_initialized=%d, found_in=%d", not_initialized, found_in);
+		slog_live("[IMSS] not_initialized=%d, found_in=%d", not_initialized, found_in);
 		g_array_remove_index(datasetd, found_in);
 		g_array_insert_val(datasetd, found_in, new_dataset);
 
@@ -2406,8 +2398,8 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 	}
 	// fprintf(stderr, "not found\n");
 	// Formated dataset uri to be sent to the metadata server.
-	char formated_uri[REQUEST_SIZE];
-	char first_parent_dir[URI_];
+	char formated_uri[REQUEST_SIZE] = {'\0'};
+	char first_parent_dir[URI_] = {'\0'};
 	uint32_t m_srv = 0;
 
 	// Discover the metadata server that handles the dataset.

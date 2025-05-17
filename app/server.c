@@ -17,7 +17,6 @@
 extern GNode *tree_root;
 extern pthread_mutex_t tree_mut;
 // extern int32_t __thread current_dataset;   // Dataset whose policy has been set last.
-// extern dataset_info __thread curr_dataset; // Currently managed dataset.
 extern imss curr_imss;
 
 // Initial buffer address.
@@ -26,7 +25,7 @@ extern char *buffer_address;
 extern pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
 extern uint64_t buffer_segment;
-char POLICY[MAX_POLICY_LEN];
+char POLICY[MAX_POLICY_LEN] = {'\0'};
 
 extern ucp_worker_h *ucp_worker_threads;
 extern ucp_address_t **local_addr;
@@ -172,7 +171,7 @@ int32_t main(int32_t argc, char **argv)
 	if (args.type != TYPE_METADATA_SERVER && args.type != TYPE_DATA_SERVER)
 	{
 		// fprintf(stderr, "%c is not a valid server type \n usage: hercules_server <m|d> <server_id> <metadata_host> <0|1>\n", args.type);
-		char usage_msg[64];
+		char usage_msg[64] = {'\0'};
 		sprintf(usage_msg, "%c is not a valid server type", args.type);
 		print_usage((const char *)usage_msg);
 		return 0;
@@ -306,7 +305,7 @@ int32_t main(int32_t argc, char **argv)
 		slog_info("args.id=%d", args.id);
 
 		ucs_status_t status;
-		int oob_sock;
+		int oob_sock = -1;
 		int ret = 0;
 		ucs_status_t ep_status = UCS_OK;
 
@@ -322,7 +321,8 @@ int32_t main(int32_t argc, char **argv)
 			perror("HERCULES_ERR_META_HOSTFILE_NOT_SET");
 			exit(1);
 		}
-		slog_debug("Opening file %s", args.meta_hostfile) if ((metadata_nodes_fd = fopen(args.meta_hostfile, "r+")) == NULL)
+		slog_debug("Opening file %s", args.meta_hostfile);
+		if ((metadata_nodes_fd = fopen(args.meta_hostfile, "r+")) == NULL)
 		{
 			char err_msg[MAX_ERR_MSG_LEN];
 			sprintf(err_msg, "HERCULES_ERR_DEPLOYFILE_OPEN:%s", deployfile);
@@ -363,6 +363,8 @@ int32_t main(int32_t argc, char **argv)
 			{
 				perror("HERCULES_ERR_STAT_HELLO");
 				slog_error("HERCULES_ERR_STAT_HELLO");
+				free(metadata_endpoints);
+				free(stat_add);
 				return -1;
 			}
 
@@ -371,7 +373,12 @@ int32_t main(int32_t argc, char **argv)
 			peer_addr = (ucp_address *)malloc(addr_len);
 			ret = recv(oob_sock, peer_addr, addr_len, MSG_WAITALL);
 			slog_debug("Peer Address=%lu", peer_addr);
-			close(oob_sock);
+			if (close(oob_sock) < 0)
+			{
+				perror("HERCULES_ERR_CLOSE_SOCK");
+				slog_error("HERCULES_ERR_CLOSE_SOCK");
+			}
+
 			free(stat_add);
 
 			/* Send client UCX address to server */
@@ -403,7 +410,7 @@ int32_t main(int32_t argc, char **argv)
 			if (!args.id)
 			{ // Only performs by the data server with ID = 0.
 				// Formated HERCULES uri to be sent to the metadata server.
-				char formated_uri[REQUEST_SIZE];
+				char formated_uri[REQUEST_SIZE] = {'\0'};
 				sprintf(formated_uri, "%" PRIu32 " GET 0 %s", id, args.imss_uri);
 				slog_debug("Request - %s", formated_uri);
 				// Send the request.
@@ -411,6 +418,7 @@ int32_t main(int32_t argc, char **argv)
 				{
 					slog_error("HERCULES_ERR__SEND_REQ");
 					perror("HERCULES_ERR__SEND_REQ");
+					free(metadata_endpoints);
 					return -1;
 				}
 
@@ -421,6 +429,7 @@ int32_t main(int32_t argc, char **argv)
 				{
 					slog_error("HERCULES_ERR__GET_RECV_DATA_LENGTH");
 					perror("HERCULES_ERR__GET_RECV_DATA_LENGTH");
+					free(metadata_endpoints);
 					return -1;
 				}
 				// Receive the associated structure.
@@ -459,7 +468,6 @@ int32_t main(int32_t argc, char **argv)
 				// Here we need to stop all HERCULES data servers
 				// related to this configuration, or check if them
 				// are not running anymore to continue deploying this configuration.
-
 				perror("HERCULES_ERR_SERVER_URI_TAKEN");
 				slog_error("HERCULES_ERR_SERVER_URI_TAKEN, ret=%d", ret);
 				// ready(tmp_file_path, "ERROR");
@@ -522,13 +530,12 @@ int32_t main(int32_t argc, char **argv)
 	{
 		// Create the tree_root node.
 		char *root_data = (char *)calloc(8, sizeof(char));
-		// strcpy(root_data, "imss://");
 		strcpy(root_data, args.imss_uri);
 		tree_root = g_node_new((void *)root_data);
-
 		if (pthread_mutex_init(&tree_mut, NULL) != 0)
 		{
 			perror("HERCULES_ERR_TREE_MUT_INIT");
+			slog_fatal("HERCULES_ERR_TREE_MUT_INIT");
 			exit(1);
 		}
 	}
@@ -713,9 +720,52 @@ int32_t main(int32_t argc, char **argv)
 		}
 	}
 
+	if (args.type == TYPE_DATA_SERVER)
+	{
+		// Init an endpoint to the metadata server, it is use
+		// to notify to the metadata server the status of this server.
+		// e.g., in malleability scenarios, this servers send a
+		// request to change the metadata to status = 0 (not avaiable).
+		// fix: set real number of metadata servers.
+		// fprintf(stderr, "Connecting to metadata server\n");
+		slog_debug("Connecting to metadata server\n");
+		if (stat_init(args.meta_hostfile, stat_port, args.num_metadata_servers, args.id) == -1)
+		{
+			// In case of error notify and exit
+			slog_error("Stat init failed, cannot connect to Metadata server.");
+			perror("Stat init failed, cannot connect to Metadata server.");
+			return -1;
+		}
+	}
+
+	// dataset_info new_dataset;
+	// strcpy(new_dataset.uri_, args.imss_uri);
+	// strcpy(new_dataset.policy, POLICY);
+	// new_dataset.num_data_elem = 1;
+	// new_dataset.data_entity_size = args.block_size * 1024; // dataset in kilobytes
+	// // new_dataset.imss_d = curr_dataset.imss_d;			  // associated_imss_indx;
+	// new_dataset.imss_d = -1;
+	// new_dataset.local_conn = -1;
+	// new_dataset.size = 0;
+	// new_dataset.is_link = 0;
+	// new_dataset.n_open = 1;
+	// new_dataset.n_servers = args.num_data_servers;
+	// new_dataset.n_servers_when_created = init_number_of_server;
+	// new_dataset.repl_factor = 1;
+	// new_dataset.repl_type = SYNC;
+	// strcpy(new_dataset.original_name, args.imss_uri);
+	// new_dataset.type = TYPE_DIRECTORY;
+
 	// Notify to the metadata server the deployment of a new HERCULES.
 	if ((args.type == TYPE_DATA_SERVER) && !args.id && stat_port)
 	{
+		// int res = create_dataset((char *)args.imss_uri, POLICY, 0, args.block_size, args.repl_factor, 0, args.num_data_servers, NO_LINK, 1, TYPE_DIRECTORY);
+		// if (res < 0)
+		// {
+		// 	slog_error("Cannot create new dataset.\n");
+		// 	return res;
+		// }
+
 		// Metadata structure containing the novel HERCULES info.
 		imss_info my_imss;
 
@@ -780,13 +830,29 @@ int32_t main(int32_t argc, char **argv)
 			return -1;
 		}
 
-		char key_plus_size[REQUEST_SIZE];
-		uint32_t id = CLOSE_EP;
+		char key_plus_size[REQUEST_SIZE] = {'\0'};
+		uint32_t id = INSTANCE_OP;
 		// Send the created structure to the metadata server.
 		sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", id, (sizeof(imss_info) + my_imss.num_storages * LINE_LENGTH + my_imss.num_storages * sizeof(int) + my_imss.num_storages * sizeof(int)), my_imss.uri_);
 		slog_debug("[main] Request - %s", key_plus_size);
 		for (size_t j = 0; j < args.num_metadata_servers; j++)
 		{
+			// if (send_req(ucp_worker, metadata_endpoints[j], req_addr, req_addr_len, key_plus_size) == 0)
+			// {
+			// 	perror("HERCULES_ERR_SEND_REQ_SET_STR");
+			// 	slog_fatal("HERCULES_ERR_SEND_REQ_SET_STR");
+			// 	return -1;
+			// }
+
+			// slog_debug("[SERVER] Creating IMSS_INFO at metadata server. ");
+			// // Send the new dataset structure to the metadata server entity.
+			// if (send_dynamic_stream(ucp_worker, metadata_endpoints[j], (void *)&new_dataset, DATASET_INFO, attr.worker_uid) == -1)
+			// {
+			// 	perror("HERCULES_ERR_MAIN_SEND_DYNAMIC_STREAM");
+			// 	slog_error("HERCULES_ERR_MAIN_SEND_DYNAMIC_STREAM");
+			// 	return -1;
+			// }
+			/// ************
 
 			if (send_req(ucp_worker, metadata_endpoints[j], req_addr, req_addr_len, key_plus_size) == 0)
 			{
@@ -797,6 +863,7 @@ int32_t main(int32_t argc, char **argv)
 
 			slog_debug("[SERVER] Creating IMSS_INFO at metadata server. ");
 			// Send the new HERCULES metadata structure to the metadata server entity.
+			// TODO: Check how this msg is received on the worker. We need to split between IMSS_INFO and DATASET_INFO.
 			if (send_dynamic_stream(ucp_worker, metadata_endpoints[j], (char *)&my_imss, IMSS_INFO, attr.worker_uid) == -1)
 			{
 				return -1;
@@ -810,22 +877,7 @@ int32_t main(int32_t argc, char **argv)
 
 	if (args.type == TYPE_DATA_SERVER)
 	{
-		// Init an endpoint to the metadata server, it is use
-		// to notify to the metadata server the status of this server.
-		// e.g., in malleability scenarios, this servers send a
-		// request to change the metadata to status = 0 (not avaiable).
-		// fix: set real number of metadata servers.
-		// fprintf(stderr, "Connecting to metadata server\n");
-		slog_debug("Connecting to metadata server\n");
-		if (stat_init(args.meta_hostfile, stat_port, args.num_metadata_servers, args.id) == -1)
-		{
-			// In case of error notify and exit
-			slog_error("Stat init failed, cannot connect to Metadata server.");
-			perror("Stat init failed, cannot connect to Metadata server.");
-			return -1;
-		}
-
-		sleep(3);
+		// sleep(3);
 		int num_active_storages = 0;
 		while (true)
 		{
@@ -959,11 +1011,11 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 	double time_taken;
 	time_t t = clock();
 	void *address_;
-	uint64_t block_size;
+	uint64_t block_size = -1;
 	int curr_map_size = 0;
-	const char *uri_;
-	size_t size;
-	char key_[REQUEST_SIZE];
+	const char *uri_ = NULL;
+	size_t size = 0;
+	char key_[REQUEST_SIZE] = {'\0'};
 	// Get the number of blocks stored by this data server.
 	int number_of_blocks_2_move = map->size();
 
@@ -1057,7 +1109,7 @@ void handle_signal_server(int signal)
 		}
 
 		ret = close(fd);
-		if (fd == -1)
+		if (ret == -1)
 		{
 			perror("ERR_HERCULES_CLOSE_PKILL_OPERATION");
 		}
