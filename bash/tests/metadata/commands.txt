@@ -27,10 +27,13 @@ HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/config
 # Memory leak
 spack load valgrind 
 ##HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so valgrind --leak-check=full  ~/gsanchez/ior/bin/ior -t 100MB -b 100MB -o /mnt/hercules/file.out -k > run_output_full 2>&1
+
 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so valgrind --leak-check=full --track-origins=yes --show-leak-kinds=all  ~/gsanchez/ior/bin/ior -i 5 -t 100MB -b 100MB -o /mnt/hercules/file.out -k > run_output_full 2>&1
 
 # List directory.
 HERCULES_THREAD_LEVEL=16 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so ls -l /mnt/hercules/
+
+HERCULES_THREAD_LEVEL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so valgrind --leak-check=full ls -l /mnt/hercules/ > valgrind.out 2>&1
 
 # Stop all
 ~/hercules/scripts/hercules stop -f /beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf

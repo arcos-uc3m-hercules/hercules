@@ -482,6 +482,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 
 	slog_debug("[IMSS] imss_path=%s", imss_path);
 	// Call IMSS to get metadata
+	int ret = 0;
 	n_ent = get_dir((char *)imss_path, &buffer, &refs);
 	slog_debug("[IMSS] imss_path=%s, n_ent=%d", imss_path, n_ent);
 	if (n_ent < 0)
@@ -538,12 +539,20 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 				filler(buf, refs[i] + offset + 1, NULL, 0);
 				// filler(buf, refs[i], NULL, 0);
 			}
-			// free(refs[i]);
+		}
+		if (refs[i] != NULL)
+		{
+			free(refs[i]);
 		}
 	}
 	// Free resources
 	// free(imss_path);
-	free(refs);
+	if (refs != NULL)
+	{
+		free(refs);
+	}
+
+	// free(refs);
 	return 0;
 
 	/*(void) offset;
@@ -2905,7 +2914,7 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 	}
 	else
 	{
-		slog_debug("%s exists", given_new_pathname);	
+		slog_debug("%s exists", given_new_pathname);
 		if (__fxstat(1, fd_new, &new_file_stat) < 0)
 		{
 			perror("HERCULES_ERR_MOVE_STAT_NEW_FILE");
