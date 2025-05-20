@@ -1,0 +1,19 @@
+logs/hercules/113284.log WARNING: task 15, partial write(), -2 of 41943040 bytes at offset 629145600
+logs/hercules/113284.log
+d-server-3.22-05-19-2024-11-03.log d-server-2.22-05-19-2024-11-03.log d-server-1.22-05-18-2024-11-03.log d-server-0.22-05-18-2024-11-03.log d-server-6.22-05-20-2024-11-03.log d-server-5.22-05-20-2024-11-03.log d-server-4.22-05-19-2024-11-03.log d-server-9.22-05-21-2024-11-03.log d-server-8.22-05-20-2024-11-03.log d-server-7.22-05-20-2024-11-03.log d-server-10.22-05-21-2024-11-03.log d-server-14.22-05-22-2024-11-03.log d-server-13.22-05-22-2024-11-03.log d-server-12.22-05-21-2024-11-03.log d-server-11.22-05-21-2024-11-03.log d-server-15.22-05-22-2024-11-03.log
+	,TIMING,0.000020,Getting content from memory
+	,TIMING,0.000023,Getting content from memory
+	,TIMING,0.000021,Getting content from memory
+	,TIMING,0.000041,Getting content from memory
+	,TIMING,0.000019,Getting content from memory
+	,TIMING,0.000015,Getting content from memory
+	,TIMING,0.000022,Getting content from memory
+	,TIMING,0.000022,Getting content from memory
+	,TIMING,0.000019,Getting content from memory
+	,TIMING,0.000074,Getting content from memory
+	,TIMING,0.000019,Getting content from memory
+	,TIMING,0.000021,Getting content from memory
+	,TIMING,0.000019,Getting content from memory
+	,TIMING,0.000020,Getting content from memory
+	,TIMING,0.000021,Getting content from memory
+	,TIMING,0.000040,Getting content from memory

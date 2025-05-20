@@ -58,75 +58,9 @@ static uint64_t BLOCK_SIZE;
 #define DPRINT(...)
 #endif
 
-/**
- * Macro to measure the time spend by function_to_call.
- * char*::print_comment: comment to be concatenated to the elapsed time.
- */
-#define __TIMING__
-
-#ifdef __TIMING__
-#define TIMING(function_to_call, print_comment, type)          \
-	({                                                         \
-		clock_t t;                                             \
-		double time_taken;                                     \
-		type ret;                                              \
-		t = clock();                                           \
-		ret = function_to_call;                                \
-		t = clock() - t;                                       \
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
-		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
-		ret;                                                   \
-	})
-#else
-#define TIMING(function_to_call, print_comment, type) \
-	({                                                \
-		function_to_call;                             \
-	})
-#endif
-
-#ifdef TIMING_NO_RETURN
-#define TIMING_NO_RETURN(function_to_call, print_comment)      \
-	({                                                         \
-		clock_t t;                                             \
-		double time_taken;                                     \
-		t = clock();                                           \
-		function_to_call;                                      \
-		t = clock() - t;                                       \
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
-		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
-	})
-#else
-#define TIMING_NO_RETURN(function_to_call, print_comment) \
-	({                                                    \
-		function_to_call;                                 \
-	})
-#endif
-
-#ifdef NETWORK_TIMING
-#define NETWORK_TIMING(function_to_call, print_comment, type)  \
-	({                                                         \
-		clock_t t;                                             \
-		double time_taken;                                     \
-		type ret;                                              \
-		t = clock();                                           \
-		ret = function_to_call;                                \
-		t = clock() - t;                                       \
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
-		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
-		ret;                                                   \
-	})
-#else
-#define NETWORK_TIMING(function_to_call, print_comment, type) \
-	({                                                        \
-		function_to_call;                                     \
-	})
-#endif
 
 int32_t get_data_location(int32_t, int32_t, int32_t);
-int32_t find_server(int32_t n_servers,
-					int32_t n_msg,
-					const char *fname,
-					int32_t op_type);
+
 // typedef enum {
 //     CLIENT_SERVER_SEND_RECV_STREAM  = UCS_BIT(0),
 //     CLIENT_SERVER_SEND_RECV_DEFAULT = CLIENT_SERVER_SEND_RECV_STREAM
@@ -154,6 +88,8 @@ typedef struct
 	int num_active_storages;
 	// Number of IMSS servers.
 	int32_t num_storages;
+	// Policy that was followed for the metadata.
+	int32_t session_plcy;
 	// Server's dispatcher thread connection port.
 	uint16_t conn_port;
 } imss_info;
@@ -187,6 +123,11 @@ typedef struct
 	char type; // = 'D';
 	// Policy that was followed in order to write the dataset.
 	char policy[MAX_POLICY_LEN];
+	// Original name when the data was created for the first time, need it for policy CRC16_ in distributed operation rename
+	char original_name[URI_];
+	// first parent directory.
+	char first_parent_dir[URI_];
+	int32_t session_plcy;
 	// Number of data elements conforming the dataset entity.
 	int32_t num_data_elem;
 	// Size of each data element (in KB).
@@ -201,8 +142,7 @@ typedef struct
 	int32_t local_conn;
 	// Actual size
 	int64_t size;
-	// Original name when the data was created for the first time, need it for policy CRC16_ in distributed operation rename
-	char original_name[256];
+	
 	// N_servers
 	int32_t n_servers;
 	/*************** USED EXCLUSIVELY BY LOCAL DATASETS ***************/
@@ -385,7 +325,7 @@ link           - It is a link.
 RETURNS:	> 0 - Number identifying the created dataset among the client's session.
 -1 - In case of error.
 	 */
-	int32_t create_dataset(char *dataset_uri, char *policy, int32_t num_data_elem, int32_t data_elem_size, int32_t repl_factor, int32_t repl_type, int32_t n_servers, char *link, int opened);
+	int32_t create_dataset(char *dataset_uri, char *policy, int32_t num_data_elem, int32_t data_elem_size, int32_t repl_factor, int32_t repl_type, int32_t n_servers, char *link, int opened, char file_type);
 
 	/* Method creating the required resources in order to READ and WRITE an existing dataset.
 
@@ -498,8 +438,8 @@ The current function does not allocate memory.
 	 * @param buffer     - Memory address where the requested block will be
 	 * received. WARNING: memory must have been allocated.
 	 * @param offset	 - Offset of the requested block.
-	 * @returns 0 if the requested block was successfully retrieved, 0 if the
-	 * requested block was not find in the remote server, or -1 in case of
+	 * @returns "msg_length" if the requested block was successfully retrieved, -1 if the
+	 * requested block was not find in the remote server, or -2 in case of
 	 * error.
 	 */
 	ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
@@ -590,7 +530,7 @@ RETURNS:	0 - No entity associated to the URI provided exists.
 2 - The URI provided corresponds to a dataset.
 -1 - In case of error.
 	 */
-	int32_t get_type(const char *uri);
+	char get_type(const char *uri);
 
 	// Method retriving list of servers to read.
 	int32_t
@@ -638,6 +578,15 @@ RETURNS:	0 - Resources were released successfully.
 	int32_t imss_comm_cleanup();
 
 	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
+
+	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
+	int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir);
+
+
+	/**
+	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.
+	 */
+	int paths_equal(const char *a, const char *b);
 
 	/**
 	 * Disk methods.

@@ -2,12 +2,17 @@
 #SBATCH --job-name=hercules    # Job name
 #SBATCH --time=01:00:00               # Time limit hrs:min:sec
 #SBATCH --output=logs/hercules/%j.log   # Standard output and error log
-#SBATCH --mem=0
-#SBATCH --exclude=broadwell-008,broadwell-010
-#SBATCH --nodelist=broadwell-[012-027]
-###SBATCH --exclusive=user
-##SBATCH --overcommit
+#SBATCH --cpus-per-task=32
+
+##SBATCH --hint=compute_bound
+##SBATCH --mem=100G
+##SBATCH --mem-per-cpu=16GB
 ##SBATCH --oversubscribe
+##SBATCH --overcommit
+##SBATCH --exclude=broadwell-008,broadwell-010
+##SBATCH --nodelist=broadwell-[012-027]
+###SBATCH --exclusive=user
+
 
 CONFIG_PATH=$1
 FILE_SIZE_PER_CLIENT=$2
@@ -26,9 +31,10 @@ IOR_AVOID_CACHE=$6
 IOR_PATH=/beegfs/home/javier.garciablas/gsanchez/ior/bin
 #spack load mpich@3.2.1%gcc@=9.4.0
 #spack load openmpi@4.1.5
-spack unload mpich openmpi
+#spack unload mpich openmpi
 #spack load openmpi@4.1.5%gcc@9.4.0 arch=linux-ubuntu20.04-broadwell
-spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
+#spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
+spack load mpich/5pgpbav
 whereis mpiexec
 # spack load \
 #    cmake@3.24.3%gcc@9.4.0 arch=linux-ubuntu20.04-broadwell \
@@ -52,18 +58,22 @@ whereis mpiexec
 
 ## Local
 # IOR_PATH=/usr/local/bin
-# export UCX_TLS=ib
+#export UCX_TLS=rc_v,rc_verbs
+#mm,posix,rc,rc_v,rc_verbs,self,shm,sm,sysv,tcp,ud,ud_v,ud_verbs,cma
+#export UCX_RNDV_SCHEME=put_zcopy
 # export UCX_NET_DEVICES=ibs1 # Slow!
 # spack load /sxjvb77
-set -x
-# export UCX_NET_DEVICES="opap6s0:1"
+export UCX_TLS=ib
+#set -x
+#export UCX_NET_DEVICES="opap6s0:1"
+#export UCX_NET_DEVICES=all
 #export UCX_IB_RCACHE_MAX_REGIONS="100"
 
 # mpiexec -env UCX_NET_DEVICES "opap6s0:1" -n=1 ucx_info -T
 #mpiexec -n=1 ucx_info -T
-set +x
+#set +x
 
-echo "temporal dir $TMPDIR"
+#echo "temporal dir $TMPDIR"
 
 
 echo "Starting Hercules with $POLICY policy"
@@ -73,7 +83,8 @@ if [ -z "$CONFIG_PATH" ]; then
    source hercules start
 else
    echo "Configuration file pass $CONFIG_PATH"
-   export HERCULES_DEBUG_LEVEL=SLOG_TIME
+#   export HERCULES_DEBUG_LEVEL=none
+#   export HERCULES_DEBUG_LEVEL=SLOG_TIME
    source /beegfs/home/javier.garciablas/hercules/scripts/hercules start \
    -f "$CONFIG_PATH" 
    unset HERCULES_DEBUG_LEVEL
@@ -82,7 +93,8 @@ end_=$(date +%s.%N)
 runtime=$(echo "$end_ - $start_" | bc -l)
 echo "Hercules started in $runtime seconds, start=$start_, end=$end_"
 
-echo "DATA SERVERS $HERCULES_NUM_DATA"
+echo "DATASERVERS $HERCULES_NUM_DATA"
+echo "THREADS $THREAD_POOL"
 
 echo "Running clients"
 #TRANSFER_SIZE=$((1024 * 16))
@@ -112,8 +124,8 @@ TRANSFER_SIZE=$FILE_SIZE_PER_CLIENT
 
 # -W -R for Write and Read verification. 
 # -k to keep the file (do not delete it after test).
-#COMMAND="$IOR_PATH/ior -w -r -k -W -R -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 1"
-COMMAND="$IOR_PATH/ior -w -r -k -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 3"
+COMMAND="$IOR_PATH/ior -w -r -k -W -R -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5"
+#COMMAND="$IOR_PATH/ior -w -r -k -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 5"
 
 if [ "$IOR_FILE_PER_PROCESS" -eq 1 ]; then
 ## -F for File-per-process.
@@ -131,13 +143,18 @@ COMMAND="$COMMAND -o /mnt/hercules/data.out"
 ## Removes the data.out file from the checkpointing folder.
 rm ./HerculesCheckpoint/*
 
+
 # MPIEXEC="mpiexec"
 set -x
+#mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_HOSTFILE_DEF=$HERCULES_MPI_HOSTFILE_NAME \
+#--bind-to core
 mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_HOSTFILE_DEF=$HERCULES_MPI_HOSTFILE_NAME \
    $HERCULES_MPI_ENV_DEF HERCULES_CONF=$HERCULES_CONF \
    $HERCULES_MPI_ENV_DEF LD_PRELOAD=$HERCULES_POSIX_PRELOAD \
    $COMMAND
+   #$HERCULES_MPI_ENV_DEF HERCULES_DEBUG_LEVEL=none \
 
+#   $HERCULES_MPI_ENV_DEF UCX_USE_MT_MUTEX=y \
 #LD_PRELOAD=$HERCULES_POSIX_PRELOAD ls -lth /mnt/hercules/
 
 ## Deletes all shared memory segments.
@@ -145,15 +162,25 @@ mpiexec -np=$NUMBER_OF_PROCESS $HERCULES_MPI_PPN=$HERCULES_NCPN  $HERCULES_MPI_H
 # 	ipcrm -a
 
 ## Waits some seconds to allow Hercules finishing copying all blocks to disk.
-/beegfs/home/javier.garciablas/hercules/scripts/hercules stop \
-	   -f "$CONFIG_PATH"
+# /beegfs/home/javier.garciablas/hercules/scripts/hercules stop \
+# 	   -f "$HERCULES_CONF"
+HERCULES_DEBUG_LEVEL=none HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/
+#exit 0
+
+# Copy the file to the disk.
+#HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  cp /mnt/hercules/data.out ./data-beegfs.out
+#md5sum data-beegfs.out
 
 ## Checksum to the file.
 #HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  ls -lh /mnt/hercules/data.out
 #HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  md5sum /mnt/hercules/data.out
 #HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  md5sum /mnt/hercules/data.out
 
+
+#HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD  diff /mnt/hercules/data.out data-beegfs.out
+
 #mpiexec -np=8 $HERCULES_MPI_PPN=1 $HERCULES_MPI_HOSTFILE_DEF=./data_hostfile \
 #	cat /tmp/hercules_pkill_operation
 
 echo "done!"
+exit 0

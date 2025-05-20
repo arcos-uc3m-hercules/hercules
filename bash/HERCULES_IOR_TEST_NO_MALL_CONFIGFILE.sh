@@ -1,12 +1,12 @@
 #!/bin/bash
 
 SCRIPT_NAME="ior_hercules_slurm.sh"
-FILE_SIZE=$((1024*1024*10))
+FILE_SIZE=$((1024*1024*50))
 
-ATTACHED=1
+ATTACHED=0
 
 # 0 = Shared single file, 1 = File per process.
-IOR_FILE_PER_PROCESS=1
+IOR_FILE_PER_PROCESS=0
 # 0 = Do not avoid cache, 1 = Avoid cache (recommend by https://ior.readthedocs.io/en/latest/userDoc/tutorial.html).
 IOR_AVOID_CACHE=0
 
@@ -19,24 +19,30 @@ HERCULES_CHECKPOINT_PATH=""
 HERCULES_SNAPSHOT_PATH=""
 DATA_HOSTFILE="\/beegfs\/home\/javier.garciablas\/hercules\/bash\/data_hostfile"
 METADATA_HOSTFILE="\/beegfs\/home\/javier.garciablas\/hercules\/bash\/meta_hostfile"
-DEBUG_LEVEL="none"
+#DEBUG_LEVEL="SLOG_TIME"
+#DEBUG_LEVEL=all
+#DEBUG_LEVEL=SLOG_READ
+DEBUG_LEVEL=none
+
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="RR"
+#export UCX_USE_MT_MUTEX=y
 
-NUM_SERVERS_RANGE=( 16 )
+NUM_SERVERS_RANGE=( 1 )
 #NUM_SERVERS_RANGE=( 1 4 8 16 32 )
 NODES_FOR_CLIENTS_RANGE=( 16 )
 #NODES_FOR_CLIENTS_RANGE=( 1 4 8 16 32 )
 #CLIENTS_PER_NODE_RANGE=( 1 2 4 8 16 32 )
 CLIENTS_PER_NODE_RANGE=( 16 )
 BLOCK_SIZE_RANGE=( 512 )
+export THREAD_POOL=1
 
 MAX_ITERATIONS=1
 
 # set -o xtrace
 #set -x
 
-jid=1
+jid=-1
 
 for loop_number in $(seq 1 $MAX_ITERATIONS);
 do
@@ -77,6 +83,7 @@ do
 					sed -i "s/^BLOCK_SIZE = [0-9]*/BLOCK_SIZE = $BLOCK_SIZE/g"  "$TEMPLATE_CONFIG_PATH"
 #					sed -i "s/^BLOCK_SIZE = [0-9]*/BLOCK_SIZE = $FILE_SIZE_PER_CLIENT/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_DATA_SERVERS = [0-9]/NUM_DATA_SERVERS = $NUM_SERVERS/g"  "$TEMPLATE_CONFIG_PATH"
+					sed -i "s/^INIT_NUM_DATA_SERVERS = [0-9]/INIT_NUM_DATA_SERVERS = $NUM_SERVERS/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_NODES_FOR_CLIENTS = [0-9]/NUM_NODES_FOR_CLIENTS = $NODES_FOR_CLIENTS/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^NUM_CLIENTS_PER_NODE = [0-9]/NUM_CLIENTS_PER_NODE = $CLIENTS_PER_NODE/g"  "$TEMPLATE_CONFIG_PATH"
 					sed -i "s/^ATTACHED = [0-9]/ATTACHED = $ATTACHED/g"  "$TEMPLATE_CONFIG_PATH"
@@ -87,6 +94,7 @@ do
 					sed -i "s|^DATA_HOSTFILE = .*|DATA_HOSTFILE = $DATA_HOSTFILE|g" "$TEMPLATE_CONFIG_PATH"
 					sed -i "s|^METADATA_HOSTFILE = .*|METADATA_HOSTFILE = $METADATA_HOSTFILE|g" "$TEMPLATE_CONFIG_PATH"
 					sed -i "s|^DEBUG_LEVEL = .*|DEBUG_LEVEL = $DEBUG_LEVEL|g" "$TEMPLATE_CONFIG_PATH"
+					sed -i "s|^THREAD_POOL = .*|THREAD_POOL = $THREAD_POOL|g" "$TEMPLATE_CONFIG_PATH"
 				
 					cat $TEMPLATE_CONFIG_PATH > "$CONFIG_PATH"
 					cp $TEMPLATE_CONFIG_PATH."_TEMP" $TEMPLATE_CONFIG_PATH
@@ -97,12 +105,13 @@ do
 				set -x
 
 				## The first job does not have dependencie (do not wait for another job to end). 
-				if [ "$jid" -eq 1 ]; then
-					jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
-				## The following jobs wait for the previous job to finish.
-				else
+#				if [ "$jid" -eq 1 ]; then
+#					jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
+#				## The following jobs wait for the previous job to finish.
+#				else
+					# --cpus-per-task=16		
 					jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT"  "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
-				fi
+#				fi
 				echo $jid
 				### exit 0
 				set +x

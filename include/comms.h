@@ -10,9 +10,10 @@
 #include <netdb.h>
 #include <ucp/api/ucp.h>
 #include <semaphore.h>
-#include <fcntl.h>    // for O_* constants
+#include <fcntl.h> // for O_* constants
 // to manage logs.
 #include "slog.h"
+#include "hello_world_util.h"
 
 #define IMSS_INFO 0
 #define DATASET_INFO 1
@@ -25,10 +26,9 @@
 #define MODE_SIZE 4
 #define BUFFER_SIZE 4 * 1024 * 1024
 
-#define CLOSE_EP 9999999
+// #define CLOSE_EP 9999999
 
 #define SHM_SIZE 50L * 1024L * 1024L * 1024L
-
 
 #define IP_STRING_LEN 50
 #define PORT_STRING_LEN 8
@@ -38,10 +38,41 @@
 // Max lenght for POLICY name.
 #define MAX_POLICY_LEN 16
 
+/*** TYPE argument legal values ***/
+#define TYPE_DATA_SERVER 'd'
+#define TYPE_METADATA_SERVER 'm'
+
+// File types.
+#define TYPE_HERCULES_INSTANCE 'I' // for Hercules instances
+#define TYPE_REGULAR_FILE 'R'      // for regular files
+#define TYPE_DIRECTORY 'D'         // for directories
+
 static const ucp_tag_t tag_req = 0x1337a880u;
 static const ucp_tag_t tag_data = 0x2337a880u;
 static const ucp_tag_t tag_reply = 0x3337a880u;
 static const ucp_tag_t tag_mask = UINT64_MAX;
+
+// Common messages between front and back ends.
+#define MAX_RESPONSE_MSG_LEN 32
+static char MSG_EMPTY_DIRECTORY[] = "EMPTY_DIRECTORY";
+static const char MSG_ERROR_OP[] = "ERROR";
+static const char MSG_OK_OP[] = "OK";
+static const char MSG_RELEASE_OP[] = "RELEASE";
+static const char MSG_RENAME_OP[] = "RENAME";
+static const char MSG_DELETE_OP[] = "DELETE";
+static const char MSG_NODELETE_OP[] = "NODELETE";
+static const char MSG_CLOSE_OP[] = "CLOSE";
+static const char MSG_OPEN_OP[] = "OPEN";
+static const char MSG_UPDATED_OP[] = "UPDATED!";
+
+// static const char *RESPONSES_MESSAGES[] = {
+//     "OK", 
+//     "ERROR"
+// };
+// static char OK_OP_MSG[] = "ERROR";
+
+// To synchronize network operations.
+static pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
 /**
  * Macro to measure the time spend by function_to_call.
@@ -143,7 +174,9 @@ size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_
 size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
 size_t isend_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
 size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest);
+size_t get_recv_data_length_2(ucp_worker_h ucp_worker, uint64_t dest, ucp_tag_recv_info_t *info_tag, ucp_tag_message_h *msg_tag);
 size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async);
+size_t recv_data_2(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async, ucp_tag_recv_info_t info_tag, ucp_tag_message_h msg_tag);
 size_t recv_data_opt(ucp_worker_h ucp_worker, ucp_ep_h ep, void **msg, size_t msg_length, uint64_t dest, int async);
 size_t recv_req(ucp_worker_h ucp_worker, ucp_ep_h ep, char *msg);
 ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request, send_req_t *ctx);
@@ -182,6 +215,7 @@ size_t send_stream_addr(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *add
 
 static void request_init(void *request);
 
+void failure_handler(void *arg, ucp_ep_h ep, ucs_status_t status);
 void flush_cb(void *request, ucs_status_t status);
 
 ucs_status_t flush_ep(ucp_worker_h worker, ucp_ep_h ep);
@@ -189,4 +223,6 @@ ucs_status_t flush_ep(ucp_worker_h worker, ucp_ep_h ep);
 ucs_status_t ucp_mem_alloc(ucp_context_h ucp_context, size_t length, void **address_p);
 
 ucs_status_t worker_flush(ucp_worker_h worker);
+
+void ep_close_err_mode(ucp_worker_h ucp_worker, ucp_ep_h ucp_ep);
 #endif

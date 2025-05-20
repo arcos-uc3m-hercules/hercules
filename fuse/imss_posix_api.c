@@ -24,6 +24,7 @@ gcc -Wall imss.c `pkg-config fuse --cflags --libs` -o imss
 #include <limits.h>
 #include <math.h>
 #include <sys/time.h>
+#include <libgen.h>
 
 #define KB 1024
 #define GB 1073741824
@@ -53,6 +54,8 @@ extern uint16_t MULTIPLE_WRITE;
 
 extern char *BUFFERPREFETCH;
 extern char prefetch_path[256];
+extern char *MOUNT_POINT;
+
 extern int32_t prefetch_first_block;
 extern int32_t prefetch_last_block;
 extern int32_t prefetch_pos;
@@ -62,7 +65,6 @@ extern int32_t prefetch_offset;
 
 extern pthread_cond_t cond_prefetch;
 extern pthread_mutex_t mutex_prefetch;
-// char fd_table[1024][MAX_PATH];
 
 #define MAX_PATH 256
 extern pthread_mutex_t lock;
@@ -82,9 +84,6 @@ int32_t LOWER_BOUND_SERVERS;
 // const char *TESTX = "imss://lorem_text.txt$1";
 // const char *TESTX = "imss://wfc1.dat$1";
 // const char *TESTX = "p4x2.save/wfc1.dat";
-
-// extern char *aux_refresh;
-// extern char *imss_path_refresh;
 
 /*
    (*) Mapping for REPL_FACTOR values:
@@ -169,25 +168,51 @@ int get_number_of_data_servers(int i_blk, int num_of_blk)
 /*
    -----------	Auxiliar Functions -----------
  */
-
-void fd_lookup(const char *path, int *fd, struct stat *s, char **aux)
+/**
+ * @brief Seek for the fd and stats of a dataset stored on a local map.
+ * @param path Name of the file to be seek.
+ * @param fd Pointer to the file descriptor of path.
+ * @param s Pointer to the stat structure where the file attributes will be stored.
+ * @param aux Pointer to the block 0 data.
+ */
+void fd_lookup(char *path, int *fd, struct stat *s, char **aux)
 {
 	pthread_mutex_lock(&lock_file);
 	*fd = -1;
+	// Seek for the fd on the map.
 	int found = map_search(map, path, fd, s, aux);
+	pthread_mutex_unlock(&lock_file);
+
 	if (found == -1)
 	{
-		// fprintf(stderr, "File not found, %s\n", path);
-		slog_warn("[imss_posix_api] file not found, %s", path);
-		slog_debug("[imss_posix_api] path=%s, found=%d, fd=%d", path, found, *fd);
-		*fd = -1;
-	}
-	else
-	{
-		slog_debug("[imss_posix_api] path=%s, found=%d, fd=%d, stat.st_nlink=%lu", path, found, *fd, s->st_nlink);
-	}
+		// if the file was not find with the current name,
+		// try again adding an extra slash if they does not have it.
+		slog_warn("file not found, %s", path);
+		size_t len = strlen(path);
+		char aux_path[MAX_PATH] = {'\0'};
+		if (len > 0 && path[len - 1] != '/')
+		{
+			strcpy(aux_path, path);
+			strcat(aux_path, "/");
+			found = map_search(map, aux_path, fd, s, aux);
+		}
 
-	pthread_mutex_unlock(&lock_file);
+		if (found == -1)
+		{
+			*fd = -1;
+			slog_warn("file not found, %s", path);
+		}
+		else
+		{
+			// if the fd was find with the extra slash,
+			// we add it to the permant path.
+			strcat(path, "/");
+		}
+	}
+	if (*fd != -1)
+	{
+		slog_debug("path=%s, found=%d, fd=%d, stat.st_nlink=%lu", path, found, *fd, s->st_nlink);
+	}
 }
 
 void get_iuri(const char *path, /*output*/ char *uri)
@@ -237,15 +262,15 @@ int imss_refresh(const char *path)
 	int fd = -1;
 	void *aux = NULL;
 	const char *imss_path = path; // this pointer should not be free.
-
-	fd_lookup(imss_path, &fd, &old_stats, (char **)&aux);
+	// Lookup the current file on the local front-end map.
+	fd_lookup((char *)imss_path, &fd, &old_stats, (char **)&aux);
 	if (fd >= 0)
 	{
 		ds = fd;
 	}
 	else
 	{
-		slog_warn("[imss_refresh] %s", strerror(ENOENT));
+		slog_warn("%s", strerror(ENOENT));
 		return -ENOENT;
 	}
 
@@ -267,13 +292,19 @@ int imss_refresh(const char *path)
 	return 0;
 }
 
-int imss_getattr(const char *path, struct stat *stbuf)
+/**
+ * @brief Method to retrieve the file attributes of a given path.
+ * @param path Path to the file.
+ * @param stbuf Pointer to the stat structure where the file attributes will be stored.
+ * @return 0 on success, negative errno value on error.
+ */
+int imss_getattr(char *path, struct stat *stbuf)
 {
 	// Needed variables for the call
 	char *buffer;
-	char **refs;
+	char **refs = NULL;
 	int n_ent;
-	const char *imss_path = path; // this pointer should no be free.
+	char *imss_path = path; // this pointer should no be free.
 	struct timespec spec;
 	memset(stbuf, 0, sizeof(struct stat));
 	clock_gettime(CLOCK_REALTIME, &spec);
@@ -286,8 +317,8 @@ int imss_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_blksize = IMSS_DATA_BSIZE; // block size in bytes.
 
 	slog_debug("before get_type, imss_path=%s", imss_path);
-	int32_t type = get_type(imss_path);
-	slog_debug("after get_type(%s):%d", imss_path, type);
+	char type = get_type(imss_path);
+	slog_debug("after get_type(%s):%c", imss_path, type);
 
 	int32_t ds = -1;
 	int fd = -1;
@@ -295,110 +326,127 @@ int imss_getattr(const char *path, struct stat *stbuf)
 	char *aux = NULL;
 	switch (type)
 	{
-	case 0:
-		// free(imss_path);
-		// erase dataset from the local maps.
-		pthread_mutex_lock(&lock_file);
-		map_erase(map, imss_path);
-		pthread_mutex_unlock(&lock_file);
-		// map_release_prefetch(map_prefetch, path);
-		slog_debug("[imss_posix_api] Calling release prefetch path = %s", imss_path);
-		map_release_prefetch(map_prefetch, imss_path);
-		slog_debug("[imss_posix_api] Ending release prefetch path = %s", imss_path);
-		return -ENOENT;
-	case 1: // Directory case?
+	case TYPE_HERCULES_INSTANCE:
+	{
+		slog_debug("n_ent=%d", n_ent);
+		stbuf->st_size = 4;
+		slog_debug("is a directy, setting st_nlink to 1");
+		stbuf->st_nlink = 1;
+		stbuf->st_mode = S_IFDIR | 0775;
+		// free(refs);
+		return 0;
+		break;
+	}
+	case TYPE_DIRECTORY:
+	case TYPE_REGULAR_FILE: // Case file
+	{
+		break;
+	}
+	default:
+		slog_error("Unkown type", type);
+		return -ENOENT; // to check!
+	}
+
+	// Seek for the dataset on the local map. If it not found,
+	// we open it.
+	fd_lookup((char *)imss_path, &fd, &stats, &aux);
+	if (fd < 0)
+	{ // not found.
+		ds = open_dataset((char *)imss_path, 0);
+		slog_debug("[imss_getattr] ds=%d", ds);
+		if (ds >= (int32_t)0) // TODO: add ds == -EEXIST in the condition and remove the else.
+		{
+			int ret = 0;
+			// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
+			void *data = NULL;
+			data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+
+			if (data == NULL)
+			{
+				perror("HERCULES_ERR_GETATTR_MEMORY_ALLOC_1");
+				slog_error("HERCULES_ERR_GETATTR_MEMORY_ALLOC_1");
+				return -ENOMEM;
+			}
+
+			//  data is filled in "get data".
+			ret = get_ndata(ds, 0, data, 0, 0);
+			if (ret < 0)
+			{
+				slog_error("Error getting data: %s", imss_path);
+				return -ENOENT;
+			}
+			memcpy(&stats, data, sizeof(struct stat));
+			// pthread_mutex_lock(&lock_file);
+			slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
+			// Put the file descriptor (ds), stats info and data on the local map.
+			map_put(map, imss_path, ds, stats, (char *)data);
+		}
+		else if (ds == -EEXIST)
+		{ // file aready exists on the remote metadata server.
+			int ret = 0;
+			// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
+			void *data = NULL;
+			data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+			if (data == NULL)
+			{
+				perror("HERCULES_ERR_GETATTR_MEMORY_ALLOC_2");
+				slog_error("HERCULES_ERR_GETATTR_MEMORY_ALLOC_2");
+				return -ENOMEM;
+			}
+			//  data is filled in "get data".
+			ret = get_ndata(ds, 0, data, 0, 0);
+			if (ret < 0)
+			{
+				slog_error("Error getting data: %s", imss_path);
+				return -ENOENT;
+			}
+			memcpy(&stats, data, sizeof(struct stat));
+			// pthread_mutex_lock(&lock_file);
+			slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
+			// Put the file descriptor (ds), stats info and data on the local map.
+			map_put(map, imss_path, ds, stats, (char *)data);
+			// fprintf(stderr, "[imss_getattr] ds=%d, %s\n", ds, strerror(EEXIST));
+			return 0;
+		}
+		else
+		{ // file does not exist on the remote metadata server.
+			// fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
+			return -ENOENT;
+		}
+	}
+	memcpy(stbuf, &stats, sizeof(struct stat));
+
+	switch (type)
+	{
+	case TYPE_DIRECTORY:
 		if ((n_ent = get_dir((char *)imss_path, &buffer, &refs)) != -1)
 		{
-			slog_debug("[imss_getattr] n_ent=%d", n_ent);
 			stbuf->st_size = 4;
 			slog_debug("is a directy, setting st_nlink to 1");
 			stbuf->st_nlink = 1;
 			stbuf->st_mode = S_IFDIR | 0775;
-			// Free resources
-			// free(buffer);
+			// TODO: free al memory in refs.
+			// for (char *aux_mem = refs[0]; aux_mem != NULL; aux_mem++)
+			// {
+			// 	for (char *aux_2 = aux_mem; aux_2 != NULL; aux_2++)
+			// 	{
+			// 		free(aux_2);
+			// 	}
+			// 	free(aux_mem);
+			// }
 			free(refs);
-			return 0;
 		}
-		else
-		{
-			// fprintf(stderr,"imss_getattr get_dir ERROR\n");
-			return -ENOENT;
-		}
-	case 2: // Case file
-		slog_debug("type=%d, imss_path=%s", type, imss_path);
-		/*if(stat_dataset(imss_path, &metadata) == -1){
-		  fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
-		  return -ENOENT;
-		  }*/
-
-		// Get header
-		// FIXME! Not always possible!!!!
-		fd_lookup(imss_path, &fd, &stats, &aux);
-		slog_debug("imss_path=%s, file descriptor=%d", imss_path, fd);
-
-		if (fd >= 0)
-		{
-			ds = fd;
-		}
-		else
-		{
-			ds = open_dataset((char *)imss_path, 0);
-			slog_debug("[imss_getattr] ds=%d", ds);
-			if (ds >= (int32_t)0)
-			{
-				int ret = 0;
-				// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
-				void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
-				// void *data = NULL;
-				//  data is allocated in "get data".
-				ret = get_ndata(ds, 0, data, 0, 0);
-				if (ret < 0)
-				{
-					slog_error("Error getting data: %s", imss_path);
-					return -ENOENT;
-				}
-				memcpy(&stats, data, sizeof(struct stat));
-				pthread_mutex_lock(&lock_file);
-				slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
-				map_put(map, imss_path, ds, stats, (char *)data);
-				pthread_mutex_unlock(&lock_file);
-				// free(aux);
-			}
-			else if (ds == -EEXIST)
-			{
-				// fprintf(stderr, "[imss_getattr] ds=%d, %s\n", ds, strerror(EEXIST));
-				return 0;
-			}
-			else
-			{
-				// fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
-				return -ENOENT;
-			}
-		}
-
-		// fprintf(stderr, "[imss_getattr] path=%s, ds=%d, stats.st_nlink=%lu, stats.st_size=%lu\n", path, ds, stats.st_nlink, stats.st_size);
-		// if (stats.st_nlink != 0)
-		{
-			memcpy(stbuf, &stats, sizeof(struct stat));
-		}
-		// stbuf->st_size = stats.st_size;
-		// else
-		// {
-		// 	// fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
-		// 	slog_error("[imss_getattr] Cannot get dataset metadata");
-		// 	return -ENOENT;
-		// }
-		// stbuf->st_blocks = ceil((double)stbuf->st_size / IMSS_BLKSIZE);
-		stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0); // Number 512-byte blocks allocated.
-		// slog_debug("stats.st_nlink=%lu, stats.st_size=%lu", stats.st_nlink, stats.st_size);
-		slog_debug("[imss_getattr] path=%s, imss_path=%s, file descriptor=%d, file size=%lu, stbuf->st_blocks=%lu, stbuf->st_nlink=%lu stats.st_nlink=%lu", path, imss_path, fd, stbuf->st_size, stbuf->st_blocks, stbuf->st_nlink, stats.st_nlink);
-		// fprintf(stderr, "[imss_getattr] path=%s, imss_path=%s, file descriptor=%d, file size=%lu, stbuf->st_blocks=%lu\n", path, imss_path, fd, stbuf->st_size, stbuf->st_blocks);
-		print_file_type(*stbuf, path);
-
-		return 0;
+	case TYPE_REGULAR_FILE:
+		stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0);
+		break;
 	default:
+		slog_error("Unkown type", type);
 		return -ENOENT; // to check!
 	}
+
+	// pthread_mutex_unlock(&lock_file);
+	// free(aux);
+	return 0;
 }
 
 /*
@@ -415,14 +463,14 @@ int imss_getattr(const char *path, struct stat *stbuf)
 
 int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t offset)
 {
-	// fprintf(stderr,"imss_readdir=%s\n",path);
 	// Needed variables for the call
 	char *buffer;
 	char **refs;
 	int n_ent = 0;
 
-	char *imss_path = (char *)calloc(MAX_PATH, sizeof(char));
-	get_iuri(path, imss_path);
+	char *imss_path = (char *)path; // this pointer should not be free. // (char *)calloc(MAX_PATH, sizeof(char));
+	// char *imss_path = (char *)calloc(MAX_PATH, sizeof(char));
+	// get_iuri(path, imss_path);
 
 	// Add "/" at the end of the path if it does not have it.
 	// FIX: "ls" when there is more than one "/".
@@ -432,48 +480,47 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 	// 	strcat(imss_path, "/");
 	// }
 
-	slog_debug("[IMSS][imss_readdir] imss_path=%s", imss_path);
+	slog_debug("[IMSS] imss_path=%s", imss_path);
 	// Call IMSS to get metadata
+	int ret = 0;
 	n_ent = get_dir((char *)imss_path, &buffer, &refs);
-	slog_debug("[IMSS][imss_readdir] imss_path=%s, n_ent=%d", imss_path, n_ent);
+	slog_debug("[IMSS] imss_path=%s, n_ent=%d", imss_path, n_ent);
 	if (n_ent < 0)
 	{
 		strcat(imss_path, "/");
-		slog_debug("[IMSS][imss_readdir] imss_path=%s", imss_path);
+		slog_debug("[IMSS] imss_path=%s", imss_path);
 		// fprintf(stderr,"try again imss_path=%s\n",imss_path);
 		n_ent = get_dir((char *)imss_path, &buffer, &refs);
 		if (n_ent < 0)
 		{
-			fprintf(stderr, "[IMSS-FUSE]	Error retrieving directories for URI=%s", path);
+			fprintf(stderr, "[IMSS-FUSE]	Error retrieving directories for URI=%s\n", path);
 			return -ENOENT;
 		}
 	}
-	slog_debug("[IMSS][imss_readdir] Before flush data");
-
+	// slog_debug("[IMSS] Before flush data");
 	// flush_data();
 
 	// Fill buffer
 	// TODO: Check if subdirectory
-	// printf("[FUSE] imss_readdir %s has=%d\n",path, n_ent);
-	slog_debug("[IMSS][imss_readdir] imss_readdir %s has=%d", path, n_ent);
+	slog_debug("[IMSS] imss_readdir %s has=%d", path, n_ent);
 	for (int i = 0; i < n_ent; ++i)
 	{
 		if (i == 0)
 		{
-			// slog_debug("[IMSS][imss_readdir] . y ..");
+			// slog_debug("[IMSS]. y ..");
 			filler(buf, "..", NULL, 0);
 			filler(buf, ".", NULL, 0);
 		}
 		else
 		{
-			// slog_debug("[IMSS][imss_readdir] %s", refs[i]);
+			// slog_debug("[IMSS]%s", refs[i]);
 			// the stbuf is not used after here.
 			// struct stat stbuf;
 			// int error = imss_getattr(refs[i] + 6, &stbuf);
 			// if (!error)
 			{
 				char *last = refs[i] + strlen(refs[i]) - 1;
-				// slog_info("last=%s", last);
+				// slog_info("last=%s of %s", last, refs[i]);
 				if (last[0] == '/')
 				{
 					last[0] = '\0';
@@ -488,16 +535,24 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 				}
 
 				// filler(buf, refs[i] + offset + 1, &stbuf, 0); // original
-				// slog_info("refs[i] + offset + 1=%s", refs[i] + offset + 1);
+				slog_info("refs[i] + offset + 1=%s", refs[i] + offset + 1);
 				filler(buf, refs[i] + offset + 1, NULL, 0);
 				// filler(buf, refs[i], NULL, 0);
 			}
+		}
+		if (refs[i] != NULL)
+		{
 			free(refs[i]);
 		}
 	}
 	// Free resources
-	free(imss_path);
-	free(refs);
+	// free(imss_path);
+	if (refs != NULL)
+	{
+		free(refs);
+	}
+
+	// free(refs);
 	return 0;
 
 	/*(void) offset;
@@ -528,15 +583,15 @@ int imss_open(char *path, uint64_t *fh)
 	struct stat stats;
 	char *aux = NULL;
 	// Look for the 'file descriptor' of 'imss_path' in the local map.
-	fd_lookup(imss_path, &fd, &stats, &aux);
-	slog_info("[FUSE][imss_posix_api] imss_path=%s, fd looked up=%d", imss_path, fd);
-	// fprintf(stderr, "[FUSE][imss_posix_api] imss_path=%s, fd looked up=%d\n", imss_path, fd);
+	fd_lookup((char *)imss_path, &fd, &stats, &aux);
+	slog_info("[FUSE]imss_path=%s, fd looked up=%d", imss_path, fd);
+	// fprintf(stderr, "[FUSE]imss_path=%s, fd looked up=%d\n", imss_path, fd);
 	if (fd >= 0)
 	{
 		print_file_type(stats, imss_path);
 		ret = open_local_dataset(imss_path, 1);
 		file_desc = fd;
-		slog_debug("[FUSE][imss_posix_api] open_local_dataset, ret=%d, file_desc=%d, nlink=%lu", ret, file_desc, stats.st_nlink);
+		slog_debug("[FUSE]open_local_dataset, ret=%d, file_desc=%d, nlink=%lu", ret, file_desc, stats.st_nlink);
 	}
 	else if (fd == -2)
 	{
@@ -554,7 +609,7 @@ int imss_open(char *path, uint64_t *fh)
 		}
 		case -2: // symbolic link case.
 		{
-			slog_warn("[FUSE][imss_posix_api] imss_path=%s, file_desc=%d", imss_path, file_desc);
+			slog_warn("[FUSE]imss_path=%s, file_desc=%d", imss_path, file_desc);
 			*fh = file_desc;
 			// errno = 2;
 			// path = imss_path;
@@ -581,25 +636,25 @@ int imss_open(char *path, uint64_t *fh)
 			return -1;
 		}
 
-		slog_debug("[imss_open] ret=%d, file_desc=%d", ret, file_desc);
+		slog_debug("ret=%d, file_desc=%d", ret, file_desc);
 		memcpy(&stats, data, sizeof(struct stat));
-		pthread_mutex_lock(&lock_file);
+		// pthread_mutex_lock(&lock_file);
 		// storing block 0 on the local map.
 		map_put(map, imss_path, file_desc, stats, (char *)data);
 		print_file_type(stats, imss_path);
-		if (PREFETCH != 0)
-		{
-			char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
-			map_init_prefetch(map_prefetch, imss_path, buff);
-		}
-		pthread_mutex_unlock(&lock_file);
+		// if (PREFETCH != 0)
+		// {
+		// 	// char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
+		// 	map_init_prefetch(map_prefetch, imss_path, PREFETCH * IMSS_DATA_BSIZE);
+		// }
+		// // pthread_mutex_unlock(&lock_file);
 		// free(aux);
 	}
 
 	// File does not exist
 	if (file_desc < 0)
 	{
-		slog_error("[FUSE][imss_posix_api] file descriptor: %d", file_desc);
+		slog_error("[FUSE]file descriptor: %d", file_desc);
 		return -1;
 	}
 
@@ -639,7 +694,7 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 	struct stat stats;
 	char *aux;
 
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	if (fd >= 0)
 		ds = fd;
 	else if (fd == -1)
@@ -751,10 +806,11 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 		// }
 		// else
 		{
-			to_read = get_ndata(ds, curr_blk, (char *)buf + byte_count, to_read, block_offset);
+			to_read = TIMING(get_ndata(ds, curr_blk, (char *)buf + byte_count, to_read, block_offset), "get_ndata", ssize_t, -1);
 		}
 		// Error handling when get_ndata does not found the request data.
-		if (to_read == -1)
+		// if (to_read == -1)
+		if (to_read < 0)
 		{
 			return to_read;
 		}
@@ -772,7 +828,7 @@ ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 	}
 
 	total_amount_read += byte_count;
-	slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B, total_amount_read=", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, byte_count, total_amount_read);
+	slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B, total_amount_read=%d", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, byte_count, total_amount_read);
 
 	// performance =
 
@@ -806,7 +862,7 @@ int imss_vread_prefetch(const char *path, char *buf, size_t size, off_t offset)
 	struct stat stats;
 	char *aux;
 	// printf("imss_read aux before %p\n", aux);
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	// printf("imss_read aux after %p\n", aux);
 	if (fd >= 0)
 		ds = fd;
@@ -1032,7 +1088,7 @@ int imss_vread_no_prefetch(const char *path, char *buf, size_t size, off_t offse
 	struct stat stats;
 	char *aux;
 	// printf("imss_read aux before %p\n", aux);
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 
 	// printf("imss_read aux after %p\n", aux);
 	if (fd >= 0)
@@ -1176,7 +1232,7 @@ int imss_vread_2x(const char *path, char *buf, size_t size, off_t offset)
 	struct stat stats;
 	char *aux;
 	// printf("imss_read aux before %p\n", aux);
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	// printf("imss_read aux after %p\n", aux);
 	if (fd >= 0)
 		ds = fd;
@@ -1406,7 +1462,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		return ret;
 	}
 
-	char *aux_block;
+	// char *aux_block = NULL;
 
 	// Compute offsets to write
 	int64_t curr_blk, end_blk, start_offset, end_offset, block_offset, i_blk, num_of_blk;
@@ -1429,7 +1485,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 	uint64_t space_in_block;
 	uint32_t filled = 0;
 	struct stat header;
-	char *aux;
+	char *aux = NULL;
 	// char *data_pointer = (char *)buf; // points to the buffer containing all bytes to be stored
 	const void *data_pointer = buf; // points to the buffer containing all bytes to be stored
 	const char *rpath = path;		// this pointer should not be free.
@@ -1437,7 +1493,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 
 	int fd = -1;
 	struct stat stats;
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	if (fd >= 0)
 		ds = fd;
 	else if (fd == -1)
@@ -1516,7 +1572,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		// }
 		// else
 		{
-			if (set_data(ds, curr_blk, data_pointer, bytes_to_copy, block_offset) < 0)
+			if (TIMING(set_data(ds, curr_blk, data_pointer, bytes_to_copy, block_offset), "set_data", int32_t, -1) < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
 				error_print = -ENOENT;
@@ -1525,7 +1581,7 @@ ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 		}
 
 		bytes_stored += bytes_to_copy;
-		data_pointer = (char *) data_pointer + bytes_to_copy;
+		data_pointer = (char *)data_pointer + bytes_to_copy;
 		block_offset = 0; // first block has been stored, next blocks don't have an offset
 		++curr_blk;
 	}
@@ -1575,7 +1631,7 @@ int imss_split_writev(const char *path, const char *buf, size_t size, off_t off)
 
 	int fd;
 	struct stat stats;
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	if (fd >= 0)
 		ds = fd;
 	else if (fd == -2)
@@ -1741,7 +1797,7 @@ int imss_split_readv(const char *path, char *buf, size_t size, off_t offset)
 	struct stat stats;
 	char *aux;
 
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	// printf("stats_size=%ld\n",stats.st_size);
 	if (stats.st_size < size)
 	{
@@ -1790,7 +1846,6 @@ int imss_split_readv(const char *path, char *buf, size_t size, off_t offset)
 	char *number = (char *)calloc(64, sizeof(char));
 	for (int server = 0; server < N_SERVERS; server++)
 	{
-		/*char all_blocks[1024];*/
 		memset(all_blocks, '\0', lenght_message);
 		count = 0;
 		for (int i = 0; i < total; i++)
@@ -1992,14 +2047,13 @@ int imss_release(const char *path)
 
 	struct stat stats;
 	char *aux = NULL;
-	fd_lookup(rpath, &fd, &stats, &aux);
+	fd_lookup((char *)rpath, &fd, &stats, &aux);
 	if (fd >= 0)
 		ds = fd;
 	else
 		return -ENOENT;
 
-	// char head[IMSS_DATA_BSIZE];
-	char *head = (char *)malloc(IMSS_DATA_BSIZE);
+	// char *head = (char *)malloc(IMSS_DATA_BSIZE);
 
 	// Get time
 	struct timespec spec;
@@ -2011,19 +2065,19 @@ int imss_release(const char *path)
 
 	// write metadata
 	slog_debug("stats.st_nlink=%lu", stats.st_nlink);
-	memcpy(head, &stats, sizeof(struct stat));
+	// memcpy(head, &stats, sizeof(struct stat));
 
 	// Updates the size of the file in the block 0.
-	if (set_data(ds, 0, head, 0, 0) < 0)
+	// if (set_data(ds, 0, head, 0, 0) < 0)
+	if (set_data(ds, 0, (char *)&stats, 0, 0) < 0)
 	{
 		perror("HERCULES_ERR_WRITTING_BLOCK");
 		slog_error("HERCULES_ERR_WRITTING_BLOCK");
-		free(head);
-		// free(rpath);
+		// free(head);
 		return -ENOENT;
 	}
 
-	free(head);
+	// free(head);
 	return ds;
 }
 
@@ -2035,8 +2089,6 @@ int imss_release(const char *path)
  */
 int imss_close(const char *path, int fd)
 {
-	// clock_t t;
-	// t = clock();
 	int ret = 0;
 	int ds = 0;
 	slog_debug("Calling imss_flush_data");
@@ -2046,27 +2098,26 @@ int imss_close(const char *path, int fd)
 	slog_debug("Ending imss_release, ret=%d", ds);
 	ret = close_dataset(path, fd);
 	slog_debug("Ending close_dataset, ret=%d", ret);
-	// imss_refresh is too slow.
-	// When we remove it pass from 3.45 sec to 0.008505 sec.
 	if (ret)
 	{ // if the file was not deleted by the close we update the stat.
+		// imss_refresh is too slow.
+		// When we remove it pass from 3.45 sec to 0.008505 sec.
 		imss_refresh(path);
 		slog_debug("Ending imss_refresh");
 	}
-	clear_dataset(path);
-	// } else {
-	// delete_dataset(path, ds);
+	else
+	{ // if the file was deleted by the close, we delete registers from the
+		// local tree and local map.
+		clear_dataset(path);
+		map_erase(map, path);
+	}
 
-	// Tell data server the file is ready to be copied to disk.
+	// TODO: Tell data server the file is ready to be copied to disk.
 
-	map_erase(map, path);
-
-	// t = clock() - t;
-	// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 	return ret;
 }
 
-int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
+int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened, char file_type)
 {
 	int ret = 0;
 	struct timespec spec;
@@ -2077,12 +2128,12 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 
 	// Assing file handler and create dataset.
 	int res = 0;
-	res = create_dataset((char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, NO_LINK, opened);
-	slog_debug("[imss_create] create_dataset((char*)rpath:%s, POLICY:%s,  N_BLKS:%ld, IMSS_BLKSIZE:%d, REPL_FACTOR:%ld, REPL_TYPE:%ld, N_SERVERS:%d), res:%d", (char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, res);
+	res = create_dataset((char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, NO_LINK, opened, file_type);
+	slog_debug("create_dataset((char*)rpath:%s, POLICY:%s,  N_BLKS:%ld, IMSS_BLKSIZE:%d, REPL_FACTOR:%ld, REPL_TYPE:%ld, N_SERVERS:%d, FILE_TYPE=%c), res:%d", (char *)rpath, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, file_type, res);
 	if (res < 0)
 	{
-		slog_error("[imss_create] Cannot create new dataset.\n");
-		// fprintf(stderr, "[imss_create] Cannot create new dataset %s, may already exist.\n", path);
+		slog_error("Cannot create new dataset.\n");
+		// fprintf(stderr, "Cannot create new dataset %s, may already exist.\n", path);
 		// free(rpath);
 		return res;
 	}
@@ -2125,20 +2176,20 @@ int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened)
 	pthread_mutex_unlock(&lock); // unlock.
 
 	map_erase(map, rpath);
-	slog_debug("[imss_create] map_erase(map, rpath:%s)", rpath);
+	slog_debug("map_erase(map, rpath:%s)", rpath);
 	// if(ret < 1){
 	// 	slog_debug("No elements erased by map_erase, ret:%d", ret);
 	// }
 
 	pthread_mutex_lock(&lock_file); // lock.
 	map_put(map, rpath, *fh, ds_stat, (char *)buff);
-	slog_debug("[imss_create] map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath, *fh, ds_stat.st_blksize);
-	if (PREFETCH != 0)
-	{
-		char *buff = (char *)malloc(PREFETCH * IMSS_BLKSIZE * KB);
-		map_init_prefetch(map_prefetch, rpath, buff);
-		slog_debug("[imss_create] PREFETCH:%ld, map_init_prefetch(map_prefetch, rpath:%s)", PREFETCH, rpath);
-	}
+	slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath, *fh, ds_stat.st_blksize);
+	// if (PREFETCH != 0)
+	// {
+	// 	// char *buff = (char *)malloc(PREFETCH * IMSS_BLKSIZE * KB);
+	// 	map_init_prefetch(map_prefetch, rpath, PREFETCH * IMSS_BLKSIZE * KB);
+	// 	slog_debug("PREFETCH:%ld, map_init_prefetch(map_prefetch, rpath:%s)", PREFETCH, rpath);
+	// }
 	pthread_mutex_unlock(&lock_file); // unlock.
 	// free(rpath);
 	return 0;
@@ -2173,8 +2224,7 @@ int imss_rmdir(const char *path)
 	char *buffer;
 	char **refs;
 	int n_ent = 0;
-	const char *imss_path = path; // This pointer should not be free. 
-	
+	const char *imss_path = path; // This pointer should not be free.
 
 	if ((n_ent = get_dir((char *)imss_path, &buffer, &refs)) > 0)
 	{
@@ -2206,13 +2256,13 @@ int imss_unlink(const char *path)
 	char *buff = NULL;
 	int ret = 0;
 	pthread_mutex_lock(&lock);
-	fd_lookup(imss_path, &fd, &stats, &buff);
+	fd_lookup((char *)imss_path, &fd, &stats, &buff);
 	if (fd >= 0)
 		ds = fd;
 	else
 	{
-		pthread_mutex_unlock(&lock);
 		slog_debug("%s not found in lookup", imss_path);
+		pthread_mutex_unlock(&lock);
 		return -ENOENT;
 	}
 
@@ -2220,9 +2270,9 @@ int imss_unlink(const char *path)
 	ret = get_ndata(ds, 0, buff, 0, 0);
 	if (ret < 0)
 	{
+		perror("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
+		slog_error("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
 		pthread_mutex_unlock(&lock);
-		perror("ERR_HERCULES_IMSS_UNLINK_GET_DATA");
-		slog_error("ERR_HERCULES_IMSS_UNLINK_GET_DATA");
 		return -1;
 	}
 	// pthread_mutex_lock(&lock);
@@ -2237,7 +2287,7 @@ int imss_unlink(const char *path)
 
 	// Write initial block (0).
 	memcpy(buff, &header, sizeof(struct stat));
-	slog_debug("[imss_posix_api] header.st_nlink=%lu", header.st_nlink);
+	slog_debug("header.st_nlink=%lu", header.st_nlink);
 	set_data(ds, 0, (char *)buff, 0, 0);
 	pthread_mutex_unlock(&lock);
 
@@ -2247,7 +2297,7 @@ int imss_unlink(const char *path)
 		// Those operations must be performed by the server itself when it knows no more process are using the file.
 		// Erase metadata in the backend.
 		ret = delete_dataset(imss_path, ds);
-		slog_debug("[imss_posix_api] delete_dataset %s, ret=%d", imss_path, ret);
+		slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
 
 		switch (ret)
 		{
@@ -2262,16 +2312,15 @@ int imss_unlink(const char *path)
 			map_erase(map, imss_path);
 			pthread_mutex_unlock(&lock_file);
 
-			slog_debug("[imss_posix_api] Calling map_release_prefetch %s", path);
-			// map_release_prefetch(map_prefetch, path);
-			map_release_prefetch(map_prefetch, imss_path);
-			slog_debug("[imss_posix_api] Finish map_release_prefetch %s", path);
+			slog_debug("Calling map_release_prefetch %s", path);
+			// map_release_prefetch(map_prefetch, imss_path);
+			slog_debug("Finish map_release_prefetch %s", path);
 			// *******************************
 			ret = release_dataset(ds);
-			slog_debug("[imss_posix_api] relese_dataset ret=%d", ret);
+			slog_debug("relese_dataset ret=%d", ret);
 			if (ret < 0)
 			{
-				slog_error("ERR_HERCULES_RELEASE_DATASET");
+				slog_error("HERCULES_ERR_RELEASE_DATASET");
 			}
 
 			ret = 3;
@@ -2286,7 +2335,7 @@ int imss_unlink(const char *path)
 	}
 	else
 	{
-		ret = 0;
+		ret = 1; // file was not deleted.
 	}
 
 	// free(imss_path);
@@ -2307,7 +2356,7 @@ int imss_utimens(const char *path, const struct timespec tv[2])
 	int fd;
 	struct stat stats;
 	char *buff;
-	fd_lookup(rpath, &fd, &stats, &buff);
+	fd_lookup((char *)rpath, &fd, &stats, &buff);
 
 	if (fd >= 0)
 		file_desc = fd;
@@ -2321,7 +2370,6 @@ int imss_utimens(const char *path, const struct timespec tv[2])
 		slog_error("[IMSS-FUSE]    Cannot open dataset.");
 	}
 
-	// char *buff = malloc(IMSS_DATA_BSIZE);
 	pthread_mutex_lock(&lock);
 	get_ndata(file_desc, 0, buff, 0, 0);
 	pthread_mutex_unlock(&lock);
@@ -2350,7 +2398,7 @@ int imss_mkdir(const char *path, mode_t mode)
 	uint64_t fi;
 	int ret = -1;
 	// opened is equals to 2 to indicate this was not created with a 'open' syscall.
-	ret = imss_create(path, mode | S_IFDIR, &fi, 2);
+	ret = imss_create(path, mode | S_IFDIR, &fi, 2, TYPE_DIRECTORY);
 	return ret;
 }
 
@@ -2372,7 +2420,7 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 	switch (_case)
 	{
 	case 0:
-		slog_debug("[FUSE][imss_posix_api] Entering case 0 ");
+		slog_debug("[FUSE]Entering case 0 ");
 		get_iuri(new_path_1, rpath1);
 		get_iuri(new_path_2, rpath2);
 		fd_lookup(new_path_1, &fd, &stats, &aux);
@@ -2394,50 +2442,50 @@ int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 			memcpy(&stats, aux, sizeof(struct stat));
 			pthread_mutex_lock(&lock_file);
 			map_put(map, new_path_1, file_desc, stats, aux);
-			if (PREFETCH != 0)
-			{
-				char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
-				map_init_prefetch(map_prefetch, new_path_1, buff);
-			}
+			// if (PREFETCH != 0)
+			// {
+			// 	char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
+			// 	map_init_prefetch(map_prefetch, new_path_1, PREFETCH * IMSS_DATA_BSIZE);
+			// }
 			pthread_mutex_unlock(&lock_file);
 			// free(aux);
 		}
-		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3);
+		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3, TYPE_REGULAR_FILE); // TODO: CHECK file type.
 
 		break;
 	case 1:
-		slog_debug("[FUSE][imss_posix_api] Entering case 1 ");
+		slog_debug("[FUSE]Entering case 1 ");
 		// rpath1 = new_path_1;
 		get_iuri(new_path_2, rpath2);
-		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3);
+		res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3, TYPE_REGULAR_FILE); // TODO: CHECK file type
 		break;
 	default:
 		break;
 	}
 
-	slog_debug("[FUSE][imss_posix_api] rpath1=%s, rpath2=%s", rpath1, rpath2);
+	slog_debug("[FUSE]rpath1=%s, rpath2=%s", rpath1, rpath2);
 
 	// Assing file handler and create dataset
 
 	if (res < 0)
 	{
 		// fprintf(stderr, "[imss_create]	Cannot create new dataset.\n");
-		slog_error("[imss_create] Cannot create new dataset.\n");
+		slog_error("Cannot create new dataset.\n");
 		free(rpath1);
 		free(rpath2);
 		return res;
 	}
 
 	map_erase(map, rpath2);
-	slog_debug("[imss_create] map_erase(map, rpath:%s), ret:%d", rpath2, ret);
+	slog_debug("map_erase(map, rpath:%s), ret:%d", rpath2, ret);
 	// if(ret < 1){
 	// 	slog_debug("No elements erased by map_erase, ret:%d", ret);
 	// }
 
 	pthread_mutex_lock(&lock_file); // lock.
 	// map_put(map, rpath2, file_desc, ds_stat, aux);
-	// slog_debug("[imss_create] map_put(map, rpath:%s, fh:%ld, ds_stat, buff:%s)", rpath, *fh, buff);
-	slog_debug("[imss_create] map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath2, file_desc, ds_stat.st_blksize);
+	// slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat, buff:%s)", rpath, *fh, buff);
+	slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath2, file_desc, ds_stat.st_blksize);
 
 	pthread_mutex_unlock(&lock_file); // unlock.
 	free(rpath1);
@@ -2480,8 +2528,6 @@ int imss_flush(const char *path)
 		// fprintf(stderr, "[IMSS-FUSE]    Cannot open dataset.\n");
 		return -EACCES;
 	}
-
-	// char *buff = malloc(IMSS_DATA_BSIZE);
 
 	stats.st_mtime = spec.tv_sec;
 
@@ -2568,7 +2614,7 @@ int imss_chown(const char *path, uid_t uid, gid_t gid)
 	int fd;
 	struct stat stats;
 	char *buff;
-	fd_lookup(rpath, &fd, &stats, &buff);
+	fd_lookup((char *)rpath, &fd, &stats, &buff);
 
 	if (fd >= 0)
 		file_desc = fd;
@@ -2604,33 +2650,448 @@ int imss_chown(const char *path, uid_t uid, gid_t gid)
 	return 0;
 }
 
-int imss_rename(const char *old_path, const char *new_path)
+// Function to recursively read and print files and directories.
+int read_directory(const char *path, const char *parent)
 {
-	// printf("Imss rename\n");
-	struct stat ds_stat_n;
-	int file_desc_o, file_desc_n;
-	int fd = 0;
-	char *old_rpath = (char *)calloc(MAX_PATH, sizeof(char));
-	get_iuri(old_path, old_rpath);
+	DIR *dir;
+	struct dirent *entry;
+	struct stat stat_buf;
+	char full_path[MAX_PATH] = {'\0'};
+	char hercules_dir_path[MAX_PATH] = {'\0'};
+	// char *basec = NULL;
+	// char *parent_bname = NULL;
 
-	char *new_rpath = (char *)calloc(MAX_PATH, sizeof(char));
-	get_iuri(new_path, new_rpath);
+	// Open the directory.
+	dir = opendir(path);
+	if (dir == NULL)
+	{
+		perror("HERCULES_ERR_READ_DIRECTORY_OPEN_DIR"); // Use perror for more informative error message.
+		slog_error("HERCULES_ERR_READ_DIRECTORY_OPEN_DIR: %s\n", path);
+		return -1;
+	}
+	slog_debug("Reading dir=%s, parent=%s", path, parent);
+	// slog_debug("dirname=%s, basename=%s, parent=%s", path, dirname(strdup((char *)path)), basename(strdup((char *)path)), parent);
+	// basec = strdup(path);
+	// parent_bname = basename(basec);
+
+	// Read the directory entries.
+	while ((entry = readdir(dir)) != NULL)
+	{
+		// Skip "." and ".." entries to avoid infinite recursion.
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+		{
+			continue;
+		}
+
+		// Construct the full path of the entry.
+		// snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+		strncpy(full_path, path, sizeof(full_path) - strlen(full_path) - 1);
+		strncat(full_path, "/", sizeof(full_path) - strlen(full_path) - 1);
+		strncat(full_path, entry->d_name, sizeof(full_path) - strlen(full_path) - 1);
+
+		slog_debug("Entry=%s", full_path);
+
+		int fd = open(full_path, O_RDONLY);
+		if (fd < 0)
+		{ // file does not exist.
+			slog_error("HERCULES_ERR_MOVE_OPEN_SYSTEM_FILE");
+			continue;
+		}
+
+		// Get the file/directory status.
+		// if (stat(full_path, &stat_buf) == -1)
+		if (__fxstat(1, fd, &stat_buf) < 0)
+		{
+			perror("HERCULES_ERR_READ_DIRECTORY_STAT");
+			slog_error("HERCULES_ERR_READ_DIRECTORY_STAT: %s\n", full_path);
+			continue; // Skip to the next entry on error
+		}
+
+		if (close(fd) == -1)
+		{
+			// continue;
+		}
+
+		slog_debug("d_name=%s", entry->d_name);
+
+		// Makes the Hercules path.
+		if (parent == NULL)
+		{
+			perror("HERCULES_ERR_READ_DIRECTORY_NO_PARENT");
+			slog_error("HERCULES_ERR_READ_DIRECTORY_NO_PARENT");
+			return -1;
+		}
+		// Format the Hercules path for this entry.
+		// parent directory (which includes the MOUNT POINT) + entry
+		// snprintf(hercules_dir_path, sizeof(hercules_dir_path), "%s/%s", parent, entry->d_name);
+		strncpy(hercules_dir_path, parent, sizeof(hercules_dir_path) - strlen(hercules_dir_path) - 1);
+		strncat(hercules_dir_path, "/", sizeof(hercules_dir_path) - strlen(hercules_dir_path) - 1);
+		strncat(hercules_dir_path, entry->d_name, sizeof(hercules_dir_path) - strlen(hercules_dir_path) - 1);
+
+		// else
+		// 	snprintf(hercules_dir_path, sizeof(hercules_dir_path), "%s/%s/%s", MOUNT_POINT, parent_bname, entry->d_name);
+
+		// Check if it's a directory.
+		if (S_ISDIR(stat_buf.st_mode))
+		{
+			slog_info("** Dir=%s, Hercules path=%s", full_path, hercules_dir_path);
+			// Creates the directory in Hercules.
+			mkdir(hercules_dir_path, 0700);
+
+			// Recursively call read_directory for subdirectories
+			read_directory(full_path, hercules_dir_path);
+		}
+		else
+		{
+			slog_info("** File=%s, Hercules path=%s", full_path, hercules_dir_path);
+			if (rename(full_path, hercules_dir_path) == -1)
+			{
+				slog_error("HERCULES_ERR_READ_DIRECTORY_RENAME: %s to %s", full_path, hercules_dir_path);
+				perror("HERCULES_ERR_READ_DIRECTORY_RENAME");
+				continue;
+			}
+		}
+	}
+
+	// Close the directory
+	if (closedir(dir) == -1)
+	{
+		perror("HERCULES_ERR_READ_DIRECTORY_CLOSEDIR");
+		slog_error("HERCULES_ERR_READ_DIRECTORY_CLOSEDIR: %s\n", path);
+	}
+	return 0;
+}
+
+int hercules_move_file_from_disk(int fd_old, const char *old_path, const char *new_path)
+{
+	struct stat old_file_stat;
+
+	int to_close = 0;
+
+	// checks if an invalid file descriptor was passed.
+	// this means this method should to open the file.
+	if (fd_old < 0)
+	{
+		to_close = 1;
+		// open the file from the file system.
+		fd_old = open(old_path, O_RDONLY);
+		if (fd_old < 0)
+		{ // file does not exist.
+			slog_error("HERCULES_ERR_MOVE_OPEN_SYSTEM_FILE");
+			return -ENOENT;
+		}
+	}
+
+	// open the files from hercules because it begins with the mount point.
+	int fd_new = open(new_path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+	if (fd_new < 0)
+	{
+		slog_error("HERCULES_ERR_RENAME_OPEN_HERCULES_FILE: %s", new_path);
+		close(fd_old);
+		return -ENOENT;
+	}
+
+	// get old file stat.
+	if (__fxstat(1, fd_old, &old_file_stat) < 0)
+	{
+		perror("HERCULES_ERR_MOVE_FILE_FROM_DISK_STAT_SYSTEM_FILE");
+		slog_error("HERCULES_ERR_MOVE_FILE_FROM_DISK_STAT_SYSTEM_FILE");
+		return -EAGAIN;
+	}
+
+	// old file size.
+	off_t old_file_size = old_file_stat.st_size;
+
+	// read old file.
+	char *old_file_buffer = NULL;
+	old_file_buffer = (char *)malloc(old_file_size * sizeof(char));
+	if(old_file_buffer == NULL) {
+		perror("HERCULES_ERR_MOVE_FILE_MEMORY_ALLOC");
+		slog_error("HERCULES_ERR_MOVE_FILE_MEMORY_ALLOC");
+		return -ENOSPC;
+	}
+
+	ssize_t bytes_read = -1, bytes_write, total_bytes = -1;
+	while ((bytes_read = read(fd_old, old_file_buffer, old_file_size)) > 0)
+	{
+		slog_info("[POSIX]. bytes read from %s = %ld/%ld", old_path, bytes_read, old_file_size);
+		// writes to Hercules.
+		bytes_write = write(fd_new, old_file_buffer, bytes_read);
+		if (bytes_write < 0)
+		{
+			perror("HERCULES_ERR_RENAME_WRITE_FILE");
+			slog_error("HERCULES_ERR_RENAME_WRITE_FILE: %s, fd_new=%d", old_path, fd_new);
+			break;
+		}
+		total_bytes += bytes_write;
+	}
+
+	if (bytes_read == -1)
+	{
+		perror("HERCULES_ERR_READ_FILE");
+		slog_error("HERCULES_ERR_READ_FILE: %s", old_path);
+	}
+
+	slog_info("[POSIX]. bytes write to %s = %ld/%ld", new_path, total_bytes, old_file_size);
+	if (total_bytes != old_file_size)
+	{
+		slog_warn("Original file has %ld bytes but Hercules only wrote %ld", old_file_size, total_bytes);
+	}
+
+	// close open files.
+	if (to_close)
+	{
+		if (close(fd_old) == -1)
+		{
+			slog_error("HERCULES_ERR_RENAME_CLOSE_FILE_OLD: %s", old_path);
+			perror("HERCULES_ERR_RENAME_CLOSE_FILE_OLD");
+		}
+	}
+	if (close(fd_new) == -1)
+	{
+		slog_error("HERCULES_ERR_RENAME_CLOSE_FILE_NEW: %s", new_path);
+		perror("HERCULES_ERR_RENAME_CLOSE_FILE_NEW");
+	}
+
+	// free memory.
+	free(old_file_buffer);
+	return 0;
+}
+
+int HerculesMove(const char *given_old_path, const char *given_new_pathname, const char *hercules_path)
+{
+	int ret = 0;
+	char full_path[PATH_MAX] = {'\0'}, name[PATH_MAX] = {'\0'};
+	int old_is_dir = 0;
+	int new_is_dir = 0;
+	int to_sub = 0;
+	struct stat new_parentdir_stat_n;
+	struct stat new_file_stat;
+	struct stat old_file_stat;
+
+	// open file system file.
+	int fd_old = open(given_old_path, O_RDONLY);
+	if (fd_old < 0)
+	{ // file does not exist.
+		slog_error("HERCULES_ERR_MOVE_OPEN_SYSTEM_FILE");
+		return -1;
+	}
+
+	// get old file stat.
+	if (__fxstat(1, fd_old, &old_file_stat) < 0)
+	{
+		perror("HERCULES_ERR_MOVE_STAT_SYSTEM_FILE");
+		slog_error("HERCULES_ERR_MOVE_STAT_SYSTEM_FILE");
+		return -1;
+	}
+
+	old_is_dir = S_ISDIR(old_file_stat.st_mode);
+	slog_debug("old path %s is_dir? =%d", given_old_path, old_is_dir);
+
+	// check if the parent directory of the new path exists.
+	char last_parent_dir[URI_] = {'\0'};
+	int last_parent_offset = find_last_parent_dir((char *)hercules_path, last_parent_dir);
+	slog_debug("last_parent_dir=%s, last_parent_offset=%d", last_parent_dir, last_parent_offset);
+	if (strncmp(last_parent_dir, given_old_path, strlen(last_parent_dir)) && last_parent_offset > 0)
+	{ // parent and old_rpath are not the same.
+		// last_parent_offset == 0 means the hercules_path is on the root directory.
+		// Due origin file (given_old_path) will be moved to a new directory
+		// we check if the new parent directoy exists.
+		ret = imss_getattr(last_parent_dir, &new_parentdir_stat_n);
+		if (ret != 0)
+		{
+			slog_error("HERCULES_ERR_MOVE_DEST_PARENT_DIR_DOES_NOT_EXIST");
+			return -ENOENT;
+		}
+		// here we know that the file will be move inside an existing subdirectory (not in the root).
+		to_sub = 1;
+	}
+	else
+	{
+		// TODO: error handling.
+	}
+
+	// checks if the new path exists.
+	int new_exists = 0;
+	int fd_new = open(given_new_pathname, O_RDONLY);
+	if (fd_new < 0)
+	{ // file does not exist.
+		// if the new path does not exists, new_is_dir takes the value of old_is_dir.
+		new_is_dir = old_is_dir;
+	}
+	else
+	{
+		slog_debug("%s exists", given_new_pathname);
+		if (__fxstat(1, fd_new, &new_file_stat) < 0)
+		{
+			perror("HERCULES_ERR_MOVE_STAT_NEW_FILE");
+			slog_error("HERCULES_ERR_MOVE_STAT_NEW_FILE: %s", hercules_path);
+			return -EAGAIN;
+		}
+		new_exists = 1;
+		// if new path exists, checks if it directory.
+		new_is_dir = S_ISDIR(new_file_stat.st_mode);
+	}
+
+	slog_debug("new path %s is_dir? =%d", given_new_pathname, new_is_dir);
+
+	// get the name of the directory.
+	// 	when the new path exists, we will use the basename of the old path.
+	int pos = 0;
+	const char *aux_path = NULL;
+	if (new_exists)
+	{
+		aux_path = given_old_path;
+	}
+	else
+	{
+		aux_path = given_new_pathname;
+	}
+	slog_debug("new_exists=%d, aux_path=%s", new_exists, aux_path);
+	// get the basename of the path.
+	for (int c = 0; c < strlen(aux_path); ++c)
+	{
+		if (aux_path[c] == '/')
+		{
+			if (c + 1 < strlen(aux_path))
+				pos = c;
+		}
+	}
+	strncpy(name, aux_path + pos, strlen(aux_path) - pos);
+	// concat the MOUNT POINT.
+	strcpy(full_path, MOUNT_POINT);
+	// if the new path exists, we concat the dir name (hercules_path + strlen("imss://")) to the full path.
+	// this makes the old directory to be stored inside the existing directory.
+	if (new_exists)
+		strcat(full_path, hercules_path + strlen("imss://"));
+	strcat(full_path, name);
+
+	slog_debug("pos=%d, full_path=%s, given_old_path=%s, hercules_path=%s, last_parent_dir=%s\n", pos, full_path, given_old_path, hercules_path, last_parent_dir);
+	// return -1;
+	// }
+	int op_not_allowed = 0;
+	if (old_is_dir && new_is_dir)
+	{ // old and new path is directory.
+		// move the old directory into the new directory because it already exists.
+		// create the new path to the given_old_path file because it will be moved to a directory.
+		slog_debug("Moving directory %s to directory %s", given_old_path, full_path);
+		// if (!strcmp(given_old_path, full_path))
+		// {
+		// 	ret = -EPERM;
+		// 	return ret;
+		// }
+
+		// Creates the directory in Hercules.
+		if (mkdir(full_path, 0700) == 0)
+		{
+			ret = read_directory(given_old_path, full_path);
+		} else {
+			perror("HERCULES_ERR_HERCULES_PATH_MKDIR_FULL_PATH");
+			slog_error("HERCULES_ERR_HERCULES_PATH_MKDIR_FULL_PATH");
+			ret = -EAGAIN;
+		}
+	}
+	else if (old_is_dir && !new_is_dir)
+	{ // old is a directory and new is a regular file: NOT POSSIBLE.
+		// cannot overwrite non-directory 'FILENAME' with directory 'DIRNAME'.
+		slog_debug("Cannot overwrite non-directory %s with directory %s", given_old_path, full_path);
+		op_not_allowed = 1;
+	}
+	else if (!old_is_dir && new_is_dir)
+	{ // old is a regular file and new is a directory.
+	  // copy the old file into the directory.
+		// TODO: check flags.
+		aux_path = given_old_path;
+		pos = 0;
+		for (int c = 0; c < strlen(aux_path); ++c)
+		{
+			if (aux_path[c] == '/')
+			{
+				if (c + 1 < strlen(aux_path))
+					pos = c;
+			}
+		}
+		memset(name, 0, sizeof(name));
+		strncpy(name, aux_path + pos, strlen(aux_path) - pos);
+		char x[MAX_PATH] = {'\0'};
+		strncpy(x, given_new_pathname, sizeof(x) - strlen(x) - 1);
+		if (aux_path[strlen(given_new_pathname)] != '/')
+		{
+			strncat(x, "/", sizeof(x) - strlen(x) - 1);
+		}
+		strncat(x, name, sizeof(x) - strlen(x) - 1);
+		slog_debug("Moving regular file %s into the directory %s", given_old_path, x);
+		ret = hercules_move_file_from_disk(fd_old, given_old_path, x);
+		// unlink the file old file.
+		// if it is the last link, it will be removed.
+		// if (unlink(given_old_path) == -1)
+		// {
+		// 	perror("HERCULES_ERR_RENAME_UNLINK_FILE_OLD");
+		// 	slog_error("HERCULES_ERR_RENAME_UNLINK_FILE_OLD: %s", hercules_path);
+		// }
+	}
+	else if (!old_is_dir && !new_is_dir)
+	{ // old is a regular file and new is a regular file.
+		// TODO: check flags.
+		slog_debug("Moving regular file %s to regular file %s", given_old_path, given_new_pathname);
+		ret = hercules_move_file_from_disk(fd_old, given_old_path, given_new_pathname);
+		// unlink the file old file.
+		// if it is the last link, it will be removed.
+		// if (unlink(given_old_path) == -1)
+		// {
+		// 	perror("HERCULES_ERR_RENAME_UNLINK_FILE_OLD");
+		// 	slog_error("HERCULES_ERR_RENAME_UNLINK_FILE_OLD: %s", hercules_path);
+		// }
+	}
+
+	if (op_not_allowed)
+	{
+		errno = EPERM;
+		ret = -EPERM;
+	}
+	// TODO: checks for errors.
+	return ret;
+}
+// else
+// { // new path does not exists.
+
+// }
+// }
+
+int imss_rename(char *old_path, char *new_path)
+{
+	struct stat ds_stat_n;
+	int file_desc_o = -1, file_desc_n = -1;
+	int fd = 0;
+	char *old_rpath = old_path;
+	char *new_rpath = new_path;
 
 	// CHECKING IF IS MV DIR TO DIR
 	// check old_path if it is a directory if it is add / at the end
-	int res = imss_getattr(old_path, &ds_stat_n);
-	slog_debug("[imss_rename] after imss_getattr=%d, st_nlink=%lu", res, ds_stat_n.st_nlink);
-	if (res == 0)
+	int ret = imss_getattr(old_path, &ds_stat_n);
+	slog_debug("after imss_getattr=%d, st_nlink=%lu", ret, ds_stat_n.st_nlink);
+	if (ret == 0)
 	{
-		slog_debug("[imss_rename] is_dir? =%d", S_ISDIR(ds_stat_n.st_mode));
+		// check if new_path is the same as old_path
+		if (!strcmp(old_path, new_path))
+		{
+			ret = -EPERM;
+			return ret;
+		}
+
+		slog_debug("%s is_dir? =%d", old_path, S_ISDIR(ds_stat_n.st_mode));
 		if (S_ISDIR(ds_stat_n.st_mode))
 		{
 
-			strcat(old_rpath, "/");
+			size_t len = strlen(old_rpath);
+			if (len > 0 && old_rpath[len - 1] != '/')
+			{
+				strcat(old_rpath, "/");
+			}
 
-			int fd;
+			int fd = -1;
 			struct stat stats;
-			char *aux;
+			char *aux = NULL;
 			fd_lookup(old_rpath, &fd, &stats, &aux);
 			if (fd >= 0)
 				file_desc_o = fd;
@@ -2642,8 +3103,8 @@ int imss_rename(const char *old_path, const char *new_path)
 			if (file_desc_o < 0)
 			{
 
-				slog_error("[IMSS-FUSE]    Cannot open dataset.");
-				free(new_rpath);
+				slog_error("HERCULES_ERR_IMSS_RENAME_CANNOT_OPEN_DATASET");
+				// free(new_rpath);
 				return -ENOENT;
 			}
 
@@ -2659,13 +3120,15 @@ int imss_rename(const char *old_path, const char *new_path)
 				}
 			}
 			char *dir_dest = (char *)calloc(MAX_PATH, sizeof(char));
-			memcpy(dir_dest, &new_path[0], pos + 1);
+			// memcpy(dir_dest, &new_path[0], pos + 1);
+			memcpy(dir_dest, &new_path[0], pos);
 
 			char *rdir_dest = (char *)calloc(MAX_PATH, sizeof(char));
 			get_iuri(dir_dest, rdir_dest);
 
-			res = imss_getattr(dir_dest, &ds_stat_n);
-			if (res == 0)
+			slog_debug("dir_dest=%s", dir_dest);
+			ret = imss_getattr(dir_dest, &ds_stat_n);
+			if (ret == 0)
 			{
 				if (S_ISDIR(ds_stat_n.st_mode))
 				{
@@ -2680,11 +3143,11 @@ int imss_rename(const char *old_path, const char *new_path)
 
 					// RENAME SRV_WORKER(MAP)
 
-					rename_dataset_srv_worker_dir_dir(old_rpath, new_rpath, fd, 0);
+					rename_dataset_srv_worker_dir_dir(old_rpath, new_rpath, file_desc_o, 0);
 					free(dir_dest);
 					free(rdir_dest);
-					free(old_rpath);
-					free(new_rpath);
+					// free(old_rpath);
+					// free(new_rpath);
 					return 0;
 				}
 			}
@@ -2710,43 +3173,117 @@ int imss_rename(const char *old_path, const char *new_path)
 
 	if (file_desc_o < 0)
 	{
-
-		// fprintf(stderr, "[IMSS-FUSE]    Cannot open dataset.\n");
-		slog_error("[imss_posix_api] Cannot open dataset, old_rpath=%s", old_rpath);
-		free(old_rpath);
-		free(new_rpath);
+		slog_error("Cannot open dataset, old_rpath=%s", old_rpath);
 		return -ENOENT;
 	}
-	res = imss_getattr(new_path, &ds_stat_n);
 
-	if (res == 0)
+	ret = imss_getattr(new_path, &ds_stat_n);
+	slog_debug("After imss_getattr, new_path=%s, ret=%d", new_path, ret);
+	if (ret == 0)
 	{
 		// fprintf(stderr, "**************EXISTE EL DESTINO=%s\n", new_path);
 		// printf("new_path[last]=%c\n",new_path[strlen(new_path) -1]);
+		slog_debug("%s is_dir? =%d", new_path, S_ISDIR(ds_stat_n.st_mode));
 		if (S_ISDIR(ds_stat_n.st_mode))
 		{
-			// Because of how the path arrive never get here.
+			// create the new path for the origin file because it will be moved to a directory.
+			int pos = 0;
+			for (int c = 0; c < strlen(old_rpath); ++c)
+			{
+				if (old_rpath[c] == '/')
+				{
+					if (c + 1 < strlen(old_rpath))
+						pos = c;
+				}
+			}
+
+			char full_path[PATH_MAX], name[PATH_MAX];
+			strncpy(name, old_rpath + pos + 1, strlen(old_rpath) - pos);
+			strcpy(full_path, new_path);
+			strcat(full_path, name);
+			// printf("%d, %s\n", pos, full_path);
+			slog_debug("%d, full_path=%s, old_rpath=%s\n", pos, full_path, old_rpath);
+
+			if (!strcmp(old_rpath, full_path))
+			{
+				ret = -EPERM;
+				return ret;
+			}
+
+			// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
+			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
+			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
+			ret = rename_dataset_metadata(old_rpath, full_path);
+			if (ret < 0)
+			{
+				// errno = EEXIST;
+				return ret;
+			}
+			// RENAME SRV_WORKER(MAP)
+			rename_dataset_srv_worker(old_rpath, full_path, fd, 0);
+			map_rename(map, old_rpath, full_path);
 		}
 		else
 		{
 			// printf("**************TENGO QUE BORRARLO ES UN FICHERO=%s\n",new_path);
 			imss_unlink(new_path);
+
+			// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
+			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
+			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
+			ret = rename_dataset_metadata(old_rpath, new_rpath);
+			if (ret < 0)
+			{
+				errno = EEXIST;
+				return ret;
+			}
+			// RENAME SRV_WORKER(MAP)
+			rename_dataset_srv_worker(old_rpath, new_rpath, fd, 0);
+			map_rename(map, old_rpath, new_rpath);
 		}
 	}
-	// else
-	// {
-	// 	fprintf(stderr, "**************NO EXISTE EL DESTINO=%s\n", new_path);
-	// }
+	else
+	{
+		/// fprintf(stderr, "**************NO EXISTE EL DESTINO=%s\n", new_path);
+		slog_error("HERCULES_ERR_IMSS_RENAME_DEST_DOES_NOT_EXIST");
+		// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
+		// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
+		// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
+		char last_parent_dir[URI_];
+		int last_parent_offset = find_last_parent_dir((char *)new_path, last_parent_dir);
+		slog_debug("last_parent_dir=%s, last_parent_offset=%d", last_parent_dir, last_parent_offset);
+		if (strncmp(last_parent_dir, old_rpath, strlen(last_parent_dir)) && last_parent_offset > 0)
+		{ // parent and old_rpath are not the same.
+			// last_parent_offset == 0 means the new_path is on the root directory.
+			// Due origin file (old_rpath) will be moved to a new directory
+			// we check if the new parent directoy exists.
+			ret = imss_getattr(last_parent_dir, &ds_stat_n);
+			if (ret != 0)
+			{
+				slog_error("HERCULES_ERR_RENAME_DEST_PARENT_DIR_DOES_NOT_EXIST");
+				return ret;
+			}
+		}
 
-	map_rename(map, old_rpath, new_rpath);
-	// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
-	// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
-	// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
-	rename_dataset_metadata(old_rpath, new_rpath);
-	// RENAME SRV_WORKER(MAP)
-	rename_dataset_srv_worker(old_rpath, new_rpath, fd, 0);
+		if (!strcmp(old_rpath, new_path))
+		{
+			ret = -EPERM;
+			return ret;
+		}
 
-	free(old_rpath);
-	free(new_rpath);
+		ret = rename_dataset_metadata(old_rpath, new_rpath);
+		if (ret < 0)
+		{
+			// errno = EEXIST;
+			return ret;
+		}
+		// RENAME SRV_WORKER(MAP)
+		rename_dataset_srv_worker(old_rpath, new_rpath, fd, 0);
+		map_rename(map, old_rpath, new_rpath);
+		// return res;
+	}
+
+	// free(old_rpath);
+	// free(new_rpath);
 	return 0;
 }

@@ -2,38 +2,8 @@
 #define _GNU_SOURCE
 #endif
 
-#include "map.hpp"
-#include "mapfd.hpp"
-#include "cfg_parse.h"
-#include "flags.h"
-#include "resolvepath.h"
-#include "tempname.h"
-#include <stdio.h>
-#include <stdint.h>
-#include <sys/types.h>
-#include <dlfcn.h>
-#include <errno.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/xattr.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/statvfs.h>
-#include <sys/vfs.h> // statfs
-// #include "imss.h"
-#include <imss_posix_api.h>
-#include <stdarg.h>
-#include "mapprefetch.hpp"
-#include <math.h>
-#include <sys/utsname.h>
-#include <sys/epoll.h>
-#include <sys/time.h>
-// #include <fcntl.h>
-// Those are used by reports functions in stat.
-#include <pwd.h>
-#include <sys/sysmacros.h>
-#include <limits.h>
+#include "imss_posix.h"
+
 #undef __USE_GNU
 // #include <poll.h>
 // #include <sys/ptrace.h>
@@ -56,17 +26,17 @@ extern "C"
 	int32_t N_SERVERS = 1;		// Default
 	int32_t N_BLKS = 1;			// Default 1
 	int32_t N_META_SERVERS = 1;
-	char *METADATA_FILE; // Not default
-	char *IMSS_HOSTFILE; // Not default
-	char *IMSS_ROOT;
-	char *META_HOSTFILE;
-	uint64_t STORAGE_SIZE = 16;	  // In GB
-	uint64_t META_BUFFSIZE = 16;  // In GB
-	uint64_t IMSS_BLKSIZE = 1024; // In KB
-	uint64_t IMSS_BUFFSIZE = 2;	  // In GB
-	uint64_t IMSS_DATA_BSIZE;	  // In Bytes.
-	int32_t REPL_FACTOR = NONE;	  // Default none
-	int32_t REPL_TYPE = ASYNC;	  // Default async
+	char *METADATA_FILE = NULL; // Not default
+	char *IMSS_HOSTFILE = NULL; // Not default
+	char *IMSS_ROOT = NULL;
+	char *META_HOSTFILE = NULL;
+	uint64_t STORAGE_SIZE = 16;			 // In GB
+	uint64_t META_BUFFSIZE = 16;		 // In GB
+	uint64_t IMSS_BLKSIZE = 1024;		 // In KB
+	uint64_t IMSS_BUFFSIZE = 2;			 // In GB
+	uint64_t IMSS_DATA_BSIZE = 512 * KB; // In Bytes.
+	int32_t REPL_FACTOR = NONE;			 // Default none
+	int32_t REPL_TYPE = ASYNC;			 // Default async
 
 	extern int32_t MALLEABILITY;
 	extern int32_t MALLEABILITY_TYPE;
@@ -98,7 +68,7 @@ extern "C"
 	void *map;
 	void *map_prefetch;
 	char *MOUNT_POINT;
-	size_t MOUNT_POINT_LEN;
+	size_t MOUNT_POINT_LEN = 0;
 
 	char *HERCULES_PATH;
 	void *map_fd;
@@ -115,140 +85,15 @@ extern "C"
 	// prefech.
 	char *buf_pref = NULL;
 
-	char *checkHerculesPath(const char *pathname);
-	char *convert_path(const char *name);
-	int generalOpen(char *new_path, int flags, mode_t mode, int createFd);
-	ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, size_t offset);
-	int IsAbsolutePath(const char *pathname);
-	int ResolvePath(const char *path_, char *resolved);
-
-	static off_t (*real_lseek)(int fd, off_t offset, int whence) = NULL;
-	static off64_t (*real_lseek64)(int fd, off64_t offset, int whence) = NULL;
-	static int (*real_fseek)(FILE *stream, long int offset, int whence) = NULL;
-	static void (*real_seekdir)(DIR *dirp, long loc) = NULL;
-
-	static int (*real_stat)(const char *pathname, struct stat *buf) = NULL;
-	static int (*real_stat64)(const char *__restrict__ pathname, struct stat64 *__restrict__ buf) = NULL;
-	static int (*real__lxstat)(int fd, const char *pathname, struct stat *buf) = NULL;
-	static int (*real__lxstat64)(int ver, const char *pathname, struct stat64 *buf) = NULL;
-	static int (*real_lstat)(const char *pathname, struct stat *buf) = NULL;
-	static int (*real_lstat64)(const char *__restrict__ pathname, struct stat64 *__restrict__ buf);
-	static int (*real_xstat)(int fd, const char *pathname, struct stat *buf) = NULL;
-	static int (*real_statx)(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *statxbuf) = NULL;
-	static int (*real___xstat)(int ver, const char *pathname, struct stat *stat_buf) = NULL;
-	static int (*real__xstat64)(int ver, const char *path, struct stat64 *stat_buf) = NULL;
-	static int (*real_fstat)(int fd, struct stat *buf) = NULL;
-	static int (*real_fstatat)(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag) = NULL;
-	static int (*real_fstatat64)(int __fd, const char *__restrict __file, struct stat64 *__restrict __buf, int __flag) = NULL;
-	static int (*real_fstatfs)(int fd, struct statfs *buf) = NULL;
-	static int (*real_statfs64)(const char *path, struct statfs64 *buf) = NULL;
-	static int (*real_newfstatat)(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag) = NULL;
-	static int (*real__fxstat64)(int ver, int fd, struct stat64 *buf) = NULL;
-	static int (*real__fxstat)(int ver, int fd, struct stat *buf) = NULL;
-	static int (*real___fxstatat)(int __ver, int __fildes, const char *__filename, struct stat *__stat_buf, int __flag) = NULL;
-	static int (*real___fxstatat64)(int __ver, int __fildes, const char *__filename, struct stat64 *__stat_buf, int __flag) = NULL;
-
-	static int (*real_close)(int fd) = NULL;
-	static int (*real_puts)(const char *str) = NULL;
-	static int (*real__open_2)(const char *pathname, int flags, ...) = NULL;
-	static int (*real_open64)(const char *pathname, int flags, ...) = NULL;
-	static int (*real_open)(const char *pathname, int flags, ...) = NULL;
-	static int (*real_creat)(const char *pathname, mode_t mode) = NULL;
-	static FILE *(*real_fopen)(const char *pathname, const char *mode) = NULL;
-	static FILE *(*real_fdopen)(int fildes, const char *mode) = NULL;
-	// static FILE *(*real_fopen64)(const char * pathname, const char * mode) = NULL;
-	static int (*real_access)(const char *pathname, int mode) = NULL;
-	static int (*real_mkdir)(const char *path, mode_t mode) = NULL;
-	static ssize_t (*real_write)(int fd, const void *buf, size_t size) = NULL;
-	static ssize_t (*real_read)(int fd, const void *buf, size_t size) = NULL;
-	static int (*real_remove)(const char *name) = NULL;
-	static int (*real_unlink)(const char *name) = NULL;
-	static int (*real_rmdir)(const char *path) = NULL;
-	static int (*real_rename)(const char *old, const char *new_pathname) = NULL;
-	static int (*real_fchmodat)(int dir_fd, const char *pathname, mode_t mode, int flags) = NULL;
-	static int (*real_fchownat)(int dir_fd, const char *pathname, uid_t owner, gid_t group, int flags) = NULL;
-	static DIR *(*real_opendir)(const char *name) = NULL;
-	static struct dirent *(*real_readdir)(DIR *dirp) = NULL;
-	static struct dirent64 *(*real_readdir64)(DIR *dirp) = NULL;
-	// static int (*real_readdir)(unsigned int fd, struct old_linux_dirent *dirp, unsigned int count);
-	static int (*real_closedir)(DIR *dirp) = NULL;
-	static int (*real_statvfs)(const char *path, struct statvfs *buf) = NULL;
-	static int (*real_fstatvfs)(int fd, struct statvfs *buf) = NULL;
-	static int (*real_statvfs64)(const char *path, struct statvfs64 *buf) = NULL;
-	static int (*real_statfs)(const char *path, struct statfs *buf) = NULL;
-	static char *(*real_realpath)(const char *path, char *resolved_path) = NULL;
-	// static int (*real__openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
-	static int (*real_openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
-	// static int (*real__openat64)(int fd, const char *file, int oflag, ...) = NULL;
-	// static int (*real__openat64_2)(int fd, const char *file, int oflag) = NULL;
-	// static int (*real__libc_openat)(int fd, const char *file, int oflag, ...) = NULL;
-	static int (*real__libc_open64)(const char *file, int oflag, ...) = NULL;
-	// static int (*real_openat)(int dir_fd, const char *pathname, int flags) = NULL;
-	static int (*real_fclose)(FILE *fp) = NULL;
-	static size_t (*real_fread)(void *buf, size_t size, size_t count, FILE *fp) = NULL;
-	static size_t (*real_fwrite)(const void *buf, size_t size, size_t count, FILE *fp) = NULL;
-	static void (*real_clearerr)(FILE *fp) = NULL;
-	static int (*real_ferror)(FILE *fp) = NULL;
-	static int (*real_feof)(FILE *fp) = NULL;
-	static long int (*real_ftell)(FILE *fp) = NULL;
-	static void (*real_rewind)(FILE *stream) = NULL;
-	// static void *(*real_mmap)(void *addr, size_t length, int prot, int flags, int fd, off_t offset) = NULL;
-	static int (*real_symlink)(const char *name1, const char *name2) = NULL;
-	static int (*real_symlinkat)(const char *name1, int fd, const char *name2) = NULL;
-	static int (*real_chdir)(const char *pathname) = NULL;
-	static int (*real_fchdir)(int fd) = NULL;
-	static int (*real__chdir)(const char *path) = NULL;
-	static int (*real___chdir)(const char *path) = NULL;
-	static int (*real_sys_chdir)(const char *filename) = NULL;
-	static int (*real_wchdir)(const wchar_t *dirname) = NULL;
-	static int (*real_chmod)(const char *pathname, mode_t mode) = NULL;
-	static int (*real_fchmod)(int fd, mode_t mode) = NULL;
-	static int (*real_execve)(const char *pathname, char *const argv[], char *const envp[]) = NULL;
-	// static int (*real_execv)(const char *pathname, char *const argv[]) = NULL;
-	static char *(*real_getcwd)(char *buf, size_t size) = NULL;
-	static int (*real_change_to_directory)(char *, int, int) = NULL;
-	static int (*real_bindpwd)(int) = NULL;
-	static int (*real_epoll_ctl)(int epfd, int op, int fd, struct epoll_event *event) = NULL;
-	static pid_t (*real_fork)(void) = NULL;
-	static pid_t (*real_vfork)(void) = NULL;
-	static pid_t (*real_wait)(int *wstatus) = NULL;
-	static pid_t (*real_waitpid)(pid_t pid, int *wstatus, int options) = NULL;
-	static int (*real___fwprintf_chk)(FILE *stream, int flag, const wchar_t *format) = NULL;
-	static ssize_t (*real_pread)(int fd, void *buf, size_t count, off_t offset) = NULL;
-	static ssize_t (*real_pwrite)(int fd, const void *buf, size_t count, off_t offset) = NULL;
-	static int (*real_truncate)(const char *path, off_t length) = NULL;
-	static int (*real_ftruncate)(int fd, off_t length) = NULL;
-	static int (*real_flock)(int fd, int operation) = NULL;
-	static int (*real_dup2)(int oldfd, int newfd) = NULL;
-	static int (*real_dup)(int oldfd) = NULL;
-	static int (*real_mkstemp)(char *template_name) = NULL;
-	static ssize_t (*real_readv)(int fd, const struct iovec *iov, int iovcnt) = NULL;
-	static ssize_t (*real_writev)(int fd, const struct iovec *iov, int iovcnt) = NULL;
-	// ssize_t preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset);
-	static ssize_t (*real_pwritev)(int fd, const struct iovec *iov, int iovcnt, off_t offset) = NULL;
-	static ssize_t (*real_pwrite64)(int fd, const void *buf, size_t count, off64_t offset) = NULL;
-	// static int (*real_poll)(struct pollfd *fds, nfds_t nfds, int timeout) = NULL;
-	// static int (*real_ppoll)(struct pollfd *fds, nfds_t nfds, const struct timespec tmo_p, const sigset_t sigmask) = NULL;
-	// static int (*real_fcntl)(int fd, int cmd, ... /* arg */) = NULL;
-	static int (*real_syncfs)(int fd) = NULL;
-	static int (*real_posix_fadvise)(int fd, off_t offset, off_t len, int advice) = NULL;
-	// static int (*real_posix_fadvise64)(int fd, off64_t offset, off64_t len, int advice) = NULL;
-	static int (*real_faccessat)(int dir_fd, const char *pathname, int mode, int flags) = NULL;
-	static int (*real_unlinkat)(int fd, const char *name, int flag) = NULL;
-	static int (*real_renameat2)(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags) = NULL;
-	// static int (*real_fstatat)(int dir_fd, const char *pathname, struct stat *buf, int flags) = NULL;
-	// static int (*real_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count) = NULL;
-	static int (*real_fsync)(int fd) = NULL;
-	// static int (*real_pthread_create)(pthread_t * thread,
-	// 								  const pthread_attr_t * attr,
-	// 								  void *(*start_routine)(void *),
-	// 								  void * arg) = NULL;
-	static void (*real_exit)(int status) __attribute__((noreturn)) = NULL;
-	// static int (*real_fprintf)(FILE * stream, const char * format, ...);
-	static int (*real_fprintf)(FILE *stream, const char *format, va_list) = NULL; // not fully supported.
-
-	static ssize_t (*real_readlink)(const char *pathname, char *buf, size_t bufsiz) = NULL;
-	static ssize_t (*real_readlinkat)(int dirfd, const char *pathname, char *buf, size_t bufsiz) = NULL;
+	void SetErrno(int value)
+	{
+		if (value >= 0)
+		{
+			// expected negative errno value.
+			return;
+		}
+		errno = -value;
+	}
 
 	void copy_stat_to_statx(const struct stat *src, struct statx *dest)
 	{
@@ -284,8 +129,6 @@ extern "C"
 		dest->stx_btime.tv_sec = src->st_ctime;
 #endif
 	}
-
-	int __fxstat(int ver, int fd, struct stat *buf);
 
 	void WarnOperationNotSupported(const char *call_name, const char *pathname)
 	{
@@ -356,6 +199,23 @@ extern "C"
 		}
 	}
 
+	void ResolvePathsAndFD(const int fd_dir, const char *path_to_check, char **directory_path, char **file_path)
+	{
+		// int ret = 0;
+		// AT_FDCWD (fd = -100) means current working directory.
+		if (fd_dir == AT_FDCWD)
+		{ // checks if the path_to_check is from Hercules.
+			*file_path = checkHerculesPath(path_to_check);
+			directory_path = NULL;
+		}
+		else
+		{ // checks if the file descriptor is from a Hercules directory.
+			*directory_path = map_fd_search_by_val(map_fd, fd_dir);
+			file_path = NULL;
+		}
+		// return ret;
+	}
+
 	char *checkHerculesPath(const char *pathname)
 	{
 		char *new_path = NULL;
@@ -376,14 +236,14 @@ extern "C"
 		size_t pathname_len = strlen(pathname);
 		// size_t max_lenght = MAX(pathname_len, strlen(MOUNT_POINT));
 		size_t compare_len = 0;
-		
+
 		// To calculate the string lenght to be compared to know if the user want to intercept
 		// the HERCULES root (MOUNT_POINT).
 		// For example: if MOUNT_POINT=/mnt/hercules/ and pathname=/mnt/hercules/x
 		// then, the correct lenght must be the one of pathname (15).
-		// But, if pathname=/mnt/hercules, the max lenght to be compared is 
+		// But, if pathname=/mnt/hercules, the max lenght to be compared is
 		// the MOUNT_POINT lenght minus 1 because we do not want to consider the last "/".
-		// In this last case we will make the comparition of MOUNT_POINT=/mnt/hercules and 
+		// In this last case we will make the comparition of MOUNT_POINT=/mnt/hercules and
 		//  pathname=/mnt/hercules.
 		if (pathname_len >= MOUNT_POINT_LEN)
 		{
@@ -423,7 +283,7 @@ extern "C"
 			}
 
 			strcpy(new_path, "imss://");
-		} 
+		}
 		else
 		{ // To check if "pathname" is part of HERCULES.
 			if (!strncmp(pathname, MOUNT_POINT, strlen(MOUNT_POINT) - 1) || (pathname[0] != '/' && !strncmp(workdir, MOUNT_POINT, strlen(MOUNT_POINT) - 1)))
@@ -441,11 +301,10 @@ extern "C"
 				else
 				{
 					// slog_live("[HERCULES] after resolve path, pathname=%s, real_pathname=%s", pathname, real_pathname);
-					// new_path = convert_path(pathname);
 					ret = ResolvePath(pathname, absolute_pathname);
-					// fprintf(stderr, "[IMSS] last option, pathname=%s, absolute_pathname_len=%d, workdir=%s\n", pathname, ret, workdir);
+					// fprintf(stderr, "[IMSS] last option, pathname=%s, absolute_pathname=%s, absolute_pathname_len=%d, workdir=%s\n", pathname, absolute_pathname, ret,  workdir);
 					if (ret > 0)
-					{
+					{ // absolute path.
 						// slog_live("[IMSS] absolute_pathname=%s", absolute_pathname);
 						new_path = convert_path(absolute_pathname);
 					}
@@ -454,8 +313,8 @@ extern "C"
 						new_path = convert_path(pathname);
 					}
 
-					// slog_live("[HERCULES] pathname=%s, realpath=%s, new_path=%s", pathname, real_pathname, new_path);
-					// free(real_pathname);
+					// slog_live("[HERCULES] pathname=%s, absolute_pathname=%s, new_path=%s", pathname, absolute_pathname,new_path);
+					//  free(real_pathname);
 				}
 			}
 		}
@@ -475,45 +334,20 @@ extern "C"
 		return (uint32_t)abs((int)h);
 	}
 
-	void *
-	prefetch_function(void *th_argv)
-	{
-		for (;;)
-		{
-
-			pthread_mutex_lock(&lock);
-			while (prefetch_ds < 0)
-			{
-				pthread_cond_wait(&cond_prefetch, &lock);
-			}
-
-			if (prefetch_first_block < prefetch_last_block && prefetch_first_block != -1)
-			{
-				// printf("Se activo Prefetch path:%s$%d-$%d\n",prefetch_path, prefetch_first_block, prefetch_last_block);
-				int exist_first_block, exist_last_block, position;
-				char *buf = map_get_buffer_prefetch(map_prefetch, prefetch_path, &exist_first_block, &exist_last_block);
-				int err = readv_multiple(prefetch_ds, prefetch_first_block, prefetch_last_block, buf, IMSS_BLKSIZE, prefetch_offset, IMSS_DATA_BSIZE * (prefetch_last_block - prefetch_first_block));
-				if (err == -1)
-				{
-					pthread_mutex_unlock(&lock);
-					continue;
-				}
-				map_update_prefetch(map_prefetch, prefetch_path, prefetch_first_block, prefetch_last_block);
-			}
-
-			prefetch_ds = -1;
-			pthread_mutex_unlock(&lock);
-		}
-
-		pthread_exit(NULL);
-	}
-
 	char *convert_path(const char *name)
 	{
 		char *path = (char *)calloc(PATH_MAX, sizeof(char));
 		char *new_path = (char *)calloc(PATH_MAX, sizeof(char));
 
+		if (path == NULL || new_path == NULL)
+		{
+			perror("HERCULES_ERR_IMSS_POSIX_CONVERT_PATH_MEMORY_ERR");
+			slog_error("HERCULES_ERR_IMSS_POSIX_CONVERT_PATH_MEMORY_ERR");
+			exit(-1);
+		}
+
 		strcpy(path, name);
+		// fprintf(stderr, "Received name=%s\n", name);
 		size_t len = strlen(MOUNT_POINT);
 		// remove MOUNT_POINT prefix from the path.
 		if (len > 0)
@@ -524,8 +358,6 @@ extern "C"
 				memmove(p, p + len, strlen(p + len) + 1);
 			}
 		}
-
-		// fprintf(stderr, "name=%s, path=%s\n", name, path);
 
 		// seeks initial slashes "/" in the path.
 		len = strlen(path);
@@ -558,6 +390,8 @@ extern "C"
 			strcat(new_path, path);
 		}
 
+		free(path);
+
 		return new_path;
 	}
 
@@ -575,7 +409,7 @@ extern "C"
 		int ret = gethostname(&hostname_[0], 512);
 		if (ret == -1)
 		{
-			perror("gethostname");
+			perror("HERCULES_ERR_FRONTEND_GETHOSTNAME");
 			exit(EXIT_FAILURE);
 		}
 		sprintf(hostname, "%s:%d", hostname_, getpid());
@@ -594,6 +428,9 @@ extern "C"
 		IMSS_DATA_BSIZE = IMSS_BLKSIZE * KB; // block size in bytes.
 		MOUNT_POINT = args.mount_point;
 		MOUNT_POINT_LEN = strlen(MOUNT_POINT);
+		// if(MOUNT_POINT[MOUNT_POINT_LEN-1] != '/') {
+		// 	MOUNT_POINT_LEN--;
+		// }
 		IMSS_ROOT = args.imss_uri;
 		IMSS_HOSTFILE = args.data_hostfile;
 		N_SERVERS = args.num_data_servers;
@@ -609,19 +446,7 @@ extern "C"
 		LOWER_BOUND_SERVERS = args.lower_bound_servers;
 		REPL_FACTOR = args.repl_factor;
 		REPL_TYPE = args.repl_type;
-		// POLICY = args.policy;
 		strncpy(POLICY, args.policy, sizeof(POLICY));
-
-		// Hercules init -- Attached deploy
-		if (DEPLOYMENT == 1)
-		{
-			// Hercules init -- Attached deploy
-			if (hercules_init(0, STORAGE_SIZE, IMSS_SRV_PORT, 1, METADATA_PORT, META_BUFFSIZE, METADATA_FILE) == -1)
-			{
-				// In case of error notify and exit
-				slog_fatal("[IMSS-FUSE]	Hercules init failed, cannot deploy IMSS.\n");
-			}
-		}
 
 		// log init.
 		time_t t = time(NULL);
@@ -663,18 +488,29 @@ extern "C"
 		// fprintf(stderr, " -- POLICY: %s\n", POLICY);
 
 		// Metadata server
-		// if (release == 1)
 		if (stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank) == -1)
 		{
 			// In case of error notify and exit
 			slog_error("Stat init failed, cannot connect to Metadata server.");
-			// return;
+			imss_comm_cleanup();
 			exit(1);
 		}
 
 		int num_active_storages = 0;
+		// Hercules init -- Attached deploy
+		// default is 2.
+		if (DEPLOYMENT == 1)
+		{
+			// Hercules init -- Attached deploy
+			if (hercules_init(0, STORAGE_SIZE, IMSS_SRV_PORT, 1, METADATA_PORT, META_BUFFSIZE, METADATA_FILE) == -1)
+			{
+				// In case of error notify and exit
+				slog_fatal("[IMSS-FUSE]	Hercules init failed, cannot deploy IMSS.\n");
+			}
+		}
 		if (DEPLOYMENT == 2)
 		{
+			// Make the connection to all data servers.
 			num_active_storages = open_imss(IMSS_ROOT);
 			if (num_active_storages < 0)
 			{
@@ -694,7 +530,7 @@ extern "C"
 		// 	}
 		// }
 
-		map_prefetch = map_create_prefetch();
+		// map_prefetch = map_create_prefetch();
 		map = map_create();
 		if (MULTIPLE_READ == 1)
 		{
@@ -728,22 +564,23 @@ extern "C"
 	void __attribute__((destructor)) run_me_last()
 	{
 		errno = 0;
-		// fprintf(stderr, "Calling 'run_me_last', pid=%d, rank=%d, release=%d\n", g_pid, rank, release);
 		slog_live("Calling 'run_me_last', pid=%d, rank=%d, release=%d", g_pid, rank, release);
 		release--;
-		if (release == 0)
+		// if (release == 0) // TODO: uncomment this line.
 		{
 			// clock_t t_s;
 			// double time_taken;
 			// t_s = clock();
 			release = -1;
 			slog_live("[POSIX] release_imss()");
-			//release_imss("imss://", CLOSE_DETACHED);
-			// slog_live("[POSIX] stat_release()");
-			// stat_release();
-			//  imss_comm_cleanup();
-			//  t_s = clock() - t_s;
-			//  time_taken = ((double)t_s) / (CLOCKS_PER_SEC);
+			release_imss("imss://", CLOSE_DETACHED);
+			// // //  slog_live("[POSIX] stat_release()");
+			stat_release();
+			// free_prefetch(map_prefetch);
+			map_free(map);
+			imss_comm_cleanup();
+			//   t_s = clock() - t_s;
+			//   time_taken = ((double)t_s) / (CLOCKS_PER_SEC);
 		}
 		// fprintf(stderr, "End 'run_me_last', pid=%d, release=%d\n", g_pid, release);
 		slog_live("End 'run_me_last', pid=%d, release=%d", g_pid, release);
@@ -763,7 +600,6 @@ extern "C"
 
 	int close(int fd)
 	{
-
 		if (!real_close)
 			real_close = (int (*)(int))dlsym(RTLD_NEXT, "close");
 
@@ -778,6 +614,14 @@ extern "C"
 		if (pathname != NULL)
 		{
 			slog_live("[POSIX]. Calling Hercules 'close', pathname=%s, fd=%d", pathname, fd);
+			if (!strcmp(pathname, MOUNT_POINT))
+			{
+				slog_debug("Trying to close the mount point %s", pathname);
+				// stores the file descriptor "ret" into the map "map_fd".
+				slog_live("[POSIX] Erasing fd %d from map", ret);
+				map_fd_erase(map_fd, fd);
+				return ret;
+			}
 			// fprintf(stderr, "[POSIX]. Calling Hercules 'close', pathname=%s, fd=%d\n", pathname, fd);
 			ret = imss_close(pathname, fd);
 			if (ret)
@@ -982,7 +826,7 @@ extern "C"
 	pid_t fork(void)
 	{
 		if (!real_fork)
-			real_fork = (pid_t(*)())dlsym(RTLD_NEXT, __func__);
+			real_fork = (pid_t (*)())dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -1140,7 +984,7 @@ extern "C"
 	int stat(const char *pathname, struct stat *buf)
 	{
 		if (!real_stat)
-			real_stat = (int (*)(const char *, struct stat *))dlsym(RTLD_NEXT, __func__);
+			real_stat = (int (*)(const char *, struct stat *))dlsym(RTLD_NEXT, "stat");
 
 		if (!init)
 		{
@@ -1165,9 +1009,9 @@ extern "C"
 		}
 		else
 		{
-			slog_live("[POSIX]. Calling Real 'stat', pathname=%s.", pathname);
+			slog_live("[POSIX]. Calling Real 'stat', pathname=%s", pathname);
 			ret = real_stat(pathname, buf);
-			slog_live("[POSIX]. Ending Real 'stat', pathname=%s.", pathname);
+			// slog_live("[POSIX]. Ending Real 'stat', pathname=%s", pathname);
 		}
 
 		return ret;
@@ -1711,7 +1555,7 @@ extern "C"
 	ssize_t readv(int fd, const struct iovec *iov, int iovcnt)
 	{
 		if (!real_readv)
-			real_readv = (ssize_t(*)(int, const iovec *, int))dlsym(RTLD_NEXT, __func__);
+			real_readv = (ssize_t (*)(int, const iovec *, int))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -1785,7 +1629,7 @@ extern "C"
 	ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 	{
 		if (!real_writev)
-			real_writev = (ssize_t(*)(int, const struct iovec *, int))dlsym(RTLD_NEXT, __func__);
+			real_writev = (ssize_t (*)(int, const struct iovec *, int))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -1856,7 +1700,7 @@ extern "C"
 	ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 	{
 		if (!real_pwritev)
-			real_pwritev = (ssize_t(*)(int, const struct iovec *, int, off_t))dlsym(RTLD_NEXT, __func__);
+			real_pwritev = (ssize_t (*)(int, const struct iovec *, int, off_t))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -1927,7 +1771,7 @@ extern "C"
 	{
 
 		if (!real_pwrite64)
-			real_pwrite64 = (ssize_t(*)(int, const void *, size_t, off64_t))dlsym(RTLD_NEXT, __func__);
+			real_pwrite64 = (ssize_t (*)(int, const void *, size_t, off64_t))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -2332,7 +2176,7 @@ extern "C"
 			update_offset = 1;
 			map_fd_search(map_fd, pathname, fd, &offset);
 			int fd_lkup = -1;
-			fd_lookup(pathname, &fd_lkup, &ds_stat_n, &aux);
+			fd_lookup((char *)pathname, &fd_lkup, &ds_stat_n, &aux);
 			slog_live("current size=%ld", ds_stat_n.st_size);
 
 			// imss_getattr(pathname, &ds_stat_n);
@@ -2343,14 +2187,13 @@ extern "C"
 				errno = ENOENT;
 				ret = -1;
 				slog_error("[POSIX] Error Hercules 'write'	: %d:%s", errno, strerror(errno));
-				// pthread_mutex_unlock(&system_lock);
 				return ret;
 			}
 		}
 
 		slog_live("[POSIX]. pathname=%s, size to write=%lu, offset=%lu", pathname, size, offset);
 
-		ret = imss_write(pathname, buf, size, offset);
+		ret = TIMING(imss_write(pathname, buf, size, offset), "imss_write", ssize_t, rank);
 
 		if (update_offset)
 		{
@@ -2369,6 +2212,18 @@ extern "C"
 		int ret = 0;
 		uint64_t ret_ds = 0;
 		long p = 0;
+		int is_mount_point = 0;
+
+		if (!strcmp(new_path, "imss://"))
+		{
+			slog_debug("Trying to open the mount point %s", new_path);
+			ret = real_open("/dev/null", 0); // Get a file descriptor
+			// stores the file descriptor "ret" into the map "map_fd".
+			slog_live("[POSIX] Puting fd %d into map", ret);
+			map_fd_put(map_fd, new_path, ret, p);
+			return ret;
+		}
+
 		// Search for the path "new_path" on the map "map_fd".
 		slog_live("[POSIX] Searching for the %s on the map", new_path);
 		int exist = map_fd_search_by_pathname(map_fd, new_path, &ret, &p);
@@ -2376,11 +2231,10 @@ extern "C"
 		{
 			int create_flag = (flags & O_CREAT);
 			slog_live("[POSIX] new_path:%s, exist: %d, create_flag: %d", new_path, exist, create_flag);
-			// fprintf(stderr, "[POSIX] new_path:%s, exist: %d, create_flag: %d\n", new_path, exist, create_flag);
 			if (create_flag == O_CREAT) // if the file does not exist, then we create it.
 			{
 				slog_live("[POSIX] New file %s, ret=%d", new_path, ret);
-				int err_create = imss_create(new_path, mode, &ret_ds, 1);
+				int err_create = imss_create(new_path, mode, &ret_ds, 1, TYPE_REGULAR_FILE);
 				slog_live("[POSIX] imss_create(%s, %d, %ld), err_create: %d", new_path, mode, ret_ds, err_create);
 				if (err_create == -EEXIST)
 				{
@@ -2536,9 +2390,9 @@ extern "C"
 		const char *file_name_without_prefix;
 		int ret = -1;
 
-		file_name_without_prefix = pathname + MOUNT_POINT_LEN;
-
-		if (file_name_without_prefix[0] == '/') // path is absolute.
+		// file_name_without_prefix = pathname + MOUNT_POINT_LEN;
+		// if (file_name_without_prefix[0] == '/') // path is absolute.
+		if (pathname[0] == '/') // path is absolute.
 		{
 			ret = 1;
 		}
@@ -2686,11 +2540,16 @@ extern "C"
 		char *new_path = checkHerculesPath(path);
 		if (new_path != NULL)
 		{
+			// char *last = new_path + strlen(new_path) - 1;
+			// if (last[0] != '/')
+			size_t len = strlen(new_path);
+			if (len > 0 && new_path[len - 1] != '/')
+			{
+				strcat(new_path, "/");
+			}
 			slog_live("[POSIX]. Calling Hercules 'mkdir', path=%s, new_path=%s", path, new_path);
-			// fprintf(stderr, "[POSIX]. Calling Hercules 'mkdir', path=%s, new_path=%s\n", path, new_path);
 
 			// char *new_path;
-			// new_path = convert_path(path, MOUNT_POINT);
 			ret = imss_mkdir(new_path, mode);
 			if (ret < 0)
 			{
@@ -2748,8 +2607,6 @@ extern "C"
 			if (new_path_1 != NULL && new_path_2 != NULL)
 			{
 				slog_live("[POSIX]. Both new_path_1=%s, new_path_2=%s", new_path_1, new_path_2);
-				// new_path_1 = convert_path(name1, MOUNT_POINT);
-				// new_path_2 = convert_path(name2, MOUNT_POINT);
 				ret = imss_symlinkat(new_path_1, new_path_2, 0);
 				free(new_path_1);
 				free(new_path_2);
@@ -2761,7 +2618,6 @@ extern "C"
 				slog_live("[POSIX]. Only second new_path_2=%s", new_path_2);
 				// new_path_1 = name1;
 				strcpy(new_path_1, name1);
-				// new_path_2 = convert_path(name2, MOUNT_POINT);
 				ret = imss_symlinkat(new_path_1, new_path_2, 1);
 				// free(new_path_1) ?
 				free(new_path_2);
@@ -2780,7 +2636,7 @@ extern "C"
 	off_t lseek(int fd, off_t offset, int whence)
 	{
 		if (!real_lseek)
-			real_lseek = (off_t(*)(int, off_t, int))dlsym(RTLD_NEXT, __func__);
+			real_lseek = (off_t (*)(int, off_t, int))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -2847,7 +2703,7 @@ extern "C"
 	off64_t lseek64(int fd, off64_t offset, int whence)
 	{
 		if (!real_lseek64)
-			real_lseek64 = (off64_t(*)(int, off64_t, int))dlsym(RTLD_NEXT, __func__);
+			real_lseek64 = (off64_t (*)(int, off64_t, int))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -3062,7 +2918,7 @@ extern "C"
 	ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset)
 	{
 		if (!real_pwrite)
-			real_pwrite = (ssize_t(*)(int, const void *, size_t, off_t))dlsym(RTLD_NEXT, __func__);
+			real_pwrite = (ssize_t (*)(int, const void *, size_t, off_t))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -3091,7 +2947,7 @@ extern "C"
 	ssize_t write(int fd, const void *buf, size_t size)
 	{
 		if (!real_write)
-			real_write = (ssize_t(*)(int, const void *, size_t))dlsym(RTLD_NEXT, __func__);
+			real_write = (ssize_t (*)(int, const void *, size_t))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -3124,7 +2980,7 @@ extern "C"
 			// {
 			// 	map_fd_update_value(map_fd, pathname, fd, ds_stat_n.st_size + size);
 			// }
-			ret = generalWrite(pathname, fd, buf, size, offset);
+			ret = TIMING(generalWrite(pathname, fd, buf, size, offset), "generalWrite", ssize_t, rank);
 
 			slog_live("[POSIX]. Ending Hercules 'write', pathname=%s, size=%lu, ret=%ld, fd=%d\n", pathname, size, ret, fd);
 		}
@@ -3156,7 +3012,7 @@ extern "C"
 	ssize_t read(int fd, void *buf, size_t size)
 	{
 		if (!real_read)
-			real_read = (ssize_t(*)(int, const void *, size_t))dlsym(RTLD_NEXT, __func__);
+			real_read = (ssize_t (*)(int, const void *, size_t))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -3189,7 +3045,7 @@ extern "C"
 
 			// fprintf(stderr, "[POSIX] Read Hercules size=%ld, offset=%lu\n", size, offset);
 			// ret = imss_read(pathname, buf, size, offset);
-			ret = imss_sread(pathname, buf, size, offset);
+			ret = TIMING(imss_sread(pathname, buf, size, offset), "imss_sread", ssize_t, rank);
 			if (ret > 0)
 			{
 				offset += ret;
@@ -3198,6 +3054,16 @@ extern "C"
 				// slog_live("[POSIX] Updating map_fd, offset=%lu, data_size=%ld", offset, ds_stat_n.st_size);
 				slog_live("[POSIX] Updating map_fd, offset=%lu", offset);
 				map_fd_update_value(map_fd, pathname, fd, offset);
+			}
+			if (ret == -1)
+			{
+				errno = ENOENT;
+			}
+			if (ret == -2)
+			{
+				errno = EIO;
+				// change return value to -1.
+				ret = -1;
 			}
 			// fprintf(stderr, "[POSIX] Hercules read, pathname=%s, ret=%ld\n", pathname, ret);
 			// fprintf(stderr, "[POSIX ] READ HERCULES ret=%ld\n", ret);
@@ -3224,7 +3090,7 @@ extern "C"
 	ssize_t pread(int fd, void *buf, size_t count, off_t offset)
 	{
 		if (!real_pread)
-			real_pread = (ssize_t(*)(int, void *, size_t, off_t))dlsym(RTLD_NEXT, __func__);
+			real_pread = (ssize_t (*)(int, void *, size_t, off_t))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
@@ -3383,37 +3249,99 @@ extern "C"
 		if (new_path != NULL)
 		{
 			slog_live("[POSIX]. Calling Hercules 'unlink', name=%s, new_path=%s", name, new_path);
-			// fprintf(stderr, "[POSIX]. Calling Hercules 'unlink', new_path=%s\n", new_path);
-			int32_t type = get_type(new_path);
-			if (type == 0)
+			struct stat ds_stat_n;
+			ret = imss_getattr(new_path, &ds_stat_n);
+			if (ret != 0)
 			{
-				strcat(new_path, "/");
-				type = get_type(new_path);
-				slog_live("[POSIX] type=%d, new_path=%s", type, new_path);
-				if (type == 2)
-				{
-					ret = imss_rmdir(new_path);
-				}
-
-				if (type != 0)
-				{
-					ret = imss_unlink(new_path);
-				}
+				slog_error("HERCULES_ERR_UNLINK_FILE_NOT_FOUND");
 			}
 			else
 			{
-				slog_live("[POSIX] type=%d, new_path=%s", type, new_path);
-				ret = imss_unlink(new_path);
-				if (ret == 3)
-				{
-					int ret_map = map_fd_erase_by_pathname(map_fd, new_path);
-					if (ret_map == -1)
-					{
-						slog_error("[POSIX]. Error Hercules no file descriptor found for the pathname=%s", new_path);
-					}
+				if (S_ISDIR(ds_stat_n.st_mode))
+				{ // directory case.
+					ret = imss_rmdir(new_path);
 				}
-				ret = 0;
+				else
+				{ // regular file case.
+					ret = imss_unlink(new_path);
+				}
 			}
+
+			// char type = get_type(new_path);
+			// switch (type)
+			// {
+			// case TYPE_DIRECTORY:
+			// case TYPE_HERCULES_INSTANCE: // Directory case?
+			// {
+			// 	char *last = new_path + strlen(new_path) - 1;
+			// 	size_t len = strlen(new_path);
+			// 	if (len > 0 && new_path[len - 1] != '/')
+			// 	{
+			// 		strcat(new_path, "/");
+			// 	}
+			// 	ret = imss_rmdir(new_path);
+			// 	break;
+			// }
+			// case TYPE_REGULAR_FILE: // is regular file.
+			// {
+			// 	ret = imss_unlink(new_path);
+			// 	break;
+			// }
+			// default:
+			// {
+			// 	slog_error("HERCULES_ERR_NOT_SUPPORTED_TYPE");
+			// 	perror("HERCULES_ERR_NOT_SUPPORTED_TYPE");
+			// 	ret = -1;
+			// 	break;
+			// }
+			// }
+
+			// if (ret == 3)
+			// {
+			// 	int ret_map = map_fd_erase_by_pathname(map_fd, new_path);
+			// 	if (ret_map == -1)
+			// 	{
+			// 		slog_error("[POSIX]. Error Hercules no file descriptor found for the pathname=%s", new_path);
+			// 	}
+			// }
+			// if(ret != -1)
+			// 	ret = 0;
+
+			// if (type == '0')
+			// {
+			// 	// char *last = new_path + strlen(new_path) - 1;
+			// 	// if (last[0] != '/')
+			// 	size_t len = strlen(new_path);
+			// 	if (len > 0 && new_path[len - 1] != '/')
+			// 	{
+			// 		strcat(new_path, "/");
+			// 	}
+			// 	type = get_type(new_path);
+			// 	slog_live("[POSIX] type=%d, new_path=%s", type, new_path);
+			// 	if (type == 2)
+			// 	{
+			// 		ret = imss_rmdir(new_path);
+			// 	}
+
+			// 	if (type != 0)
+			// 	{
+			// 		ret = imss_unlink(new_path);
+			// 	}
+			// }
+			// else
+			// {
+			// 	slog_live("[POSIX] type=%d, new_path=%s", type, new_path);
+			// 	ret = imss_unlink(new_path);
+			// 	if (ret == 3)
+			// 	{
+			// 		int ret_map = map_fd_erase_by_pathname(map_fd, new_path);
+			// 		if (ret_map == -1)
+			// 		{
+			// 			slog_error("[POSIX]. Error Hercules no file descriptor found for the pathname=%s", new_path);
+			// 		}
+			// 	}
+			// 	ret = 0;
+			// }
 
 			// unlink error.
 			if (ret < 0)
@@ -3423,13 +3351,15 @@ extern "C"
 				slog_error("[POSIX]. Error Hercules 'unlink', errno=%d:%s", errno, strerror(errno));
 			}
 			// remove the file descriptor from the local map.
-			if (ret == 1)
+			if (ret == 1 || ret == 3)
 			{
 				if (map_fd_erase_by_pathname(map_fd, new_path) == -1)
 				{
-					slog_warn("[POSIX]. Hercules Warning, no file descriptor found for the pathname=%s", new_path);
-					ret = -1;
+					// slog_warn("[POSIX]. Hercules Warning, no file descriptor found for the pathname=%s", new_path);
+					// ret = -1;
 					// errno =
+					// file could be deleted but without be opened before.
+					ret = 0;
 				}
 				else
 				{
@@ -3437,7 +3367,7 @@ extern "C"
 				}
 			}
 
-			slog_live("[POSIX]. Ending Hercules 'unlink', type=%d, new_path=%s, ret=%d\n", type, new_path, ret);
+			slog_live("[POSIX]. Ending Hercules 'unlink', new_path=%s, ret=%d\n", new_path, ret);
 			// fprintf(stderr, "[POSIX]. Ending Hercules 'unlink', type=%d, new_path=%s, ret=%d\n", type, new_path, ret);
 			free(new_path);
 		}
@@ -3467,12 +3397,21 @@ extern "C"
 		char *new_path = checkHerculesPath(path);
 		if (new_path != NULL)
 		{
+			// char *last = new_path + strlen(new_path) - 1;
+			// if (last[0] != '/')
+			size_t len = strlen(new_path);
+			if (len > 0 && new_path[len - 1] != '/')
+			{
+				strcat(new_path, "/");
+			}
+
 			slog_live("[POSIX]. Calling Hercules 'rmdir', new_path=%s", new_path);
 			ret = imss_rmdir(new_path);
 			if (ret == -1)
 			{ // special case io500
 				ret = real_unlinkat(0, path, 0);
 			}
+			slog_live("[POSIX]. Ending Hercules 'rmdir', new_path=%s, ret=%d\n", new_path, ret);
 			free(new_path);
 		}
 		else if (!strncmp(path, "imss://", strlen("imss://"))) // TO REVIEW!
@@ -3485,63 +3424,6 @@ extern "C"
 		}
 		return ret;
 	}
-
-	// int unlinkat(int fd, const char *name, int flag)
-	// { // rm & rm -r
-	// 	// fprintf(stderr, "Starting unlinkat, name=%s\n", name);
-	// 	if (!real_unlinkat)
-	// 		real_unlinkat = dlsym(RTLD_NEXT, "unlinkat");
-
-	// 	if (!init)
-	// 	{
-	// 		return real_unlinkat(fd, name, flag);
-	// 	}
-
-	// 	errno = 0;
-	// 	int ret = 0;
-	// 	char *new_path = checkHerculesPath(name);
-	// 	if (new_path != NULL)
-	// 	{
-	// 		slog_live("[POSIX]. Calling Hercules 'unlinkat', new_path=%s", new_path);
-	// 		// char *new_path;
-	// 		// new_path = convert_path(name, MOUNT_POINT);
-	// 		int n_ent = 0;
-	// 		char *buffer;
-	// 		char **refs;
-
-	// 		if ((n_ent = get_dir((char *)new_path, &buffer, &refs)) < 0)
-	// 		{
-	// 			strcat(new_path, "/");
-	// 			if ((n_ent = get_dir((char *)new_path, &buffer, &refs)) < 0)
-	// 			{
-	// 				return -ENOENT;
-	// 			}
-	// 		}
-
-	// 		for (int i = n_ent - 1; i > -1; --i)
-	// 		{
-	// 			char *last = refs[i] + strlen(refs[i]) - 1;
-
-	// 			if (refs[i][strlen(refs[i]) - 1] == '/')
-	// 			{
-	// 				rmdir(refs[i]);
-	// 			}
-	// 			else
-	// 			{
-	// 				unlink(refs[i]);
-	// 			}
-	// 		}
-	// 		slog_live("[POSIX]. Calling Hercules 'unlinkat', new_path=%s", new_path);
-	// 		free(new_path);
-	// 	}
-	// 	else
-	// 	{
-	// 		slog_live("[POSIX]. Calling real 'unlinkat', pathname=%s", name);
-	// 		ret = real_unlinkat(fd, name, flag);
-	// 	}
-	// 	// fprintf(stderr, "Ending unlinkat, name=%s\n", name);
-	// 	return ret;
-	// }
 
 	int remove(const char *name)
 	{
@@ -3559,26 +3441,33 @@ extern "C"
 		if (new_path != NULL)
 		{
 			slog_live("[POSIX]. Calling Hercules 'remove', new_path=%s", new_path);
-			int32_t type = get_type(new_path);
-			if (type == 0)
+			char type = get_type(new_path);
+			slog_live("[POSIX] type=%d, new_path=%s", type, new_path);
+			switch (type)
 			{
-				strcat(new_path, "/");
-				type = get_type(new_path);
-				slog_live("[POSIX][remove] type=%d, new_path=%s", type, new_path);
-				if (type == 2)
+			case TYPE_DIRECTORY:
+			case TYPE_HERCULES_INSTANCE: // Directory case?
+			{
+				size_t len = strlen(new_path);
+				if (len > 0 && new_path[len - 1] != '/')
 				{
-					ret = imss_rmdir(new_path);
+					strcat(new_path, "/");
 				}
-
-				if (type != 0)
-				{
-					ret = imss_unlink(new_path);
-				}
+				ret = imss_rmdir(new_path);
+				break;
 			}
-			else
+			case TYPE_REGULAR_FILE: // is regular file.
 			{
-				slog_live("[POSIX][remove] type=%d, new_path=%s", type, new_path);
 				ret = imss_unlink(new_path);
+				break;
+			}
+			default:
+			{
+				slog_error("HERCULES_ERR_NOT_SUPPORTED_TYPE");
+				perror("HERCULES_ERR_NOT_SUPPORTED_TYPE");
+				ret = -1;
+				break;
+			}
 			}
 
 			if (ret < 0)
@@ -3634,6 +3523,11 @@ extern "C"
 		{ // move from Hercules to Hercules.
 			slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new_pathname=%s, old path=%s, new_pathname=%s", old, new_pathname, old_path, new_path);
 			ret = imss_rename(old_path, new_path);
+			if (ret < 0)
+			{
+				errno = -ret;
+				ret = -1;
+			}
 			slog_live("[POSIX]. End Hercules 'rename', old path=%s, new_pathname=%s, ret=%d\n", old_path, new_path, ret);
 			free(old_path);
 			free(new_path);
@@ -3641,31 +3535,19 @@ extern "C"
 		else if (old_path == NULL && new_path != NULL)
 		{ // move from file system to Hercules.
 			slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s", old, new_pathname, new_path);
+			ret = HerculesMove(old, new_pathname, new_path);
+			SetErrno(ret);
 
-			// open both files.
-			int fd_old = open(old, O_RDONLY);
-			int fd_new = open(new_pathname, O_WRONLY | O_APPEND | O_CREAT, 0644);
-
-			// get old file stat.
-			struct stat *old_file_stat;
-			old_file_stat = (struct stat *)malloc(sizeof(struct stat));
-			ret = __fxstat(1, fd_old, old_file_stat);
-			// old file size.
-			off_t old_file_size = old_file_stat->st_size;
-
-			// read old file.
-			char *old_file_buffer = NULL;
-			old_file_buffer = (char *)malloc(old_file_size * sizeof(char));
-			ssize_t ret = read(fd_old, old_file_buffer, old_file_size);
-			slog_info("[POSIX]. bytes read from %s = %ld/%ld", old, ret, old_file_size);
-
-			ret = write(fd_new, old_file_buffer, ret);
-
-			slog_info("[POSIX]. bytes write to %s = %ld/%ld", new_pathname, ret, old_file_size);
-
-			close(fd_new);
-			close(fd_old);
+			// // free memory.
+			// free(old_file_buffer);
+			slog_live("[POSIX]. End Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s, ret=%d", old, new_pathname, new_path, ret);
 			free(new_path);
+		}
+		else if (old_path != NULL && new_path == NULL)
+		{ // move from Hercules to file system.
+			slog_live("[POSIX] Calling Hercules 'rename', Hercules %s to file system %s", old_path, new_path);
+			ret = HerculesMove(old, new_pathname, old_path);
+			slog_live("[POSIX] Ending Hercules 'rename', Hercules %s to file system %s, ret=%d", old_path, new_path, ret);
 		}
 		else
 		{
@@ -3995,7 +3877,7 @@ extern "C"
 		strcat((char *)buf, "$");
 		return 1;
 	}
-
+	static struct dirent entry;
 	struct dirent *readdir(DIR *dirp)
 	{
 		if (!real_readdir)
@@ -4009,11 +3891,25 @@ extern "C"
 		errno = 0;
 		size_t ret;
 		char *pathname = map_fd_search_by_val(map_fd, dirfd(dirp));
-		struct dirent *entry = NULL;
+		// struct dirent *entry = NULL;
+
 		if (pathname != NULL)
 		{
+			size_t len = strlen(pathname);
+			if (len > 0 && pathname[len - 1] != '/')
+			{
+				strcat(pathname, "/");
+			}
+
 			slog_live("[POSIX]. Calling Hercules 'readdir', pathname=%s", pathname);
-			entry = (struct dirent *)malloc(sizeof(struct dirent));
+			// entry = (struct dirent *)malloc(sizeof(struct dirent));
+			// if (entry == NULL)
+			// {
+			// 	perror("HERCULES_ERR_READDIR_MEMORY_ALLOC");
+			// 	slog_error("HERCULES_ERR_READDIR_MEMORY_ALLOC: %s", pathname;
+			// 	return NULL;
+			// }
+
 			char buf[KB * KB] = {0};
 			char *token;
 			imss_readdir(pathname, buf, myfiller, 0);
@@ -4027,56 +3923,55 @@ extern "C"
 				if (i == pos)
 				{
 					slog_live("[POSIX] current token=%s, i=%d, pos=%d", token, i, pos);
-					entry->d_ino = 0;
-					entry->d_off = pos;
+					entry.d_ino = 0;
+					entry.d_off = pos;
 
 					// name of file
-					strcpy(entry->d_name, token);
+					strcpy(entry.d_name, token);
 
 					char path_search[256] = {0};
 					// sprintf(path_search, "imss://%s", token); // original
 					// sprintf(path_search, "%s", token);
-					char *last = pathname + strlen(pathname) - 1;
-					if (last[0] != '/')
+					// char *last = pathname + strlen(pathname) - 1;
+					// if (last[0] != '/')
+					size_t len = strlen(pathname);
+					if (len > 0 && pathname[len - 1] != '/')
+					{
 						sprintf(path_search, "%s/%s", pathname, token);
+					}
 					else
+					{
 						sprintf(path_search, "%s%s", pathname, token);
+					}
 
 					if (!strncmp(token, ".", strlen(token)))
 					{
 						// sprintf(path_search, "imss://%s", token);
-						entry->d_type = DT_DIR;
+						entry.d_type = DT_DIR;
 					}
 					else if (!strncmp(token, "..", strlen(token)))
 					{
 						// sprintf(path_search, "imss://%s", token);
-						entry->d_type = DT_DIR;
+						entry.d_type = DT_DIR;
 					}
 					else
 					{
 						// to get the type of this entry.
-						int32_t type = get_type(path_search);
+						char type = get_type(path_search);
 						slog_info("type=%d", type);
 
 						switch (type)
 						{
-						case 0: // error, try again concatenating a slash.
-							strcat(path_search, "/");
-							type = get_type(path_search);
-							if (type == 2)
-							{
-								entry->d_type = DT_DIR;
-							}
-							else
-							{
-								entry->d_type = DT_REG;
-							}
+						case TYPE_DIRECTORY:
+						case TYPE_HERCULES_INSTANCE: // Directory case?
+							entry.d_type = DT_DIR;
 							break;
-						case 2: // is directory.
-							entry->d_type = DT_DIR;
+						case TYPE_REGULAR_FILE: // is regular file.
+							entry.d_type = DT_REG;
 							break;
-						default: // is regular file.
-							entry->d_type = DT_REG;
+						default:
+							slog_error("HERCULES_ERR_NOT_SUPPORTED_TYPE");
+							perror("HERCULES_ERR_NOT_SUPPORTED_TYPE");
 							break;
 						}
 					}
@@ -4084,11 +3979,11 @@ extern "C"
 					// length of this record
 					if (strlen(token) < 5)
 					{
-						entry->d_reclen = 24;
+						entry.d_reclen = 24;
 					}
 					else
 					{
-						entry->d_reclen = ceil((double)(strlen(token) - 4) / 8) * 8 + 24;
+						entry.d_reclen = ceil((double)(strlen(token) - 4) / 8) * 8 + 24;
 					}
 					slog_live("[imss_posix] path_searched = %s", path_search);
 					break;
@@ -4099,18 +3994,22 @@ extern "C"
 			seekdir(dirp, pos + 1);
 			if (token == NULL)
 			{
-				entry = NULL;
+				// free(entry);
+				// entry = NULL;
+				return NULL;
 			}
+			return &entry;
 			slog_live("[POSIX]. Ending Hercules 'readdir',  pathname=%s\n", pathname);
 		}
 		else
 		{
 			slog_full("[POSIX]. Calling real 'readdir', fd=%d.", dirfd(dirp));
-			entry = real_readdir(dirp);
+			// entry = real_readdir(dirp);
+			return real_readdir(dirp);
 			slog_full("[POSIX]. Ending real 'readdir'");
 		}
 
-		return entry;
+		// return &entry;
 	}
 
 	struct dirent64 *readdir64(DIR *dirp)
@@ -4160,11 +4059,15 @@ extern "C"
 		char *pathname = map_fd_search_by_val(map_fd, fd);
 		if (pathname != NULL)
 		{
+			size_t len = strlen(pathname);
+			if (len > 0 && pathname[len - 1] != '/')
+			{
+				strcat(pathname, "/");
+			}
 			// fprintf(stderr, "Hercules closedir, %s\n", pathname);
 			slog_live("[POSIX] Calling Hercules 'closedir', pathname=%s, fd=%d.", pathname, fd);
 
 			// Closes the dataset on the backend and delete it when the dataset status is "dest" and no more process has the file open.
-			// ret = imss_close(pathname, fd);
 			ret = map_fd_search_by_val_close(map_fd, fd);
 
 			if (ret != 0)
@@ -4173,8 +4076,14 @@ extern "C"
 				slog_error("[POSIX] Error while Hercules closed the directory %s, errno=%d:%s", pathname, errno, strerror(errno));
 			}
 
+			// ret = real_closedir(dirp);
+			real_closedir(dirp);
+			// if(ret == -1) {
+			// 	slog_error("[POSIX] Error closing the real directory descriptor for %s", pathname);
+			// 	perror("HERCULES_ERR_CLOSING_REAL_DIRECTORY");
+			// }
+
 			slog_live("[POSIX] End Hercules 'closedir', fd=%d, ret=%d\n", fd, ret);
-			// fprintf(stderr, "Hercules closedir, %d\n", ret);
 		}
 		else
 		{
@@ -4182,8 +4091,6 @@ extern "C"
 			ret = real_closedir(dirp);
 			slog_full("[POSIX] End Real 'closedir', fd=%d, ret=%d", fd, ret);
 		}
-
-		// int ret = real_closedir(dirp);
 
 		return ret;
 	}
@@ -4266,9 +4173,9 @@ extern "C"
 		}
 		else
 		{
-			slog_live("[POSIX]. Calling Real 'stat', pathname=%s.", pathname);
+			slog_live("[POSIX]. Calling Real 'stat64', pathname=%s.", pathname);
 			ret = real_stat64(pathname, buf);
-			slog_live("[POSIX]. Ending Real 'stat', pathname=%s.", pathname);
+			slog_live("[POSIX]. Ending Real 'stat64', pathname=%s.", pathname);
 		}
 
 		return ret;
@@ -4507,7 +4414,83 @@ extern "C"
 		return ret;
 	}
 
-	// int (*real_faccessat)(int dir_fd, const char *pathname, int mode, int flags) = NULL;
+	int GeneralFAccessAt(int dir_fd, const char *pathname, int mode, int flags, char *pathname_dir)
+	{
+		int ret = -1;
+		int is_absolute_path = IsAbsolutePath(pathname);
+
+		// If pathname is absolute, then dir_fd is ignored.
+		if (is_absolute_path == 1)
+		{
+			// char *new_path = checkHerculesPath(pathname);
+			slog_live("[POSIX] is absolute, 'faccessat2', pathname=%s", pathname);
+			ret = access(pathname, mode);
+		}
+		else if (is_absolute_path == 0) // pathname is relative.
+		{
+			if (dir_fd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
+			{						// TO CHECK!
+				slog_live("[POSIX] is relative, current directory, 'faccessat2', pathname=%s", pathname);
+				ret = access(pathname, mode);
+			}
+			else
+			{
+				char absolute_pathname[PATH_MAX];
+				char *dirr = pathname_dir + strlen("imss://");
+				sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
+
+				slog_live("[POSIX] is relative, 'faccessat2', absolute_pathname=%s", absolute_pathname);
+				ret = access(absolute_pathname, mode);
+			}
+		}
+		return ret;
+	}
+
+	int faccessat2(int dir_fd, const char *pathname, int mode, int flags)
+	{
+		if (!real_faccessat2)
+		{
+			real_faccessat2 = (int (*)(int, const char *, int, int))dlsym(RTLD_NEXT, __func__);
+		}
+
+		if (!init)
+		{
+			return real_faccessat2(dir_fd, pathname, mode, flags);
+		}
+
+		errno = 0;
+		int ret = 0;
+		char *pathname_dir = NULL, *new_path = NULL;
+		if (dir_fd == AT_FDCWD)
+		{
+			new_path = checkHerculesPath(pathname);
+			pathname_dir = NULL;
+		}
+		else
+		{
+			pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
+		}
+
+		if (pathname_dir != NULL || new_path != NULL)
+		{
+			slog_live("[POSIX] Calling Hercules 'faccessat2' flags=%d, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, dir_fd, pathname_dir, pathname);
+
+			ret = GeneralFAccessAt(dir_fd, pathname, mode, flags, pathname_dir);
+
+			slog_live("[POSIX] Ending Hercules 'faccessat2', ret=%d, errno=%d:%s\n", ret, errno, strerror(errno));
+			if (new_path != NULL)
+				free(new_path);
+		}
+		else
+		{
+			slog_full("[POSIX] Calling real 'faccessat2' flags=%d, dir_fd=%d, pathname=%s", flags, dir_fd, pathname);
+			ret = real_faccessat2(dir_fd, pathname, mode, flags);
+			slog_full("[POSIX] Ending real 'faccessat2' flags=%d, dir_fd=%d, pathname=%s, errno=%d:%s", flags, dir_fd, pathname, errno, strerror(errno));
+		}
+
+		return ret;
+	}
+
 	int faccessat(int dir_fd, const char *pathname, int mode, int flags)
 	{
 		if (!real_faccessat)
@@ -4521,9 +4504,9 @@ extern "C"
 		}
 
 		errno = 0;
-		int saved_errno;
+		// int saved_errno;
 		int ret = 0;
-		char *pathname_dir, *new_path = NULL;
+		char *pathname_dir = NULL, *new_path = NULL;
 		if (dir_fd == AT_FDCWD)
 		{
 			// pathname_dir = getenv("PWD");
@@ -4540,54 +4523,8 @@ extern "C"
 		if (pathname_dir != NULL || new_path != NULL)
 		{
 			slog_live("[POSIX] Calling Hercules 'faccessat' flags=%d, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, dir_fd, pathname_dir, pathname);
-			int is_absolute_path = IsAbsolutePath(pathname);
 
-			// If pathname is absolute, then dir_fd is ignored.
-			if (is_absolute_path == 1)
-			{
-				// char *new_path = checkHerculesPath(pathname);
-				slog_live("[POSIX] is absolute, 'faccessat', pathname=%s", pathname);
-				ret = access(pathname, mode);
-
-				// ret = generalOpen(new_path, flags, mode);
-				// free(new_path);
-			}
-			else if (is_absolute_path == 0) // pathname is relative.
-			{
-				if (dir_fd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
-				{						// TO CHECK!
-					// char *new_path = checkHerculesPath(pathname);
-					// slog_live("[POSIX] is relative, current directory, 'faccessat', new_path=%s", new_path);
-					slog_live("[POSIX] is relative, current directory, 'faccessat', pathname=%s", pathname);
-					// pathname is interpreted relative to the current working directory of the calling process (like real_open).
-					// ret = generalOpen(new_path, flags, mode);
-					ret = access(pathname, mode);
-					// free(new_path);
-				}
-				else
-				{
-					// // get the pathname of the directory pointed by dir_fd if it is storage in the local map "map_fd".
-					// char *pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
-					// if (pathname_dir == NULL)
-					// { // if dir_fd is not storage locally
-					// 	// search dir_fd on the metadata server.
-					// 	slog_error("[POSIX] dir_fd=%d could not be resolved.");
-					// 	return -1;
-					// }
-
-					char absolute_pathname[PATH_MAX];
-					char *dirr = pathname_dir + strlen("imss://");
-					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
-
-					// char *new_path = checkHerculesPath(absolute_pathname);
-					//  slog_live("[POSIX] is relative, 'faccessat', new_path=%s", new_path);
-					slog_live("[POSIX] is relative, 'faccessat', absolute_pathname=%s", absolute_pathname);
-					ret = access(absolute_pathname, mode);
-
-					// ret = generalOpen(new_path, flags, mode);
-					// free(new_path);
-				}
-			}
+			ret = GeneralFAccessAt(dir_fd, pathname, mode, flags, pathname_dir);
 
 			slog_live("[POSIX] Ending Hercules 'faccessat', ret=%d, errno=%d:%s\n", ret, errno, strerror(errno));
 			if (new_path != NULL)
@@ -4710,36 +4647,45 @@ extern "C"
 
 		errno = 0;
 		int ret = 0;
-		char *pathname_dir, *new_path = NULL;
-		if (olddirfd == AT_FDCWD)
-		{
-			// pathname_dir = getenv("PWD");
-			// new_path = checkHerculesPath(pathname_dir);
-			// pathname_dir = NULL;
-			new_path = checkHerculesPath(oldpath);
-			pathname_dir = NULL;
-		}
-		else
-		{
-			pathname_dir = map_fd_search_by_val(map_fd, olddirfd);
-		}
+		char *old_pathname_dir = NULL;
+		char *old_new_path = NULL;
+		char *new_pathname_dir = NULL;
+		char *new_new_path = NULL;
+		// int to_free_old_path = 0, to_free_new_path = 0;
 
-		if (pathname_dir != NULL || new_path != NULL)
+		// ResolvePathsAndFD(olddirfd, old_path, old_pathname_dir, old_new_path);
+		ResolvePathsAndFD(olddirfd, oldpath, &old_pathname_dir, &old_new_path);
+		ResolvePathsAndFD(newdirfd, newpath, &new_pathname_dir, &new_new_path);
+
+		// if (pathname_dir != NULL || new_path != NULL)
+		if (old_new_path || old_pathname_dir || new_new_path || new_pathname_dir)
+		// if (old_new_path || new_new_path)
 		{
-			slog_live("[POSIX] Calling Hercules 'renameat2', flags=%d, olddirfd=%d, oldpath=%s, newdirfd=%d, newpath=%s", flags, olddirfd, oldpath, newdirfd, newpath);
+
+			// size_t len = strlen(new_new_path);
+			// if (len > 0 && new_new_path[len - 1] == '/')
+			// {
+			// 	strcat(new_new_path, old_new_path);
+			// }
+
+			// TODO: check if old path is directory.
+
+			// TODO: check if new path is directory.
+
+			slog_live("[POSIX] Calling Hercules 'renameat2', flags=%d, newdirfd=%d, oldpath=%s, newdirfd=%d, newpath=%s", flags, newdirfd, oldpath, newdirfd, newpath);
 			int is_absolute_path = IsAbsolutePath(oldpath);
 
-			// If pathname is absolute, then dir_fd is ignored.
+			// If newpath is absolute, then newdirfd is ignored.
 			if (is_absolute_path == 1)
 			{
 				slog_live("[POSIX] is absolute, 'renameat2', oldpath=%s", oldpath);
 				ret = rename(oldpath, newpath);
 			}
-			else if (is_absolute_path == 0) // pathname is relative.
+			else if (is_absolute_path == 0) // newpath is relative.
 			{
-				if (olddirfd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
+				if (newdirfd == AT_FDCWD) // newdirfd is the special value AT_FDCWD.
 				{						  // TO CHECK!
-					slog_live("[POSIX] is relative, current directory, 'renameat2', oldpath=%s", oldpath);
+					slog_live("[POSIX] is relative, current directory, 'renameat2', newpath=%s", newpath);
 					// pathname is interpreted relative to the current working directory of the calling process (like real_open).
 					ret = rename(oldpath, newpath);
 				}
@@ -4747,8 +4693,8 @@ extern "C"
 				{
 					// // get the pathname of the directory pointed by dir_fd if it is storage in the local map "map_fd".
 					char absolute_pathname[PATH_MAX];
-					char *dirr = pathname_dir + strlen("imss://");
-					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, oldpath);
+					char *dirr = new_pathname_dir + strlen("imss://");
+					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, newpath);
 
 					// char *new_path = checkHerculesPath(absolute_pathname);
 					//  slog_live("[POSIX] is relative, 'renameat2', new_path=%s", new_path);
@@ -4757,9 +4703,11 @@ extern "C"
 				}
 			}
 
-			slog_live("[POSIX] Ending Hercules 'renameat2', ret=%d, errno=%d:%s\n", ret, errno, strerror(errno));
-			if (new_path != NULL)
-				free(new_path);
+			slog_live("[POSIX] Ending Hercules 'renameat2', ret=%d\n", ret);
+			if (old_new_path)
+				free(old_new_path);
+			if (new_new_path)
+				free(new_new_path);
 		}
 		else
 		{
@@ -4780,7 +4728,6 @@ extern "C"
 
 		if (!init)
 		{
-			// slog_live("[POSIX %d] Calling Real '__fxstat64'", rank);
 			return real__fxstat64(ver, fd, buf);
 		}
 
@@ -4941,7 +4888,7 @@ extern "C"
 	{
 		if (!real_readlinkat)
 		{
-			real_readlinkat = (ssize_t(*)(int, const char *, char *, size_t))dlsym(RTLD_NEXT, __func__);
+			real_readlinkat = (ssize_t (*)(int, const char *, char *, size_t))dlsym(RTLD_NEXT, __func__);
 		}
 
 		if (!init)
@@ -5153,49 +5100,60 @@ extern "C"
 			struct stat stat_buf;
 			int permissions = 0;
 			slog_live("Calling Hercules 'access', new_path=%s", new_path);
-			ret = imss_refresh(new_path);
-			// if (ret < 0)
-			// {
-			// 	// errno = -ret;
-			// 	ret = -1;
-			// 	// perror("ERRIMSS_ACCESS_IMSSREFRESH");
-			// }
-			ret = imss_getattr(new_path, &stat_buf);
-			if (ret < 0)
+
+			// Skip special case where the mount point is checked.
+			// TODO: change imss:// for a variable.
+			if (!strncmp(new_path, "imss://", strlen(new_path)))
 			{
-				errno = -ret;
-				ret = -1;
-				// perror("ERRIMSS_ACCESS_IMSSGETATTR");
+				ret = 0;
 			}
 			else
 			{
-				errno = 0;
-				// ret = imss_getattr(new_path, &stat_buf);
+				ret = imss_refresh(new_path);
 				// if (ret < 0)
 				// {
-				// 	errno = -ret;
+				// 	// errno = -ret;
 				// 	ret = -1;
-				// 	// perror("ERRIMSS_ACCESS_IMSSGETATTR");
+				// 	// perror("ERRIMSS_ACCESS_IMSSREFRESH");
 				// }
-				// else
+				ret = imss_getattr(new_path, &stat_buf);
+				if (ret < 0)
 				{
-					/* check permissions */
-					if ((mode & F_OK) == F_OK)
-						permissions |= F_OK; /* file exists */
-					if ((mode & R_OK) == R_OK && (stat_buf.st_mode & S_IRUSR))
-						permissions |= R_OK; /* read permissions granted */
-					if ((mode & W_OK) == W_OK && (stat_buf.st_mode & S_IWUSR))
-						permissions |= W_OK; /* write permissions granted */
-					if ((mode & X_OK) == X_OK && (stat_buf.st_mode & S_IXUSR))
-						permissions |= X_OK; /* execute permissions granted */
+					errno = -ret;
+					ret = -1;
+					// perror("ERRIMSS_ACCESS_IMSSGETATTR");
+				}
+				else
+				{
+					errno = 0;
+					// ret = imss_getattr(new_path, &stat_buf);
+					// if (ret < 0)
+					// {
+					// 	errno = -ret;
+					// 	ret = -1;
+					// 	// perror("ERRIMSS_ACCESS_IMSSGETATTR");
+					// }
+					// else
+					{
+						/* check permissions */
+						if ((mode & F_OK) == F_OK)
+							permissions |= F_OK; /* file exists */
+						if ((mode & R_OK) == R_OK && (stat_buf.st_mode & S_IRUSR))
+							permissions |= R_OK; /* read permissions granted */
+						if ((mode & W_OK) == W_OK && (stat_buf.st_mode & S_IWUSR))
+							permissions |= W_OK; /* write permissions granted */
+						if ((mode & X_OK) == X_OK && (stat_buf.st_mode & S_IXUSR))
+							permissions |= X_OK; /* execute permissions granted */
 
-					/* check if all the tested permissions are granted */
-					if (mode == permissions)
-						ret = 0;
-					else
-						ret = -1;
+						/* check if all the tested permissions are granted */
+						if (mode == permissions)
+							ret = 0;
+						else
+							ret = -1;
+					}
 				}
 			}
+
 			// pthread_mutex_unlock(&system_lock);
 			slog_live("[POSIX]. End Hercules 'access', new_path=%s ret=%d\n", new_path, ret);
 			free(new_path);
@@ -5391,6 +5349,101 @@ extern "C"
 			slog_full("[POSIX] Calling real 'chdir', pathname=%s", pathname);
 			ret = real_chdir(pathname);
 			slog_full("[POSIX] Ending real 'chdir', pathname=%s, ret=%d\n", pathname, ret);
+		}
+
+		return ret;
+	}
+
+	int utimensat(int dirfd, const char *pathname, const struct timespec times[_Nullable 2], int flags)
+	{
+		if (!real_utimensat)
+			real_utimensat = (int (*)(int, const char *, const struct timespec *, int))dlsym(RTLD_NEXT, "utimensat");
+
+		if (!init)
+		{
+			return real_utimensat(dirfd, pathname, times, flags);
+		}
+
+		errno = 0;
+		int ret = 0;
+		char *pathname_dir, *new_path = NULL;
+		mode_t new_mode;
+		new_mode |= S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH;
+
+		if (dirfd == AT_FDCWD)
+		{
+			// pathname_dir = getenv("PWD");
+			// new_path = checkHerculesPath(pathname_dir);
+			// pathname_dir = NULL;
+			new_path = checkHerculesPath(pathname);
+			pathname_dir = NULL;
+		}
+		else
+		{
+			pathname_dir = map_fd_search_by_val(map_fd, dirfd);
+		}
+
+		if (pathname_dir != NULL || new_path != NULL)
+		{
+			slog_live("[POSIX] Calling Hercules 'utimensat' flags=%d, dirfd=%d, pathname_dir=%s, pathname=%s", flags, dirfd, pathname_dir, pathname);
+			int is_absolute_path = IsAbsolutePath(pathname);
+
+			// If pathname is absolute, then dir_fd is ignored.
+			if (is_absolute_path == 1)
+			{
+				// char *new_path = checkHerculesPath(pathname);
+				slog_live("[POSIX] is absolute, 'utimensat', pathname=%s", pathname);
+
+				ret = generalOpen((char *)pathname, flags, new_mode, -1);
+				// ret = generalOpen(new_path, flags, mode);
+				// free(new_path);
+			}
+			else if (is_absolute_path == 0) // pathname is relative.
+			{
+				if (dirfd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
+				{					   // TO CHECK!
+					// char *new_path = checkHerculesPath(pathname);
+					// slog_live("[POSIX] is relative, current directory, 'unlinkat', new_path=%s", new_path);
+					slog_live("[POSIX] is relative, current directory, 'utimensat', pathname=%s", pathname);
+					// pathname is interpreted relative to the current working directory of the calling process (like real_open).
+					// ret = generalOpen(new_path, flags, mode);
+					ret = generalOpen((char *)pathname, flags, new_mode, -1);
+					// free(new_path);
+				}
+				else
+				{
+					// // get the pathname of the directory pointed by dir_fd if it is storage in the local map "map_fd".
+					// char *pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
+					// if (pathname_dir == NULL)
+					// { // if dir_fd is not storage locally
+					// 	// search dir_fd on the metadata server.
+					// 	slog_error("[POSIX] dir_fd=%d could not be resolved.");
+					// 	return -1;
+					// }
+
+					char absolute_pathname[PATH_MAX];
+					char *dirr = pathname_dir + strlen("imss://");
+					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
+
+					// char *new_path = checkHerculesPath(absolute_pathname);
+					//  slog_live("[POSIX] is relative, 'unlinkat', new_path=%s", new_path);
+					slog_live("[POSIX] is relative, 'utimensat', absolute_pathname=%s", absolute_pathname);
+					ret = generalOpen(absolute_pathname, flags, new_mode, -1);
+
+					// ret = generalOpen(new_path, flags, mode);
+					// free(new_path);
+				}
+			}
+
+			slog_live("[POSIX] Ending Hercules 'utimensat', ret=%d\n", ret);
+			if (new_path != NULL)
+				free(new_path);
+		}
+		else
+		{
+			slog_full("[POSIX] Calling real 'utimensat' flags=%d, dir_fd=%d, pathname=%s", flags, dirfd, pathname);
+			ret = real_utimensat(dirfd, pathname, times, flags);
+			slog_full("[POSIX] Ending real 'utimensat' flags=%d, dir_fd=%d, pathname=%s", flags, dirfd, pathname);
 		}
 
 		return ret;
@@ -5702,6 +5755,38 @@ extern "C"
 
 	// 	return ret;
 	// }
+
+	void *prefetch_function(void *th_argv)
+	{
+		for (;;)
+		{
+
+			pthread_mutex_lock(&lock);
+			while (prefetch_ds < 0)
+			{
+				pthread_cond_wait(&cond_prefetch, &lock);
+			}
+
+			if (prefetch_first_block < prefetch_last_block && prefetch_first_block != -1)
+			{
+				// printf("Se activo Prefetch path:%s$%d-$%d\n",prefetch_path, prefetch_first_block, prefetch_last_block);
+				int exist_first_block, exist_last_block, position;
+				char *buf = map_get_buffer_prefetch(map_prefetch, prefetch_path, &exist_first_block, &exist_last_block);
+				int err = readv_multiple(prefetch_ds, prefetch_first_block, prefetch_last_block, buf, IMSS_BLKSIZE, prefetch_offset, IMSS_DATA_BSIZE * (prefetch_last_block - prefetch_first_block));
+				if (err == -1)
+				{
+					pthread_mutex_unlock(&lock);
+					continue;
+				}
+				map_update_prefetch(map_prefetch, prefetch_path, prefetch_first_block, prefetch_last_block);
+			}
+
+			prefetch_ds = -1;
+			pthread_mutex_unlock(&lock);
+		}
+
+		pthread_exit(NULL);
+	}
 
 #ifdef __cplusplus
 }

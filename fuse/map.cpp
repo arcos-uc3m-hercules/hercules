@@ -37,6 +37,7 @@ extern "C"
 	}
 
 	// Insert the element "p = {v,stat,aux}" with key "k" to the map "map".
+	// This info is used by the "fd_lookup" function to avoid extra calls for the block 0.
 	void map_put(void *map, char *k, int v, struct stat stat, char *aux)
 	{
 		std::unique_lock<std::mutex> lck(map_lock);
@@ -76,8 +77,8 @@ extern "C"
 		{
 			slog_debug("[map] element with key %s was not find", k);
 		}
-		m->erase(std::string(k));
-		slog_debug("[map] finish map_erase");
+		int num_elements_erased = m->erase(std::string(k));
+		slog_debug("[map] finish map_erase, num_elements_erased=%d", num_elements_erased);
 		// return ret;
 	}
 
@@ -145,6 +146,33 @@ extern "C"
 			m->insert(std::move(node));
 		}
 		return 1;
+	}
+
+	void map_free(void *map)
+	{
+		std::unique_lock<std::mutex> lck(map_lock);
+		Map *m = reinterpret_cast<Map *>(map);
+		// auto search = m->find(std::string(k));
+
+		for (auto it = m->cbegin(); it != m->cend(); ++it)
+		{
+			free(it->second.aux);
+		}
+
+		m->clear();
+
+		// if (search != m->end())
+		// {
+		// 	free(search->second.aux);
+		// 	slog_debug("[map] erasing element with key %s", k);
+		// }
+		// else
+		// {
+		// 	slog_debug("[map] element with key %s was not find", k);
+		// }
+		// int num_elements_erased = m->erase(std::string(k));
+		// slog_debug("[map] finish map_erase, num_elements_erased=%d", num_elements_erased);
+		// return ret;
 	}
 
 } // extern "C"

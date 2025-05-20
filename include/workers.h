@@ -19,6 +19,8 @@
 #define CLOSE_OP 7
 #define OPEN_OP 8
 // #define STATFS			  7
+#define DATASET_OP 8
+#define INSTANCE_OP 9
 
 #define WRITE_OP 1
 #define WRITEV 7
@@ -34,7 +36,7 @@
 #define KB 1024
 #define GB 1073741824
 
-#define MAX_THREAD_POOL_SIZE 16
+//#define MAX_THREAD_POOL_SIZE 16
 
 // Set of arguments passed to each server thread.
 typedef struct
@@ -59,12 +61,15 @@ typedef struct
 	ucp_address_t *peer_address;
 	uint64_t worker_uid;
 	char *tmp_file_path;
+	u_int16_t hercules_thread_pool_size;
+	int thread_id;
 	struct arguments args;
 } p_argv;
 
 // Thread method attending client data requests.
+void *hercules_ucx_server(void *th_argv);
 void *srv_worker(void *th_argv);
-int srv_worker_helper(p_argv *arguments, const char *req);
+int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps);
 void *Checkpoint(void *th_argv);
 void *Snapshot(void *th_argv);
 
@@ -73,7 +78,7 @@ void *garbage_collector(void *th_argv);
 
 // Thread method attending client metadata requests.
 void *stat_worker(void *th_argv);
-int stat_worker_helper(p_argv *arguments, char *req);
+int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps);
 
 // Dispatcher thread method distributing clients among the pool server threads.
 void *srv_attached_dispatcher(void *th_argv);

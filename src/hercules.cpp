@@ -116,15 +116,15 @@ void *imss_server(void *arg_)
 	// Amount of memory enabled for execution.
 	uint64_t data_reserved;
 
-	region_locks = (pthread_mutex_t *)malloc(IMSS_THREAD_POOL * sizeof(pthread_mutex_t));
+	region_locks = (pthread_mutex_t *)malloc(HERCULES_THREAD_POOL_SIZE * sizeof(pthread_mutex_t));
 
 	// Special independent thread as a garbage collector
 	pthread_t thread_garbage_collector;
 
 	// Initialize pool of threads.
-	pthread_t threads[(IMSS_THREAD_POOL + 1)];
+	pthread_t threads[(HERCULES_THREAD_POOL_SIZE + 1)];
 	// Thread arguments.
-	p_argv arguments[(IMSS_THREAD_POOL + 1)];
+	p_argv arguments[(HERCULES_THREAD_POOL_SIZE + 1)];
 
 	// Add port number to thread arguments.
 	arguments[0].port = (arg.port)++;
@@ -164,9 +164,9 @@ void *imss_server(void *arg_)
 	std::shared_ptr<map_records> buffer_map(new map_records(data_reserved));
 	// buffer_address = (unsigned char *) malloc(sizeof(char)*data_reserved );
 
-	buffer_segment = data_reserved / IMSS_THREAD_POOL;
+	buffer_segment = data_reserved / HERCULES_THREAD_POOL_SIZE;
 
-	for (int32_t i = 1; i < (IMSS_THREAD_POOL + 1); i++)
+	for (int32_t i = 1; i < (HERCULES_THREAD_POOL_SIZE + 1); i++)
 	{
 		arguments[i].port = (arg.port)++;
 		// Add the reference to the map into the set of thread arguments.
@@ -211,7 +211,7 @@ void *imss_server(void *arg_)
 	}
 
 	// Wait for threads to finish.
-	for (int32_t i = 0; i < (IMSS_THREAD_POOL + 1); i++)
+	for (int32_t i = 0; i < (HERCULES_THREAD_POOL_SIZE + 1); i++)
 	{
 		if (pthread_join(threads[i], NULL) != 0)
 		{
@@ -279,15 +279,15 @@ imss_metadata(void *arg_)
 	data_reserved -= bytes_written;
 
 	// Buffer segment size assigned to each thread.
-	int64_t buffer_segment_ = data_reserved / IMSS_THREAD_POOL;
+	int64_t buffer_segment_ = data_reserved / HERCULES_THREAD_POOL_SIZE;
 
 	// Initialize pool of threads.
-	pthread_t threads[(IMSS_THREAD_POOL + 1)];
+	pthread_t threads[(HERCULES_THREAD_POOL_SIZE + 1)];
 	// Thread arguments.
-	p_argv arguments[(IMSS_THREAD_POOL + 1)];
+	p_argv arguments[(HERCULES_THREAD_POOL_SIZE + 1)];
 
 	// Execute all threads.
-	for (int32_t i = 0; i < (IMSS_THREAD_POOL + 1); i++)
+	for (int32_t i = 0; i < (HERCULES_THREAD_POOL_SIZE + 1); i++)
 	{
 		// Add port number to set of thread arguments.
 		arguments[i].port = (arg.port)++;
@@ -319,7 +319,7 @@ imss_metadata(void *arg_)
 	}
 
 	// Wait for the threads to conclude.
-	for (int32_t i = 0; i < (IMSS_THREAD_POOL + 1); i++)
+	for (int32_t i = 0; i < (HERCULES_THREAD_POOL_SIZE + 1); i++)
 	{
 		if (pthread_join(threads[i], NULL) != 0)
 		{

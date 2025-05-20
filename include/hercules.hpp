@@ -11,7 +11,7 @@
 #include "cfg_parse.h"
 // #include "hercules.hpp"
 
-static u_int16_t IMSS_THREAD_POOL = 1;
+static u_int16_t HERCULES_THREAD_POOL_SIZE = 1;
 
 // using std::string;
 

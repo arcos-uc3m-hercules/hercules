@@ -21,10 +21,12 @@ using std::pair;
 using std::string;
 
 extern StsHeader *mem_pool;
+size_t MAX_POOL_SIZE = 10L * GB;
 
-extern int32_t __thread current_dataset;   // Dataset whose policy has been set last.
-extern dataset_info __thread curr_dataset; // Currently managed dataset.
-extern imss __thread curr_imss;
+// __thread
+extern int32_t current_dataset;	  // Dataset whose policy has been set last.
+extern dataset_info curr_dataset; // Currently managed dataset.
+extern imss curr_imss;
 
 extern std::mutex mtx;
 extern std::condition_variable cv;
@@ -58,7 +60,7 @@ std::string map_records::get_head_element()
 {
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	it = buffer.begin();
 	// string key = it->first();
 	string key = it->first;
@@ -175,6 +177,7 @@ int32_t map_records::put(std::string key, void *address, uint64_t length)
 	if (quantity_occupied + length > total_size && total_size > 0)
 	{ // out of space
 		fprintf(stderr, "[Map record] Out of space  %ld/%ld.\n", quantity_occupied + length, total_size);
+		slog_error("Out of space  %ld/%ld.\n", quantity_occupied + length, total_size);
 		return -1;
 	}
 
@@ -182,6 +185,8 @@ int32_t map_records::put(std::string key, void *address, uint64_t length)
 	// uname(&detect);
 	// DPRINT("Nodename    - %s add in map=%s\n", detect.nodename, key.c_str());
 	// fprintf(stderr, "key=%s, quantity=%ld total size=%ld\n", key.c_str(), quantity_occupied, total_size);
+	// if(quantity_occupied % ) {
+	// }
 	quantity_occupied = quantity_occupied + length;
 	buffer.insert({key, value});
 	return 0;
@@ -221,7 +226,7 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 
 	// fprintf(stderr, "GET KEY=%s\n",key.c_str());
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -229,16 +234,29 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	// uname(&detect);
 
 	if (buffer.empty())
+	{
+		slog_debug("map is empty");
 		return 0;
+	}
 
 	// Search for the address related to the key.
 	it = buffer.find(key);
 	// Check if the value did exist within the map.
 	if (it == buffer.end())
 	{
+		slog_debug("%s not found in the map", key.c_str());
+		size_t len = strlen(key.c_str());
+		if (len > 0 && key.c_str()[len - 1] != '/')
+		{
+			key += '/';
+			it = buffer.find(key);
+		}
+		// if (it == buffer.end())
+		// {
 		// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
 		// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
 		return 0;
+		// }
 	}
 
 	// fprintf(stderr,"GET-%s \n", key.c_str());
@@ -319,7 +337,7 @@ int32_t map_records::update(std::string key, void *add_, uint64_t length)
 {
 
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -367,6 +385,25 @@ int32_t map_records::update_simple(std::string key, int value)
 	return 1;
 }
 
+int32_t map_records::delete_metadata_stat_worker(std::string key)
+{
+	std::unique_lock<std::mutex> lock(*mut);
+	int num_elements_erased = buffer.erase(key);
+	if (num_elements_erased == 0)
+	{
+		// const char *last = key.c_str() + strlen(key.c_str()) - 1;
+		// if (last[0] != '/')
+		size_t len = strlen(key.c_str());
+		if (len > 0 && key.c_str()[len - 1] != '/')
+		{
+			key += '/';
+			num_elements_erased = delete_metadata_stat_worker(key);
+		}
+	}
+
+	return num_elements_erased;
+}
+
 /***
  * @brief Method renaming from stat_worker
  * @return 1 in case of success or 0 in case of error.
@@ -374,7 +411,7 @@ int32_t map_records::update_simple(std::string key, int value)
 int32_t map_records::rename_metadata_stat_worker(std::string old_key, std::string new_key)
 {
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -383,8 +420,8 @@ int32_t map_records::rename_metadata_stat_worker(std::string old_key, std::strin
 	// Check if the value did exist within the map.
 	if (it == buffer.end())
 	{
-		// 0 if the key does not exist.
-		return 0;
+		// -1 if the key does not exist.
+		return -1;
 	}
 	else
 	{
@@ -406,7 +443,7 @@ int32_t map_records::rename_metadata_stat_worker(std::string old_key, std::strin
 int32_t map_records::rename_data_srv_worker(std::string old_key, std::string new_key)
 {
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -427,6 +464,12 @@ int32_t map_records::rename_data_srv_worker(std::string old_key, std::string new
 		}
 	}
 
+	// check if the vector is empty, meaning that the old_dir key is not valid.
+	if (vec.size() == 0)
+	{
+		return 1;
+	}
+
 	std::vector<string>::iterator i;
 	for (i = vec.begin(); i < vec.end(); i++)
 	{
@@ -443,7 +486,7 @@ int32_t map_records::rename_data_srv_worker(std::string old_key, std::string new
 	}
 
 	// Return the address associated to the record.
-	return 1;
+	return 0;
 }
 
 // Method renaming from srv_worker
@@ -451,7 +494,7 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 {
 	// printf("rename data_dir_dir_srv_worker old_dir=%s dir_dest=%s\n",old_dir.c_str(), rdir_dest.c_str());
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
@@ -474,6 +517,12 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 		}
 	}
 
+	// check if the vector is empty, meaning that the old_dir key is not valid.
+	if (vec.size() == 0)
+	{
+		return -1;
+	}
+
 	std::vector<string>::iterator i;
 	for (i = vec.begin(); i < vec.end(); i++)
 	{
@@ -490,7 +539,7 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 		buffer.insert(std::move(node));
 	}
 
-	return 1;
+	return 0;
 }
 
 // Method renaming from stat_worker
@@ -498,7 +547,7 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 {
 	// printf("rename_metadata_dir_dir_stat_worker\n");
 	// Map iterator that will be searching for the key.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
@@ -521,6 +570,12 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 		}
 	}
 
+	// check if the vector is empty, meaning that the old key is not valid.
+	if (vec.size() == 0)
+	{
+		return -1;
+	}
+
 	std::vector<string>::iterator i;
 	for (i = vec.begin(); i < vec.end(); i++)
 	{
@@ -535,7 +590,7 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 		buffer.insert(std::move(node));
 	}
 
-	return 1;
+	return 0;
 }
 
 /**
@@ -605,7 +660,9 @@ int32_t map_records::cleaning()
 
 int32_t map_records::cleaning_specific(std::string new_key)
 {
+	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
+	int32_t ret = 1;
 
 	// borrar todos los bloques con mismo path/key
 	for (const auto &it2 : buffer)
@@ -622,20 +679,42 @@ int32_t map_records::cleaning_specific(std::string new_key)
 		}
 	}
 
+	if (vec.size() == 0)
+	{
+		size_t len = strlen(new_key.c_str());
+		if (len > 0 && new_key.c_str()[len - 1] != '/')
+		{
+			new_key += '/';
+			ret = cleaning_specific(new_key);
+		}
+		return ret;
+	}
+
 	// Block the access to the map structure.
-	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string>::iterator i;
+	uint64_t item_mem_size = 0;
 	for (i = vec.begin(); i != vec.end(); i++)
 	{
 		// std::cout << "Garbage Collector: Deleting " << *i << "\n";
 		auto item = buffer.find(*i);
-		// push the memory pointer of this block inside the mem pool to be reused.
-		StsQueue.push(mem_pool, item->second.first);
-		quantity_occupied = quantity_occupied - item->second.second;
+		item_mem_size = item->second.second;
+		// checks if the mem pool has a slot.
+		if (StsQueue.size(mem_pool) + item_mem_size >= MAX_POOL_SIZE)
+		{
+			slog_debug("Freeing memory of key %s", item->first.c_str());
+			free(item->second.first); // free the memory of this block.
+		}
+		else
+		{
+			slog_debug("Pushing memory of key %s into mem_pool", item->first.c_str());
+			// push the memory pointer of this block inside the mem pool to be reused.
+			StsQueue.push(mem_pool, item->second.first);
+		}
+		quantity_occupied = quantity_occupied - item_mem_size;
 		// fprintf(stderr, "quantity_occupied = %lu\n", quantity_occupied);
-		// free(item->second.first);
 		// erase the dataset information from the map.
 		// fprintf(stderr, "Erasing element with key %s\n", i);
+		slog_debug("Erasing element with key %s", item->first.c_str());
 		buffer.erase(*i);
 		buffer_snapshot.erase(*i);
 	}
@@ -774,7 +853,6 @@ char *map_records::GetDataOfFile(string file_name, uint64_t *file_size_occupied)
 }
 
 // TODO: make a function to allow each server to write the collected data.
-
 
 /**
  * @brief Merge all data comming from the data servers following a Posix format.
@@ -1099,8 +1177,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 						  block_size,
 						  time_taken_for_collecting,
 						  time_taken_for_merge,
-						  POLICY
-						);
+						  POLICY);
 
 				int find = erase_snapshot_element(key);
 				if (find)
@@ -1387,8 +1464,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 						  block_size,
 						  time_taken_for_collecting,
 						  time_taken_for_merge,
-						  POLICY
-						);
+						  POLICY);
 
 				int find = erase_snapshot_element(key);
 				if (find)

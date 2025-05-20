@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+// #include <shared_mutex>
 #include "hercules.hpp"
 
 // Structure storing all information related to a certain IMSS.
@@ -48,10 +49,7 @@ public:
 	int32_t erase_head_element();
 	// Used in stat_worker threads
 	// Method deleting a record.
-	int32_t delete_metadata_stat_worker(std::string key)
-	{
-		return buffer.erase(key);
-	}
+	int32_t delete_metadata_stat_worker(std::string key);
 
 	// Method storing a new record.
 	int32_t put(std::string key, void *address, uint64_t length);
@@ -95,12 +93,12 @@ public:
 	int32_t Snapshot(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator begin()
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator begin()
 	{
 		return buffer.begin();
 	}
 	// Method retrieving a reference to the end of the map.
-	std::unordered_map<std::string, std::pair<void *, uint64_t>>::iterator end()
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator end()
 	{
 		return buffer.end();
 	}
@@ -114,7 +112,7 @@ public:
 private:
 	// Map structure tracking stored records (by default sorts keys with '<' op).
 	// <key(file uri), <data, lenght>>
-	std::unordered_map<std::string, std::pair<void *, uint64_t>> buffer;
+	std::map<std::string, std::pair<void *, uint64_t>> buffer;
 	std::map<std::string, int> buffer_snapshot;
 	// std::unordered_map<std::string, int> buffer_broadcast;
 	std::map<std::string, std::pair<void *, uint64_t>> buffer_broadcast;
@@ -123,6 +121,7 @@ private:
 	uint64_t total_size;
 	uint64_t quantity_occupied = 0;
 	std::mutex *mut;
+	// std::shared_mutex mut;
 };
 
 #endif

@@ -30,9 +30,12 @@ extern "C"
 		std::pair<std::string, long> value(pathname, offset);
 		std::pair<std::map<int, std::pair<std::string, long>>::iterator, bool> ret;
 		ret = m->insert({fd, value});
-		if(ret.second==false) {
+		if (ret.second == false)
+		{
 			return -1;
-		} else {
+		}
+		else
+		{
 			return 1;
 		}
 	}
@@ -75,20 +78,41 @@ extern "C"
 
 	int map_fd_erase_by_pathname(void *map, const char *pathname)
 	{
+		slog_debug("Erasing %s from the map", pathname);
 		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
+		char aux_path[PATH_MAX] = {0};
+		
+		size_t len = strlen(pathname);
+		if (len > 0 && pathname[len - 1] != '/')
+		{
+			strcat(aux_path, pathname);
+			strcat(aux_path, "/");
+		}
 
 		for (auto &it : *m)
 		{
 			const char *val = it.second.first.c_str();
 			// if (!strncmp(val, pathname, strlen(val)))
-			if (!strcmp(val, pathname))
+			slog_debug("pathname=%s, aux_path=%s", pathname, aux_path);
+			if (!strcmp(val, pathname) || !strcmp(val, aux_path))
 			{
 				int fd = it.first;
 				m->erase(fd);
 				return 1;
 			}
 		}
+		// if (last[0] != '/')
+		// {
+		// 	char aux_path[PATH_MAX] = {0};
+		// 	strcat(aux_path, pathname);
+		// 	strcat(aux_path, "/");
+		// 	int ret = map_fd_erase_by_pathname(map, aux_path);
+		// 	if (ret)
+		// 	{
+		// 		return ret;
+		// 	}
+		// }
 		return -1;
 	}
 
@@ -112,8 +136,8 @@ extern "C"
 		}
 	}
 
-	/* 
-	Note: this function should also return a pointer to the offset 
+	/*
+	Note: this function should also return a pointer to the offset
 	to avoid to use "map_fd_search", which add extra overhead.
 	*/
 	char *map_fd_search_by_val(void *map, const int fd)
