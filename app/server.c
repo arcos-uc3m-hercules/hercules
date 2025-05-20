@@ -36,12 +36,12 @@ struct arguments args;
 std::shared_ptr<map_records> g_map;
 
 /* UCP objects */
-ucp_worker_h ucp_worker;
+ucp_worker_h ucp_worker = NULL;
 
 // ucp_ep_h pub_ep;
-ucp_address_t *req_addr;
-ucp_ep_h *metadata_endpoints;
-size_t req_addr_len;
+ucp_address_t *req_addr = NULL;
+ucp_ep_h *metadata_endpoints = NULL; 
+size_t req_addr_len = 0;
 
 unsigned long number_active_storage_servers = 0; // stores the current number of active storage servers.
 pthread_t *threads;
@@ -123,18 +123,18 @@ int32_t main(int32_t argc, char **argv)
 	pthread_cond_init(&global_finish_cond, NULL);
 
 	/* UCP objects */
-	ucp_context_h ucp_context;
+	ucp_context_h ucp_context = NULL;
 
 	// clock_t t;
-	double time_taken;
+	double time_taken = 0.0;
 	int init_number_of_server = 1;
 
-	uint64_t bind_port;
+	uint64_t bind_port = 0;
 	char *stat_add = NULL;
 	char *deployfile = NULL;
 	int64_t buffer_size = 0, stat_port = 0, num_servers = 0;
 	ucp_ep_params_t ep_params;
-	ucp_address_t *peer_addr;
+	ucp_address_t *peer_addr = NULL;
 	size_t addr_len = 0;
 
 	// memory pool stuff
@@ -255,7 +255,7 @@ int32_t main(int32_t argc, char **argv)
 	// get max RAM we could use for storage
 	max_system_ram_allowed = (uint64_t)sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGESIZE) * RAM_STORAGE_USE_PCT;
 
-	fprintf(stderr, "max_system_ram_allowed=%lu\n", max_system_ram_allowed);
+	// fprintf(stderr, "max_system_ram_allowed=%lu\n", max_system_ram_allowed);
 
 	// make sure we don't use more memory than available
 	if (max_storage_size >= max_system_ram_allowed || max_storage_size < 0)
@@ -647,6 +647,7 @@ int32_t main(int32_t argc, char **argv)
 		else
 		{
 			aux_idx = i - extra_threads;
+			fprintf(stdout, "Init worker %d\n", aux_idx);
 			ret = init_worker(ucp_context, &ucp_worker_threads[aux_idx]);
 			if (ret != 0)
 			{
@@ -694,29 +695,6 @@ int32_t main(int32_t argc, char **argv)
 				slog_fatal("HERCULES_ERR_UCX_SERVER_DEPLOY");
 				return -1;
 			}
-			// if (args.type == TYPE_DATA_SERVER)
-			// {
-			// 	slog_debug("[SERVER] Creating data thread.");
-			// 	if (pthread_create(&threads[i], NULL, srv_worker, (void *)&arguments[i]) == -1)
-			// 	{
-			// 		// Notify thread error deployment.
-			// 		perror("HERCULES_ERR_SRV_WORKER_DEPLOY");
-			// 		slog_fatal("HERCULES_ERR_SRV_WORKER_DEPLOY");
-			// 		return -1;
-			// 	}
-			// }
-			// // HERCULES Metadata server.
-			// else
-			// {
-			// 	slog_debug("[SERVER] Creating metadata thread.");
-			// 	if (pthread_create(&threads[i], NULL, stat_worker, (void *)&arguments[i]) == -1)
-			// 	{
-			// 		// Notify thread error deployment.
-			// 		perror("HERCULES_ERR_STAT_WORKER_DEPLOY");
-			// 		slog_fatal("HERCULES_ERR_STAT_WORKER_DEPLOY");
-			// 		return -1;
-			// 	}
-			// }
 		}
 	}
 
@@ -871,16 +849,22 @@ int32_t main(int32_t argc, char **argv)
 		}
 
 		for (int32_t i = 0; i < num_servers; i++)
+		{
 			free(my_imss.ips[i]);
+		}
+		free((void *)my_imss.status);
+		free((void *)my_imss.arr_num_active_storages);
 		free(my_imss.ips);
 	}
 
 	if (args.type == TYPE_DATA_SERVER)
 	{
-		// sleep(3);
+		if (args.id != 0) // wait for server 0 which has an extra task to do.
+			sleep(3);
 		int num_active_storages = 0;
 		while (true)
 		{
+			// stablish a connection to all data servers endpoints.
 			num_active_storages = open_imss(args.imss_uri);
 			// fprintf(stderr, "Hercules = %s\n", curr_imss.info.uri_);
 			if (num_active_storages < 0)
@@ -922,6 +906,32 @@ int32_t main(int32_t argc, char **argv)
 		unlink(tmp_file_path);
 	}
 
+	if (args.type == TYPE_DATA_SERVER)
+	{
+		for (int i = 0; i < args.num_metadata_servers; i++)
+		{
+			close_ucx_endpoint(ucp_worker, metadata_endpoints[i]);
+		}
+		imss_comm_cleanup();
+	}
+
+	// Release UCX resources used by the threads.
+	for (int i = 0; i < hercules_thread_pool_size; i++)
+	{
+		fprintf(stdout, "Releasing UCX resources for worker %d/%d\n", i, hercules_thread_pool_size);
+		fprintf(stdout, "ucp_worker_progress for worker %d\n", i);
+		// ucp_worker_progress(ucp_worker_threads[i]);
+		fprintf(stdout, "ucp_worker_flush for worker %d\n", i);
+		// ucp_worker_flush(ucp_worker_threads[i]);
+		fprintf(stdout, "ucp_worker_release_address for worker %d\n", i);
+		ucp_worker_release_address(ucp_worker_threads[i], local_addr[i]);
+		fprintf(stdout, "ucp_worker_flush for worker %d\n", i);
+		// ucp_worker_flush(ucp_worker_threads[i]);
+		fprintf(stdout, "ucp_worker_destroy for worker %d\n", i);
+		ucp_worker_destroy(ucp_worker_threads[i]);
+	}
+	fprintf(stdout, "All UCX resources for workers has been released\n");
+
 	// Write the metadata structures retrieved by the metadata server threads.
 	if (args.type == TYPE_METADATA_SERVER)
 	{
@@ -954,6 +964,13 @@ int32_t main(int32_t argc, char **argv)
 	// Close publisher socket.
 	// ep_close(ucp_worker, pub_ep, UCP_EP_CLOSE_MODE_FORCE);
 	// ep_close(ucp_worker, metadata_endpoints, UCP_EP_CLOSE_MODE_FORCE);
+	ucp_worker_flush(ucp_worker);
+	ucp_worker_release_address(ucp_worker, peer_addr);
+	if (args.type == TYPE_DATA_SERVER)
+	{
+		ucp_worker_release_address(ucp_worker, req_addr);
+	}
+	ucp_worker_flush(ucp_worker);
 	ucp_worker_destroy(ucp_worker);
 	ucp_cleanup(ucp_context);
 
@@ -1010,7 +1027,7 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 	// print all key/value elements.
 	double time_taken;
 	time_t t = clock();
-	void *address_;
+	void *address_ = NULL;
 	uint64_t block_size = -1;
 	int curr_map_size = 0;
 	const char *uri_ = NULL;

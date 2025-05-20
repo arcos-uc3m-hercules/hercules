@@ -2,6 +2,8 @@
 #SBATCH --job-name=hercules    # Job name
 #SBATCH --output=logs/hercules/%j_mdtest.log   # Standard output and error log
 #SBATCH --time=06:00:00               # Time limit hrs:min:sec
+#SBATCH --cpus-per-task=32
+
 ###SBATCH --exclude=broadwell-008,broadwell-010
 ###SBATCH --nodelist=broadwell-[013-028]
 ##SBATCH --mem=0
@@ -68,7 +70,7 @@ if [ -z "$CONFIG_PATH" ]; then
 else
    echo "Configuration file pass $CONFIG_PATH"
 #   export HERCULES_DEBUG_LEVEL=SLOG_TIME
-#   export HERCULES_DEBUG_LEVEL=SLOG_LIVE
+   export HERCULES_DEBUG_LEVEL=none
    source /beegfs/home/javier.garciablas/hercules/scripts/hercules start \
    -f "$CONFIG_PATH" 
    unset HERCULES_DEBUG_LEVEL

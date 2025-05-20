@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SCRIPT_NAME="mdtest_hercules_slurm.sh"
-TOTAL_NUMBER_OF_FILES=100000
+TOTAL_NUMBER_OF_FILES=10000
 
 ATTACHED=1
 

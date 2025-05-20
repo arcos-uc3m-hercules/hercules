@@ -867,7 +867,7 @@ int32_t open_imss(char *imss_uri)
 	// NUM_DATA_SERVERS = new_imss.info.num_storages;
 	NUM_DATA_SERVERS = new_imss.info.num_active_storages;
 
-	char str_NUM_DATA_SERVERS[10];
+	char str_NUM_DATA_SERVERS[10] = {'\0'};
 	sprintf(str_NUM_DATA_SERVERS, "%d", new_imss.info.num_active_storages);
 	setenv("HERCULES_CURR_ACTIVE_DATA_NODES", str_NUM_DATA_SERVERS, 1);
 
@@ -2599,7 +2599,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 		}
 	}
 	pthread_mutex_lock(&lock_network);
-	char key_[REQUEST_SIZE];
+	char key_[REQUEST_SIZE] = {'\0'};
 	// Key related to the requested data element.
 
 	// Request the concerned block to the involved servers.
@@ -2617,13 +2617,6 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 			slog_error("ERR_HERCULES_RENAME_DATASET_SRV_WORKER_DIR_DIR_SEND_REQ");
 			return -1;
 		}
-
-		// char result[RESPONSE_SIZE];
-		// if (recv_data(ucp_worker_data, ep, result, local_data_uid, 0) < 0)
-		// {
-		// 	perror("ERRIMSS_RECVDYNAMSTRUCT_RECV");
-		// 	return -1;
-		// }
 
 		size_t msg_length = 0;
 		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
@@ -2651,8 +2644,10 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 		// fprintf(stderr, "RESPONSE MSG=%s\n", (char *)result);
 		if (strncmp((const char *)result, MSG_RENAME_OP, strlen(MSG_RENAME_OP)))
 		{ // if the response message is different from "RENAME" it was an error.
-			perror("HERCULES_ERR_DATA_RENAME_DIR_FAILED");
-			slog_error("HERCULES_ERR_DATA_RENAME_DIR_FAILED");
+			char err_msg[MAX_ERR_MSG_LEN] = {'\0'};
+			sprintf(err_msg,"HERCULES_ERR_DATA_RENAME_DIR_FAILED: request=%s, result=%s", key_, (const char *)result);
+			// perror(err_msg);
+			slog_error("%s",err_msg);
 			// free(result);
 			// return -1;
 		}

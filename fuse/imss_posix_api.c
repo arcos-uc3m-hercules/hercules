@@ -520,7 +520,7 @@ int imss_readdir(const char *path, void *buf, posix_fill_dir_t filler, off_t off
 			// if (!error)
 			{
 				char *last = refs[i] + strlen(refs[i]) - 1;
-				slog_info("last=%s of %s", last, refs[i]);
+				// slog_info("last=%s of %s", last, refs[i]);
 				if (last[0] == '/')
 				{
 					last[0] = '\0';
@@ -2684,7 +2684,11 @@ int read_directory(const char *path, const char *parent)
 		}
 
 		// Construct the full path of the entry.
-		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+		// snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+		strncpy(full_path, path, sizeof(full_path) - strlen(full_path) - 1);
+		strncat(full_path, "/", sizeof(full_path) - strlen(full_path) - 1);
+		strncat(full_path, entry->d_name, sizeof(full_path) - strlen(full_path) - 1);
+
 		slog_debug("Entry=%s", full_path);
 
 		int fd = open(full_path, O_RDONLY);
@@ -2719,8 +2723,10 @@ int read_directory(const char *path, const char *parent)
 		}
 		// Format the Hercules path for this entry.
 		// parent directory (which includes the MOUNT POINT) + entry
-		snprintf(hercules_dir_path, sizeof(hercules_dir_path), "%s/%s", parent, entry->d_name);
-		// snprintf(hercules_dir_path, sizeof(hercules_dir_path), "%s/%s/%s/%s", MOUNT_POINT, parent, parent_bname, entry->d_name);
+		// snprintf(hercules_dir_path, sizeof(hercules_dir_path), "%s/%s", parent, entry->d_name);
+		strncpy(hercules_dir_path, parent, sizeof(hercules_dir_path) - strlen(hercules_dir_path) - 1);
+		strncat(hercules_dir_path, "/", sizeof(hercules_dir_path) - strlen(hercules_dir_path) - 1);
+		strncat(hercules_dir_path, entry->d_name, sizeof(hercules_dir_path) - strlen(hercules_dir_path) - 1);
 
 		// else
 		// 	snprintf(hercules_dir_path, sizeof(hercules_dir_path), "%s/%s/%s", MOUNT_POINT, parent_bname, entry->d_name);
@@ -2753,6 +2759,7 @@ int read_directory(const char *path, const char *parent)
 		perror("HERCULES_ERR_READ_DIRECTORY_CLOSEDIR");
 		slog_error("HERCULES_ERR_READ_DIRECTORY_CLOSEDIR: %s\n", path);
 	}
+	return 0;
 }
 
 int hercules_move_file_from_disk(int fd_old, const char *old_path, const char *new_path)
@@ -2771,7 +2778,7 @@ int hercules_move_file_from_disk(int fd_old, const char *old_path, const char *n
 		if (fd_old < 0)
 		{ // file does not exist.
 			slog_error("HERCULES_ERR_MOVE_OPEN_SYSTEM_FILE");
-			return -1;
+			return -ENOENT;
 		}
 	}
 
@@ -2781,7 +2788,7 @@ int hercules_move_file_from_disk(int fd_old, const char *old_path, const char *n
 	{
 		slog_error("HERCULES_ERR_RENAME_OPEN_HERCULES_FILE: %s", new_path);
 		close(fd_old);
-		return -1;
+		return -ENOENT;
 	}
 
 	// get old file stat.
@@ -2789,7 +2796,7 @@ int hercules_move_file_from_disk(int fd_old, const char *old_path, const char *n
 	{
 		perror("HERCULES_ERR_MOVE_FILE_FROM_DISK_STAT_SYSTEM_FILE");
 		slog_error("HERCULES_ERR_MOVE_FILE_FROM_DISK_STAT_SYSTEM_FILE");
-		return -1;
+		return -EAGAIN;
 	}
 
 	// old file size.
@@ -2798,12 +2805,11 @@ int hercules_move_file_from_disk(int fd_old, const char *old_path, const char *n
 	// read old file.
 	char *old_file_buffer = NULL;
 	old_file_buffer = (char *)malloc(old_file_size * sizeof(char));
-	// if(old_file_buffer == NULL) {
-	// 	perror("HERCULES_ERR_RENAME_MEMORY_ALLOC");
-	// 	slog_error("HERCULES_ERR_RENAME_MEMORY_ALLOC");
-	// 	// errno = ENOSPC;
-	// 	return -1;
-	// }
+	if(old_file_buffer == NULL) {
+		perror("HERCULES_ERR_MOVE_FILE_MEMORY_ALLOC");
+		slog_error("HERCULES_ERR_MOVE_FILE_MEMORY_ALLOC");
+		return -ENOSPC;
+	}
 
 	ssize_t bytes_read = -1, bytes_write, total_bytes = -1;
 	while ((bytes_read = read(fd_old, old_file_buffer, old_file_size)) > 0)
@@ -2849,6 +2855,7 @@ int hercules_move_file_from_disk(int fd_old, const char *old_path, const char *n
 
 	// free memory.
 	free(old_file_buffer);
+	return 0;
 }
 
 int HerculesMove(const char *given_old_path, const char *given_new_pathname, const char *hercules_path)
@@ -2894,7 +2901,7 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 		if (ret != 0)
 		{
 			slog_error("HERCULES_ERR_MOVE_DEST_PARENT_DIR_DOES_NOT_EXIST");
-			return ret;
+			return -ENOENT;
 		}
 		// here we know that the file will be move inside an existing subdirectory (not in the root).
 		to_sub = 1;
@@ -2919,29 +2926,17 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 		{
 			perror("HERCULES_ERR_MOVE_STAT_NEW_FILE");
 			slog_error("HERCULES_ERR_MOVE_STAT_NEW_FILE: %s", hercules_path);
-			return -1;
+			return -EAGAIN;
 		}
 		new_exists = 1;
 		// if new path exists, checks if it directory.
 		new_is_dir = S_ISDIR(new_file_stat.st_mode);
 	}
 
-	// if (imss_getattr((char *)hercules_path, &new_file_stat) == 0)
-	// if (__fxstat(1, fd_new, &new_file_stat) < 0)
-	// {
-	// 	new_exists = 1;
-	// 	// if new path exists, checks if it directory.
-	// 	new_is_dir = S_ISDIR(new_file_stat.st_mode);
-	// }
-	// else
-	// {
-	// }
-
-	// if (ret == 0)
-	// { // new path already exists.
 	slog_debug("new path %s is_dir? =%d", given_new_pathname, new_is_dir);
 
 	// get the name of the directory.
+	// 	when the new path exists, we will use the basename of the old path.
 	int pos = 0;
 	const char *aux_path = NULL;
 	if (new_exists)
@@ -2953,7 +2948,7 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 		aux_path = given_new_pathname;
 	}
 	slog_debug("new_exists=%d, aux_path=%s", new_exists, aux_path);
-
+	// get the basename of the path.
 	for (int c = 0; c < strlen(aux_path); ++c)
 	{
 		if (aux_path[c] == '/')
@@ -2963,7 +2958,7 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 		}
 	}
 	strncpy(name, aux_path + pos, strlen(aux_path) - pos);
-	// strcpy(full_path, last_parent_dir);
+	// concat the MOUNT POINT.
 	strcpy(full_path, MOUNT_POINT);
 	// if the new path exists, we concat the dir name (hercules_path + strlen("imss://")) to the full path.
 	// this makes the old directory to be stored inside the existing directory.
@@ -2987,8 +2982,14 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 		// }
 
 		// Creates the directory in Hercules.
-		mkdir(full_path, 0700);
-		read_directory(given_old_path, full_path);
+		if (mkdir(full_path, 0700) == 0)
+		{
+			ret = read_directory(given_old_path, full_path);
+		} else {
+			perror("HERCULES_ERR_HERCULES_PATH_MKDIR_FULL_PATH");
+			slog_error("HERCULES_ERR_HERCULES_PATH_MKDIR_FULL_PATH");
+			ret = -EAGAIN;
+		}
 	}
 	else if (old_is_dir && !new_is_dir)
 	{ // old is a directory and new is a regular file: NOT POSSIBLE.
@@ -3013,14 +3014,14 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 		memset(name, 0, sizeof(name));
 		strncpy(name, aux_path + pos, strlen(aux_path) - pos);
 		char x[MAX_PATH] = {'\0'};
-		strncpy(x, given_new_pathname, sizeof(x));
+		strncpy(x, given_new_pathname, sizeof(x) - strlen(x) - 1);
 		if (aux_path[strlen(given_new_pathname)] != '/')
 		{
-			strncat(x, "/", 1);
+			strncat(x, "/", sizeof(x) - strlen(x) - 1);
 		}
-		strncat(x, name, sizeof(x));
+		strncat(x, name, sizeof(x) - strlen(x) - 1);
 		slog_debug("Moving regular file %s into the directory %s", given_old_path, x);
-		hercules_move_file_from_disk(fd_old, given_old_path, x);
+		ret = hercules_move_file_from_disk(fd_old, given_old_path, x);
 		// unlink the file old file.
 		// if it is the last link, it will be removed.
 		// if (unlink(given_old_path) == -1)
@@ -3033,7 +3034,7 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 	{ // old is a regular file and new is a regular file.
 		// TODO: check flags.
 		slog_debug("Moving regular file %s to regular file %s", given_old_path, given_new_pathname);
-		hercules_move_file_from_disk(fd_old, given_old_path, given_new_pathname);
+		ret = hercules_move_file_from_disk(fd_old, given_old_path, given_new_pathname);
 		// unlink the file old file.
 		// if it is the last link, it will be removed.
 		// if (unlink(given_old_path) == -1)
@@ -3046,53 +3047,10 @@ int HerculesMove(const char *given_old_path, const char *given_new_pathname, con
 	if (op_not_allowed)
 	{
 		errno = EPERM;
-		return -EPERM;
+		ret = -EPERM;
 	}
 	// TODO: checks for errors.
-	return 0;
-
-	// else
-	// {
-	// 	full_path = new_path;
-	// }
-
-	/// fprintf(stderr, "**************NO EXISTE EL DESTINO=%s\n", new_path);
-	// slog_error("HERCULES_ERR_IMSS_RENAME_DEST_DOES_NOT_EXIST");
-	// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
-	// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
-	// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
-	// char last_parent_dir[URI_];
-	// int last_parent_offset = find_last_parent_dir((char *)new_path, last_parent_dir);
-	// slog_debug("last_parent_dir=%s, last_parent_offset=%d", last_parent_dir, last_parent_offset);
-	// if (strncmp(last_parent_dir, given_old_path, strlen(last_parent_dir)) && last_parent_offset > 0)
-	// { // parent and old_rpath are not the same.
-	// 	// last_parent_offset == 0 means the new_path is on the root directory.
-	// 	// Due origin file (given_old_path) will be moved to a new directory
-	// 	// we check if the new parent directoy exists.
-	// 	ret = imss_getattr(last_parent_dir, &ds_stat_n);
-	// 	if (ret != 0)
-	// 	{
-	// 		slog_error("HERCULES_ERR_RENAME_DEST_PARENT_DIR_DOES_NOT_EXIST");
-	// 		return ret;
-	// 	}
-	// }
-
-	// if (!strcmp(given_old_path, new_path))
-	// { // old path and new path are the same.
-	// 	ret = -EPERM;
-	// 	return ret;
-	// }
-
-	// // ret = rename_dataset_metadata(given_old_path, new_path);
-	// // if (ret < 0)
-	// // {
-	// // 	// errno = EEXIST;
-	// // 	return ret;
-	// // }
-	// // // RENAME SRV_WORKER(MAP)
-	// // rename_dataset_srv_worker(old_rpath, new_rpath, fd, 0);
-	// // map_rename(map, old_rpath, new_rpath);
-	// // return res;
+	return ret;
 }
 // else
 // { // new path does not exists.

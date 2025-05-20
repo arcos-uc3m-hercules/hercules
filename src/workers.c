@@ -141,6 +141,7 @@ int ready(char *tmp_file_path, const char *msg)
 int SendConfirmationMessage(const p_argv *arguments, const char *msg)
 {
 	int ret = 0;
+	slog_debug("Seding msg %s", msg);
 	ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, (const void *)msg, strlen(msg) + 1, arguments->worker_uid);, "Send data", int);
 	return ret;
 }
@@ -192,7 +193,7 @@ void *hercules_ucx_server(void *th_argv)
 		ucs_status_t ep_status = UCS_OK;
 		ucp_ep_h ep;
 		struct ucx_context *request = NULL;
-		char *req;
+		char *req = NULL;
 		ucp_tag_recv_info_t info_tag;
 		ucp_tag_message_h msg_tag;
 		msg_req_t *msg = NULL;
@@ -592,6 +593,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				std::string rdir_dest = key.substr(found + 1);
 
 				// RENAME MAP
+				slog_debug("rename_data_dir_srv_worker, old_dir=%s, dest_dir=%s", old_dir.c_str(), rdir_dest.c_str());
 				ret = map->rename_data_dir_srv_worker(old_dir, rdir_dest);
 			}
 
@@ -1973,35 +1975,19 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		case RENAME_DIR_DIR_OP:
 		{
 			int ret = -1;
-			// if (req[num_characters_read] != '\0')
-			// {
-			// 	char new_uri_[URI_];
-			// 	slog_live("Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
-			// 	// fprintf(stderr, "Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
-			// 	// get the server status to be set.
-			// 	sscanf(&req[num_characters_read], "%s", new_uri_);
-			// 	// flag = 1;
-			// 	// std::size_t found = key.find(' ');
-			// 	// if (found != std::string::npos)
-			// 	// {
-			// 	std::string old_dir = key; // key.substr(0, found);
 			std::size_t found = key.find(',');
 			if (found != std::string::npos)
 			{
 				std::string old_dir = key.substr(0, found);
-				// std::string new_key = key.substr(found + 1, key.length());
 				std::string rdir_dest = key.substr(found + 1);
 
 				slog_debug("[RENAME_DIR_DIR_OP] old_key=%s, new_key=%s\n", old_dir.c_str(), rdir_dest.c_str());
-				// std::string rdir_dest = key.substr(found + 1, key.length());
-				// std::string rdir_dest;
-				// rdir_dest.assign((const char *)new_uri_);
 
 				// RENAME MAP
 				ret = map->rename_metadata_dir_stat_worker(old_dir, rdir_dest);
 
 				// RENAME TREE
-				if (ret != -1)
+				if (ret == 0)
 				{
 					pthread_mutex_lock(&tree_mut);
 					ret = GTree_rename_dir_dir((char *)old_dir.c_str(), (char *)rdir_dest.c_str());
@@ -2156,18 +2142,18 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// Write operations.
 	case SET_OP:
 	{
-		switch (operation)
-		{
-		case INSTANCE_OP:
-		{
-			slog_debug("NEW INSTANCE OPERATION");
-			slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
-			/* code */
-			break;
-		}
-		default:
-			break;
-		}
+		// switch (operation)
+		// {
+		// case INSTANCE_OP:
+		// {
+		// 	slog_debug("NEW INSTANCE OPERATION");
+		// 	slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
+		// 	/* code */
+		// 	break;
+		// }
+		// default:
+		// 	break;
+		// }
 
 		slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
 		// TO CHECK: this mutex can be removed cause' map->get has another mutex.

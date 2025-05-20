@@ -31,7 +31,7 @@ GTree_search_(GNode *parent_node,
 
 		// HAVE TO CHECK IF IT IS A DIRECTORY OR A FILE
 		// For this i check if it has at the end /
-//		slog_debug("child->data=%s, desired_data=%s", child->data, desired_data);
+		//		slog_debug("child->data=%s, desired_data=%s", child->data, desired_data);
 		if (desired_data[strlen(desired_data) - 1] == '/' && !strncmp((char *)child->data, desired_data, strlen((char *)child->data)))
 		{ // directory case.
 			slog_debug("directory case");
@@ -49,8 +49,8 @@ GTree_search_(GNode *parent_node,
 			}
 		}
 		else if (desired_data[strlen(desired_data) - 1] != '/' && !strncmp((char *)child->data, desired_data, strlen((char *)child->data)))
-		{ // regular file.
-//			slog_debug("regular file");
+		{	// regular file.
+			//			slog_debug("regular file");
 			// Check if the compared node is the requested one.
 			if (!strcmp((char *)child->data, desired_data))
 			{
@@ -72,7 +72,7 @@ GTree_search_(GNode *parent_node,
 				}
 				int amount_child = 0;
 				char *path_child = (char *)child->data;
-//				slog_debug("path_child=%s, desired_data=%s", path_child, desired_data);
+				//				slog_debug("path_child=%s, desired_data=%s", path_child, desired_data);
 				for (int32_t j = 0; j < strlen(path_child) - 1; j++)
 				{ // counts the number of "/" on the child path.
 					if (path_child[j] == '/')
@@ -80,7 +80,7 @@ GTree_search_(GNode *parent_node,
 						amount_child = amount_child + 1;
 					}
 				}
-//				slog_debug("amount=%d, amount_child=%d", amount, amount_child);
+				//				slog_debug("amount=%d, amount_child=%d", amount, amount_child);
 				if (amount == amount_child)
 				{
 					// Move on to the following child.
@@ -97,7 +97,7 @@ GTree_search_(GNode *parent_node,
 		child = child->next;
 	}
 	last_parent = parent_node;
-//	slog_debug("last_parent=%s", last_parent->data);
+	//	slog_debug("last_parent=%s", last_parent->data);
 	return 0;
 }
 
@@ -127,24 +127,24 @@ GTree_rename(char *old_desired_data, char *new_desired_data)
 	GNode *closest_node;
 
 	// Check if the node has been already inserted.
-	//slog_debug("[GTree] old_desired_data=%s, new_desired_data=%s", old_desired_data, new_desired_data);
+	// slog_debug("[GTree] old_desired_data=%s, new_desired_data=%s", old_desired_data, new_desired_data);
 	if (GTree_search(tree_root, old_desired_data, &closest_node) == 1)
 	{
-	//	slog_debug("\t[GTree] closest_node->data=%s", (char *)closest_node->data);
+		//	slog_debug("\t[GTree] closest_node->data=%s", (char *)closest_node->data);
 		// If the searched name (old data) and the data of the node in the tree are equals,
 		// we remove the node from the tree, and insert the new one.
 		if (strcmp(old_desired_data, (char *)closest_node->data) == 0)
 		{
 			g_node_destroy(closest_node);
 			ret = GTree_insert(new_desired_data);
-	//		slog_debug("GTree_insert=%d", ret);
+			//		slog_debug("GTree_insert=%d", ret);
 		}
 	}
 	else
 	{
 		// fprintf(stderr, "Rename Error not found:%s\n", old_desired_data);
 		slog_error("Rename Error not found:%s", old_desired_data);
-		return 0;
+		return -1;
 	}
 
 	return 1;
@@ -189,7 +189,7 @@ GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 				strcpy(new_path, rdir_dest);
 				strcat(new_path, "/");
 				strcat(new_path, path);
-				//slog_debug("new_path to be inserted=%s", new_path);
+				// slog_debug("new_path to be inserted=%s", new_path);
 
 				GTree_insert(new_path);
 			}
@@ -198,8 +198,8 @@ GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 		g_node_destroy(dir_node);
 	}
 	else
-	{
-		return 1;
+	{ //  error case.
+		return -1;
 	}
 	return 0;
 }
@@ -224,11 +224,11 @@ int32_t GTree_delete(char *desired_data)
 	{
 		// add recursive search.
 		size_t len = strlen(desired_data);
-		if (len > 0 && desired_data[len - 1] != '/') 
+		if (len > 0 && desired_data[len - 1] != '/')
 		{
-			strcat(desired_data,"/");
+			strcat(desired_data, "/");
 			ret = GTree_delete(desired_data);
-		}		
+		}
 		// return 0;
 	}
 
@@ -236,14 +236,13 @@ int32_t GTree_delete(char *desired_data)
 }
 
 // Method inserting a new path.
-int32_t
-GTree_insert(char *desired_data)
+int32_t GTree_insert(char *desired_data)
 {
 	// Closest node to the one requested (or even the requested one itself).
 	GNode *closest_node = NULL;
 	if (last_parent != NULL)
 	{
-		//slog_debug("last_parent->data=%s, desired_data=%s", last_parent->data, desired_data);
+		// slog_debug("last_parent->data=%s, desired_data=%s", last_parent->data, desired_data);
 		char *data_search = (char *)calloc(256, sizeof(char));
 		if (desired_data[strlen(desired_data) - 1] == '/')
 		{
@@ -259,7 +258,7 @@ GTree_insert(char *desired_data)
 		int copy = (strlen(data_search) - strlen(lastson));
 
 		memcpy(father, &data_search[0], copy + 1);
-//		slog_live("desired_data=%s, data_search=%s, lastson=%s, father=%s", desired_data, data_search, lastson, father);
+		//		slog_live("desired_data=%s, data_search=%s, lastson=%s, father=%s", desired_data, data_search, lastson, father);
 		// Compares the data on the current node (last_parent) against the Hercules instance (e.g., imss://Makefile and imss://).
 		if (strncmp((char *)last_parent->data, father, strlen((char *)father)) == 0 && strlen((char *)last_parent->data) == strlen(father))
 		{
@@ -270,7 +269,7 @@ GTree_insert(char *desired_data)
 	}
 	else
 	{
-//		slog_debug("last_parent is NULL");
+		//		slog_debug("last_parent is NULL");
 	}
 
 	// Check if the node has been already inserted.
@@ -278,7 +277,7 @@ GTree_insert(char *desired_data)
 	{
 		if (GTree_search(tree_root, desired_data, &closest_node))
 		{
-//			slog_debug("closest_node=%s", closest_node->data);
+			//			slog_debug("closest_node=%s", closest_node->data);
 			return 0;
 		}
 	}
@@ -298,7 +297,7 @@ GTree_insert(char *desired_data)
 	}
 
 	// Search for the '/' characters within the additional ones.
-//	slog_debug("path=%s, more_chars=%d, closest_data_length=%d", desired_data, more_chars, closest_data_length);
+	//	slog_debug("path=%s, more_chars=%d, closest_data_length=%d", desired_data, more_chars, closest_data_length);
 	for (int32_t i = 0; i < more_chars; i++)
 	{
 		int32_t new_position = closest_data_length + i;
@@ -320,7 +319,7 @@ GTree_insert(char *desired_data)
 			GNode *new_node = g_node_new((void *)new_data);
 
 			// Introduce it as a child of the closest one found.
-			//slog_debug("[GTree] inserting in the tree=%s", new_data);
+			// slog_debug("[GTree] inserting in the tree=%s", new_data);
 			g_node_append(closest_node, new_node);
 
 			return 0;
@@ -430,7 +429,7 @@ GTree_getdir(char *desired_dir,
 	// *numdir_elems = num_children + 1; //+1 because of the actual directory + childrens
 	*numdir_elems = num_children; // actual directory is concat in the front-end.
 
-	//slog_info("num_children=%d", *numdir_elems);
+	// slog_info("num_children=%d", *numdir_elems);
 
 	if (*numdir_elems == 0)
 	{
@@ -444,7 +443,7 @@ GTree_getdir(char *desired_dir,
 
 	// Call the serialization function storing all dir elements in the buffer.
 	// TO CHECK!
-//	slog_info("serialize_dir_childrens(dir_node=%s, num_children=%d, &aux_dir_elem)", dir_node->data, num_children);
+	//	slog_info("serialize_dir_childrens(dir_node=%s, num_children=%d, &aux_dir_elem)", dir_node->data, num_children);
 	serialize_dir_childrens(dir_node, num_children, &aux_dir_elem);
 	// slog_info("ending serialize_dir_childrens, aux_dir_elem=%s", *aux_dir_elem);
 

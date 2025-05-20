@@ -27,6 +27,7 @@ StopServers() {
     fi
     echo ${OPERATION} > "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
     cat "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
+    echo "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
 
     i=0
     # Sends the pkill operation to each server.

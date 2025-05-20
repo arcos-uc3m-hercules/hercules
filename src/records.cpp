@@ -520,7 +520,7 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 	// check if the vector is empty, meaning that the old_dir key is not valid.
 	if (vec.size() == 0)
 	{
-		return 1;
+		return -1;
 	}
 
 	std::vector<string>::iterator i;
@@ -573,7 +573,7 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 	// check if the vector is empty, meaning that the old key is not valid.
 	if (vec.size() == 0)
 	{
-		return 1;
+		return -1;
 	}
 
 	std::vector<string>::iterator i;
