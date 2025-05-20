@@ -188,10 +188,10 @@ void *hercules_ucx_server(void *th_argv)
 	for (;;)
 	{
 		// errno = 0;
-		size_t peer_addr_len;
+		size_t peer_addr_len = 0;
 		ucp_address_t *peer_addr;
 		ucs_status_t ep_status = UCS_OK;
-		ucp_ep_h ep;
+		ucp_ep_h ep = NULL;
 		struct ucx_context *request = NULL;
 		char *req = NULL;
 		ucp_tag_recv_info_t info_tag;
@@ -276,8 +276,8 @@ void *hercules_ucx_server(void *th_argv)
 								   UCP_EP_PARAM_FIELD_ERR_HANDLER |
 								   UCP_EP_PARAM_FIELD_USER_DATA;
 			ep_params.address = peer_addr;
-			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-			ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+			ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 			// ep_params.err_handler.cb = err_cb_server;
 			ep_params.err_handler.cb = failure_handler;
 			ep_params.err_handler.arg = NULL;
@@ -327,8 +327,8 @@ void *hercules_ucx_server(void *th_argv)
 		time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 		slog_info("Serving time %f s\n", time_taken);
 
-		status = flush_ep(arguments->ucp_worker, ep);
-		slog_debug("flush_ep completed with status %d (%s)\n", status, ucs_status_string(status));
+		// status = flush_ep(arguments->ucp_worker, ep);
+		// slog_debug("flush_ep completed with status %d (%s)\n", status, ucs_status_string(status));
 
 		free(msg);
 		free(peer_addr);
@@ -347,7 +347,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	std::shared_ptr<map_records> map = arguments->map;
 
 	// Resources specifying if the request set in the sender.
-	int64_t more;
+	int64_t more = 0;
 	size_t more_size = sizeof(more);
 	int is_shared_memory = 0, snapshot_op = 0;
 
@@ -503,6 +503,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		{
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			slog_debug("[READ_OP][RELEASE]");
+			/*
 			response_msg = MSG_RELEASE_OP;
 			ret = SendConfirmationMessage(arguments, response_msg);
 			if (ret == 0)
@@ -511,6 +512,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				slog_error("HERCULES_ERR_SRV_SEND_DATA_RELEASE");
 				return -1;
 			}
+				*/
 			break;
 		}
 		case DELETE_OP:
@@ -1168,12 +1170,14 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					{
 						if (snapshot_op)
 						{ // Snapshot operation sends data bigger than BLOCK_SIZE.
-							buffer = TIMING((void *)mem_type_malloc(msg_length * sizeof(char));, "[write] mem_type_malloc snapshot", void *, arguments->thread_id);
+							// buffer = TIMING((void *)mem_type_malloc(msg_length * sizeof(char));, "[write] mem_type_malloc snapshot", void *, arguments->thread_id);
+							buffer = (void *)malloc(msg_length * sizeof(char));
 							slog_debug("Allocating buffer of size %lu, snapshot_op=%d", msg_length, snapshot_op);
 						}
 						else
 						{
-							buffer = TIMING((void *)mem_type_malloc(BLOCK_SIZE * sizeof(char));, "[write] mem_type_malloc", void *, arguments->thread_id);
+							// buffer = TIMING((void *)mem_type_malloc(BLOCK_SIZE * sizeof(char));, "[write] mem_type_malloc", void *, arguments->thread_id);
+							buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
 							slog_debug("Allocating buffer of size %lu", BLOCK_SIZE);
 						}
 					}
@@ -1325,7 +1329,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					if (!is_shared_memory)
 					{ // non shared memory method.
 						ucp_tag_recv_info_t info_tag;
-						ucp_tag_message_h msg_tag;
+						ucp_tag_message_h msg_tag = NULL;
 						// pthread_mutex_lock(&lock_network);
 						//  msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
 						msg_length = TIMING(get_recv_data_length_2(arguments->ucp_worker, arguments->worker_uid, &info_tag, &msg_tag), "[write] get_recv_data_length_2", size_t, arguments->thread_id);
@@ -1840,6 +1844,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		case RELEASE:
 		{
 			slog_debug("[stat_worker_thread][READ_OP][RELEASE] Deleting endpoint with %" PRIu64 "", arguments->worker_uid);
+			
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			// ucp_destroy(arguments->ucp_context);
 			slog_debug("[stat_worker_thread][READ_OP][RELEASE] Endpoints deleted ");

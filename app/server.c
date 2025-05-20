@@ -387,8 +387,8 @@ int32_t main(int32_t argc, char **argv)
 								   UCP_EP_PARAM_FIELD_ERR_HANDLER |
 								   UCP_EP_PARAM_FIELD_USER_DATA;
 			ep_params.address = peer_addr;
-			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-			ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+			ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 			ep_params.err_handler.cb = err_cb_client;
 			ep_params.err_handler.arg = NULL;
 			ep_params.user_data = &ep_status;
@@ -857,27 +857,27 @@ int32_t main(int32_t argc, char **argv)
 		free(my_imss.ips);
 	}
 
-	if (args.type == TYPE_DATA_SERVER)
-	{
-		if (args.id != 0) // wait for server 0 which has an extra task to do.
-			sleep(3);
-		int num_active_storages = 0;
-		while (true)
-		{
-			// stablish a connection to all data servers endpoints.
-			num_active_storages = open_imss(args.imss_uri);
-			// fprintf(stderr, "Hercules = %s\n", curr_imss.info.uri_);
-			if (num_active_storages < 0)
-			{
-				// slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-				// printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
-				// return -1;
-				sleep(3);
-				continue;
-			}
-			break;
-		}
-	}
+	// if (args.type == TYPE_DATA_SERVER)
+	// {
+	// 	// if (args.id != 0) // wait for server 0 which has an extra task to do.
+	// 	sleep(10);
+	// 	int num_active_storages = 0;
+	// 	while (true)
+	// 	{
+	// 		// Establish a connection to all data servers endpoints.
+	// 		num_active_storages = open_imss(args.imss_uri);
+	// 		// fprintf(stderr, "Hercules = %s\n", curr_imss.info.uri_);
+	// 		if (num_active_storages < 0)
+	// 		{
+	// 			// slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+	// 			// printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
+	// 			// return -1;
+	// 			sleep(3);
+	// 			continue;
+	// 		}
+	// 		break;
+	// 	}
+	// }
 
 	ret = ready(tmp_file_path, "OK");
 	fprintf(stderr, "%c-server %d is ready = %d\n", args.type, args.id, ret);
