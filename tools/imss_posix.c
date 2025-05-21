@@ -494,7 +494,7 @@ extern "C"
 		{
 			// In case of error notify and exit
 			slog_error("Stat init failed, cannot connect to Metadata server.");
-			imss_comm_cleanup();
+			// imss_comm_cleanup();
 			exit(1);
 		}
 
@@ -568,15 +568,17 @@ extern "C"
 		errno = 0;
 		slog_live("Calling 'run_me_last', pid=%d, rank=%d, release=%d", g_pid, rank, release);
 		release--;
-		if (release == 0) // TODO: uncomment this line.
+		if (release == 0)
 		{
 			// clock_t t_s;
 			// double time_taken;
 			// t_s = clock();
 			release = -1;
 			slog_live("[POSIX] release_imss()");
+			// releases endpoints created with the DATA servers.
 			release_imss("imss://", CLOSE_DETACHED);
-			// // //  slog_live("[POSIX] stat_release()");
+			slog_live("[POSIX] stat_release()");
+			// releases endpoints created with the METADATA servers.
 			stat_release();
 			// free_prefetch(map_prefetch);
 			map_free(map);
@@ -2054,10 +2056,8 @@ extern "C"
 				return NULL;
 			}
 			ret = file->_fileno; // get file descriptor.
-			// real_fclose(file);
 
 			slog_live("[POSIX] File descriptor=%d", ret);
-			// fprintf(stderr, "Hercules fd =%d\n", ret);
 
 			ret = generalOpen(new_path, oflags, ALLPERMS, ret);
 			// ret = generalOpen(new_path, flags, new_mode);
@@ -2067,30 +2067,11 @@ extern "C"
 				return NULL;
 			}
 
-			// fprintf(stderr, "[POSIX] file->_fileno=%d, file->_offset=%ld\n", file->_fileno, file->_offset);
-			// if (file != NULL)
-			// 	fprintf(stderr, "[POSIX] Calling Hercules 'fopen', pathname=%s, mode=%s, file->_fileno=%d, file->_offset=%ld\n", new_path, mode, file->_fileno, file->_offset);
-			// else
-			// fprintf(stderr, "Calling Hercules 'fopen', file NULL\n");
-
-			// slog_live("[POSIX] Calling Hercules 'fopen', pathname=%s, mode=%s", new_path, mode);
-			// fprintf(stderr, "[POSIX] Ending Hercules 'fopen', new_path=%s, ret=%d, fd=%d\n", new_path, ret, file->_fileno);
 			free(new_path);
 		}
 		else /* Do not try to use slog_ here! This function uses 'fopen' internally. */
 		{
-			// if (strncmp(pathname + strlen(pathname) - 3, "log", strlen("log")))
-			// {
-			// 	fprintf(stderr, "Calling Real 'fopen', pathname=%s\n", pathname);
-			// }
 			file = real_fopen(pathname, mode);
-			// if (strncmp(pathname + strlen(pathname) - 3, "log", strlen("log")))
-			// {
-			// if (file != NULL)
-			// 	fprintf(stderr, "Calling Real 'fopen', pathname=%s, file->_fileno=%d, file->_offset=%ld\n", pathname, file->_fileno, file->_offset);
-			// 	else
-			// 		fprintf(stderr, "Calling Real 'fopen', pathname=%s, file NULL\n", pathname);
-			// }
 		}
 
 		return file;
@@ -2295,7 +2276,6 @@ extern "C"
 			else if (ret > -1 && createFd >= 0)
 			{
 				slog_live("[POSIX] Puting fd %d into map, passed from arguments.", createFd);
-				// fprintf(stderr, "Putting fd %d into map\n", createFd);
 				map_fd_put(map_fd, new_path, createFd, p);
 				ret = createFd;
 			}
@@ -2356,13 +2336,11 @@ extern "C"
 		if (new_path != NULL)
 		{
 			slog_live("[POSIX] Calling Hercules 'open' flags=%d, mode=%o, pathname=%s, new_path=%s", flags, mode, pathname, new_path);
-			// fprintf(stderr, "[POSIX] Calling Hercules 'open' flags=%d, mode=%o, pathname=%s, new_path=%s\n", flags, mode, pathname, new_path);
 			checkOpenFlags(pathname, flags);
 
 			ret = generalOpen(new_path, flags, mode, -1);
 
 			slog_live("[POSIX] Ending Hercules 'open', mode=%o, ret=%d\n", mode, ret);
-			// fprintf(stderr, "[POSIX] Ending Hercules 'open', mode=%o, ret=%d\n", mode, ret);
 			free(new_path);
 		}
 		else
@@ -4913,53 +4891,6 @@ extern "C"
 
 		return ret;
 	}
-
-	// /*
-	// int fstatat(int dir_fd, const char *pathname, struct stat *buf, int flags) {
-	// */
-	// int fstatat(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag)
-	// {
-	// 	fprintf(stderr, "[POSIX][TODO]. Calling Real 'fstatat', pathname=%s\n", __file);
-
-	// 	if (!real_fstatat)
-	// 	{
-	// 		// void *handle;
-	// 		// /* open the needed object */
-	// 		// handle = dlopen("/lib/x86_64-linux-gnu/libc.so.6", RTLD_LOCAL | RTLD_LAZY);
-	// 		// /* find the address of function and data objects */
-	// 		// real_fstatat = dlsym(handle, "fstatat");
-	// 		real_fstatat = dlsym(RTLD_NEXT, "fstatat");
-	// 	}
-
-	// 	// if (init)
-	// 	// {
-	// 	// 	slog_warn("[POSIX][TODO]. Calling Real 'fstatat', pathname=%s", __file);
-	// 	// }
-	// 	if (real_fstatat == NULL)
-	// 		fprintf(stderr, "error: real_fstatat is NULL\n");
-
-	// 	// // TODO.
-
-	// 	return real_fstatat(__fd, __file, __buf, __flag);
-	// }
-
-	// // int fstatat64(int dir_fd, const char *pathname, struct stat *buf, int flags)
-	// int fstatat64(int __fd, const char *__restrict __file, struct stat64 *__restrict __buf, int __flag)
-	// {
-	// 	fprintf(stderr, "[POSIX][TODO]. Calling Real 'fstatat64', pathname=%s\n", __file);
-
-	// 	if (!real_fstatat64)
-	// 		real_fstatat64 = dlsym(RTLD_NEXT, "fstatat64");
-
-	// 	if (init)
-	// 	{
-	// 		// slog_warn("[POSIX][TODO]. Calling Real 'fstatat64', pathname=%s", __file);
-	// 	}
-
-	// 	// TODO.
-
-	// 	return real_fstatat64(__fd, __file, __buf, __flag);
-	// }
 
 	int newfstatat(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag)
 	{

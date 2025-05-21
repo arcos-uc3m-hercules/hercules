@@ -197,7 +197,7 @@ extern "C"
     // void server_conn_handle_cb(ucp_conn_request_h conn_request, void *arg);
     ucs_status_t server_create_ep(ucp_worker_h data_worker, ucp_conn_request_h conn_request, ucp_ep_h *server_ep);
     // void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
-    ucs_status_t ep_flush(ucp_ep_h ep, ucp_worker_h worker);
+    // ucs_status_t ep_flush(ucp_ep_h ep, ucp_worker_h worker);
     ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr);
     ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, int *);
     void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);

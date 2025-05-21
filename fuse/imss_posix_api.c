@@ -2091,9 +2091,9 @@ int imss_close(const char *path, int fd)
 {
 	int ret = 0;
 	int ds = 0;
-	slog_debug("Calling imss_flush_data");
+	// slog_debug("Calling imss_flush_data");
 	// imss_flush_data();
-	slog_debug("Ending imss_flush_data");
+	// slog_debug("Ending imss_flush_data");
 	ds = imss_release(path);
 	slog_debug("Ending imss_release, ret=%d", ds);
 	ret = close_dataset(path, fd);

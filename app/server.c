@@ -38,7 +38,6 @@ std::shared_ptr<map_records> g_map;
 /* UCP objects */
 ucp_worker_h ucp_worker = NULL;
 
-// ucp_ep_h pub_ep;
 ucp_address_t *req_addr = NULL;
 ucp_ep_h *metadata_endpoints = NULL; 
 size_t req_addr_len = 0;
@@ -962,8 +961,6 @@ int32_t main(int32_t argc, char **argv)
 	}
 
 	// Close publisher socket.
-	// ep_close(ucp_worker, pub_ep, UCP_EP_CLOSE_MODE_FORCE);
-	// ep_close(ucp_worker, metadata_endpoints, UCP_EP_CLOSE_MODE_FORCE);
 	ucp_worker_flush(ucp_worker);
 	ucp_worker_release_address(ucp_worker, peer_addr);
 	if (args.type == TYPE_DATA_SERVER)

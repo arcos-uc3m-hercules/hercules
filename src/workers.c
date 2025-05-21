@@ -179,8 +179,8 @@ void *hercules_ucx_server(void *th_argv)
 		pthread_exit((void *)-1);
 	}
 
-	// if (!arguments->thread_id)
-	{ // thread 0.
+	// if (!arguments->thread_id) // thread 0.
+	{ 
 		map_server_eps = map_server_eps_create();
 		BLOCK_SIZE = arguments->blocksize * 1024;
 	}
@@ -501,8 +501,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		}
 		case RELEASE:
 		{
-			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			slog_debug("[READ_OP][RELEASE]");
+			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			/*
 			response_msg = MSG_RELEASE_OP;
 			ret = SendConfirmationMessage(arguments, response_msg);
@@ -3047,7 +3047,6 @@ void *stat_worker(void *th_argv)
 		// arguments->worker_uid = attr.worker_uid;
 		stat_worker_helper(arguments, req, map_server_eps);
 
-		// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
 		free(peer_addr);
 		free(msg);
 
