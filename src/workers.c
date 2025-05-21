@@ -1641,7 +1641,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 {
 	ucs_status_t status;
 	int ret = 0;
-	const char *response_msg = null;
+	const char *response_msg = NULL;
 
 	// obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
@@ -1656,23 +1656,23 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	char err_code[] = "$errimss_no_key_avail$";
 
 	uint32_t operation = 0; // server id.
-	char mode[mode_size] = {'\0'};
+	char mode[MODE_SIZE] = {'\0'};
 	int32_t req_size = 0;
 	char raw_msg[req_size + 1] = {'\0'};
 	char number[16] = {'\0'};
-	char uri_[uri_] = {'\0'};
+	char uri_[URI_] = {'\0'};
 	int extra_info = 0;
 	int num_characters_read = 0;
 	int num_input_read = 0;
 
 	// save the request to be served.
 	slog_info("request - '%s'", req);
-	num_input_read = sscanf(req, "%" priu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
+	num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
 
 	if (!strcmp(mode, "get"))
-		more = get_op;
+		more = GET_OP;
 	else
-		more = set_op;
+		more = SET_OP;
 
 	uint64_t block_size_recv = (uint64_t)atoi(number);
 
@@ -1683,7 +1683,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	key.assign((const char *)uri_);
 
 	// information associated to the arriving key.
-	void *address_ = null;
+	void *address_ = NULL;
 	uint64_t block_size_rtvd = 0;
 	dataset_info *dataset;
 
@@ -1691,13 +1691,13 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	switch (more)
 	{
 	// read operations.
-	case get_op:
+	case GET_OP:
 	{
 		switch (block_size_recv)
 		{
-		case getdir:
+		case GETDIR:
 		{
-			char *buffer = null;
+			char *buffer = NULL;
 			int32_t numelems_indir = -1;
 			// retrieve all elements inside the requested directory.
 			pthread_mutex_lock(&hiredis_mut);

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libhercules_posix_api.a CMakeFiles/hercules_posix_api.dir/__/fuse/imss_posix_api.c.o CMakeFiles/hercules_posix_api.dir/__/fuse/map.cpp.o CMakeFiles/hercules_posix_api.dir/__/fuse/mapprefetch.cpp.o CMakeFiles/hercules_posix_api.dir/__/src/slog.c.o
+/usr/bin/ranlib libhercules_posix_api.a
