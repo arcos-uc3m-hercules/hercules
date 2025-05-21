@@ -546,14 +546,18 @@ int32_t stat_release()
 	g_array_free(free_datasetd, TRUE);
 
 	pthread_mutex_lock(&lock_network);
-	ucp_ep_h ep;
 	// Disconnect from all metadata servers.
+	ucp_ep_h ep;
+	char release_msg[REQUEST_SIZE] = {'\0'};
 	for (int i = 0; i < n_stat_servers; i++)
 	{
+		release_msg[0] = '\0';
 		ep = stat_eps[i];
-		char release_msg[REQUEST_SIZE] = {'\0'};
+		// flush pending data in the endpoint.
+		flush_ep(ucp_worker_meta, ep);	
 		sprintf(release_msg, "%" PRIu32 " GET 2 RELEASE", process_rank);
 		slog_live("Request - %s", release_msg);
+		// request to close the endpoint on the server side.
 		if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, release_msg) == 0)
 		{
 			slog_error("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
@@ -561,16 +565,10 @@ int32_t stat_release()
 			pthread_mutex_unlock(&lock_network);
 			return -1;
 		}
-
-		// close_ucx_endpoint(ucp_worker_meta, ep);
-
-		// ep_flush(ep, ucp_worker_meta);
-		// //  ucp_ep_destroy(ep);
-		// ucp_context_destroy(ucp_worker_meta);
-		// ep_close(ucp_worker_meta, ep, 0);
+		// close endpoint in the client side.
+		close_ucx_endpoint(ucp_worker_meta, ep);
 		free(stat_addr[i]);
 	}
-	free(stat_addr);
 
 	// flush the worker
 	ucs_status_t status = ucp_worker_flush(ucp_worker_meta);
@@ -578,11 +576,9 @@ int32_t stat_release()
 	{
 		fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
 	}
-	
-	// Destroy the worker
-	// ucp_worker_destroy(ucp_worker_meta);
 
 	free(stat_eps);
+	free(stat_addr);
 
 	pthread_mutex_unlock(&lock_network);
 	return 0;
@@ -1023,8 +1019,9 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 		slog_fatal("HERCULES_ERR_RLSHERCULES_NOTFOUND");
 		return -1;
 	}
-
+	
 	// Release the set of connections to the corresponding IMSS.
+	char release_msg[] = "GET 2 0 RELEASE\0";
 	pthread_mutex_lock(&lock_network);
 	slog_live("imss_position=%d, num_active_storages=%d", imss_position, imss_.info.num_active_storages);
 	ucp_ep_h ep;
@@ -1034,10 +1031,10 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 		if (release_op == CLOSE_DETACHED && imss_.info.status[i] == 1)
 		{
 			ep = imss_.conns.eps[i];
-
-			// sprintf(release_msg, "GET 2 0 RELEASE");
-			char release_msg[] = "GET 2 0 RELEASE\0";
+			// flush pending data in the endpoint.
+			flush_ep(ucp_worker_data, ep);
 			slog_live("release_msg=%s to server %d", release_msg, i);
+			// close the endpoint in the server side.
 			if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, release_msg) == 0)
 			{
 				pthread_mutex_unlock(&lock_network);
@@ -1101,20 +1098,20 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 
 			// ucp_ep_destroy(ep);
 			// ucp_context_destroy(ucp_worker_data);
+			// close the endpoint in the client side.
+			close_ucx_endpoint(ucp_worker_data, ep);
 		}
 		// ep_flush(ep, ucp_worker_data);
 		// ep_flush(imss_.conns.eps_[i], ucp_worker_data);
 		free(imss_.info.ips[i]);
 		free(imss_.conns.peer_addr[i]);
 	}
-	// Optionally, flush the worker
+	// flush the worker
 	ucs_status_t status = ucp_worker_flush(ucp_worker_data);
 	if (status != UCS_OK)
 	{
 		fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
 	}
-	// Destroy the worker
-	// ucp_worker_destroy(ucp_worker_data);
 
 	free(imss_.info.ips);
 	free(curr_imss.conns.eps);

@@ -1283,13 +1283,13 @@ void empty_function(void *request, ucs_status_t status)
 void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
 {
 	// Flush the endpoint to ensure all outstanding operations are completed
-	ucs_status_t status = ucp_ep_flush(ep);
-	if (status != UCS_OK)
-	{
-		fprintf(stderr, "Failed to flush endpoint: %s\n", ucs_status_string(status));
-		slog_error("Failed to flush endpoint: %s\n", ucs_status_string(status));
-	}
-
+	// ucs_status_t status = ucp_ep_flush(ep);
+	// if (status != UCS_OK)
+	// {
+	// 	fprintf(stderr, "Failed to flush endpoint: %s\n", ucs_status_string(status));
+	// 	slog_error("Failed to flush endpoint: %s\n", ucs_status_string(status));
+	// }
+	fprintf(stdout,"Closing ep %p\n", &ep);
 	ep_close(worker, ep, UCP_EP_CLOSE_MODE_FLUSH);
 	// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
 
@@ -1339,42 +1339,42 @@ void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags)
 	}
 }
 
-ucs_status_t ep_flush(ucp_ep_h ep, ucp_worker_h worker)
-{
-	void *request;
-	StsHeader *req_queue;
-	ucx_async_t *async;
+// ucs_status_t ep_flush(ucp_ep_h ep, ucp_worker_h worker)
+// {
+// 	void *request = NULL;
+// 	// StsHeader *req_queue;
+// 	// ucx_async_t *async;
 
-	slog_debug("[COMM] Flushed endpoint started.");
-	request = ucp_ep_flush_nb(ep, 0, empty_function);
-	if (request == NULL)
-	{
-		return UCS_OK;
-	}
-	else if (UCS_PTR_IS_ERR(request))
-	{
-		return UCS_PTR_STATUS(request);
-	}
-	else
-	{
-		ucs_status_t status;
-		slog_debug("[COMM] Flush waiting for completion.");
-		do
-		{
-			ucp_worker_progress(worker);
-			status = ucp_request_check_status(request);
-		} while (status == UCS_INPROGRESS);
-		ucp_request_free(request);
-		slog_debug("[COMM] Flushed endpoint.");
-		return status;
-	}
-	slog_debug("[COMM] Flushed endpoint.");
-}
+// 	slog_debug("[COMM] Flushed endpoint started.");
+// 	request = ucp_ep_flush_nb(ep, 0, empty_function);
+// 	if (request == NULL)
+// 	{
+// 		return UCS_OK;
+// 	}
+// 	else if (UCS_PTR_IS_ERR(request))
+// 	{
+// 		return UCS_PTR_STATUS(request);
+// 	}
+// 	else
+// 	{
+// 		ucs_status_t status;
+// 		slog_debug("[COMM] Flush waiting for completion.");
+// 		do
+// 		{
+// 			ucp_worker_progress(worker);
+// 			status = ucp_request_check_status(request);
+// 		} while (status == UCS_INPROGRESS);
+// 		ucp_request_free(request);
+// 		slog_debug("[COMM] Flushed endpoint.");
+// 		return status;
+// 	}
+// 	slog_debug("[COMM] Flushed endpoint.");
+// }
 
 ucs_status_t flush_ep(ucp_worker_h worker, ucp_ep_h ep)
 {
 	ucp_request_param_t param;
-	void *request;
+	void *request = NULL;
 
 	param.op_attr_mask = 0;
 	request = ucp_ep_flush_nbx(ep, &param);
