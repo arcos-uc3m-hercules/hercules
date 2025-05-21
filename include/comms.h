@@ -66,7 +66,7 @@ static const char MSG_OPEN_OP[] = "OPEN";
 static const char MSG_UPDATED_OP[] = "UPDATED!";
 
 // static const char *RESPONSES_MESSAGES[] = {
-//     "OK", 
+//     "OK",
 //     "ERROR"
 // };
 // static char OK_OP_MSG[] = "ERROR";
@@ -167,62 +167,72 @@ typedef struct worker_info
         }                                                                      \
     } while (0)
 
-int init_worker(ucp_context_h ucp_context, ucp_worker_h *ucp_worker);
-int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h *ucp_worker, send_recv_type_t send_recv_type);
-int request_finalize(ucp_worker_h ucp_worker, send_req_t *request, send_req_t *ctx);
-size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len, char *request);
-size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
-size_t isend_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
-size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest);
-size_t get_recv_data_length_2(ucp_worker_h ucp_worker, uint64_t dest, ucp_tag_recv_info_t *info_tag, ucp_tag_message_h *msg_tag);
-size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async);
-size_t recv_data_2(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async, ucp_tag_recv_info_t info_tag, ucp_tag_message_h msg_tag);
-size_t recv_data_opt(ucp_worker_h ucp_worker, ucp_ep_h ep, void **msg, size_t msg_length, uint64_t dest, int async);
-size_t recv_req(ucp_worker_h ucp_worker, ucp_ep_h ep, char *msg);
-ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request, send_req_t *ctx);
-void stream_recv_cb(void *request, ucs_status_t status, size_t length, void *user_data);
-void send_handler_data(void *request, ucs_status_t status, void *ctx);
-void send_handler_req(void *request, ucs_status_t status, void *ctx);
-// void recv_handler(void *request, ucs_status_t status, ucp_tag_recv_info_t *info);
-void recv_handler(void *request, ucs_status_t status, const ucp_tag_recv_info_t *info, void *user_data);
-void send_cb(void *request, ucs_status_t status, void *user_data);
-void err_cb_client(void *arg, ucp_ep_h ep, ucs_status_t status);
-void err_cb_server(void *arg, ucp_ep_h ep, ucs_status_t status);
-void common_cb(void *user_data, const char *type_str);
-// void server_conn_handle_cb(ucp_conn_request_h conn_request, void *arg);
-ucs_status_t server_create_ep(ucp_worker_h data_worker, ucp_conn_request_h conn_request, ucp_ep_h *server_ep);
-// void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
-ucs_status_t ep_flush(ucp_ep_h ep, ucp_worker_h worker);
-ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr);
-ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, int *);
-void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 
-// Method sending a data structure with dynamic memory allocation fields.
-int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_struct, int32_t data_type, uint64_t from);
+    int init_worker(ucp_context_h ucp_context, ucp_worker_h *ucp_worker);
+    int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h *ucp_worker, send_recv_type_t send_recv_type);
+    int request_finalize(ucp_worker_h ucp_worker, send_req_t *request, send_req_t *ctx);
+    size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len, char *request);
+    size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
+    size_t isend_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
+    size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest);
+    size_t get_recv_data_length_2(ucp_worker_h ucp_worker, uint64_t dest, ucp_tag_recv_info_t *info_tag, ucp_tag_message_h *msg_tag);
+    size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async);
+    size_t recv_data_2(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async, ucp_tag_recv_info_t info_tag, ucp_tag_message_h msg_tag);
+    size_t recv_data_opt(ucp_worker_h ucp_worker, ucp_ep_h ep, void **msg, size_t msg_length, uint64_t dest, int async);
+    size_t recv_req(ucp_worker_h ucp_worker, ucp_ep_h ep, char *msg);
+    ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request, send_req_t *ctx);
+    void stream_recv_cb(void *request, ucs_status_t status, size_t length, void *user_data);
+    void send_handler_data(void *request, ucs_status_t status, void *ctx);
+    void send_handler_req(void *request, ucs_status_t status, void *ctx);
+    // void recv_handler(void *request, ucs_status_t status, ucp_tag_recv_info_t *info);
+    void recv_handler(void *request, ucs_status_t status, const ucp_tag_recv_info_t *info, void *user_data);
+    void send_cb(void *request, ucs_status_t status, void *user_data);
+    void err_cb_client(void *arg, ucp_ep_h ep, ucs_status_t status);
+    void err_cb_server(void *arg, ucp_ep_h ep, ucs_status_t status);
+    void common_cb(void *user_data, const char *type_str);
+    // void server_conn_handle_cb(ucp_conn_request_h conn_request, void *arg);
+    ucs_status_t server_create_ep(ucp_worker_h data_worker, ucp_conn_request_h conn_request, ucp_ep_h *server_ep);
+    // void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
+    ucs_status_t ep_flush(ucp_ep_h ep, ucp_worker_h worker);
+    ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr);
+    ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, int *);
+    void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
+    void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
+    // Method sending a data structure with dynamic memory allocation fields.
+    int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_struct, int32_t data_type, uint64_t from);
 
-/**
- * @brief  Method retrieving a serialized dynamic data structure.
- * @return bytes of the message received or -1 on error.
- */
-int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_struct, int32_t data_type, uint64_t dest, size_t length);
-int32_t recv_dynamic_stream_opt(ucp_worker_h ucp_worker, ucp_ep_h ep, void **data_struct, int32_t data_type, uint64_t dest, size_t length);
+    /**
+     * @brief  Method retrieving a serialized dynamic data structure.
+     * @return bytes of the message received or -1 on error.
+     */
+    int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_struct, int32_t data_type, uint64_t dest, size_t length);
+    int32_t recv_dynamic_stream_opt(ucp_worker_h ucp_worker, ucp_ep_h ep, void **data_struct, int32_t data_type, uint64_t dest, size_t length);
 
-int connect_common(const char *server, uint64_t server_port, sa_family_t af);
+    int connect_common(const char *server, uint64_t server_port, sa_family_t af);
 
-ucs_status_t ucx_wait(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str);
+    ucs_status_t ucx_wait(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str);
 
-size_t send_stream_addr(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len);
+    size_t send_stream_addr(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len);
 
-static void request_init(void *request);
+    static void request_init(void *request);
 
-void failure_handler(void *arg, ucp_ep_h ep, ucs_status_t status);
-void flush_cb(void *request, ucs_status_t status);
+    void failure_handler(void *arg, ucp_ep_h ep, ucs_status_t status);
+    void flush_cb(void *request, ucs_status_t status);
 
-ucs_status_t flush_ep(ucp_worker_h worker, ucp_ep_h ep);
+    ucs_status_t flush_ep(ucp_worker_h worker, ucp_ep_h ep);
 
-ucs_status_t ucp_mem_alloc(ucp_context_h ucp_context, size_t length, void **address_p);
+    ucs_status_t ucp_mem_alloc(ucp_context_h ucp_context, size_t length, void **address_p);
 
-ucs_status_t worker_flush(ucp_worker_h worker);
+    ucs_status_t worker_flush(ucp_worker_h worker);
 
-void ep_close_err_mode(ucp_worker_h ucp_worker, ucp_ep_h ucp_ep);
+    void ep_close_err_mode(ucp_worker_h ucp_worker, ucp_ep_h ucp_ep);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

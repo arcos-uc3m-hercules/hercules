@@ -397,7 +397,7 @@ extern "C"
 
 	__attribute__((constructor)) void imss_posix_init(void)
 	{
-		errno = 0;
+		// errno = 0;
 
 		struct timeval start, end;
 		gettimeofday(&start, NULL);
@@ -416,6 +416,8 @@ extern "C"
 		g_pid = getpid();
 
 		rank = MurmurOAAT32(hostname);
+
+		fprintf(stderr, "Running client %d\n", rank);
 
 		// fill global variables with the enviroment variables value.
 		ret = getConfiguration(&args);
@@ -566,7 +568,7 @@ extern "C"
 		errno = 0;
 		slog_live("Calling 'run_me_last', pid=%d, rank=%d, release=%d", g_pid, rank, release);
 		release--;
-		// if (release == 0) // TODO: uncomment this line.
+		if (release == 0) // TODO: uncomment this line.
 		{
 			// clock_t t_s;
 			// double time_taken;

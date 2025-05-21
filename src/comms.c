@@ -25,6 +25,12 @@ pthread_mutex_t lock_ucx_comm = PTHREAD_MUTEX_INITIALIZER;
 
 int ep_timeout = 0;
 
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+
 ucs_status_t ucp_mem_alloc(ucp_context_h ucp_context, size_t length, void **address_p)
 {
 	ucp_mem_map_params_t params;
@@ -76,7 +82,7 @@ ucs_status_t ucp_mem_alloc(ucp_context_h ucp_context, size_t length, void **addr
 int init_worker(ucp_context_h ucp_context, ucp_worker_h *ucp_worker)
 {
 	ucp_worker_params_t worker_params;
-	ucs_status_t status;
+	ucs_status_t status = UCS_OK;
 	int ret = 0;
 
 	memset(&worker_params, 0, sizeof(worker_params));
@@ -92,7 +98,6 @@ int init_worker(ucp_context_h ucp_context, ucp_worker_h *ucp_worker)
 		// fprintf(stderr, "failed to ucp_worker_create (%s)", ucs_status_string(status));
 		perror("HERCULES_ERR_WORKER_INIT");
 		slog_error("HERCULES_ERR_WORKER_INIT: failed to ucp_worker_create (%s)", ucs_status_string(status));
-
 		ret = -1;
 	}
 	// ucp_context_attr_t attr; //(ucp_context_attr_t *)malloc(sizeof(ucp_context_attr_t));
@@ -110,7 +115,7 @@ int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h 
 {
 	/* UCP objects */
 	ucp_params_t ucp_params;
-	ucs_status_t status;
+	ucs_status_t status = UCS_OK;
 	int ret = 0;
 
 	// status = ucp_config_read(NULL, NULL, &config);
@@ -143,6 +148,7 @@ int init_context(ucp_context_h *ucp_context, ucp_config_t *config, ucp_worker_h 
 	if (status != UCS_OK)
 	{
 		fprintf(stderr, "failed to ucp_init (%s)\n", ucs_status_string(status));
+		slog_error("failed to ucp_init (%s)\n", ucs_status_string(status));
 		return -1;
 	}
 
@@ -288,18 +294,25 @@ size_t isend_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t 
 size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len, char *req)
 {
 
-	ucs_status_t status;
+	ucs_status_t status = UCS_OK;
 	struct ucx_context *request;
-	size_t msg_len;
+	size_t msg_len = 0;
 	ucp_request_param_t send_param;
 	send_req_t ctx;
 
 	msg_req_t *msg = NULL;
 
-	msg_len = sizeof(uint64_t) + REQUEST_SIZE + addr_len;
+	// msg_len = sizeof(uint64_t) + REQUEST_SIZE + addr_len;
+	msg_len = sizeof(msg_req_t) + addr_len;
 	// slog_info("[COMM][send_req] msg_len=%ld", msg_len);
 	// slog_info("[COMM][send_req] msg_len=%ld, before malloc", msg_len);
 	msg = (msg_req_t *)malloc(msg_len);
+	if (msg == NULL)
+	{
+		perror("HERCULES_ERR_COMMS_SEND_REQ_ALLOC_MEMORY");
+		slog_error("HERCULES_ERR_COMMS_SEND_REQ_ALLOC_MEMORY");
+		exit(-1);
+	}
 	// slog_info("[COMM][send_req] msg_len=%lu", msg_len);
 	//	msg = (msg_req_t *)send_buffer;
 
@@ -327,17 +340,17 @@ size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_
 	// slog_info("[COMM][send_req] after ucp_tag_send_nbx");
 	// slog_info("[COMM][send_req] before ucx_wait");
 	status = ucx_wait(ucp_worker, request, "send", req); // original
-	// if (request == NULL)
-	// {
-	// 	status = UCS_OK;
-	// }
-	// else
-	// {
-	// 	while (((status = ucp_request_check_status(request)) == UCS_INPROGRESS) && ep_timeout != 1)
-	// 	{
-	// 		ucp_worker_progress(ucp_worker);
-	// 	}
-	// }
+	if (request == NULL)
+	{
+		status = UCS_OK;
+	}
+	else
+	{
+		while (((status = ucp_request_check_status(request)) == UCS_INPROGRESS) && ep_timeout != 1)
+		{
+			ucp_worker_progress(ucp_worker);
+		}
+	}
 	// slog_info("[COMM][send_req] after ucx_wait");
 
 	if (status != UCS_OK)
@@ -760,8 +773,8 @@ ucs_status_t server_create_ep(ucp_worker_h data_worker,
 	ep_params.field_mask = UCP_EP_PARAM_FIELD_ERR_HANDLER | UCP_EP_PARAM_FIELD_CONN_REQUEST;
 	ep_params.conn_request = conn_request;
 	ep_params.err_handler.cb = err_cb_server;
-	// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-	ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 	ep_params.err_handler.arg = NULL;
 
 	status = ucp_ep_create(data_worker, &ep_params, server_ep);
@@ -790,8 +803,8 @@ ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_addres
 						   UCP_EP_PARAM_FIELD_ERR_HANDLER |
 						   UCP_EP_PARAM_FIELD_USER_DATA;
 	ep_params.address = peer_addr;
-	// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-	ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 	ep_params.err_handler.cb = err_cb_client;
 	ep_params.err_handler.arg = NULL;
 	// ep_params.err_handler.arg = &server_status;
@@ -801,7 +814,8 @@ ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_addres
 	status = ucp_ep_create(worker, &ep_params, ep);
 	if (status != UCS_OK)
 	{
-		fprintf(stderr, "failed to create an endpoint on the server: (%s)", ucs_status_string(status));
+		fprintf(stderr, "failed to create an endpoint on the server: (%s)\n", ucs_status_string(status));
+		slog_error("failed to create an endpoint on the server: (%s)", ucs_status_string(status));
 	}
 
 	slog_debug("[COMM] Created client endpoint");
@@ -811,7 +825,7 @@ ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_addres
 ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr)
 {
 	ucp_ep_params_t ep_params;
-	ucs_status_t status;
+	ucs_status_t status = UCS_OK;
 	ucs_status_t ep_status = UCS_OK;
 
 	/* Server creates an ep to the client on the data worker.
@@ -824,8 +838,8 @@ ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_ad
 						   UCP_EP_PARAM_FIELD_ERR_HANDLER |
 						   UCP_EP_PARAM_FIELD_USER_DATA;
 	ep_params.address = peer_addr;
-	// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-	ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+	// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 	ep_params.err_handler.cb = err_cb_client;
 	ep_params.err_handler.arg = NULL;
 	ep_params.user_data = &ep_status;
@@ -863,8 +877,8 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages) + (sizeof(int) * struct_->num_storages) + (sizeof(int) * struct_->num_storages);
 
 		// Reserve the corresponding amount of memory for the previous buffer.
-		// info_buffer = (char *)malloc(msg_size * sizeof(char));
-		info_buffer = (char *)mem_type_malloc(msg_size * sizeof(char));
+		info_buffer = (char *)malloc(msg_size * sizeof(char));
+		// info_buffer = (char *)mem_type_malloc(msg_size * sizeof(char));
 
 		if (info_buffer == NULL)
 		{
@@ -913,8 +927,8 @@ int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		// 	msg_size += (struct_->num_data_elem * sizeof(uint16_t));
 
 		// Reserve the corresponding amount of memory for the previous buffer.
-		// info_buffer = (char *)malloc(msg_size * sizeof(char));
-		info_buffer = (char *)mem_type_malloc(msg_size * sizeof(char));
+		info_buffer = (char *)malloc(msg_size * sizeof(char));
+		// info_buffer = (char *)mem_type_malloc(msg_size * sizeof(char));
 		if (info_buffer == NULL)
 		{
 			perror("HERCULES_ERR_COMMS_DATASET_INFO_SEND_DYNAMIC_STREAM_MEMORY");
@@ -1265,6 +1279,27 @@ void empty_function(void *request, ucs_status_t status)
 {
 }
 
+// Function to flush and close the endpoint
+void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
+{
+	// Flush the endpoint to ensure all outstanding operations are completed
+	ucs_status_t status = ucp_ep_flush(ep);
+	if (status != UCS_OK)
+	{
+		fprintf(stderr, "Failed to flush endpoint: %s\n", ucs_status_string(status));
+		slog_error("Failed to flush endpoint: %s\n", ucs_status_string(status));
+	}
+
+	ep_close(worker, ep, UCP_EP_CLOSE_MODE_FLUSH);
+	// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
+
+	// Destroy the endpoint
+	// ucp_ep_destroy(ep);
+
+	// progress the worker
+	ucp_worker_progress(worker);
+}
+
 /**
  * Close UCP endpoint.
  *
@@ -1520,13 +1555,17 @@ ucs_status_t worker_flush(ucp_worker_h worker)
 
 void ep_close_err_mode(ucp_worker_h ucp_worker, ucp_ep_h ucp_ep)
 {
-    uint64_t ep_close_flags = 0;
+	uint64_t ep_close_flags = 0;
 
-    // if (err_handling_opt.ucp_err_mode == UCP_ERR_HANDLING_MODE_PEER) {
-    //     ep_close_flags = UCP_EP_CLOSE_FLAG_FORCE;
-    // } else {
-    //     ep_close_flags = 0;
-    // }
+	// if (err_handling_opt.ucp_err_mode == UCP_ERR_HANDLING_MODE_PEER) {
+	//     ep_close_flags = UCP_EP_CLOSE_FLAG_FORCE;
+	// } else {
+	//     ep_close_flags = 0;
+	// }
 
-    ep_close(ucp_worker, ucp_ep, ep_close_flags);
+	ep_close(ucp_worker, ucp_ep, ep_close_flags);
 }
+
+#ifdef __cplusplus
+}
+#endif
