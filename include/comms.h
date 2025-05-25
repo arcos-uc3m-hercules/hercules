@@ -14,6 +14,7 @@
 // to manage logs.
 #include "slog.h"
 #include "hello_world_util.h"
+#include <string>
 
 #define IMSS_INFO 0
 #define DATASET_INFO 1
@@ -46,6 +47,7 @@
 #define TYPE_HERCULES_INSTANCE 'I' // for Hercules instances
 #define TYPE_REGULAR_FILE 'R'      // for regular files
 #define TYPE_DIRECTORY 'D'         // for directories
+#define TYPE_ERROR 'E'         // unkown file type
 
 static const ucp_tag_t tag_req = 0x1337a880u;
 static const ucp_tag_t tag_data = 0x2337a880u;

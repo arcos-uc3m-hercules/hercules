@@ -25,7 +25,7 @@ extern char *buffer_address;
 extern pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
 extern uint64_t buffer_segment;
-char POLICY[MAX_POLICY_LEN] = {'\0'};
+char POLICY[MAX_POLICY_LEN] = {0};
 
 extern ucp_worker_h *ucp_worker_threads;
 extern ucp_address_t **local_addr;
@@ -170,7 +170,7 @@ int32_t main(int32_t argc, char **argv)
 	if (args.type != TYPE_METADATA_SERVER && args.type != TYPE_DATA_SERVER)
 	{
 		// fprintf(stderr, "%c is not a valid server type \n usage: hercules_server <m|d> <server_id> <metadata_host> <0|1>\n", args.type);
-		char usage_msg[64] = {'\0'};
+		char usage_msg[64] = {0};
 		sprintf(usage_msg, "%c is not a valid server type", args.type);
 		print_usage((const char *)usage_msg);
 		return 0;
@@ -409,7 +409,7 @@ int32_t main(int32_t argc, char **argv)
 			if (!args.id)
 			{ // Only performs by the data server with ID = 0.
 				// Formated HERCULES uri to be sent to the metadata server.
-				char formated_uri[REQUEST_SIZE] = {'\0'};
+				char formated_uri[REQUEST_SIZE] = {0};
 				sprintf(formated_uri, "%" PRIu32 " GET 0 %s", id, args.imss_uri);
 				slog_debug("Request - %s", formated_uri);
 				// Send the request.
@@ -807,7 +807,7 @@ int32_t main(int32_t argc, char **argv)
 			return -1;
 		}
 
-		char key_plus_size[REQUEST_SIZE] = {'\0'};
+		char key_plus_size[REQUEST_SIZE] = {0};
 		uint32_t id = INSTANCE_OP;
 		// Send the created structure to the metadata server.
 		sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", id, (sizeof(imss_info) + my_imss.num_storages * LINE_LENGTH + my_imss.num_storages * sizeof(int) + my_imss.num_storages * sizeof(int)), my_imss.uri_);
@@ -1029,7 +1029,7 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 	int curr_map_size = 0;
 	const char *uri_ = NULL;
 	size_t size = 0;
-	char key_[REQUEST_SIZE] = {'\0'};
+	char key_[REQUEST_SIZE] = {0};
 	// Get the number of blocks stored by this data server.
 	int number_of_blocks_2_move = map->size();
 

@@ -160,8 +160,8 @@ void *hercules_ucx_server(void *th_argv)
 	p_argv *arguments = (p_argv *)th_argv;
 	// Map that stores server side endpoints
 	void *map_server_eps = NULL;
-	char server_name[PATH_MAX] = {'\0'};
-	char server_tag[PATH_MAX] = {'\0'};
+	char server_name[PATH_MAX] = {0};
+	char server_tag[PATH_MAX] = {0};
 
 	switch (arguments->args.type)
 	{
@@ -180,7 +180,7 @@ void *hercules_ucx_server(void *th_argv)
 	}
 
 	// if (!arguments->thread_id) // thread 0.
-	{ 
+	{
 		map_server_eps = map_server_eps_create();
 		BLOCK_SIZE = arguments->blocksize * 1024;
 	}
@@ -1185,6 +1185,12 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					{
 						slog_debug("Reusing buffer");
 					}
+					if (msg_length > BLOCK_SIZE)
+					{
+						perror("HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK");
+						slog_error("HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK");
+						sleep(5);
+					}
 
 					if (buffer == NULL)
 					{
@@ -1651,11 +1657,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 
 	uint32_t operation = 0; // server id.
-	char mode[MODE_SIZE] = {'\0'};
+	char mode[MODE_SIZE] = {0};
 	int32_t req_size = 0;
-	char raw_msg[req_size + 1] = {'\0'};
-	char number[16] = {'\0'};
-	char uri_[URI_] = {'\0'};
+	char raw_msg[req_size + 1] = {0};
+	char number[16] = {0};
+	char uri_[URI_] = {0};
 	int extra_info = 0;
 	int num_characters_read = 0;
 	int num_input_read = 0;
@@ -1769,8 +1775,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			// }
 			// free(item);
 			free(buffer);
-			break;
 		}
+		break;
 		case READ_OP:
 		{ // case 0.
 			slog_debug("[READ_OP]");
@@ -1839,17 +1845,17 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				// pthread_mutex_unlock(&lock_network);
 			}
-			break;
 		}
+		break;
 		case RELEASE:
 		{
 			slog_debug("[stat_worker_thread][READ_OP][RELEASE] Deleting endpoint with %" PRIu64 "", arguments->worker_uid);
-			
+
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			// ucp_destroy(arguments->ucp_context);
 			slog_debug("[stat_worker_thread][READ_OP][RELEASE] Endpoints deleted ");
-			break;
 		}
+		break;
 		case DELETE_OP:
 		{
 			slog_debug("DELETE_OP");
@@ -1928,8 +1934,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				// pthread_mutex_unlock(&lock_network);
 			}
-			break;
 		}
+		break;
 		case RENAME_OP:
 		{
 			int ret = -1;
@@ -1975,8 +1981,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				return -1;
 			}
 			// pthread_mutex_unlock(&lock_network);
-			break;
 		}
+		break;
 		case RENAME_DIR_DIR_OP:
 		{
 			int ret = -1;
@@ -2026,8 +2032,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				return -1;
 			}
 			// pthread_mutex_unlock(&lock_network);
-			break;
 		}
+		break;
 		case CLOSE_OP:
 		{
 			slog_debug("CLOSE_OP");
@@ -2090,8 +2096,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				// pthread_mutex_unlock(&lock_network);
 			}
-			break;
 		}
+		break;
 		case OPEN_OP:
 		{
 			slog_debug("OPEN_OP");
@@ -2137,8 +2143,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					return -1;
 				}
 			}
-			break;
 		}
+		break;
 		default:
 			break;
 		}
@@ -2147,19 +2153,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// Write operations.
 	case SET_OP:
 	{
-		// switch (operation)
-		// {
-		// case INSTANCE_OP:
-		// {
-		// 	slog_debug("NEW INSTANCE OPERATION");
-		// 	slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
-		// 	/* code */
-		// 	break;
-		// }
-		// default:
-		// 	break;
-		// }
-
 		slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
 		// TO CHECK: this mutex can be removed cause' map->get has another mutex.
 		// pthread_mutex_lock(&memory_protect);
@@ -2436,8 +2429,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 		}
 		// pthread_mutex_unlock(&memory_protect);
-		break;
 	}
+	break;
 	default:
 		break;
 	}
@@ -2466,7 +2459,6 @@ void *srv_attached_dispatcher(void *th_argv)
 
 	// Variable specifying the ID that will be granted to the next client.
 	uint32_t client_id_ = 0;
-	// char req[256];
 	char *req;
 
 	ret = init_worker(arguments->ucp_context, &ucp_data_worker);
@@ -2641,7 +2633,7 @@ void *dispatcher(void *th_argv)
 	char req[REQUEST_SIZE];
 	struct sockaddr_in server_addr;
 	socklen_t addrlen = sizeof(server_addr);
-	int ret;
+	int ret = 0;
 	int listenfd = -1;
 	int optval = 1;
 	char *tmp_file_path = arguments->tmp_file_path;
@@ -2695,8 +2687,7 @@ void *dispatcher(void *th_argv)
 	while (1)
 	{
 		ucs_status_t status;
-		char mode[MODE_SIZE];
-
+		char mode[MODE_SIZE] = {0};
 		// slog_debug("[DISPATCHER] Waiting for connection requests.");
 		// fprintf(stderr, "[DISPATCHER] Waiting for connection requests.\n");
 		new_socket = accept(global_server_fd_thread, (struct sockaddr *)&server_addr, &addrlen);
@@ -2712,6 +2703,7 @@ void *dispatcher(void *th_argv)
 			// slog_error("ERR_HERCULES_DISPATCHER_ACCEPT");
 			continue;
 		}
+
 		ret = recv(new_socket, req, REQUEST_SIZE, MSG_WAITALL);
 		if (ret < 0)
 		{

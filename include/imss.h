@@ -58,7 +58,6 @@ static uint64_t BLOCK_SIZE;
 #define DPRINT(...)
 #endif
 
-
 int32_t get_data_location(int32_t, int32_t, int32_t);
 
 // typedef enum {
@@ -142,7 +141,7 @@ typedef struct
 	int32_t local_conn;
 	// Actual size
 	int64_t size;
-	
+
 	// N_servers
 	int32_t n_servers;
 	/*************** USED EXCLUSIVELY BY LOCAL DATASETS ***************/
@@ -216,7 +215,7 @@ RETURNS:	> 0 - Number of items contained by the specified URI.
 WARNING:	The get_dir function allocates memory (performs malloc operations). Therefore, the provided pointers (*buffer & *items) MUST BE FREED once done.
 	 */
 	// FIXME: fix implementation for multiple servers.
-	uint32_t get_dir(char *requested_uri, char **buffer, char ***items);
+	uint32_t get_dir(std::string requested_uri, char **buffer, char ***items);
 
 	/****************************************************************************************************************************/
 	/************************************** IN-MEMORY STORAGE SYSTEM MANAGEMENT FUNCTIONS ***************************************/
@@ -477,7 +476,7 @@ RETURNS:	 0 - The requested block was successfully stored.
 
 	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server);
 
-	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char* key);
+	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char *key);
 
 	int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const char *request);
 
@@ -577,11 +576,12 @@ RETURNS:	0 - Resources were released successfully.
 
 	int32_t imss_comm_cleanup();
 
-	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
+	int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root);
+	int32_t release_network_resources(const char *imss_uri, int is_parent, int process_rank);
 
 	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
 	int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir);
-
+	void ConcatLastSlash(std::string &pathname);
 
 	/**
 	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.
@@ -595,6 +595,7 @@ RETURNS:	0 - Resources were released successfully.
 	int32_t Open_file(const char *checkpoint_dir, const char *filename);
 	int32_t Close_file(int fd);
 	ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset);
+	
 
 #ifdef __cplusplus
 }

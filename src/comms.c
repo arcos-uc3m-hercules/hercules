@@ -306,22 +306,22 @@ size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_
 	msg_len = sizeof(msg_req_t) + addr_len;
 	// slog_info("[COMM][send_req] msg_len=%ld", msg_len);
 	// slog_info("[COMM][send_req] msg_len=%ld, before malloc", msg_len);
-	msg = (msg_req_t *)malloc(msg_len);
+	// msg = (msg_req_t *)malloc(msg_len);
+	msg = (msg_req_t *)calloc(1, msg_len);
 	if (msg == NULL)
 	{
 		perror("HERCULES_ERR_COMMS_SEND_REQ_ALLOC_MEMORY");
 		slog_error("HERCULES_ERR_COMMS_SEND_REQ_ALLOC_MEMORY");
 		exit(-1);
 	}
-	// slog_info("[COMM][send_req] msg_len=%lu", msg_len);
-	//	msg = (msg_req_t *)send_buffer;
 
 	msg->addr_len = addr_len; // imprimir la long de adress_len.
-	memcpy(msg->request, req, REQUEST_SIZE);
+	// memcpy(msg->request, req, REQUEST_SIZE);
+	memcpy(msg->request, req, strlen(req) + 1);
 	memcpy(msg + 1, addr, addr_len);
 
 	ctx.complete = 0;
-	ctx.buffer = (char *)msg;
+	ctx.buffer = (void *)msg;
 
 	send_param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
 							  UCP_OP_ATTR_FIELD_CALLBACK |
@@ -334,10 +334,10 @@ size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_
 	// send_param.memory_type  = UCS_MEMORY_TYPE_HOST;
 	send_param.user_data = &ctx;
 
-	// slog_info("[COMM][send_req] before ucp_tag_send_nbx");
+	slog_info("[COMM][send_req] before ucp_tag_send_nbx");
 	request = (struct ucx_context *)ucp_tag_send_nbx(ep, msg, msg_len, tag_req, &send_param);
 	// request = (struct ucx_context *)ucp_tag_send_sync_nbx(ep, msg, msg_len, tag_req, &send_param);
-	// slog_info("[COMM][send_req] after ucp_tag_send_nbx");
+	slog_info("[COMM][send_req] after ucp_tag_send_nbx");
 	// slog_info("[COMM][send_req] before ucx_wait");
 	status = ucx_wait(ucp_worker, request, "send", req); // original
 	if (request == NULL)
@@ -1065,7 +1065,7 @@ int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 	{
 		if (!strncmp("$ERRIMSS_NO_KEY_AVAIL$", msg_data, 22))
 		{
-			slog_error("[COMM] recv_dynamic_stream end  with error, err code 22");
+			slog_warn("[COMM] recv_dynamic_stream end: $ERRIMSS_NO_KEY_AVAIL$");
 			// return 22;
 			free(result);
 			return -1;
@@ -1289,7 +1289,7 @@ void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
 	// 	fprintf(stderr, "Failed to flush endpoint: %s\n", ucs_status_string(status));
 	// 	slog_error("Failed to flush endpoint: %s\n", ucs_status_string(status));
 	// }
-	fprintf(stdout,"Closing ep %p\n", &ep);
+	// fprintf(stdout,"Closing ep %p\n", &ep);
 	ep_close(worker, ep, UCP_EP_CLOSE_MODE_FLUSH);
 	// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
 

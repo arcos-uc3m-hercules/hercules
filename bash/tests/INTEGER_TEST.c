@@ -19,7 +19,7 @@ int main(int argc, char **argv)
     printf("Number: %d\n", number);
 
     char *mount_point = argv[1];
-    char file_path[100] = {'\0'};
+    char file_path[100] = {0};
 
     strncpy(file_path, mount_point, strlen(mount_point));
     strcat(file_path, "number.txt");

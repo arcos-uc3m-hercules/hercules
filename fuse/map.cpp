@@ -36,6 +36,14 @@ extern "C"
 		return reinterpret_cast<void *>(new Map);
 	}
 
+	void map_destroy(void *map)
+	{
+		if (map)
+		{
+			delete reinterpret_cast<Map *>(map);
+		}
+	}
+
 	// Insert the element "p = {v,stat,aux}" with key "k" to the map "map".
 	// This info is used by the "fd_lookup" function to avoid extra calls for the block 0.
 	void map_put(void *map, char *k, int v, struct stat stat, char *aux)
