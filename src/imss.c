@@ -44,8 +44,9 @@ GArray *free_imssd;		// Set of free entries within the 'imssd' vector.
 int32_t imssd_pos;		// Next position within the vextor were a new IMSS will be inserted.
 int32_t imssd_max_size; // Maximum number of elements that could be introduced into the imss array.
 
-GArray *datasetd;		   // Set of dataset metadata structures.
-GArray *free_datasetd;	   // Set of free entries within the 'datasetd' vector.
+GArray *datasetd;	   // Set of dataset metadata structures.
+GArray *free_datasetd; // Set of free entries within the 'datasetd' vector.
+GHashTable *dataset_uri_map = NULL;
 int32_t datasetd_pos;	   // Next position within the vextor were a new dataset will be inserted.
 int32_t datasetd_max_size; // Maximum number of elements that could be introduced into the dataset array.
 
@@ -117,6 +118,15 @@ int32_t imss_comm_cleanup()
 	ucp_cleanup(ucp_context_client);
 
 	return 0;
+}
+
+void add_dataset_entry(GHashTable **map, const char *uri, dataset_info *info)
+{
+	if (*map == NULL)
+	{
+		*map = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
+	}
+	g_hash_table_insert(*map, g_strdup(uri), info); // g_strdup to make a copy of the key
 }
 
 // Method inserting an element into a certain control GArray vector.
@@ -598,7 +608,7 @@ uint32_t discover_stat_srv(const char *_uri)
  * @brief Method retrieving the whole set of elements contained by a specific URI.
  * @return Number of entries/files for a specific URI.
  */
-uint32_t get_dir(std::string requested_uri_obj, char **buffer, char ***items)
+uint32_t get_dir(std::string requested_uri_obj, char ***items)
 {
 	ConcatLastSlash(requested_uri_obj);
 
@@ -623,7 +633,7 @@ uint32_t get_dir(std::string requested_uri_obj, char **buffer, char ***items)
 		number_metadata_servers = n_stat_servers;
 	}
 
-	slog_debug("requested_uri=%s, first_parent_dir=%s, first_parent_offset=%d, number_metadata_servers=%d, n_stat_servers=%d", requested_uri, first_parent_dir, first_parent_offset, number_metadata_servers, n_stat_servers);
+	slog_debug("requested_uri=%s, first_parent_dir=%s, first_parent_offset=%d, number_metadata_servers=%d, n_stat_servers=%d, m_srv=%d", requested_uri, first_parent_dir, first_parent_offset, number_metadata_servers, n_stat_servers, m_srv);
 
 	char getdir_req[REQUEST_SIZE] = {0};
 	uint32_t total_num_elements = 0;
@@ -671,7 +681,7 @@ uint32_t get_dir(std::string requested_uri_obj, char **buffer, char ***items)
 		char *elements = (char *)malloc(length * sizeof(char));
 		//  Retrieve the set of elements within the requested uri.
 		ret = recv_dynamic_stream(ucp_worker_meta, ep, elements, BUFFER, local_meta_uid, length);
-		if (ret < 0)
+		if (ret == -2)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("HERCULES_ERR_GET_DIR_RECV_STREAM");
@@ -708,6 +718,8 @@ uint32_t get_dir(std::string requested_uri_obj, char **buffer, char ***items)
 		arr_elements[i] = elements;
 		arr_lengths[i] = num_elements;
 	}
+
+	// fprintf(stdout,"Elements readed from the servers=%lu\n", total_num_elements);
 
 	// Identify each element within the buffer provided.
 	total_num_elements++;
@@ -1425,7 +1437,7 @@ int32_t create_dataset(char *dataset_uri,
 		char parent_dir[PATH_MAX] = {0};
 		strncpy(parent_dir, dataset_uri, offset);
 		slog_live("dataset_uri=%s, parent directory = %s", dataset_uri, parent_dir);
-		if ((ret = stat_dataset(parent_dir, &new_dataset, 0)) <= 0)
+		if ((ret = stat_dataset(parent_dir, &new_dataset, 0)) < 0)
 		{
 			/********** TO CHECK */
 			char err_msg[MAX_ERR_MSG_LEN];
@@ -1460,6 +1472,7 @@ int32_t create_dataset(char *dataset_uri,
 		// Add the created struture into the underlying IMSSs.
 		// return (GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd));
 		GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
+		// add_dataset_entry(dataset_uri_map, dataset_uri, new_dataset);
 		// fprintf(stderr, "dataset already exists, ret=%d\n", ret);
 		return -EEXIST;
 	}
@@ -1647,8 +1660,8 @@ int32_t open_dataset(char *dataset_uri, int opened)
 
 	dataset_info new_dataset;
 	// Dataset metadata request.
-	int32_t stat_dataset_res = stat_dataset(dataset_uri, &new_dataset, opened);
-	if (stat_dataset_res == 0)
+	int32_t stat_dataset_res = TIMING(stat_dataset(dataset_uri, &new_dataset, opened), "stat_dataset", int32_t, 0);
+	if (stat_dataset_res == -2)
 	{
 		slog_warn("HERCULES_ERR_OPEN_DATASET_NOT_EXIST_1: %s, dataset does not exist", dataset_uri);
 		return -1;
@@ -1680,13 +1693,13 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	// Check if the requested dataset did not exist or was already stored in the local vector.
 	switch (stat_dataset_res)
 	{
-	case 0:
+	case -2:
 	{
 		// slog_fatal("HERCULES_ERR_OPENDATASET_NOTEXISTS: %s", dataset_uri);
 		slog_warn("HERCULES_ERR_OPEN_DATASET_NOT_EXIST_2: %s, dataset does not exist", dataset_uri);
 		return -1;
 	}
-	case 2:
+	default:
 	{
 		if (new_dataset.local_conn != -2)
 		{
@@ -1715,7 +1728,8 @@ int32_t open_dataset(char *dataset_uri, int opened)
 
 			// return i;
 			// return GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
-			return -EEXIST;
+			// return -EEXIST;
+			return stat_dataset_res;
 		}
 		not_initialized = 1;
 
@@ -2051,13 +2065,13 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
 {
 	ucp_ep_h ep;
 	// Formated dataset uri to be sent to the metadata server.
-	char formated_uri[REQUEST_SIZE];
+	char formated_uri[REQUEST_SIZE] = {0};
 	int32_t ret = -1;
 
 	// Discover the metadata server that handles the dataset.
 	// uint32_t m_srv = discover_stat_srv((char *)dataset_uri);
 	// uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-	char first_parent_dir[URI_];
+	char first_parent_dir[URI_] = {0};
 	uint32_t m_srv = 0;
 	// int number_data_servers = 0;
 	int first_parent_offset = find_first_parent_dir((char *)dataset_uri, first_parent_dir);
@@ -2080,6 +2094,7 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
 	slog_debug("[IMSS] formated_uri='%s'", formated_uri);
 
 	pthread_mutex_lock(&lock_network);
+	slog_debug("Request to metadata %d - %s\n", m_srv, formated_uri);
 
 	// Send the request.
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
@@ -2157,7 +2172,6 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 
 		if (strstr(dataset_info_.uri_, old_dir) != NULL)
 		{
-			slog_debug("datset_info_.uri=%s, old_dir=%s", dataset_info_.uri_, old_dir);
 			char *path = dataset_info_.uri_;
 
 			size_t len = strlen(old_dir);
@@ -2169,11 +2183,15 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 					memmove(p, p + len, strlen(p + len) + 1);
 				}
 			}
+			slog_debug("datset_info_.uri=%s, old_dir=%s, rdir_dest=%s, path=%s", dataset_info_.uri_, old_dir, rdir_dest, path);
 			// char * new_path = (char *) malloc(strlen(rdir_dest) + 1);
 			char *new_path = (char *)malloc(256);
 			strcpy(new_path, rdir_dest);
-			strcat(new_path, "/");
-			strcat(new_path, path);
+			if (strlen(path) > 0)
+			{
+				strcat(new_path, "/");
+				strcat(new_path, path);
+			}
 
 			strcpy(dataset_info_.uri_, new_path);
 			g_array_remove_index(datasetd, i);
@@ -2240,6 +2258,7 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	}
 	pthread_mutex_unlock(&lock_network);
 
+	slog_debug("Result = %s", result);
 	if (strncmp((const char *)result, "RENAME", strlen("RENAME")))
 	{ // if the response message is different from "RENAME" it was an error.
 		perror("HERCULES_ERR_METADATA_RENAME_DIR_FAILED");
@@ -2303,7 +2322,7 @@ int32_t rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 
 	// Send the request.
 	sprintf(formated_uri, "%" PRIu32 " GET 5 %s,%s", stat_ids[m_srv], old_dataset_uri, new_dataset_uri);
-	slog_live("Request - %s", formated_uri);
+	slog_live("Request to metadata %d - %s", m_srv, formated_uri);
 	// fprintf(stderr, "Request - %s\n", formated_uri);
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
 	{
@@ -2344,10 +2363,11 @@ int32_t rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 		free(result);
 		return -1;
 	}
-
-	if (strncmp((const char *)result, "RENAME", strlen("RENAME")))
+	slog_debug("Response=%s", result);
+	if (strncmp((const char *)result, MSG_RENAME_OP, strlen(MSG_RENAME_OP)))
 	{ // if the response message is different from "RENAME" it was an error.
 		perror("HERCULES_ERR_RENAME_FILE_FAILED");
+		slog_error("HERCULES_ERR_RENAME_FILE_FAILED");
 		free(result);
 		return -1;
 	}
@@ -2473,8 +2493,8 @@ int paths_equal(const char *a, const char *b)
  * @param dataset_info Pointer to the struct where the dataset information will be stored.
  * @param opened "1" indicates to the remote metadata server if the file is being to be opened by the current process
  * or "0" if it is a simple request. If "0", the counter of how many process has the file opened will not be increased.
- * @return 2 if the dataset is on the local map "datasetd", 1 if the info was retreived from the remote metadata
- * server, 0 if the dataset does not exist, or -1 on error.
+ * @return if the dataset is on the local map "datasetd", the index is returned, 1 if the info was retreived from the remote metadata
+ * server, -2 if the dataset does not exist, or -1 on error.
  */
 int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int opened)
 {
@@ -2486,7 +2506,7 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 	// Search for the requested dataset in the local vector.
 	int len = 0;
 	for (int32_t i = 0; i < datasetd->len; i++)
-	{
+	{ // TO CHECK: adds overhead when the array grows.
 		*dataset_info_ = g_array_index(datasetd, dataset_info, i);
 		// fprintf(stderr, "[IMSS] dataset_uri=%s, dataset_info_->uri_=%s\n", dataset_uri, dataset_info_->uri_);
 
@@ -2496,7 +2516,8 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 			// fprintf(stderr, "[IMSS] dataset_uri=%s, dataset_info_->uri_=%s\n", dataset_uri, dataset_info_->uri_);
 			slog_live("[IMSS] dataset_uri=%s, dataset_info_->uri_=%s", dataset_uri, dataset_info_->uri_);
 			// fprintf(stderr, "found\n");
-			return 2;
+			// return 2;
+			return i;
 		}
 	}
 	// fprintf(stderr, "not found\n");
@@ -2558,7 +2579,7 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 		pthread_mutex_unlock(&lock_network);
 		slog_warn("[IMSS] dataset does not exist, req=%s", formated_uri);
 		free(data);
-		return 0;
+		return -2;
 	}
 	pthread_mutex_unlock(&lock_network);
 
@@ -2713,6 +2734,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 
 		sprintf(key_, "GET 6 0 %s,%s", old_dir, rdir_dest);
 		slog_debug("Request to data %d - %s", i, key_);
+		// fprintf(stdout, "Request to data %d - %s\n", i, key_);
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -2745,6 +2767,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 			return -1;
 		}
 		// fprintf(stderr, "RESPONSE MSG=%s\n", (char *)result);
+		slog_debug("Result=%s", result);
 		if (strncmp((const char *)result, MSG_RENAME_OP, strlen(MSG_RENAME_OP)))
 		{ // if the response message is different from "RENAME" it was an error.
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
@@ -2888,7 +2911,7 @@ int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, i
 	}
 
 	pthread_mutex_lock(&lock_network);
-	char key_[REQUEST_SIZE];
+	char key_[REQUEST_SIZE] = {0};
 
 	// Request the concerned block to the involved servers.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -2899,7 +2922,7 @@ int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, i
 		sprintf(key_, "GET 4 0 %s", dataset_uri);
 		// fprintf(stderr, "Request - %s\n", key_);
 		// printf("BLOCK %d ASKED TO %d SERVER with key: %s (%d)", data_id, repl_servers[i], key, key_length);
-		slog_debug("Data Request - %s\n", key_);
+		slog_debug("Request to data %d - %s\n", i, key_);
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -3275,7 +3298,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 	int n_server = -1;
 	int replication_factor = 1;
 	int inf_prov = 0;
-	int32_t curr_imss_storages;
+	int32_t curr_imss_storages = 0;
 
 	// if the number of server to be used was not provided, we try to obtain the data location.
 	// Server containing the corresponding data to be retrieved.
@@ -3324,7 +3347,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 	// double time_taken;
 	ucp_ep_h ep;
 	size_t msg_length = 0;
-	char mode[10];
+	char mode[10] = {0};
 	pthread_mutex_lock(&lock_network);
 
 	// Request the concerned block to the involved servers.
@@ -4054,7 +4077,7 @@ char **get_dataloc(const char *dataset,
 	switch (stat_dataset(dataset, &where_dataset, 0))
 	{
 	// No dataset was found with the requested name.
-	case 0:
+	case -2:
 	{
 		slog_fatal("ERRIMSS_GETDATALOC_DATASETNOTEXISTS");
 		return NULL;
@@ -4283,7 +4306,6 @@ char get_type(const char *uri)
 		slog_fatal("HERCULES_ERR_GET_TYPE_MEMORY_ALLOC");
 		exit(-1);
 	}
-	
 
 	recv_msg_len = recv_dynamic_stream(ucp_worker_meta, ep, result, BUFFER, local_meta_uid, length);
 	slog_debug("after recv_dynamic_stream recv_msg_len=%d", recv_msg_len);

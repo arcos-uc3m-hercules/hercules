@@ -182,40 +182,44 @@ extern "C"
 	 */
 	void fd_lookup(char *path, int *fd, struct stat *s, char **aux)
 	{
-		pthread_mutex_lock(&lock_file);
+		// pthread_mutex_lock(&lock_file);
 		*fd = -1;
 		// Seek for the fd on the map.
 		int found = map_search(map, path, fd, s, aux);
-		pthread_mutex_unlock(&lock_file);
+		// pthread_mutex_unlock(&lock_file);
 
 		if (found == -1)
 		{
 			// if the file was not find with the current name,
 			// try again adding an extra slash if they does not have it.
 			slog_warn("file not found, %s", path);
-			size_t len = strlen(path);
 			char aux_path[MAX_PATH] = {0};
+			size_t len = strlen(path);
 			if (len > 0 && path[len - 1] != '/')
 			{
 				strcpy(aux_path, path);
 				strcat(aux_path, "/");
+				found = map_search(map, aux_path, fd, s, aux);
+			} else {
+				strncpy(aux_path, path, strlen(path)-1);
 				found = map_search(map, aux_path, fd, s, aux);
 			}
 
 			if (found == -1)
 			{
 				*fd = -1;
-				slog_warn("file not found, %s", path);
+				slog_warn("file not found, %s", aux_path);
 			}
 			else
 			{
-				// if the fd was find with the extra slash,
-				// we add it to the permant path.
-				strcat(path, "/");
+				// if the fd was find with the aux_path, we replace it.
+				// strcat(path, "/");
+				// TODO: change for strncpy.
+				strcpy(path, aux_path);
 			}
 		}
 		if (*fd != -1)
-		{
+		{ // print data if the fd exists.
 			slog_debug("path=%s, found=%d, fd=%d, stat.st_nlink=%lu", path, found, *fd, s->st_nlink);
 		}
 	}
@@ -280,7 +284,7 @@ extern "C"
 		}
 
 		// get block 0 from data server.
-		ret = get_ndata(ds, 0, aux, 0, 0);
+		ret = TIMING(get_ndata(ds, 0, aux, 0, 0);, "get_ndata 0", int32_t, 0);
 		if (ret < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN];
@@ -299,6 +303,7 @@ extern "C"
 
 	void free_entries(char **refs, int n_ent)
 	{
+		slog_debug("Freeing memory of %d entries", n_ent);
 		if (refs != NULL)
 		{
 			for (size_t i = 0; i < n_ent; i++)
@@ -321,7 +326,7 @@ extern "C"
 	int imss_getattr(const char *path, struct stat *stbuf)
 	{
 		// Needed variables for the call
-		char *buffer = NULL;
+		// char *buffer = NULL;
 		char **refs = NULL;
 		int n_ent = -1;
 		const char *imss_path = path; // this pointer should no be free.
@@ -337,7 +342,7 @@ extern "C"
 		stbuf->st_blksize = IMSS_DATA_BSIZE; // block size in bytes.
 
 		slog_debug("before get_type, imss_path=%s", imss_path);
-		char type = get_type(imss_path);
+		char type = TIMING(get_type(imss_path), "get type", char, 0);
 		slog_debug("after get_type(%s):%c", imss_path, type);
 
 		int32_t ds = -1;
@@ -358,6 +363,14 @@ extern "C"
 			break;
 		}
 		case TYPE_DIRECTORY:
+		{
+			int len = strlen(path);
+			if (path[len - 1] != '/')
+			{
+				strcat((char *)path, "/");
+			}
+		}
+		break;
 		case TYPE_REGULAR_FILE: // Case file
 		{
 			break;
@@ -369,7 +382,7 @@ extern "C"
 
 		// Seek for the dataset on the local map. If it not found,
 		// we open it.
-		fd_lookup((char *)imss_path, &fd, &stats, &aux);
+		TIMING_NO_RETURN(fd_lookup((char *)imss_path, &fd, &stats, &aux), "fd_lookup", 0);
 		if (fd < 0)
 		{ // not found.
 			ds = open_dataset((char *)imss_path, 0);
@@ -389,6 +402,7 @@ extern "C"
 				}
 
 				//  data is filled in "get data".
+				// get block 0.
 				ret = get_ndata(ds, 0, data, 0, 0);
 				if (ret < 0)
 				{
@@ -439,7 +453,7 @@ extern "C"
 		switch (type)
 		{
 		case TYPE_DIRECTORY:
-			if ((n_ent = get_dir(imss_path, &buffer, &refs)) != -1)
+			if ((n_ent = get_dir(imss_path, &refs)) != -1)
 			{
 				stbuf->st_size = 4;
 				slog_debug("is a directy, setting st_nlink to 1");
@@ -447,10 +461,6 @@ extern "C"
 				stbuf->st_mode = S_IFDIR | 0775;
 				// free all memory in refs.
 				free_entries(refs, n_ent);
-				if (buffer != NULL)
-				{
-					free(buffer);
-				}
 			}
 		case TYPE_REGULAR_FILE:
 			stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0);
@@ -477,106 +487,108 @@ extern "C"
 	   and always passes non-zero offset to the filler function. When the buffer is full (or an error happens) the filler function will return '1'.
 	   */
 
-	int imss_readdir(std::string imss_path, char **buf, posix_fill_dir_t filler, off_t offset)
+	uint32_t imss_readdir(std::string imss_path, char ***buf, posix_fill_dir_t filler, off_t offset)
 	{
 		// Needed variables for the call
-		char *buffer = NULL;
-		char **refs = NULL;
+		// char *buffer = NULL;
+		//  char **refs = NULL;
 		uint32_t n_ent = 0;
-		uint32_t imss_path_len = imss_path.length();
+		// uint32_t imss_path_len = imss_path.length();
 
 		// TODO: "ls" when there is more than one "/".
 
 		slog_debug("[IMSS] imss_path=%s", imss_path.c_str());
 		// Call IMSS to get metadata
-		//int ret = 0;
-		n_ent = get_dir(imss_path, &buffer, &refs);
+		// int ret = 0;
+		n_ent = get_dir(imss_path, buf);
 		slog_debug("[IMSS] imss_path=%s, n_ent=%d", imss_path.c_str(), n_ent);
+		// buf = refs;
+		return ++n_ent;
 
-		if (n_ent < 0)
-		{
-			// strcat(imss_path, "/");
-			// slog_debug("[IMSS] imss_path=%s", imss_path);
-			// fprintf(stderr,"try again imss_path=%s\n",imss_path);
-			// n_ent = get_dir((char *)imss_path, &buffer, &refs);
-			// if (n_ent < 0)
-			// {
-			// 	fprintf(stderr, "[IMSS-FUSE]	Error retrieving directories for URI=%s\n", path);
-			return -ENOENT;
-			// }
-		}
-		// slog_debug("[IMSS] Before flush data");
-		// flush_data();
+		// if (n_ent < 0)
+		// {
+		// 	// strcat(imss_path, "/");
+		// 	// slog_debug("[IMSS] imss_path=%s", imss_path);
+		// 	// fprintf(stderr,"try again imss_path=%s\n",imss_path);
+		// 	// n_ent = get_dir((char *)imss_path, &buffer, &refs);
+		// 	// if (n_ent < 0)
+		// 	// {
+		// 	// 	fprintf(stderr, "[IMSS-FUSE]	Error retrieving directories for URI=%s\n", path);
+		// 	return -ENOENT;
+		// 	// }
+		// }
+		// // slog_debug("[IMSS] Before flush data");
+		// // flush_data();
 
-		// Fill buffer
-		// TODO: Check if subdirectory
-		slog_debug("[IMSS] imss_readdir %s has=%" PRIu32, imss_path.c_str(), n_ent);
-		// reserve memory for the string contaning all the entries.
-		*buf=(char *)calloc(1, n_ent*URI_*sizeof(char *)+1);
-		char *aux_pointer = *buf;
-		uint64_t aux_i = 0;
-		for (uint32_t i = 0; i < n_ent; ++i)
-		{
+		// // Fill buffer
+		// // TODO: Check if subdirectory
+		// slog_debug("[IMSS] imss_readdir %s has=%" PRIu32, imss_path.c_str(), n_ent);
+		// // reserve memory for the string contaning all the entries.
+		// *buf=(char *)calloc(1, n_ent*URI_*sizeof(char *)+1);
+		// char *aux_pointer = *buf;
+		// uint64_t aux_i = 0;
+		// for (uint32_t i = 0; i < n_ent; ++i)
+		// {
 
-			clock_t t;
-			double time_taken;
-			t = clock();
-			if(i%1000==0){
-				t = clock() - t;
-				time_taken = ((double)t) / (CLOCKS_PER_SEC);
-				// print a message every 1000 files.
-				printf("[%s][%.2f] Reading entry %" PRIu32 " of %" PRIu32 ", please wait, it=%" PRIu64 "\n", imss_path.c_str(), time_taken, i, n_ent, aux_i);
-			}
-			aux_i++;
-			if (i == 0)
-			{
-				// slog_debug("[IMSS]. y ..");
-				filler(aux_pointer, "..", NULL, 0);
-				filler(aux_pointer, ".", NULL, 0);
-			}
-			else
-			{
-				// slog_debug("[IMSS]%s", refs[i]);
-				// the stbuf is not used after here.
-				// struct stat stbuf;
-				// int error = imss_getattr(refs[i] + 6, &stbuf);
-				// if (!error)
-				{
-					// char *last = refs[i] + strlen(refs[i]) - 1;
-					// // slog_info("last=%s of %s", last, refs[i]);
-					// if (last[0] == '/')
-					// {
-					// 	last[0] = '\0';
-					// }
-					// int offset = 0;
-					// for (int j = 0; j < strlen(refs[i]); ++j)
-					// {
-					// 	if (refs[i][j] == '/')
-					// 	{
-					// 		offset = j;
-					// 	}
-					// }
-					// fprintf(stdout, "expected element %s\n", refs[i]+imss_path_len);
-					// filler(buf, refs[i] + offset + 1, &stbuf, 0); // original
-					// slog_full("refs[i] + offset + 1=%s", refs[i] + offset + 1);
-					// fprintf(stdout,"refs[%d]=%s, strlen(refs[i])=%lu, last=%s, refs[i] + offset + 1=%s\n", i, refs[i], strlen(refs[i]), last, refs[i] + offset + 1);
-					// filler(*buf, refs[i] + offset + 1, NULL, 0);
-					// filler(buf, refs[i], NULL, 0);
-					filler(aux_pointer, refs[i]+imss_path_len, NULL, 0);
-				}
-			}
-			if (refs[i] != NULL)
-			{
-				free(refs[i]);
-			}
-		}
-		// Free resources
-		if (refs != NULL)
-		{
-			free(refs);
-		}
-		printf("Ending imss_readdir\n");
-		return 0;
+		// 	clock_t t;
+		// 	double time_taken;
+		// 	t = clock();
+		// 	if(i%1000==0){
+		// 		t = clock() - t;
+		// 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
+		// 		// print a message every 1000 files.
+		// 		printf("[%s][%.2f] Reading entry %" PRIu32 " of %" PRIu32 ", please wait, it=%" PRIu64 "\n", imss_path.c_str(), time_taken, i, n_ent, aux_i);
+		// 	}
+		// 	aux_i++;
+		// 	if (i == 0)
+		// 	{
+		// 		// slog_debug("[IMSS]. y ..");
+		// 		filler(aux_pointer, "..", NULL, 0);
+		// 		filler(aux_pointer, ".", NULL, 0);
+		// 	}
+		// 	else
+		// 	{
+		// 		// slog_debug("[IMSS]%s", refs[i]);
+		// 		// the stbuf is not used after here.
+		// 		// struct stat stbuf;
+		// 		// int error = imss_getattr(refs[i] + 6, &stbuf);
+		// 		// if (!error)
+		// 		{
+		// 			// char *last = refs[i] + strlen(refs[i]) - 1;
+		// 			// // slog_info("last=%s of %s", last, refs[i]);
+		// 			// if (last[0] == '/')
+		// 			// {
+		// 			// 	last[0] = '\0';
+		// 			// }
+		// 			// int offset = 0;
+		// 			// for (int j = 0; j < strlen(refs[i]); ++j)
+		// 			// {
+		// 			// 	if (refs[i][j] == '/')
+		// 			// 	{
+		// 			// 		offset = j;
+		// 			// 	}
+		// 			// }
+		// 			// fprintf(stdout, "expected element %s\n", refs[i]+imss_path_len);
+		// 			// filler(buf, refs[i] + offset + 1, &stbuf, 0); // original
+		// 			// slog_full("refs[i] + offset + 1=%s", refs[i] + offset + 1);
+		// 			// fprintf(stdout,"refs[%d]=%s, strlen(refs[i])=%lu, last=%s, refs[i] + offset + 1=%s\n", i, refs[i], strlen(refs[i]), last, refs[i] + offset + 1);
+		// 			// filler(*buf, refs[i] + offset + 1, NULL, 0);
+		// 			// filler(buf, refs[i], NULL, 0);
+		// 			filler(aux_pointer, refs[i]+imss_path_len, NULL, 0);
+		// 		}
+		// 	}
+		// 	if (refs[i] != NULL)
+		// 	{
+		// 		free(refs[i]);
+		// 	}
+		// }
+		// // Free resources
+		// if (refs != NULL)
+		// {
+		// 	free(refs);
+		// }
+		// printf("Ending imss_readdir\n");
+		// return 0;
 	}
 
 	int imss_open(const char *path, uint64_t *fh)
@@ -2233,17 +2245,17 @@ extern "C"
 	{
 
 		// Needed variables for the call
-		char *buffer;
-		char **refs;
+		char **refs = NULL;
 		int n_ent = 0;
 
-		if ((n_ent = get_dir(imss_path, &buffer, &refs)) > 0)
+		if ((n_ent = get_dir(imss_path, &refs)) > 0)
 		{
 			free_entries(refs, n_ent);
-			if (n_ent > 1)
-			{
-				return -EPERM;
-			}
+			// if (n_ent > 1)
+			// {
+			// 	slog_debug("n_ent > 1");
+			// 	return -EPERM;
+			// }
 		}
 		else
 		{
@@ -3148,6 +3160,12 @@ extern "C"
 					if (S_ISDIR(ds_stat_n.st_mode))
 					{
 						// WE ARE IN MV DIR TO DIR
+						size_t len = strlen(new_rpath);
+						if (len > 0 && new_rpath[len - 1] != '/')
+						{
+							strcat(new_rpath, "/");
+						}
+
 						map_rename_dir_dir(map, old_rpath, new_rpath);
 						if (MULTIPLE_READ == 1)
 						{

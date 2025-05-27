@@ -245,18 +245,19 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	if (it == buffer.end())
 	{
 		slog_debug("%s not found in the map", key.c_str());
-		size_t len = strlen(key.c_str());
-		if (len > 0 && key.c_str()[len - 1] != '/')
-		{
+		// size_t len = strlen(key.c_str());
+		// if (len > 0 && key.c_str()[len - 1] != '/')
+		if (!key.empty() && key.back() != '/')
+		{ // check if the key does not have the last slash (e.g., directory case).
 			key += '/';
 			it = buffer.find(key);
 		}
-		// if (it == buffer.end())
-		// {
-		// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
-		// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
-		return 0;
-		// }
+		if (it == buffer.end())
+		{
+			// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
+			// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
+			return 0;
+		}
 	}
 
 	// fprintf(stderr,"GET-%s \n", key.c_str());
@@ -387,7 +388,23 @@ int32_t map_records::update_simple(std::string key, int value)
 
 int32_t map_records::delete_metadata_stat_worker(std::string key)
 {
+	// TO CHECK: is the memory being free?
+	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+
 	std::unique_lock<std::mutex> lock(*mut);
+	// find the element.
+	it = buffer.find(key);
+	if (it == buffer.end())
+	{
+		// -1 if the key does not exist.
+		return -1;
+	}
+	// push the memory pointer of this block inside the mem pool to be reused.
+	// StsQueue.push(mem_pool, item->second.first);
+	// free(item->second.first);
+	free(it->second.first);
+
+	// erase the element from the map.
 	int num_elements_erased = buffer.erase(key);
 	if (num_elements_erased == 0)
 	{
@@ -528,7 +545,7 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 	{
 		string key = *i;
 		// printf("Nodename    - %s	Rename modify original=%s\n",detect.nodename,key.c_str());
-		key.erase(0, old_dir.length() - 1);
+		key.erase(0, old_dir.length());
 
 		string new_path = rdir_dest;
 		new_path.append(key);
@@ -580,10 +597,11 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 	for (i = vec.begin(); i < vec.end(); i++)
 	{
 		string key = *i;
-		key.erase(0, old_dir.length() - 1);
+		key.erase(0, old_dir.length());
 
 		string new_path = rdir_dest;
 		new_path.append(key);
+		// fprintf(stdout, "Renaming dir %s to %s\n", old_dir.c_str(), new_path.c_str());
 
 		auto node = buffer.extract(*i);
 		node.key() = new_path;

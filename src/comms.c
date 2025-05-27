@@ -1014,7 +1014,7 @@ int32_t recv_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_str
 		perror("HERCULES_RECV_DATA_DYNAMIC_STREAM");
 		slog_error("HERCULES_RECV_DATA_DYNAMIC_STREAM");
 		free(result);
-		return -1;
+		return -2;
 	}
 
 	char *msg_data = result;

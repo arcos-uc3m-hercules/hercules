@@ -3503,12 +3503,18 @@ extern "C"
 				strcat(new_path, "/");
 			}
 
-			slog_live("[POSIX]. Calling Hercules 'rmdir', new_path=%s", new_path);
+			slog_live("[POSIX]. Calling Hercules 'rmdir', path=%s, new_path=%s", path, new_path);
 			ret = imss_rmdir(new_path);
-			if (ret == -1)
-			{ // special case io500
-				ret = real_unlinkat(0, path, 0);
+			if (ret < 0)
+			{
+				errno = -ret;
+				ret = -1;
 			}
+			
+			// if (ret == -1)
+			// { // special case io500
+			// 	ret = real_unlinkat(0, path, 0);
+			// }
 			slog_live("[POSIX]. Ending Hercules 'rmdir', new_path=%s, ret=%d\n", new_path, ret);
 			free(new_path);
 		}
@@ -3985,12 +3991,14 @@ extern "C"
 		return dirp;
 	}
 
-	char* mystrcat( char* dest, const char* src )
-{
-     while (*dest) dest++;
-     while (*dest++ = *src++);
-     return --dest;
-}
+	char *mystrcat(char *dest, const char *src)
+	{
+		while (*dest)
+			dest++;
+		while (*dest++ = *src++)
+			;
+		return --dest;
+	}
 
 	int myfiller(void *buf, const char *name, const struct stat *stbuf, off_t off)
 	{
@@ -4008,8 +4016,11 @@ extern "C"
 
 	struct dirent entry;
 	int to_read = 1;
-	// char ori_buf[KB * KB] = {0};
-	char *ori_buf = NULL;
+	char **ori_buf = NULL;
+	uint32_t n_ent = 0;
+	uint32_t imss_path_len = 0;
+	clock_t t;
+	int init_loop_timer = 1;
 	struct dirent *readdir(DIR *dirp)
 	{
 		if (!real_readdir)
@@ -4026,131 +4037,143 @@ extern "C"
 		std::string pathname_obj = map_fd_search_by_val(map_fd, dirfd(dirp));
 		if (!pathname_obj.empty())
 		{
-			// size_t len = strlen(pathname);
-			// if (len > 0 && pathname[len - 1] != '/')
-			// {
-			// 	strcat(pathname, "/");
-			// }
 			ConcatLastSlash(pathname_obj);
 			const char *pathname = pathname_obj.c_str();
 
 			slog_live("[POSIX]. Calling Hercules 'readdir', pathname=%s", pathname_obj.c_str());
 
-			char *token = NULL;
+			if (init_loop_timer)
+			{
+				t = clock();
+				init_loop_timer = 0;
+			}
+
+			const char *token = NULL;
 			if (to_read)
 			{
-				imss_readdir(pathname_obj, &ori_buf, OptFiller, 0);
+				n_ent = imss_readdir(pathname_obj, &ori_buf, OptFiller, 0);
 				to_read = 0;
-				token = strtok(ori_buf, "$");
+				imss_path_len = pathname_obj.length();
 			}
-			else
-			{
-				token = strtok(NULL, "$");
-			}
-			// printf("buffer=%s\n", ori_buf);
 
-			unsigned long pos = telldir(dirp);
+			long int pos = TIMING(telldir(dirp), "telldir", long int, rank);
 
 			// int i = 0;
-			slog_live("Init while, first token=%s, pos=%lu", token, pos);
-			if (token != NULL)
+			// slog_live("Init while, first token=%s, pos=%lu", token, pos);
+			// if (token != NULL)
+			if (pos < n_ent)
 			{
-				// if (i == pos)
+				memset(&entry, 0, sizeof(struct dirent));
+				int idx = pos - 1;
+
+				if (pos == 0)
 				{
-					memset(&entry, 0, sizeof(struct dirent));
-					// slog_live("[POSIX] current token=%s, i=%d, pos=%d", token, i, pos);
-					slog_live("[POSIX] current token=%s, pos=%d", token, pos);
-					entry.d_ino = 0;
-					entry.d_off = pos;
-
-					// name of file
-					strcpy(entry.d_name, token);
-
-					char path_search[PATH_MAX] = {0};
-					// Add the slash between pathname and token if missing.
-					size_t len = strlen(pathname);
-					if (len > 0 && pathname[len - 1] != '/')
-					{
-						sprintf(path_search, "%s/%s", pathname, token);
-					}
-					else
-					{
-						sprintf(path_search, "%s%s", pathname, token);
-					}
-
-					if (!strncmp(token, ".", strlen(token)))
-					{ // current directory.
-						entry.d_type = DT_DIR;
-					}
-					else if (!strncmp(token, "..", strlen(token)))
-					{ // parent directory.
-						entry.d_type = DT_DIR;
-					}
-					else
-					{
-						// to get the type of this entry.
-						// char type = get_type(path_search);
-						// slog_info("type=%d", type);
-
-						// switch (type)
-						// {
-						// case TYPE_DIRECTORY:
-						// case TYPE_HERCULES_INSTANCE: // Directory case?
-						// 	entry.d_type = DT_DIR;
-						// 	break;
-						// case TYPE_REGULAR_FILE: // is regular file.
-						// 	entry.d_type = DT_REG;
-						// 	break;
-						// default:
-						// 	slog_error("HERCULES_ERR_READDIR_NOT_SUPPORTED_TYPE");
-						// 	perror("HERCULES_ERR_READDIR_NOT_SUPPORTED_TYPE");
-						// 	break;
-						// }
-						size_t len = strlen(token);
-						if (len > 0 && token[len - 1] != '/')
-						{
-							entry.d_type = DT_REG;
-						} else {
-							entry.d_type = DT_DIR;
-						}					
-					}
-
-					// length of this record
-					if (strlen(token) < 5)
-					{
-						entry.d_reclen = 24;
-					}
-					else
-					{
-						entry.d_reclen = ceil((double)(strlen(token) - 4) / 8) * 8 + 24;
-					}
-					slog_live("[imss_posix] path_searched = %s", path_search);
-					// break;
+					// strncpy(entry.d_name, "..", sizeof(".."));
+					token = ".";
 				}
-				// slog_live("Next token=%s", token)
-				// i++;
+				else if (pos == 1)
+				{
+					token = "..";
+				}
+				else
+				{
+					// uint32_t offset = URI_*(pos-1);
+					// printf("idx=%d\n", idx);
+					token = (char *)ori_buf[idx] + imss_path_len;
+				}
+
+				size_t len = strlen(token);
+				if (!strncmp(token, ".", strlen(token)))
+				{ // current directory.
+					entry.d_type = DT_DIR;
+				}
+				else if (!strncmp(token, "..", strlen(token)))
+				{ // parent directory.
+					entry.d_type = DT_DIR;
+				}
+				else
+				{
+					// to get the type of this entry.
+					if (len > 0 && token[len - 1] != '/')
+					{
+						entry.d_type = DT_REG;
+					}
+					else
+					{
+						entry.d_type = DT_DIR;
+						len -= 1; // to skip the last lash.
+					}
+				}
+
+				// slog_live("[POSIX] current token=%s, i=%d, pos=%d", token, i, pos);
+				slog_live("[POSIX] current token=%s, pos=%d", token, pos);
+				entry.d_ino = 0;
+				entry.d_off = pos;
+
+				// name of file
+				strncpy(entry.d_name, token, len);
+
+				if (pos % 1000 == 0) // TODO: comments this lines, only for debug.
+				{					 // print a message every 1000 files.
+					t = clock() - t;
+					double time_taken = 0.0;
+					time_taken = ((double)t) / (CLOCKS_PER_SEC);
+					printf("[%s][%f] Reading entry %s, %ld of  %" PRIu32 ", please wait.\n", pathname, time_taken, entry.d_name, pos, n_ent);
+					init_loop_timer = 1;
+				}
+				// printf("[%s] Reading entry %s, %" PRIu32 " of %u, please wait\n", pathname, entry.d_name,  pos, n_ent);
+
+				char path_search[PATH_MAX] = {0};
+				// Add the slash between pathname and token if missing.
+				len = strlen(pathname);
+				if (len > 0 && pathname[len - 1] != '/')
+				{
+					sprintf(path_search, "%s/%s", pathname, token);
+				}
+				else
+				{
+					sprintf(path_search, "%s%s", pathname, token);
+				}
+
+				// length of this record
+				if (strlen(token) < 5)
+				{
+					entry.d_reclen = 24;
+				}
+				else
+				{
+					entry.d_reclen = ceil((double)(strlen(token) - 4) / 8) * 8 + 24;
+				}
+				slog_live("[imss_posix] path_searched = %s", path_search);
+
+				if (pos > 1)
+				{
+					if (ori_buf[idx] != NULL)
+					{
+						free(ori_buf[idx]);
+					}
+				}
+
+				TIMING_NO_RETURN(seekdir(dirp, pos + 1), "seekdir", rank);
 			}
-			seekdir(dirp, pos + 1);
 			if (token == NULL)
 			{
 				// free(entry);
 				// entry = NULL;
 				to_read = 1;
-				free(ori_buf);
+				// Free resources
+				if (ori_buf != NULL)
+				{
+					free(ori_buf);
+				}
 				return NULL;
 			}
 			slog_live("[POSIX]. Ending Hercules 'readdir',  pathname=%s\n", pathname);
 			return &entry;
-		}
-		// else
-		// {
-		slog_full("[POSIX]. Calling real 'readdir', fd=%d.", dirfd(dirp));
-		// entry = real_readdir(dirp);
-		return real_readdir(dirp);
-		// slog_full("[POSIX]. Ending real 'readdir'");
-		// }
+		} // end of Hercules case.
 
-		// return &entry;
+		slog_full("[POSIX]. Calling real 'readdir', fd=%d.", dirfd(dirp));
+		return real_readdir(dirp);
 	}
 
 	struct dirent64 *readdir64(DIR *dirp)

@@ -53,7 +53,7 @@ extern "C"
 	int imss_refresh(const char *path);
 	int imss_getattr(const char *path, struct stat *stbuf);
 
-	int imss_readdir(std::string path, char **buf, posix_fill_dir_t filler, off_t offset);
+	uint32_t imss_readdir(std::string path, char ***buf, posix_fill_dir_t filler, off_t offset);
 	int imss_open(const char *path, uint64_t *fh);
 	ssize_t imss_read(const char *path, void *buf, size_t size, off_t offset);
 	ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset);

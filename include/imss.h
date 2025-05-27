@@ -215,7 +215,7 @@ RETURNS:	> 0 - Number of items contained by the specified URI.
 WARNING:	The get_dir function allocates memory (performs malloc operations). Therefore, the provided pointers (*buffer & *items) MUST BE FREED once done.
 	 */
 	// FIXME: fix implementation for multiple servers.
-	uint32_t get_dir(std::string requested_uri, char **buffer, char ***items);
+	uint32_t get_dir(std::string requested_uri_obj, char ***items);
 
 	/****************************************************************************************************************************/
 	/************************************** IN-MEMORY STORAGE SYSTEM MANAGEMENT FUNCTIONS ***************************************/

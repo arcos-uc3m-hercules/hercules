@@ -646,7 +646,7 @@ int32_t main(int32_t argc, char **argv)
 		else
 		{
 			aux_idx = i - extra_threads;
-			fprintf(stdout, "Init worker %d\n", aux_idx);
+			// fprintf(stdout, "Init worker %d\n", aux_idx);
 			ret = init_worker(ucp_context, &ucp_worker_threads[aux_idx]);
 			if (ret != 0)
 			{

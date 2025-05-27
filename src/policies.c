@@ -212,13 +212,13 @@ void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
 {
 	// Dataset metadata request.
 	dataset_info new_dataset;
-	int32_t stat_dataset_res = 0;
+	int32_t stat_dataset_res = -2;
 	if (server_type == TYPE_DATA_SERVER)
 	{
 		stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
 	}
 	char *tmp = NULL;
-	if (stat_dataset_res == 0)
+	if (stat_dataset_res == -2)
 	{
 		tmp = (char *)fname;
 	}
@@ -248,7 +248,7 @@ int32_t find_server(
 	int32_t session_plcy)
 {
 	int32_t next_server = -1;
-	char passed_name[PATH_MAX];
+	char passed_name[PATH_MAX] = {0};
 
 	switch (session_plcy)
 	{

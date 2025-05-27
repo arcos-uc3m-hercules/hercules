@@ -324,6 +324,8 @@ void *hercules_ucx_server(void *th_argv)
 
 		t = clock() - t;
 
+		fflush(stdout);
+
 		time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 		slog_info("Serving time %f s\n", time_taken);
 
@@ -1187,9 +1189,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					}
 					if (msg_length > BLOCK_SIZE)
 					{
-						perror("HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK");
-						slog_error("HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK");
-						sleep(5);
+						fprintf(stdout, "HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK\n");
+						slog_warn("HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK");
 					}
 
 					if (buffer == NULL)
@@ -1782,14 +1783,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			slog_debug("[READ_OP]");
 			// Check if there was an associated block to the key.
 			int err = map->get(key, &address_, &block_size_rtvd);
-			if (err == 0)
-			{
-				if (!key.empty() && key.back() != '/')
-				{
-					key += '/';
-					err = map->get(key, &address_, &block_size_rtvd);
-				}
-			}
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
@@ -1913,7 +1906,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				pthread_mutex_unlock(&memory_protect);
 
-				if (ret_map && ret_tree)
+				// char *buffer = NULL;
+				// int32_t numelems_indir = -1;
+				//fprintf(stdout, "Before getdir %s\n", key.c_str());
+				// buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
+				// fprintf(stdout,"After getdir %s, num elements %d\n", key.c_str(), numelems_indir);
+				// if (numelems_indir == -1)
+				// 	fprintf(stdout, "Entry already deleted: %s\n", key.c_str());
+
+				if (ret_map > 0 && ret_tree == 1)
 				{
 					response_msg = MSG_DELETE_OP;
 				}
@@ -2084,7 +2085,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				pthread_mutex_unlock(&memory_protect);
 
-				// int32_t result = map->delete_metadata_stat_worker(key);
 				// pthread_mutex_lock(&lock_network);
 				ret = SendConfirmationMessage(arguments, response_msg);
 				if (ret == 0)
@@ -2409,7 +2409,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					}
 					// Receive the block into the buffer.
 					ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
-					if (ret == -1)
+					if (ret < 0)
 					{
 						perror("HERCULES_ERR_STAT_SET_OP_RECV_STREAM");
 						slog_error("HERCULES_ERR_STAT_SET_OP_RECV_STREAM");
