@@ -1693,6 +1693,8 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	// Check if the requested dataset did not exist or was already stored in the local vector.
 	switch (stat_dataset_res)
 	{
+	case -3:
+	break;
 	case -2:
 	{
 		// slog_fatal("HERCULES_ERR_OPENDATASET_NOTEXISTS: %s", dataset_uri);
@@ -2586,7 +2588,7 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 	memcpy(dataset_info_, data, sizeof(dataset_info));
 	free(data);
 
-	return 1;
+	return -3;
 }
 
 /*

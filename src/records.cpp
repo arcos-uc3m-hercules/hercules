@@ -480,11 +480,11 @@ int32_t map_records::rename_data_srv_worker(std::string old_key, std::string new
 			vec.insert(vec.begin(), key);
 		}
 	}
-
+	slog_debug("Rename data srv worker %s=%d", old_key.c_str(), vec.size());
 	// check if the vector is empty, meaning that the old_dir key is not valid.
 	if (vec.size() == 0)
 	{
-		return 1;
+		return -1;
 	}
 
 	std::vector<string>::iterator i;
@@ -696,16 +696,18 @@ int32_t map_records::cleaning_specific(std::string new_key)
 			vec.insert(vec.begin(), partner_key);
 		}
 	}
-
+	slog_debug("Passing first loop, vec.size()=%d", vec.size());
 	if (vec.size() == 0)
 	{
-		size_t len = strlen(new_key.c_str());
-		if (len > 0 && new_key.c_str()[len - 1] != '/')
-		{
-			new_key += '/';
-			ret = cleaning_specific(new_key);
-		}
-		return ret;
+		// size_t len = strlen(new_key.c_str());
+		// if (len > 0 && new_key.c_str()[len - 1] != '/')
+		// {
+		// 	new_key += '/';
+		// 	// std::unique_lock<std::mutex> unlock(*mut);
+		// 	ret = cleaning_specific(new_key);
+		// }
+		// return ret;
+		return -1;
 	}
 
 	// Block the access to the map structure.

@@ -523,7 +523,17 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			slog_debug("Cleaning %s", key.c_str());
 			const char *response_msg = NULL;
 			ret = map->cleaning_specific(key);
-			if (ret != 0)
+			if (ret == -1)
+			{
+				size_t len = strlen(key.c_str());
+				if (len > 0 && key.c_str()[len - 1] != '/')
+				{
+					key += '/';
+					// std::unique_lock<std::mutex> unlock(*mut);
+					ret = map->cleaning_specific(key);
+				}
+			}
+			if (ret == -1)
 			{
 				fprintf(stderr, "HERCULES_ERR_CLEANING_DATASET: %s\n", key.c_str());
 				slog_error("HERCULES_ERR_CLEANING_DATASET: %s", key.c_str());
@@ -555,8 +565,18 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				std::string new_key = key.substr(found + 1);
 				slog_debug("[RENAME_OP], old_key=%s, new_key=%s", old_key.c_str(), new_key.c_str());
 				// RENAME MAP
-				ret = map->cleaning_specific(new_key);
-				if (ret == 0)
+				// ret = map->cleaning_specific(old_key);
+				// if (ret == -1)
+				// {
+				// 	size_t len = strlen(old_key.c_str());
+				// 	if (len > 0 && old_key.c_str()[len - 1] != '/')
+				// 	{
+				// 		old_key += '/';
+				// 		// std::unique_lock<std::mutex> unlock(*mut);
+				// 		ret = map->cleaning_specific(old_key);
+				// 	}
+				// }
+				// if (ret == 0)
 				{
 					ret = map->rename_data_srv_worker(old_key, new_key);
 				}
@@ -1906,11 +1926,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				pthread_mutex_unlock(&memory_protect);
 
-				// char *buffer = NULL;
-				// int32_t numelems_indir = -1;
-				//fprintf(stdout, "Before getdir %s\n", key.c_str());
-				// buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
-				// fprintf(stdout,"After getdir %s, num elements %d\n", key.c_str(), numelems_indir);
+				char *buffer = NULL;
+				int32_t numelems_indir = -1;
+				fprintf(stdout, "Before getdir %s\n", key.c_str());
+				buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
+				fprintf(stdout, "After getdir %s, num elements %d\n", key.c_str(), numelems_indir);
 				// if (numelems_indir == -1)
 				// 	fprintf(stdout, "Entry already deleted: %s\n", key.c_str());
 
