@@ -200,8 +200,10 @@ extern "C"
 				strcpy(aux_path, path);
 				strcat(aux_path, "/");
 				found = map_search(map, aux_path, fd, s, aux);
-			} else {
-				strncpy(aux_path, path, strlen(path)-1);
+			}
+			else
+			{
+				strncpy(aux_path, path, strlen(path) - 1);
 				found = map_search(map, aux_path, fd, s, aux);
 			}
 
@@ -303,13 +305,14 @@ extern "C"
 
 	void free_entries(char **refs, int n_ent)
 	{
-		slog_debug("Freeing memory of %d entries", n_ent);
+		// slog_debug("Freeing memory of %d entries", n_ent);
 		if (refs != NULL)
 		{
 			for (size_t i = 0; i < n_ent; i++)
 			{
 				if (refs[i] != NULL)
 				{
+					// fprintf(stdout, "%s\n", refs[i]);
 					free(refs[i]);
 				}
 			}
@@ -2250,12 +2253,13 @@ extern "C"
 
 		if ((n_ent = get_dir(imss_path, &refs)) > 0)
 		{
+			// fprintf(stdout, "Dir %s still has %d entries\n", imss_path, n_ent);
 			free_entries(refs, n_ent);
-			// if (n_ent > 1)
-			// {
-			// 	slog_debug("n_ent > 1");
-			// 	return -EPERM;
-			// }
+			if (n_ent > 1)
+			{
+				slog_debug("n_ent > 1");
+				return -EPERM;
+			}
 		}
 		else
 		{
@@ -2281,17 +2285,39 @@ extern "C"
 		int ret = 0;
 		pthread_mutex_lock(&lock);
 		fd_lookup((char *)imss_path, &fd, &stats, &buff);
+		// if (fd >= 0)
+		// 	ds = fd;
+		// else
+		// {
+		// 	slog_debug("%s not found in lookup", imss_path);
+		// 	pthread_mutex_unlock(&lock);
+		// 	return -ENOENT;
+		// }
+		int file_desc = 0;
 		if (fd >= 0)
-			ds = fd;
+			file_desc = fd;
+		else if (fd == -2)
+			return -ENOENT;
 		else
 		{
-			slog_debug("%s not found in lookup", imss_path);
-			pthread_mutex_unlock(&lock);
-			return -ENOENT;
+			// If not in the local map, open de dataset.
+			file_desc = open_dataset((char *)imss_path, 1);
+			// Get initial block (0).
+			char *data = NULL;
+			data = (char *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+			if (data == NULL)
+			{
+				perror("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
+				slog_error("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
+				return -ENOMEM;
+			}
+			memcpy(&stats, data, sizeof(struct stat));
+			map_put(map, imss_path, file_desc, stats, (char *)data);
+			buff = data;
 		}
 
-		// Get initial block (0).
-		ret = get_ndata(ds, 0, buff, 0, 0);
+		//  data is filled in "get data".
+		ret = get_ndata(file_desc, 0, buff, 0, 0);
 		if (ret < 0)
 		{
 			perror("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
@@ -2312,7 +2338,7 @@ extern "C"
 		// Write initial block (0).
 		memcpy(buff, &header, sizeof(struct stat));
 		slog_debug("header.st_nlink=%lu", header.st_nlink);
-		set_data(ds, 0, (char *)buff, 0, 0);
+		set_data(file_desc, 0, (char *)buff, 0, 0);
 		pthread_mutex_unlock(&lock);
 
 		// if it is the last link, the file is deleted (we also should to check if other process is open).
@@ -2320,7 +2346,7 @@ extern "C"
 		{
 			// Those operations must be performed by the server itself when it knows no more process are using the file.
 			// Erase metadata in the backend.
-			ret = delete_dataset(imss_path, ds);
+			ret = delete_dataset(imss_path, file_desc);
 			slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
 
 			switch (ret)
@@ -2340,7 +2366,7 @@ extern "C"
 				// map_release_prefetch(map_prefetch, imss_path);
 				slog_debug("Finish map_release_prefetch %s", path);
 				// *******************************
-				ret = release_dataset(ds);
+				ret = release_dataset(file_desc);
 				slog_debug("relese_dataset ret=%d", ret);
 				if (ret < 0)
 				{

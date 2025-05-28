@@ -11,6 +11,23 @@
 GNode *tree_root;
 GNode *last_parent = NULL;
 
+// Helper function to print the tree structure
+void print_tree_structure(GNode *root, int depth) {
+    if (!root) return;
+
+    for (int i = 0; i < depth; i++) {
+        //fprintf(stdout, "  "); // Indent
+    }
+    //fprintf(stdout,"- %s\n", (const char *)root->data);
+
+    // Recursively print children
+    GNode *child = root->children;
+    while (child) {
+        print_tree_structure(child, depth + 1);
+        child = child->next;
+    }
+}
+
 // Method searching for a certain data node.
 int32_t
 GTree_search_(GNode *parent_node,
@@ -23,7 +40,7 @@ GTree_search_(GNode *parent_node,
 	GNode *child = parent_node->children;
 
 	*found_node = parent_node;
-	//fprintf(stdout, "TreeSearch number of child %ld in %s\n", num_children, (char *)parent_node->data);
+	//fprintf(stdout, "TreeSearch number of child %ld in %p, %s\n", num_children, parent_node, (char *)parent_node->data);
 	// Search for the requested data within the children of the current node.
 	for (int32_t i = 0; i < num_children; i++)
 	{
@@ -430,6 +447,15 @@ serialize_dir(GNode *visited_node,
 // WARNING: this function reserves memory that must be freed.
 /**********************************************************/
 
+void print_child_node(GNode *node, gpointer data) {
+    // Cast the node's data back to a const char*
+    const char *node_name = (const char *)node->data;
+    // Cast the user_data back to a const char* (optional, but good practice if used)
+    const char *user_message = (const char *)data;
+
+    //fprintf(stdout,"  Child Node: %s\n", node_name);
+}
+
 
 // Method retrieving a buffer with all the files within a directory.
 char *
@@ -438,6 +464,8 @@ GTree_getdir(char *desired_dir,
 {
 	// Node whose elements must be retrieved.
 	GNode *dir_node;
+
+	// print_tree_structure(tree_root, 0);
 
 	// Check if the node is inserted.
 	if (!GTree_search(tree_root, desired_dir, &dir_node))
@@ -456,7 +484,7 @@ GTree_getdir(char *desired_dir,
 	// Number of children of the directory node.
 	uint32_t num_children = g_node_n_children(dir_node);
 	//fprintf(stdout,"Number of files in node %p, %s: %d\n", dir_node, (char * )dir_node->data, num_children);
-    
+    g_node_children_foreach(dir_node, G_TRAVERSE_ALL, print_child_node, (void *)"Hello from user data!");
 	// *numdir_elems = num_children + 1; //+1 because of the actual directory + childrens
 	*numdir_elems = num_children; // actual directory is concat in the front-end.
 

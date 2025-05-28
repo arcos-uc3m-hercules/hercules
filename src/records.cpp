@@ -527,13 +527,14 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 		{
 			vec.insert(vec.begin(), key);
 
-			key.erase(0, old_dir.length() - 1);
-
+			key.erase(0, old_dir.length());
 			string new_path = rdir_dest;
 			new_path.append(key);
+			slog_debug("new path=%s", new_path.c_str());
 		}
 	}
 
+	slog_debug("vec size=%d", vec.size());
 	// check if the vector is empty, meaning that the old_dir key is not valid.
 	if (vec.size() == 0)
 	{
@@ -554,6 +555,7 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 		// printf("Nodename    - %s	Rename new=%s\n",detect.nodename, new_path.c_str());
 		node.key() = new_path;
 		buffer.insert(std::move(node));
+		slog_debug("inserting %s", new_path.c_str());
 	}
 
 	return 0;

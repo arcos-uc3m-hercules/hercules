@@ -166,8 +166,6 @@ GInsert(int32_t *pos,
 		inserted_pos = *pos;
 	}
 
-	slog_debug("[IMSS][GTree] inserted_pos=%d", inserted_pos);
-
 	return inserted_pos;
 }
 
@@ -690,7 +688,8 @@ uint32_t get_dir(std::string requested_uri_obj, char ***items)
 			return -1;
 		}
 
-		if (!strncmp("$ERRIMSS_NO_KEY_AVAIL$", (const char *)elements, 22))
+		// if (!strncmp("$ERRIMSS_NO_KEY_AVAIL$", (const char *)elements, 22))
+		if (ret == -1)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("HERCULES_ERR_GET_DIR_NODIR");
@@ -1688,7 +1687,7 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	}
 	else
 	{
-		slog_debug("is_link=%d, stat_dataset_res=%d, new_dataset.local_conn=%d, n_servers=%d", new_dataset.is_link, stat_dataset_res, new_dataset.local_conn, new_dataset.n_servers);
+		slog_debug("is_link=%d, stat_dataset_res=%d, new_dataset.local_conn=%d, n_servers=%d, name=%s", new_dataset.is_link, stat_dataset_res, new_dataset.local_conn, new_dataset.n_servers, new_dataset.original_name);
 	}
 	int32_t not_initialized = 0;
 
@@ -1726,9 +1725,9 @@ int32_t open_dataset(char *dataset_uri, int opened)
 			// 	}
 			// }
 			// slog_debug("g_array->inserting %s in %d", dataset_info_.uri_, i);
-			// curr_dataset = g_array_index(datasetd, dataset_info, i);
+			curr_dataset = g_array_index(datasetd, dataset_info, stat_dataset_res);
 
-			curr_dataset = new_dataset;
+			// curr_dataset = new_dataset;
 
 			// return i;
 			// return GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
@@ -1784,8 +1783,10 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	// pthread_mutex_lock(&lock_gtree);
 	int32_t ret = GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
 
+
 	// curr_dataset = new_dataset;
 	curr_dataset = g_array_index(datasetd, dataset_info, ret);
+	slog_debug("[GInsert] %s inserted_pos=%d", curr_dataset.uri_, ret);
 
 	// pthread_mutex_unlock(&lock_gtree);
 	return ret;
@@ -3480,7 +3481,7 @@ ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_
 			char err_msg[MAX_ERR_MSG_LEN];
 			sprintf(err_msg, "HERCULES_ERR_NO_KEY_AVAIL, %s$%d", curr_dataset.uri_, data_id);
 			perror(err_msg);
-			slog_error("HERCULES_ERR_NO_KEY_AVAIL");
+			slog_error("%s", err_msg);
 			// free(response_buffer);
 		}
 	}

@@ -983,9 +983,6 @@ extern "C"
 			return real_lstat64(pathname, buf);
 		}
 
-		fprintf(stderr, "Calling lstat, pathname=%s\n", pathname);
-		slog_full("Calling lstat, pathname=%s", pathname);
-
 		errno = 0;
 		int ret = 0;
 		char *new_path = checkHerculesPath(pathname);
@@ -1048,8 +1045,6 @@ extern "C"
 		{
 			return real_stat(pathname, buf);
 		}
-
-		fprintf(stderr, "Calling lstat, pathname=%s\n", pathname);
 
 		errno = 0;
 		int ret;

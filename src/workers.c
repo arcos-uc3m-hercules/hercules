@@ -355,7 +355,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
-	char mode[MODE_SIZE];
+	char mode[MODE_SIZE] = {0};
 	const char *response_msg = NULL;
 
 	// Save the request to be served.
@@ -363,7 +363,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 	// Elements conforming the request.
 	uint32_t block_size_recv, block_offset;
-	char uri_[URI_];
+	char uri_[URI_] = {0};
 	size_t to_read = 0;
 	int sender = 0;
 
@@ -1926,11 +1926,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				pthread_mutex_unlock(&memory_protect);
 
-				char *buffer = NULL;
-				int32_t numelems_indir = -1;
-				fprintf(stdout, "Before getdir %s\n", key.c_str());
-				buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
-				fprintf(stdout, "After getdir %s, num elements %d\n", key.c_str(), numelems_indir);
+				// char *buffer = NULL;
+				// int32_t numelems_indir = -1;
+				// fprintf(stdout, "Before getdir %s\n", key.c_str());
+				// buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
+				// fprintf(stdout, "After getdir %s, num elements %d\n", key.c_str(), numelems_indir);
 				// if (numelems_indir == -1)
 				// 	fprintf(stdout, "Entry already deleted: %s\n", key.c_str());
 
