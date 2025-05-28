@@ -1437,7 +1437,8 @@ int32_t create_dataset(char *dataset_uri,
 		char parent_dir[PATH_MAX] = {0};
 		strncpy(parent_dir, dataset_uri, offset);
 		slog_live("dataset_uri=%s, parent directory = %s", dataset_uri, parent_dir);
-		if ((ret = stat_dataset(parent_dir, &new_dataset, 0)) < 0)
+		ret = stat_dataset(parent_dir, &new_dataset, 0);
+		if (ret < 0 && ret != -3)
 		{
 			/********** TO CHECK */
 			char err_msg[MAX_ERR_MSG_LEN];
@@ -1449,7 +1450,8 @@ int32_t create_dataset(char *dataset_uri,
 	}
 
 	// Dataset metadata request. To know if the dataset already exists.
-	if ((ret = stat_dataset(dataset_uri, &new_dataset, opened)) > 0)
+	ret = stat_dataset(dataset_uri, &new_dataset, opened);
+	if (ret >= 0)
 	{ // The dataset exists.
 		slog_live("[IMSS] ERRIMSS_CREATEDATASET_ALREADYEXISTS, associated_imss.conns.matching_server=%d", associated_imss.conns.matching_server);
 		new_dataset.imss_d = associated_imss_indx;
@@ -2495,7 +2497,7 @@ int paths_equal(const char *a, const char *b)
  * @param dataset_info Pointer to the struct where the dataset information will be stored.
  * @param opened "1" indicates to the remote metadata server if the file is being to be opened by the current process
  * or "0" if it is a simple request. If "0", the counter of how many process has the file opened will not be increased.
- * @return if the dataset is on the local map "datasetd", the index is returned, 1 if the info was retreived from the remote metadata
+ * @return if the dataset is on the local map "datasetd", the index is returned, -3 if the info was retreived from the remote metadata
  * server, -2 if the dataset does not exist, or -1 on error.
  */
 int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int opened)

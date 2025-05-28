@@ -430,6 +430,7 @@ serialize_dir(GNode *visited_node,
 // WARNING: this function reserves memory that must be freed.
 /**********************************************************/
 
+
 // Method retrieving a buffer with all the files within a directory.
 char *
 GTree_getdir(char *desired_dir,
@@ -451,9 +452,11 @@ GTree_getdir(char *desired_dir,
 
 	//*numdir_elems = num_elements_indir;
 
+	
 	// Number of children of the directory node.
 	uint32_t num_children = g_node_n_children(dir_node);
 	//fprintf(stdout,"Number of files in node %p, %s: %d\n", dir_node, (char * )dir_node->data, num_children);
+    
 	// *numdir_elems = num_children + 1; //+1 because of the actual directory + childrens
 	*numdir_elems = num_children; // actual directory is concat in the front-end.
 
