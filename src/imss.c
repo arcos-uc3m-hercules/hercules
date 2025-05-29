@@ -1436,9 +1436,9 @@ int32_t create_dataset(char *dataset_uri,
 		char parent_dir[PATH_MAX] = {0};
 		strncpy(parent_dir, dataset_uri, offset);
 		slog_live("dataset_uri=%s, parent directory = %s", dataset_uri, parent_dir);
-		dataset_info *parent_dataset = NULL;
+		dataset_info parent_dataset;
 
-		ret = stat_dataset(parent_dir, parent_dataset, 0);
+		ret = stat_dataset(parent_dir, &parent_dataset, 0);
 		if (ret < 0 && ret != -3)
 		{
 			/********** TO CHECK */
@@ -1448,8 +1448,6 @@ int32_t create_dataset(char *dataset_uri,
 			perror(err_msg);
 			return -ENOENT;
 		}
-		if (parent_dataset != NULL)
-			free(parent_dataset);
 	}
 
 	// Dataset metadata request. To know if the dataset already exists.
@@ -2503,7 +2501,8 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 	int len = 0;
 	for (int32_t i = 0; i < datasetd->len; i++)
 	{ // TO CHECK: adds overhead when the array grows.
-		dataset_info_ = &g_array_index(datasetd, dataset_info, i);
+		// dataset_info_ = &g_array_index(datasetd, dataset_info, i);
+		*dataset_info_ = g_array_index(datasetd, dataset_info, i);
 		// fprintf(stderr, "[IMSS] dataset_uri=%s, dataset_info_->uri_=%s\n", dataset_uri, dataset_info_->uri_);
 		slog_debug("[IMSS] dataset_uri=%s, dataset_info_->uri_=%s\n", dataset_uri, dataset_info_->uri_);
 		// if (!strncmp(dataset_uri, dataset_info_->uri_, len))
