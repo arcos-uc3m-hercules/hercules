@@ -208,6 +208,7 @@ void *hercules_ucx_server(void *th_argv)
 			if (global_finish_threads == 1)
 			{
 				fprintf(stderr, "Ending %s server thread.\n", server_name);
+				map_server_eps_destroy(map_server_eps);
 				// pthread_exit(NULL);
 				pthread_exit((void *)0);
 			}
@@ -1677,7 +1678,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 
-	uint32_t operation = 0; // server id.
+	uint32_t operation = 0;
 	char mode[MODE_SIZE] = {0};
 	int32_t req_size = 0;
 	char raw_msg[req_size + 1] = {0};
@@ -1819,35 +1820,35 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 			else
 			{
-				// dataset_info *dataset = (dataset_info*) address_;
-				// printf("[STAT_SERVER] dataset.original=%s",dataset->original_name);
-				// imss_info * data = (imss_info *) address_;
-				// printf("READ_OP SEND data->type=%c",data->type);
-				// Send the requested block.
-				dataset = (dataset_info *)address_;
-				// TODO: check why dataset->n_open is 21893 for imss://
-				slog_debug("Before dataset->n_open=%d", dataset->n_open);
-				// Checks if the clients wants to open the file.
-				switch (operation)
+				if (operation == IMSS_INFO)
 				{
-				case 1: // file opened.
-					pthread_mutex_lock(&memory_protect);
-					dataset->n_open += 1;
-					pthread_mutex_unlock(&memory_protect);
-					slog_debug("File opened");
-					break;
-				default:
-					break;
+					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, address_, IMSS_INFO, arguments->worker_uid);
+				}
+				else
+				{
+					// Send the requested block.
+					dataset = (dataset_info *)address_;
+					// TODO: check why dataset->n_open is 21893 for imss://
+					slog_debug("Before dataset->n_open=%d", dataset->n_open);
+					// Checks if the clients wants to open the file.
+					switch (operation)
+					{
+					case 1: // file opened.
+						pthread_mutex_lock(&memory_protect);
+						dataset->n_open += 1;
+						pthread_mutex_unlock(&memory_protect);
+						slog_debug("File opened");
+						break;
+					default:
+						break;
+					}
+					slog_debug("After dataset->n_open=%d", dataset->n_open);
+					msg_t m;
+					m.data = address_;
+					m.size = block_size_rtvd;
+					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
 				}
 
-				slog_debug("After dataset->n_open=%d", dataset->n_open);
-				pthread_mutex_lock(&memory_protect);
-				msg_t m;
-				m.data = address_;
-				m.size = block_size_rtvd;
-				// pthread_mutex_lock(&lock_network);
-				err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
-				pthread_mutex_unlock(&memory_protect);
 
 				if (err < 0)
 				{
@@ -2204,12 +2205,18 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
-			ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
+			if (operation == IMSS_INFO)
+			{
+				ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, IMSS_INFO, arguments->worker_uid, length);
+			}
+			else
+			{
+				ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, DATASET_INFO, arguments->worker_uid, length);
+				// dataset_info *struct_ = (dataset_info *)buffer;
+				slog_debug("END Recv dynamic, n_server_when_created=%d", ((dataset_info *)buffer)->n_servers_when_created);
+			}
+
 			// pthread_mutex_unlock(&lock_network);
-
-			dataset_info *struct_ = (dataset_info *)buffer;
-
-			slog_debug("END Recv dynamic, n_server_when_created=%d", struct_->n_servers_when_created);
 
 			if (ret < 0)
 			{

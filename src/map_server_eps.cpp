@@ -18,6 +18,14 @@ void *map_server_eps_create()
 	return reinterpret_cast<void *>(new map_server_eps_t);
 }
 
+void map_server_eps_destroy(void *map)
+	{
+		if (map)
+		{
+			delete reinterpret_cast<map_server_eps_t *>(map);
+		}
+	}
+
 void map_server_eps_put(void *map, uint64_t uuid, ucp_ep_h ep)
 {
 	map_server_eps_t *m = reinterpret_cast<map_server_eps_t *>(map);

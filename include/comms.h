@@ -16,11 +16,11 @@
 #include "hello_world_util.h"
 #include <string>
 
-#define IMSS_INFO 0
 #define DATASET_INFO 1
 #define STRING 2
 #define BUFFER 4
 #define MSG 5
+#define IMSS_INFO 6
 
 #define REQUEST_SIZE 1024
 #define RESPONSE_SIZE 1024

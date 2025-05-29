@@ -44,7 +44,7 @@ StopServers() {
         set +x
         i=$(($i+1))
     done
-    rm "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
+    # rm "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
 }
 
 WakeUpServers() {

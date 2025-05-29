@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SCRIPT_NAME="mdtest_hercules_slurm.sh"
-TOTAL_NUMBER_OF_FILES=100000
+TOTAL_NUMBER_OF_FILES=10000
 
 ATTACHED=1
 
@@ -13,7 +13,7 @@ HERCULES_CHECKPOINT_PATH=""
 #HERCULES_SNAPSHOT_PATH="/beegfs/home/javier.garciablas/hercules/bash/tests/disk/HerculesSnapshot"
 DATA_HOSTFILE="/beegfs/home/javier.garciablas/hercules/tmp/data_hostfile"
 METADATA_HOSTFILE="/beegfs/home/javier.garciablas/hercules/tmp/meta_hostfile"
-DEBUG_LEVEL="all"
+DEBUG_LEVEL="none"
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="HASH"
 

@@ -402,8 +402,6 @@ extern "C"
 
 	__attribute__((constructor)) void imss_posix_init(void)
 	{
-		// errno = 0;
-
 		struct timeval start, end;
 		gettimeofday(&start, NULL);
 
@@ -433,9 +431,6 @@ extern "C"
 		IMSS_DATA_BSIZE = IMSS_BLKSIZE * KB; // block size in bytes.
 		MOUNT_POINT = args.mount_point;
 		MOUNT_POINT_LEN = strlen(MOUNT_POINT);
-		// if(MOUNT_POINT[MOUNT_POINT_LEN-1] != '/') {
-		// 	MOUNT_POINT_LEN--;
-		// }
 		IMSS_ROOT = args.imss_uri;
 		IMSS_HOSTFILE = args.data_hostfile;
 		N_SERVERS = args.num_data_servers;
@@ -585,6 +580,8 @@ extern "C"
 		// fprintf(stderr, "End 'run_me_last', pid=%d, release=%d\n", g_pid, release);
 		slog_live("End 'run_me_last', pid=%d", g_pid);
 		map_fd_destroy(map_fd);
+	
+
 		init = 0;
 	}
 
@@ -1399,8 +1396,8 @@ extern "C"
 			ret = generalOpen(new_path, flags, mode, -1);
 
 			slog_live("[POSIX]. Ending Hercules '__open_2', new_path=%s, ret=%d, errno=%d:%s\n", new_path, ret, errno, strerror(errno));
-			if (ret < 0)
-				free(new_path);
+			// if (ret < 0)
+			free(new_path);
 		}
 		else
 		{
@@ -1447,8 +1444,8 @@ extern "C"
 			ret = generalOpen(new_path, flags, mode, -1);
 
 			slog_live("[POSIX]. Ending Hercules 'open64', pathname=%s, fd=%d\n", pathname, ret);
-			if (ret < 0)
-				free(new_path);
+			// if (ret < 0)
+			free(new_path);
 		}
 		else
 		{
@@ -1496,8 +1493,8 @@ extern "C"
 			ret = generalOpen(new_path_by_template, flags, mode, -1);
 
 			slog_live("[POSIX]. Ending Hercules 'mkstemp', new_path=%s, template_name=%s, fd=%d, new_path_by_template=%s\n", new_path, template_name, ret, new_path_by_template);
-			if (ret < 0)
-				free(new_path_by_template);
+			// if (ret < 0)
+			free(new_path_by_template);
 			free(new_path);
 		}
 		else
@@ -2452,8 +2449,8 @@ extern "C"
 			ret = generalOpen(new_path, flags, mode, -1);
 
 			slog_live("[POSIX] Ending Hercules 'open', mode=%o, ret=%d\n", mode, ret);
-			if (ret < 0)
-				free(new_path);
+			// if (ret < 0)
+			free(new_path);
 		}
 		else
 		{
@@ -2550,8 +2547,8 @@ extern "C"
 				else
 				{
 					ret = generalOpen(new_path, flags, mode, -1);
-					if (ret < 0)
-						free(new_path);
+					// if (ret < 0)
+					// free(new_path);
 				}
 			}
 			else if (is_absolute_path == 0) // pathname is relative.
@@ -2562,8 +2559,8 @@ extern "C"
 					slog_live("[POSIX] is relative, current directory, 'openat', new_path=%s", new_path);
 					// pathname is interpreted relative to the current working directory of the calling process (like real_open).
 					ret = generalOpen(new_path, flags, mode, -1);
-					if (ret < 0)
-						free(new_path);
+					// if (ret < 0)
+					// 	free(new_path);
 				}
 				else
 				{
@@ -2584,13 +2581,13 @@ extern "C"
 					char *new_path = checkHerculesPath(absolute_pathname);
 					slog_live("[POSIX] is relative, 'openat', new_path=%s", new_path);
 					ret = generalOpen(new_path, flags, mode, -1);
-					if (ret < 0)
-						free(new_path);
+					// if (ret < 0)
+					// 	free(new_path);
 				}
 			}
 
 			slog_live("[POSIX] Ending Hercules 'openat', mode=%o, ret=%d, errno=%d:%s\n", mode, ret, errno, strerror(errno));
-			// free(new_path);
+			free(new_path);
 		}
 		else
 		{
@@ -3505,7 +3502,7 @@ extern "C"
 				errno = -ret;
 				ret = -1;
 			}
-			
+
 			// if (ret == -1)
 			// { // special case io500
 			// 	ret = real_unlinkat(0, path, 0);
@@ -3937,7 +3934,7 @@ extern "C"
 
 		errno = 0;
 		DIR *dirp = NULL;
-		const char *new_path = checkHerculesPath(name);
+		char *new_path = checkHerculesPath(name);
 		if (new_path != NULL)
 		{
 			slog_live("[POSIX]. Calling Hercules 'opendir', pathname=%s, new_path=%s", name, new_path);
@@ -3975,7 +3972,7 @@ extern "C"
 			ret = map_fd_put(map_fd, new_path, dirfd(dirp), p);
 			// }
 			slog_live("[POSIX]. End Hercules 'opendir', pathname=%s, new_path=%s, ret=%d\n", name, new_path, ret);
-			// free(new_path);
+			free(new_path);
 		}
 		else
 		{
