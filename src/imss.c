@@ -159,20 +159,20 @@ void print_entry(gpointer key, gpointer value, gpointer user_data)
 	slog_debug("  Key: %s -> Value: {URI: %s, Original name: %s}", uri_key, info->uri_, info->original_name);
 }
 
-int replace_dataset_entry_key(const char *old_uri, const char *new_uri)
-{
-	/*********RENAME GARRAY DATASET*******/
-	// dataset_info *dataset_info_;
-	// int ret = find_dataset_by_uri_hash(datasetd, old_uri, &dataset_info_);
-	// if (ret == 0)
-	// { // if the old name is not in the local g_array we finish this function.
-	// 	return -1;
-	// }
-	// add_dataset_entry(&datasetd, new_uri, dataset_info_);
-	// remove_dataset_entry(datasetd, old_uri);
-	// return 0;
-	replace_uri_base_path(datasetd, old_uri, new_uri);
-}
+// int replace_dataset_entry_key(const char *old_uri, const char *new_uri)
+// {
+// 	/*********RENAME GARRAY DATASET*******/
+// 	// dataset_info *dataset_info_;
+// 	// int ret = find_dataset_by_uri_hash(datasetd, old_uri, &dataset_info_);
+// 	// if (ret == 0)
+// 	// { // if the old name is not in the local g_array we finish this function.
+// 	// 	return -1;
+// 	// }
+// 	// add_dataset_entry(&datasetd, new_uri, dataset_info_);
+// 	// remove_dataset_entry(datasetd, old_uri);
+// 	// return 0;
+// 	replace_uri_base_path(datasetd, old_uri, new_uri);
+// }
 
 gboolean replace_uri_base_path(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri)
 {
@@ -205,7 +205,7 @@ gboolean replace_uri_base_path(GHashTable *hash_table, const char *old_base_uri,
 		if (g_str_has_prefix((char *)current_key, old_base_uri))
 		{
 			slog_debug("  Found matching key: '%s'", current_key);
-			keys_to_replace = g_list_append(keys_to_replace, g_strdup(current_key));
+			keys_to_replace = g_list_append(keys_to_replace, g_strdup((const char *)current_key));
 		}
 	}
 
@@ -223,7 +223,7 @@ gboolean replace_uri_base_path(GHashTable *hash_table, const char *old_base_uri,
 		// slog_debug("  Preparing to change '%s' to '%s'", uri_key, new_base_uri);
 		slog_debug("  Preparing to change '%s' to '%s'", old_key, new_base_uri);
 
-		gpointer *info = g_hash_table_lookup(hash_table, old_key);
+		dataset_info *info = (dataset_info *)g_hash_table_lookup(hash_table, old_key);
 
 		if (info)
 		{
@@ -231,13 +231,12 @@ gboolean replace_uri_base_path(GHashTable *hash_table, const char *old_base_uri,
 			strncpy(info->uri_, new_base_uri, URI_);
 			// Remove the old dataset info and insert the new one.
 			g_hash_table_steal(hash_table, old_key);
-			g_hash_table_insert(hash_table, g_strdup(new_base_uri), value);
+			g_hash_table_insert(hash_table, g_strdup(new_base_uri), info);
 		}
 		// Free the key that was copied.x
 		g_free(l->data);
 
 		modified_any = TRUE;
-
 	}
 
 	g_list_free(keys_to_replace);

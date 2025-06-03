@@ -60,7 +60,7 @@ static uint64_t BLOCK_SIZE;
 #endif
 
 // GHashMap functions.
-int replace_dataset_entry_key(const char *old_uri, const char *new_uri);
+// int replace_dataset_entry_key(const char *old_uri, const char *new_uri);
 gboolean replace_uri_base_path(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
 
 int32_t get_data_location(int32_t, int32_t, int32_t);

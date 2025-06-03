@@ -3254,6 +3254,7 @@ extern "C"
 			// TODO: check flags.
 			aux_path = old_path;
 			pos = 0;
+			// get the basename of the old regular file.
 			for (int c = 0; c < strlen(aux_path); ++c)
 			{
 				if (aux_path[c] == '/')
@@ -3262,16 +3263,19 @@ extern "C"
 						pos = c;
 				}
 			}
+			pos++; // +1 to avoid the found slash.
 			memset(name, 0, sizeof(name));
 			strncpy(name, aux_path + pos, strlen(aux_path) - pos);
+			slog_debug("name=%s, aux_path=%s, strlen(aux_path)=%d, pos=%d", name, aux_path, strlen(aux_path), pos);
 			char destination_path[MAX_PATH] = {0};
 			strncpy(destination_path, new_path, sizeof(destination_path) - strlen(destination_path) - 1);
-			if (aux_path[strlen(new_path)] != '/')
-			{
-				strncat(destination_path, "/", sizeof(destination_path) - strlen(destination_path) - 1);
-			}
+			// if (aux_path[strlen(new_path)] != '/')
+			// {
+			// 	strncat(destination_path, "/", sizeof(destination_path) - strlen(destination_path) - 1);
+			// }
+			ConcatLastSlashC(destination_path);
 			strncat(destination_path, name, sizeof(destination_path) - strlen(destination_path) - 1);
-			slog_debug("Moving regular file %s into the directory %s", old_path, destination_path);
+			slog_debug("Moving Hercules regular file %s into the Hercules directory %s", old_path, destination_path);
 
 			if (!strcmp(old_path, destination_path))
 			{
