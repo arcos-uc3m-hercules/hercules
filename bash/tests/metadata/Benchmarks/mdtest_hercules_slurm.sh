@@ -100,7 +100,7 @@ COMMAND="$MDTEST_PATH/mdtest -n ${NUMBER_OF_FILES_PER_PROCESS}"
 # COMMAND="$COMMAND -C"
 
 # Number of iterations.
-COMMAND="$COMMAND -i 5"
+COMMAND="$COMMAND -i 1"
 
 # Verbose
 COMMAND="$COMMAND -V 1"

@@ -3283,6 +3283,10 @@ extern "C"
 				return ret;
 			}
 
+			// deletes the destionation path because it is a file that will be overwritten.
+			// this also can be done on the server side.
+			imss_unlink(destination_path);
+
 			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
 			ret = rename_dataset_metadata(old_path, destination_path);
 			if (ret < 0)
