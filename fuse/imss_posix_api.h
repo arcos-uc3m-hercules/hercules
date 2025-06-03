@@ -29,14 +29,14 @@
 
 #include <dirent.h>
 
-struct dirent64
-{
-	__ino64_t d_ino;
-	__off64_t d_off;
-	unsigned short int d_reclen;
-	unsigned char d_type;
-	char d_name[256]; /* We must not include limits.h! */
-};
+// struct dirent64
+// {
+// 	__ino64_t d_ino;
+// 	__off64_t d_off;
+// 	unsigned short int d_reclen;
+// 	unsigned char d_type;
+// 	char d_name[256]; /* We must not include limits.h! */
+// };
 
 #ifdef __cplusplus
 extern "C"

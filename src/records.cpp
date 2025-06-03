@@ -254,11 +254,13 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 		}
 		if (it == buffer.end())
 		{
+			slog_debug("%s not found in the map", key.c_str());
 			// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
 			// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
 			return 0;
 		}
 	}
+	slog_debug("%s found in the map", key.c_str());
 
 	// fprintf(stderr,"GET-%s \n", key.c_str());
 	// fprintf(stderr,"Nodename    - %s	GET-%s \n", detect.nodename, key.c_str());
@@ -579,10 +581,11 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 		{
 			vec.insert(vec.begin(), key);
 
-			key.erase(0, old_dir.length() - 1);
+			// key.erase(0, old_dir.length() - 1);
+			// slog_debug("Key aftr erase: %s", key.c_str());
 
 			string new_path = rdir_dest;
-			new_path.append(key);
+			// new_path.append(key);
 
 			imss_info_ *data = (imss_info_ *)it.second.first;
 			strcpy(data->uri_, new_path.c_str());
@@ -603,7 +606,7 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 
 		string new_path = rdir_dest;
 		new_path.append(key);
-		// fprintf(stdout, "Renaming dir %s to %s\n", old_dir.c_str(), new_path.c_str());
+		slog_debug("Renaming dir %s to %s", old_dir.c_str(), new_path.c_str());
 
 		auto node = buffer.extract(*i);
 		node.key() = new_path;

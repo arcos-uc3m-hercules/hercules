@@ -225,7 +225,7 @@ int32_t GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 					strcat(new_path, "/");
 					strcat(new_path, path);
 				}
-				// slog_debug("new_path to be inserted=%s", new_path);
+				slog_debug("new_path to be inserted=%s", new_path);
 
 				GTree_insert(new_path);
 				free(new_path);
@@ -471,10 +471,8 @@ void print_child_node(GNode *node, gpointer data)
 {
 	// Cast the node's data back to a const char*
 	const char *node_name = (const char *)node->data;
-	// Cast the user_data back to a const char* (optional, but good practice if used)
-	const char *user_message = (const char *)data;
 
-	// fprintf(stdout,"  Child Node: %s\n", node_name);
+	fprintf(stdout,"  Child Node: %s\n", node_name);
 }
 
 // Method retrieving a buffer with all the files within a directory.
@@ -503,7 +501,7 @@ GTree_getdir(char *desired_dir,
 	// Number of children of the directory node.
 	uint32_t num_children = g_node_n_children(dir_node);
 	// fprintf(stdout,"Number of files in node %p, %s: %d\n", dir_node, (char * )dir_node->data, num_children);
-	g_node_children_foreach(dir_node, G_TRAVERSE_ALL, print_child_node, (void *)"Hello from user data!");
+	// g_node_children_foreach(dir_node, G_TRAVERSE_ALL, print_child_node, NULL);
 	// *numdir_elems = num_children + 1; //+1 because of the actual directory + childrens
 	*numdir_elems = num_children; // actual directory is concat in the front-end.
 

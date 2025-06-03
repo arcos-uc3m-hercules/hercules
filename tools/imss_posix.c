@@ -55,6 +55,7 @@ int32_t prefetch_pos = 0;
 pthread_t prefetch_t;
 int16_t prefetch_ds = 0;
 int32_t prefetch_offset = 0;
+char *prefetch_uri = NULL;
 
 pthread_cond_t cond_prefetch;
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -844,7 +845,7 @@ extern "C"
 
 		errno = 0;
 		slog_live("[POSIX] Calling fork");
-		fprintf(stdout, "[POSIX] Calling fork\n");
+		// fprintf(stdout, "[POSIX] Calling fork\n");
 
 		release_network_resources(IMSS_ROOT, 1, rank);
 		imss_comm_cleanup();
@@ -1006,7 +1007,7 @@ extern "C"
 			return real_lstat(pathname, buf);
 		}
 
-		fprintf(stderr, "Calling lstat, pathname=%s\n", pathname);
+		// fprintf(stderr, "Calling lstat, pathname=%s\n", pathname);
 		errno = 0;
 		int ret;
 		char *new_path = checkHerculesPath(pathname);
@@ -1234,7 +1235,7 @@ extern "C"
 		{
 			return real_fstatfs(fd, buf);
 		}
-		fprintf(stderr, "fstatfs\n");
+		// fprintf(stderr, "fstatfs\n");
 
 		errno = 0;
 		int ret = 0;
@@ -3600,7 +3601,7 @@ extern "C"
 		return ret;
 	}
 
-	int rename(const char *old, const char *new_pathname)
+	int rename(const char *old_given_path, const char *new_given_pathname)
 	{
 
 		if (!real_rename)
@@ -3608,48 +3609,48 @@ extern "C"
 
 		if (!init)
 		{
-			return real_rename(old, new_pathname);
+			return real_rename(old_given_path, new_given_pathname);
 		}
 
 		errno = 0;
 		int ret;
-		char *old_path = checkHerculesPath(old);
-		char *new_path = checkHerculesPath(new_pathname);
+		char *old_path = checkHerculesPath(old_given_path);
+		char *new_path = checkHerculesPath(new_given_pathname);
 		if (old_path != NULL && new_path != NULL)
 		{ // move from Hercules to Hercules.
-			slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new_pathname=%s, old path=%s, new_pathname=%s", old, new_pathname, old_path, new_path);
+			slog_live("[POSIX]. Calling Hercules 'rename', old_given_path=%s, new_given_pathname=%s, old path=%s, new_path=%s", old_given_path, new_given_pathname, old_path, new_path);
 			ret = imss_rename(old_path, new_path);
 			if (ret < 0)
 			{
 				errno = -ret;
 				ret = -1;
 			}
-			slog_live("[POSIX]. End Hercules 'rename', old path=%s, new_pathname=%s, ret=%d\n", old_path, new_path, ret);
+			slog_live("[POSIX]. End Hercules 'rename', old path=%s, new_path=%s, ret=%d\n", old_path, new_path, ret);
 			free(old_path);
 			free(new_path);
 		}
 		else if (old_path == NULL && new_path != NULL)
 		{ // move from file system to Hercules.
-			slog_live("[POSIX]. Calling Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s", old, new_pathname, new_path);
-			ret = HerculesMove(old, new_pathname, new_path);
+			slog_live("[POSIX]. Calling Hercules 'rename', old_given_path=%s, new_given_pathname=%s, new_path=%s", old_given_path, new_given_pathname, new_path);
+			ret = HerculesMove(old_given_path, new_given_pathname, new_path);
 			SetErrno(ret);
 
 			// // free memory.
 			// free(old_file_buffer);
-			slog_live("[POSIX]. End Hercules 'rename', old=%s, new_pathname=%s, new_pathname=%s, ret=%d", old, new_pathname, new_path, ret);
+			slog_live("[POSIX]. End Hercules 'rename', old_given_path=%s, new_given_pathname=%s, new_path=%s, ret=%d", old_given_path, new_given_pathname, new_path, ret);
 			free(new_path);
 		}
 		else if (old_path != NULL && new_path == NULL)
 		{ // move from Hercules to file system.
 			slog_live("[POSIX] Calling Hercules 'rename', Hercules %s to file system %s", old_path, new_path);
-			ret = HerculesMove(old, new_pathname, old_path);
+			ret = HerculesMove(old_given_path, new_given_pathname, old_path);
 			slog_live("[POSIX] Ending Hercules 'rename', Hercules %s to file system %s, ret=%d", old_path, new_path, ret);
 		}
 		else
 		{
-			slog_live("[POSIX]. Calling Real 'rename', old path=%s, new_pathname=%s", old, new_pathname);
-			ret = real_rename(old, new_pathname);
-			slog_live("[POSIX]. End Real 'rename', old path=%s, new_pathname=%s", old, new_pathname);
+			slog_live("[POSIX]. Calling Real 'rename', old_given_path=%s, new_given_pathname=%s", old_given_path, new_given_pathname);
+			ret = real_rename(old_given_path, new_given_pathname);
+			slog_live("[POSIX]. End Real 'rename', old_given_path=%s, new_given_pathname=%s", old_given_path, new_given_pathname);
 		}
 		return ret;
 	}
@@ -4982,7 +4983,7 @@ extern "C"
 			return real_fstatat(__fd, __file, __buf, __flag);
 		}
 
-		fprintf(stdout, "Calling fstatat, pathname=%s\n", __file);
+		// fprintf(stdout, "Calling fstatat, pathname=%s\n", __file);
 
 		int ret = 0;
 		std::string pathname_ob = map_fd_search_by_val(map_fd, __fd);
@@ -5012,7 +5013,7 @@ extern "C"
 			return real_fstatat64(__fd, __file, __buf, __flag);
 		}
 
-		fprintf(stderr, "fstatat64\n");
+		// fprintf(stderr, "fstatat64\n");
 
 		int ret = 0;
 		std::string pathname_ob = map_fd_search_by_val(map_fd, __fd);
@@ -5141,7 +5142,7 @@ extern "C"
 		}
 
 		slog_warn("[POSIX][TODO]. Calling Real 'newfstatat', pathname=%s\n", __file);
-		fprintf(stderr, "newfstatat\n");
+		// fprintf(stderr, "newfstatat\n");
 		// TODO.
 
 		return real_newfstatat(__fd, __file, __buf, __flag);
@@ -5950,7 +5951,7 @@ extern "C"
 				// printf("Se activo Prefetch path:%s$%d-$%d\n",prefetch_path, prefetch_first_block, prefetch_last_block);
 				int exist_first_block, exist_last_block, position;
 				char *buf = map_get_buffer_prefetch(map_prefetch, prefetch_path, &exist_first_block, &exist_last_block);
-				int err = readv_multiple(prefetch_ds, prefetch_first_block, prefetch_last_block, buf, IMSS_BLKSIZE, prefetch_offset, IMSS_DATA_BSIZE * (prefetch_last_block - prefetch_first_block));
+				int err = readv_multiple(prefetch_uri, prefetch_ds, prefetch_first_block, prefetch_last_block, buf, IMSS_BLKSIZE, prefetch_offset, IMSS_DATA_BSIZE * (prefetch_last_block - prefetch_first_block));
 				if (err == -1)
 				{
 					pthread_mutex_unlock(&lock);

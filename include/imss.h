@@ -1,6 +1,7 @@
 #ifndef IMSS_WRAP_
 #define IMSS_WRAP_
 
+#include <glib.h>
 #include <stdint.h>
 #include <ucp/api/ucp.h>
 #include "comms.h"
@@ -57,6 +58,10 @@ static uint64_t BLOCK_SIZE;
 #else
 #define DPRINT(...)
 #endif
+
+// GHashMap functions.
+int replace_dataset_entry_key(const char *old_uri, const char *new_uri);
+gboolean replace_uri_base_path(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
 
 int32_t get_data_location(int32_t, int32_t, int32_t);
 
@@ -392,7 +397,8 @@ provided by the create_dataset or open_dataset method.
 RETURNS:	 0 - Release operation took place successfully.
 -1 - In case of error.
 	 */
-	int32_t release_dataset(int32_t dataset_id);
+	// int32_t release_dataset(int32_t dataset_id);
+	int32_t release_dataset(const char *dataset_uri);
 
 	/* Method retrieving information related to a certain dataset.
 
@@ -419,7 +425,8 @@ The current function does not allocate memory.
 
 	// Method retrieving a multiple datasets
 	int32_t
-	readv_multiple(int32_t dataset_id,
+	readv_multiple(char *dataset_uri,
+		int32_t dataset_id,
 				   int32_t curr_block,
 				   int32_t prefetch,
 				   char *buffer,
@@ -441,7 +448,7 @@ The current function does not allocate memory.
 	 * requested block was not find in the remote server, or -2 in case of
 	 * error.
 	 */
-	ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
+	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
 
 	/**
 	 * @brief Method used during malleability to retrieving a data element
@@ -470,9 +477,9 @@ offset     - Offset within the block.
 RETURNS:	 0 - The requested block was successfully stored.
 -1 - In case of error.
 	 */
-	int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset);
+	int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset);
 
-	int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
+	int32_t set_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
 
 	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server);
 
@@ -506,7 +513,8 @@ char ** locations = get_dataloc(datasetd, data_id, &num_storages);
 	 */
 
 	int32_t
-	set_ndata(int32_t dataset_id,
+	set_ndata(char *dataset_uri,
+		int32_t dataset_id,
 			  int32_t data_id,
 			  char *buffer,
 			  uint32_t size);
@@ -532,8 +540,7 @@ RETURNS:	0 - No entity associated to the URI provided exists.
 	char get_type(const char *uri);
 
 	// Method retriving list of servers to read.
-	int32_t
-	split_location_servers(int **list_servers, int32_t dataset_id, int32_t curr_blk, int32_t end_blk);
+	int32_t split_location_servers(char *dataset_uri,int **list_servers, int32_t dataset_id, int32_t curr_blk, int32_t end_blk);
 
 	// Method writing multiple data to a specific server
 
@@ -582,6 +589,7 @@ RETURNS:	0 - Resources were released successfully.
 	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
 	int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir);
 	void ConcatLastSlash(std::string &pathname);
+	void ConcatLastSlashC(char *pathname);
 
 	/**
 	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.
@@ -595,7 +603,6 @@ RETURNS:	0 - Resources were released successfully.
 	int32_t Open_file(const char *checkpoint_dir, const char *filename);
 	int32_t Close_file(int fd);
 	ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset);
-	
 
 #ifdef __cplusplus
 }

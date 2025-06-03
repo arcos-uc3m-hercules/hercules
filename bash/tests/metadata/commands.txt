@@ -50,3 +50,9 @@ HERCULES_THREAD_LEVEL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/jav
 
 # Stop all
 ~/hercules/scripts/hercules stop -f /beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf
+
+## TO COMPILE FOR DEBUG:
+cmake -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_C_FLAGS_DEBUG="-g -O0" \
+      -DCMAKE_CXX_FLAGS_DEBUG="-g -O0" \
+      ..

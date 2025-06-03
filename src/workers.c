@@ -1829,7 +1829,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// Send the requested block.
 					dataset = (dataset_info *)address_;
 					// TODO: check why dataset->n_open is 21893 for imss://
-					slog_debug("Before dataset->n_open=%d", dataset->n_open);
+					slog_debug("Before dataset->n_open=%d, dataset uri=%s", dataset->n_open, dataset->uri_);
 					// Checks if the clients wants to open the file.
 					switch (operation)
 					{

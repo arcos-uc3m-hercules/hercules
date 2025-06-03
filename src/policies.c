@@ -219,11 +219,11 @@ void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
 	}
 	char *tmp = NULL;
 	if (stat_dataset_res == -2)
-	{
+	{ // dataset does not exists, we will use the provided fname.
 		tmp = (char *)fname;
 	}
 	else
-	{
+	{ // original name is used in case the file was renamed.
 		tmp = new_dataset.original_name;
 	}
 	snprintf(passed_name, PATH_MAX, "%s", tmp);
@@ -232,7 +232,12 @@ void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
 	if (passed_name == NULL)
 	{
 		perror("HERCULES_ERR_FIND_SERVER_GETTING_FILE_NAME");
+		slog_error("HERCULES_ERR_FIND_SERVER_GETTING_FILE_NAME");
 	}
+	// if (!strcmp(fname, "imss://test-dir.0-0/mdtest_tree.0.0/file.mdtest.0.0"))
+	// {
+	// 	fprintf(stderr, "passed name = %s, stat_dataset_res=%d\n", passed_name, stat_dataset_res);
+	// }
 }
 
 /**
@@ -249,6 +254,11 @@ int32_t find_server(
 {
 	int32_t next_server = -1;
 	char passed_name[PATH_MAX] = {0};
+
+	// if (!strcmp(fname, "imss://test-dir.0-0/mdtest_tree.0.0/file.mdtest.0.0"))
+	// {
+	// 	fprintf(stderr, "fname = %s, session_plcy=%d\n", passed_name, session_plcy);
+	// }
 
 	switch (session_plcy)
 	{
