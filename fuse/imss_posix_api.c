@@ -192,7 +192,7 @@ extern "C"
 		{
 			// if the file was not find with the current name,
 			// try again adding an extra slash if they does not have it.
-			slog_warn("file not found, %s", path);
+			slog_warn("file not found on the local map, %s", path);
 			char aux_path[MAX_PATH] = {0};
 			size_t len = strlen(path);
 			if (len > 0 && path[len - 1] != '/')
@@ -281,7 +281,7 @@ extern "C"
 		}
 		else
 		{
-			slog_warn("%s", strerror(ENOENT));
+			slog_warn("Local map: %s", strerror(ENOENT));
 			return -ENOENT;
 		}
 
@@ -303,20 +303,30 @@ extern "C"
 		return 0;
 	}
 
-	void free_entries(char **refs, int n_ent)
+	void free_entries(char ***refs, int n_ent)
 	{
-		// slog_debug("Freeing memory of %d entries", n_ent);
-		if (refs != NULL)
+		if (refs == NULL)
 		{
-			for (size_t i = 0; i < n_ent; i++)
+			return;
+		}	
+
+		// slog_debug("Freeing memory of %d entries", n_ent);
+		if (*refs != NULL)
+		{
+			char **entry_arr = *refs;
+			for (int i = 0; i < n_ent; i++)
 			{
-				if (refs[i] != NULL)
+				// fprintf(stdout,"Freeing entry %d/%d, %s\n", i, n_ent, entry_arr[i]);
+				if (entry_arr[i] != NULL)
 				{
 					// fprintf(stdout, "%s\n", refs[i]);
-					free(refs[i]);
+					free(entry_arr[i]);
+					entry_arr[i] = NULL;
 				}
 			}
-			free(refs);
+			free(entry_arr);
+			*refs = NULL;
+			// fprintf(stdout,"After free refs %p\n", *refs);
 		}
 	}
 
@@ -345,7 +355,7 @@ extern "C"
 		stbuf->st_blksize = IMSS_DATA_BSIZE; // block size in bytes.
 
 		slog_debug("before get_type, imss_path=%s", imss_path);
-		char type = TIMING(get_type(imss_path), "get type", char, 0);
+		char type = TIMING(get_type(imss_path), "get type", char, 0);	
 		slog_debug("after get_type(%s):%c", imss_path, type);
 
 		int32_t ds = -1;
@@ -466,7 +476,7 @@ extern "C"
 				stbuf->st_nlink = 1;
 				stbuf->st_mode = S_IFDIR | 0775;
 				// free all memory in refs.
-				free_entries(refs, n_ent);
+				free_entries(&refs, n_ent);
 			}
 		case TYPE_REGULAR_FILE:
 			stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0);
@@ -509,7 +519,7 @@ extern "C"
 		n_ent = get_dir(imss_path, buf);
 		slog_debug("[IMSS] imss_path=%s, n_ent=%d", imss_path.c_str(), n_ent);
 		// buf = refs;
-		return ++n_ent;
+		return n_ent;
 
 		// if (n_ent < 0)
 		// {
@@ -2257,7 +2267,7 @@ extern "C"
 		if ((n_ent = get_dir(imss_path, &refs)) > 0)
 		{
 			// fprintf(stdout, "Dir %s still has %d entries\n", imss_path, n_ent);
-			free_entries(refs, n_ent);
+			free_entries(&refs, n_ent);
 			if (n_ent > 1)
 			{
 				slog_debug("n_ent > 1");

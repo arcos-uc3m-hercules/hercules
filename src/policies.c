@@ -113,7 +113,7 @@ int32_t set_policy_dataset(dataset_info *dataset)
 // 	return session_plcy;
 // }
 
-int32_t RoundRobin(int32_t n_servers, int32_t n_msg, char *fname)
+int32_t RoundRobin(int32_t n_servers, int32_t n_msg, const char *fname)
 {
 	int32_t next_server = -1;
 	uint16_t crc_ = 0;
@@ -253,6 +253,7 @@ int32_t find_server(
 	int32_t session_plcy)
 {
 	int32_t next_server = -1;
+	// TODO: delete passed_name from all functions.
 	char passed_name[PATH_MAX] = {0};
 
 	// if (!strcmp(fname, "imss://test-dir.0-0/mdtest_tree.0.0/file.mdtest.0.0"))
@@ -265,10 +266,11 @@ int32_t find_server(
 	// Follow a round robin policy.
 	case ROUND_ROBIN_:
 	{
-		FindNameForPolicy(fname, passed_name, server_type);
-		if (passed_name != NULL)
+		// FindNameForPolicy(fname, passed_name, server_type);
+		// if (passed_name != NULL)
 		{
-			next_server = RoundRobin(n_servers, n_msg, passed_name);
+			// next_server = RoundRobin(n_servers, n_msg, passed_name);
+			next_server = RoundRobin(n_servers, n_msg, fname);
 		}
 	}
 	break;
@@ -375,7 +377,8 @@ int32_t find_server(
 	default:
 		break;
 	}
-	slog_debug("session_plcy=%ld, fname=%s, next_server=%d, n_servers=%d, passed_name=%s", session_plcy, fname, next_server, n_servers, passed_name);
+	// slog_debug("session_plcy=%ld, fname=%s, next_server=%d, n_servers=%d, passed_name=%s", session_plcy, fname, next_server, n_servers, passed_name);
+	slog_debug("session_plcy=%ld, fname=%s, next_server=%d, n_servers=%d", session_plcy, fname, next_server, n_servers);
 	// slog_debug("fnameadd=%p, passed_nameadd=%p", fname, passed_name);
 
 	// "next_server" must be a value between 0 and n_servers-1.

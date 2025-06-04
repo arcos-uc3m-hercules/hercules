@@ -201,20 +201,23 @@ extern "C"
 		}
 	}
 
-	void ResolvePathsAndFD(const int fd_dir, const char *path_to_check, char **directory_path, char **file_path)
+	void ResolvePathsAndFD(const int fd_dir, const char *path_to_check, std::string &directory_path, char **file_path)
 	{
 		// int ret = 0;
 		// AT_FDCWD (fd = -100) means current working directory.
 		if (fd_dir == AT_FDCWD)
 		{ // checks if the path_to_check is from Hercules.
 			*file_path = checkHerculesPath(path_to_check);
-			directory_path = NULL;
+			directory_path = "";
 		}
 		else
 		{ // checks if the file descriptor is from a Hercules directory.
-			std::string directory_path_ob = map_fd_search_by_val(map_fd, fd_dir);
-			*directory_path = (char *)directory_path_ob.c_str();
-			file_path = NULL;
+			// std::string directory_path_ob
+			directory_path = map_fd_search_by_val(map_fd, fd_dir);
+			// slog_debug("path found=%s", directory_path.c_str());
+			// *directory_path = directory_path_ob.c_str();
+			slog_debug("directory path found in the map: %s, fd=%d", directory_path.c_str(), fd_dir);
+			*file_path = NULL;
 		}
 		// return ret;
 	}
@@ -581,7 +584,6 @@ extern "C"
 		// fprintf(stderr, "End 'run_me_last', pid=%d, release=%d\n", g_pid, release);
 		slog_live("End 'run_me_last', pid=%d", g_pid);
 		map_fd_destroy(map_fd);
-	
 
 		init = 0;
 	}
@@ -2518,10 +2520,12 @@ extern "C"
 
 		errno = 0;
 		int ret = 0;
-		char *pathname_dir = NULL, *new_path = NULL;
-		ResolvePathsAndFD(dir_fd, pathname, &pathname_dir, &new_path);
-		if (pathname_dir != NULL || new_path != NULL)
+		std::string pathname_dir_op = "";
+		char *new_path = NULL;
+		ResolvePathsAndFD(dir_fd, pathname, pathname_dir_op, &new_path);
+		if (pathname_dir_op != "" || new_path != NULL)
 		{
+			const char *pathname_dir = pathname_dir_op.c_str();
 			// const char *pathname_dir = pathname_dir_ob.c_str();
 			slog_live("[POSIX] Calling Hercules 'openat' flags=%d, mode=%o, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, mode, dir_fd, pathname_dir, pathname);
 			// checkOpenFlags(pathname, flags);
@@ -3792,8 +3796,8 @@ extern "C"
 				slog_live("[POSIX]. Lowest available file descriptor: %d", lowest_fd);
 				// ret = close(lowest_fd); // Close the duplicated file descriptor
 				// slog_live("[POSIX]. File descriptor %d closed, ret=%d", lowest_fd, ret);
-				ret = map_fd_put(map_fd, pathname, lowest_fd, 0);
-				slog_live("[POSIX]. Putting %d in the map, ret=%d", lowest_fd, ret);
+				ret = map_fd_put(map_fd, strdup(pathname), lowest_fd, 0);
+				slog_live("[POSIX]. Putting %d in the map, ret=%d, pathname=%s", lowest_fd, ret, pathname);
 				if (ret == -1)
 				{
 					errno = 9;
@@ -3979,7 +3983,7 @@ extern "C"
 		{
 			slog_full("[POSIX]. Calling real 'opendir', pathname=%s", name);
 			dirp = real_opendir(name);
-			// slog_live("[POSIX]. Ending real 'opendir', pathname=%s, fd=%d", name, dirfd(dirp));
+			slog_full("[POSIX]. Ending real 'opendir', pathname=%s, fd=%d", name, dirfd(dirp));
 		}
 		return dirp;
 	}
@@ -4005,6 +4009,36 @@ extern "C"
 		buf = mystrcat((char *)buf, name);
 		buf = mystrcat((char *)buf, "$");
 		return 1;
+	}
+
+	ssize_t getdents64(int fd, void *dirp, size_t count)
+	{
+		if (!real_getdents64)
+			real_getdents64 = (ssize_t (*)(int, void *, size_t))dlsym(RTLD_NEXT, __func__);
+
+		if (!init)
+		{
+			return real_getdents64(fd, dirp, count);
+		}
+
+		slog_warn("Function still not supported");
+
+		return real_getdents64(fd, dirp, count);
+	}
+
+	int getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
+	{
+		if (!real_getdents)
+			real_getdents = (int (*)(unsigned int, struct linux_dirent *, unsigned int))dlsym(RTLD_NEXT, __func__);
+
+		if (!init)
+		{
+			return real_getdents(fd, dirp, count);
+		}
+
+		slog_warn("Function still not supported");
+
+		return real_getdents(fd, dirp, count);
 	}
 
 	struct dirent entry;
@@ -4033,7 +4067,7 @@ extern "C"
 			ConcatLastSlash(pathname_obj);
 			const char *pathname = pathname_obj.c_str();
 
-			slog_live("[POSIX]. Calling Hercules 'readdir', pathname=%s", pathname_obj.c_str());
+			slog_live("[POSIX]. Calling Hercules 'readdir', pathname=%s, to_read=%d", pathname_obj.c_str(), to_read);
 
 			if (init_loop_timer)
 			{
@@ -4042,6 +4076,7 @@ extern "C"
 			}
 
 			const char *token = NULL;
+			// fprintf(stdout,"to read=%d, n_ent=%d\n", to_read, n_ent);
 			if (to_read)
 			{
 				n_ent = imss_readdir(pathname_obj, &ori_buf, OptFiller, 0);
@@ -4054,7 +4089,7 @@ extern "C"
 			// int i = 0;
 			// slog_live("Init while, first token=%s, pos=%lu", token, pos);
 			// if (token != NULL)
-			if (pos < n_ent)
+			if (pos < n_ent + 1) // +1 to add ".."
 			{
 				memset(&entry, 0, sizeof(struct dirent));
 				int idx = pos - 1;
@@ -4139,26 +4174,25 @@ extern "C"
 				}
 				slog_live("[imss_posix] path_searched = %s", path_search);
 
-				if (pos > 1)
-				{
-					if (ori_buf[idx] != NULL)
-					{
-						free(ori_buf[idx]);
-					}
-				}
+				// if (pos > 1)
+				// {
+				// 	if (ori_buf[idx] != NULL)
+				// 	{
+				// 		free(ori_buf[idx]);
+				// 	}
+				// }
 
 				TIMING_NO_RETURN(seekdir(dirp, pos + 1), "seekdir", rank);
 			}
 			if (token == NULL)
 			{
-				// free(entry);
-				// entry = NULL;
+				slog_live("[POSIX]. Last token for the directory %s reached.", pathname);
 				to_read = 1;
-				// Free resources
-				if (ori_buf != NULL)
-				{
-					free(ori_buf);
-				}
+				// Free memory.
+				// fprintf(stdout,"Last token\n");
+				free_entries(&ori_buf, n_ent);
+				// fprintf(stdout,"after free ori_buf=%p\n", ori_buf);
+
 				return NULL;
 			}
 			slog_live("[POSIX]. Ending Hercules 'readdir',  pathname=%s\n", pathname);
@@ -4242,6 +4276,11 @@ extern "C"
 			// 	slog_error("[POSIX] Error closing the real directory descriptor for %s", pathname);
 			// 	perror("HERCULES_ERR_CLOSING_REAL_DIRECTORY");
 			// }
+
+			// Free resources
+			// free_entries(&ori_buf, n_ent);
+			to_read = 1;
+			n_ent = 0;
 
 			slog_live("[POSIX] End Hercules 'closedir', fd=%d, ret=%d\n", fd, ret);
 		}
@@ -4445,11 +4484,13 @@ extern "C"
 		// {
 		// 	pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
 		// }
-		char *pathname_dir = NULL, *new_path = NULL;
-		ResolvePathsAndFD(dir_fd, pathname, &pathname_dir, &new_path);
+		std::string pathname_dir_op = "";
+		char *new_path = NULL;
+		ResolvePathsAndFD(dir_fd, pathname, pathname_dir_op, &new_path);
 
-		if (pathname_dir != NULL || new_path != NULL)
+		if (pathname_dir_op != "" || new_path != NULL)
 		{
+			const char *pathname_dir = pathname_dir_op.c_str();
 			// fprintf(stderr, "[POSIX] Calling Hercules '__fxstatat' flags=%d, dir_fd=%d, pathname_dir=%s, new_path_dir=%s, pathname=%s\n", flags, dir_fd, pathname_dir, new_path, pathname);
 			slog_live("[POSIX] Calling Hercules '__fxstatat', flags=%d, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, dir_fd, pathname_dir, pathname);
 			int is_absolute_path = IsAbsolutePath(pathname);
@@ -4490,13 +4531,13 @@ extern "C"
 					// 	return -1;
 					// }
 
-					char absolute_pathname[PATH_MAX];
-					char *dirr = pathname_dir + strlen("imss://");
+					char absolute_pathname[PATH_MAX] = {0};
+					char *dirr = (char *)pathname_dir + strlen("imss://");
 					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
 
 					// char *new_path = checkHerculesPath(absolute_pathname);
 					//  slog_live("[POSIX] is relative, '__fxstatat', new_path=%s", new_path);
-					slog_live("[POSIX] is relative, '__fxstatat', absolute_pathname=%s", absolute_pathname);
+					slog_live("[POSIX] is relative, '__fxstatat', pathname_dir=%s, absolute_pathname=%s", pathname_dir, absolute_pathname);
 					ret = stat(absolute_pathname, stat_buf);
 
 					// ret = generalOpen(new_path, flags, mode);
@@ -4547,11 +4588,13 @@ extern "C"
 		// 	pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
 		// }
 
-		char *pathname_dir = NULL, *new_path = NULL;
-		ResolvePathsAndFD(dir_fd, pathname, &pathname_dir, &new_path);
+		std::string pathname_dir_op = "";
+		char *new_path = NULL;
+		ResolvePathsAndFD(dir_fd, pathname, pathname_dir_op, &new_path);
 
-		if (pathname_dir != NULL || new_path != NULL)
+		if (pathname_dir_op != "" || new_path != NULL)
 		{
+			const char *pathname_dir = pathname_dir_op.c_str();
 			// fprintf(stderr, "[POSIX] Calling Hercules '__fxstatat' flags=%d, dir_fd=%d, pathname_dir=%s, new_path_dir=%s, pathname=%s\n", flags, dir_fd, pathname_dir, new_path, pathname);
 			slog_live("[POSIX] Calling Hercules '__fxstatat64' flags=%d, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, dir_fd, pathname_dir, pathname);
 			int is_absolute_path = IsAbsolutePath(pathname);
@@ -4590,8 +4633,8 @@ extern "C"
 					// 	return -1;
 					// }
 
-					char absolute_pathname[PATH_MAX];
-					char *dirr = pathname_dir + strlen("imss://");
+					char absolute_pathname[PATH_MAX] = {0};
+					char *dirr = (char *)pathname_dir + strlen("imss://");
 					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
 
 					// char *new_path = checkHerculesPath(absolute_pathname);
@@ -4676,14 +4719,16 @@ extern "C"
 		// 	pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
 		// }
 
-		char *pathname_dir = NULL, *new_path = NULL;
-		ResolvePathsAndFD(dir_fd, pathname, &pathname_dir, &new_path);
+		std::string pathname_dir_op = "";
+		char *new_path = NULL;
+		ResolvePathsAndFD(dir_fd, pathname, pathname_dir_op, &new_path);
 
-		if (pathname_dir != NULL || new_path != NULL)
+		if (pathname_dir_op != "" || new_path != NULL)
 		{
+			const char *pathname_dir = pathname_dir_op.c_str();
 			slog_live("[POSIX] Calling Hercules 'faccessat2' flags=%d, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, dir_fd, pathname_dir, pathname);
 
-			ret = GeneralFAccessAt(dir_fd, pathname, mode, flags, pathname_dir);
+			ret = GeneralFAccessAt(dir_fd, pathname, mode, flags, (char *)pathname_dir);
 
 			slog_live("[POSIX] Ending Hercules 'faccessat2', ret=%d, errno=%d:%s\n", ret, errno, strerror(errno));
 			if (new_path != NULL)
@@ -4727,14 +4772,17 @@ extern "C"
 		// {
 		// 	pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
 		// }
-		char *pathname_dir = NULL, *new_path = NULL;
-		ResolvePathsAndFD(dir_fd, pathname, &pathname_dir, &new_path);
 
-		if (pathname_dir != NULL || new_path != NULL)
+		std::string pathname_dir_op = "";
+		char *new_path = NULL;
+		ResolvePathsAndFD(dir_fd, pathname, pathname_dir_op, &new_path);
+
+		if (pathname_dir_op != "" || new_path != NULL)
 		{
+			const char *pathname_dir = pathname_dir_op.c_str();
 			slog_live("[POSIX] Calling Hercules 'faccessat' flags=%d, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, dir_fd, pathname_dir, pathname);
 
-			ret = GeneralFAccessAt(dir_fd, pathname, mode, flags, pathname_dir);
+			ret = GeneralFAccessAt(dir_fd, pathname, mode, flags, (char *)pathname_dir);
 
 			slog_live("[POSIX] Ending Hercules 'faccessat', ret=%d, errno=%d:%s\n", ret, errno, strerror(errno));
 			if (new_path != NULL)
@@ -4777,11 +4825,14 @@ extern "C"
 		// {
 		// 	pathname_dir = map_fd_search_by_val(map_fd, dir_fd);
 		// }
-		char *pathname_dir = NULL, *new_path = NULL;
-		ResolvePathsAndFD(dir_fd, pathname, &pathname_dir, &new_path);
 
-		if (pathname_dir != NULL || new_path != NULL)
+		std::string pathname_dir_op = "";
+		char *new_path = NULL;
+		ResolvePathsAndFD(dir_fd, pathname, pathname_dir_op, &new_path);
+
+		if (pathname_dir_op != "" || new_path != NULL)
 		{
+			const char *pathname_dir = pathname_dir_op.c_str();
 			slog_live("[POSIX] Calling Hercules 'unlinkat' flags=%d, dir_fd=%d, pathname_dir=%s, pathname=%s", flags, dir_fd, pathname_dir, pathname);
 			int is_absolute_path = IsAbsolutePath(pathname);
 
@@ -4818,7 +4869,7 @@ extern "C"
 					// }
 
 					char absolute_pathname[PATH_MAX];
-					char *dirr = pathname_dir + strlen("imss://");
+					char *dirr = (char *)pathname_dir + strlen("imss://");
 					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
 
 					// char *new_path = checkHerculesPath(absolute_pathname);
@@ -4859,19 +4910,20 @@ extern "C"
 
 		errno = 0;
 		int ret = 0;
-		char *old_pathname_dir = NULL;
+		std::string old_pathname_dir_op = "";
 		char *old_new_path = NULL;
-		char *new_pathname_dir = NULL;
+		std::string new_pathname_dir_op = "";
 		char *new_new_path = NULL;
 		// int to_free_old_path = 0, to_free_new_path = 0;
 
-		ResolvePathsAndFD(olddirfd, oldpath, &old_pathname_dir, &old_new_path);
-		ResolvePathsAndFD(newdirfd, newpath, &new_pathname_dir, &new_new_path);
+		ResolvePathsAndFD(olddirfd, oldpath, old_pathname_dir_op, &old_new_path);
+		ResolvePathsAndFD(newdirfd, newpath, new_pathname_dir_op, &new_new_path);
 
 		// if (pathname_dir != NULL || new_path != NULL)
-		if (old_new_path || old_pathname_dir || new_new_path || new_pathname_dir)
-		// if (old_new_path || new_new_path)
+		if (old_new_path || old_pathname_dir_op != "" || new_new_path || new_pathname_dir_op != "")
 		{
+			const char *old_pathname_dir = old_pathname_dir_op.c_str();
+			const char *new_pathname_dir = new_pathname_dir_op.c_str();
 
 			// size_t len = strlen(new_new_path);
 			// if (len > 0 && new_new_path[len - 1] == '/')
@@ -4903,8 +4955,8 @@ extern "C"
 				else
 				{
 					// // get the pathname of the directory pointed by dir_fd if it is storage in the local map "map_fd".
-					char absolute_pathname[PATH_MAX];
-					char *dirr = new_pathname_dir + strlen("imss://");
+					char absolute_pathname[PATH_MAX] = {0};
+					char *dirr = (char *)new_pathname_dir + strlen("imss://");
 					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, newpath);
 
 					// char *new_path = checkHerculesPath(absolute_pathname);
@@ -5558,11 +5610,13 @@ extern "C"
 		// 	pathname_dir = map_fd_search_by_val(map_fd, dirfd);
 		// }
 
-		char *pathname_dir, *new_path = NULL;
-		ResolvePathsAndFD(dirfd, pathname, &pathname_dir, &new_path);
+		std::string pathname_dir_op = "";
+		char *new_path = NULL;
+		ResolvePathsAndFD(dirfd, pathname, pathname_dir_op, &new_path);
 
-		if (pathname_dir != NULL || new_path != NULL)
+		if (pathname_dir_op != "" || new_path != NULL)
 		{
+			const char *pathname_dir = pathname_dir_op.c_str();
 			slog_live("[POSIX] Calling Hercules 'utimensat' flags=%d, dirfd=%d, pathname_dir=%s, pathname=%s", flags, dirfd, pathname_dir, pathname);
 			int is_absolute_path = IsAbsolutePath(pathname);
 
@@ -5599,8 +5653,8 @@ extern "C"
 					// 	return -1;
 					// }
 
-					char absolute_pathname[PATH_MAX];
-					char *dirr = pathname_dir + strlen("imss://");
+					char absolute_pathname[PATH_MAX] = {0};
+					char *dirr = (char *)pathname_dir + strlen("imss://");
 					sprintf(absolute_pathname, "%s/%s/%s", MOUNT_POINT, dirr, pathname);
 
 					// char *new_path = checkHerculesPath(absolute_pathname);
@@ -5793,147 +5847,148 @@ extern "C"
 	// 	real_exit(status);
 	// }
 
-	// int fcntl(int fd, int cmd, ... /* arg */)
-	// {
-	// 	if (!real_fcntl)
-	// 		real_fcntl = dlsym(RTLD_NEXT, "fcntl");
-	// 	// FIX ME!
+	int fcntl(int fd, int cmd, ... /* arg */)
+	{
+		if (!real_fcntl)
+			real_fcntl = (int (*)(int, int, ...))dlsym(RTLD_NEXT, "fcntl");
+		// FIX ME!
 
-	// 	va_list ap;
-	// 	void *arg;
-	// 	va_start(ap, cmd);
-	// 	arg = va_arg(ap, void *);
-	// 	va_end(ap);
+		va_list ap;
+		void *arg;
+		va_start(ap, cmd);
+		arg = va_arg(ap, void *);
+		va_end(ap);
 
-	// 	if (!init)
-	// 	{
-	// 		if (!arg)
-	// 			return real_fcntl(fd, cmd);
-	// 		else
-	// 			return real_fcntl(fd, cmd, arg);
-	// 	}
+		if (!init)
+		{
+			if (!arg)
+				return real_fcntl(fd, cmd);
+			else
+				return real_fcntl(fd, cmd, arg);
+		}
 
-	// 	errno = 0;
-	// 	int ret = 0;
-	// 	std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
-	// 	// if (pathname = map_fd_search_by_val(map_fd, fd))
-	// 	if (!pathname_ob.empty())
-	// 	{
-	// 		slog_live("[POSIX]. Calling Hercules 'fcntl', pathname=%s, fd=%d", pathname, fd);
-	// 		cmd = FCNTL_ADJUST_CMD(cmd);
-	// 		switch (cmd)
-	// 		{
-	// 		// case F_SETLKW:
-	// 		case F_SETLKW64: // release the existence of record locks.
-	// 			// return SYSCALL_CANCEL(fcntl64, fd, cmd, arg);
-	// 			slog_live("[POSIX][fcntl] pathname=%s, fd=%d, F_SETLKW", pathname, fd);
-	// 			// ret = 0;//real_fcntl(fd, cmd, arg);
-	// 			ret = -1;
-	// 			errno = EDEADLK;
-	// 			break;
-	// 		case F_OFD_SETLKW:
-	// 		{
-	// 			struct flock *flk = (struct flock *)arg;
-	// 			slog_live("[POSIX][fcntl] pathname=%s, fd=%d, F_OFD_SETLKW", pathname, fd);
-	// 			// struct flock64 flk64 =
-	// 			// 	{
-	// 			// 		.l_type = flk->l_type,
-	// 			// 		.l_whence = flk->l_whence,
-	// 			// 		.l_start = flk->l_start,
-	// 			// 		.l_len = flk->l_len,
-	// 			// 		.l_pid = flk->l_pid
-	// 			// 	};
-	// 			// return SYSCALL_CANCEL(fcntl64, fd, cmd, &flk64);
-	// 			ret = 0; // real_fcntl(fd, cmd, &flk);
-	// 			break;
-	// 		}
-	// 		case F_OFD_GETLK:
-	// 		case F_OFD_SETLK:
-	// 		{
-	// 			slog_live("[POSIX][fcntl], pathname=%s, fd=%d, F_OFD_SETLK", pathname, fd);
-	// 			struct flock *flk = (struct flock *)arg;
-	// 			// struct flock64 flk64 =
-	// 			// 	{
-	// 			// 		.l_type = flk->l_type,
-	// 			// 		.l_whence = flk->l_whence,
-	// 			// 		.l_start = flk->l_start,
-	// 			// 		.l_len = flk->l_len,
-	// 			// 		.l_pid = flk->l_pid
-	// 			// 	};
-	// 			int ret = real_fcntl(fd, cmd, &flk); // INLINE_SYSCALL_CALL(fcntl64, fd, cmd, &flk64);
-	// 			if (ret == -1)
-	// 				return -1;
-	// 			if ((off_t)flk->l_start != flk->l_start || (off_t)flk->l_len != flk->l_len)
-	// 			{
-	// 				//__set_errno(EOVERFLOW);
-	// 				errno = EOVERFLOW;
-	// 				return -1;
-	// 			}
-	// 			// flk->l_type = flk64.l_type;
-	// 			// flk->l_whence = flk64.l_whence;
-	// 			// flk->l_start = flk64.l_start;
-	// 			// flk->l_len = flk64.l_len;
-	// 			// flk->l_pid = flk64.l_pid;
-	// 			// return ret;
-	// 			break;
-	// 		}
-	// 		case F_DUPFD_CLOEXEC:
-	// 		{
-	// 			slog_live("[POSIX][fcntl], pathname=%s, fd=%d, F_DUPFD_CLOEXEC", pathname, fd);
-	// 			// ret = real_fcntl(fd, cmd, arg);
-	// 			ret = dup(fd);
-	// 			break;
-	// 		}
-	// 		/* Since only F_SETLKW{64}/F_OLD_SETLK are cancellation entrypoints and
-	// 	   only OFD locks require LFS handling, all others flags are handled
-	// 	   unmodified by calling __NR_fcntl64.  */
-	// 		default:
-	// 			slog_live("[POSIX][fcntl], pathname=%s, fd=%d, default", pathname, fd);
-	// 			// ret = real_fcntl(fd, cmd, arg);
-	// 			if (!arg)
-	// 				ret = real_fcntl(fd, cmd);
-	// 			else
-	// 				ret = real_fcntl(fd, cmd, arg);
-	// 			break;
-	// 			// return __fcntl64_nocancel_adjusted(fd, cmd, arg);
-	// 		}
-	// 		slog_live("[POSIX]. Ending Hercules 'fcntl', pathname=%s, fd=%d, ret=%d, errno=%d:%s\n", pathname, fd, ret, errno, strerror(errno));
-	// 	}
-	// 	else
-	// 	{
-	// 		slog_full("[POSIX]. Calling real 'fcntl', fd=%d", fd);
-	// 		// cmd = FCNTL_ADJUST_CMD(cmd);
-	// 		// switch (cmd)
-	// 		// {
-	// 		// // case F_SETLKW:
-	// 		// case F_SETLKW64: // release the existence of record locks.
-	// 		// 	slog_live("[POSIX][fcntl] fd=%d, F_SETLKW", fd);
-	// 		// 	break;
-	// 		// case F_OFD_SETLKW:
-	// 		// {
-	// 		// 	struct flock *flk = (struct flock *)arg;
-	// 		// 	slog_live("[POSIX][fcntl] fd=%d, F_OFD_SETLKW", fd);
-	// 		// 	break;
-	// 		// }
-	// 		// case F_OFD_GETLK:
-	// 		// case F_OFD_SETLK:
-	// 		// {
-	// 		// 	slog_live("[POSIX][fcntl] fd=%d, F_OFD_SETLK", fd);
-	// 		// 	break;
-	// 		// }
-	// 		// default:
-	// 		// 	slog_live("[POSIX][fcntl] fd=%d, default", fd);
-	// 		// 	break;
-	// 		// }
-	// 		if (!arg)
-	// 			ret = real_fcntl(fd, cmd);
-	// 		else
-	// 			ret = real_fcntl(fd, cmd, arg);
-	// 		slog_full("[POSIX]. Ending Real 'fcntl', fd=%d, ret=%d", fd, ret);
-	// 	}
+		errno = 0;
+		int ret = 0;
+		std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
+		// if (pathname = map_fd_search_by_val(map_fd, fd))
+		if (!pathname_ob.empty())
+		{
+			const char *pathname = pathname_ob.c_str();
+			slog_live("[POSIX]. Calling Hercules 'fcntl', pathname=%s, fd=%d, cmd=%d", pathname, fd, cmd);
+			// cmd = FCNTL_ADJUST_CMD(cmd);
+			switch (cmd)
+			{
+			// case F_SETLKW:
+			case F_SETLKW64: // release the existence of record locks.
+				// return SYSCALL_CANCEL(fcntl64, fd, cmd, arg);
+				slog_live("[POSIX][fcntl] pathname=%s, fd=%d, F_SETLKW", pathname, fd);
+				// ret = 0;//real_fcntl(fd, cmd, arg);
+				ret = -1;
+				errno = EDEADLK;
+				break;
+			case F_OFD_SETLKW:
+			{
+				struct flock *flk = (struct flock *)arg;
+				slog_live("[POSIX][fcntl] pathname=%s, fd=%d, F_OFD_SETLKW", pathname, fd);
+				// struct flock64 flk64 =
+				// 	{
+				// 		.l_type = flk->l_type,
+				// 		.l_whence = flk->l_whence,
+				// 		.l_start = flk->l_start,
+				// 		.l_len = flk->l_len,
+				// 		.l_pid = flk->l_pid
+				// 	};
+				// return SYSCALL_CANCEL(fcntl64, fd, cmd, &flk64);
+				ret = 0; // real_fcntl(fd, cmd, &flk);
+				break;
+			}
+			case F_OFD_GETLK:
+			case F_OFD_SETLK:
+			{
+				slog_live("[POSIX][fcntl], pathname=%s, fd=%d, F_OFD_SETLK", pathname, fd);
+				struct flock *flk = (struct flock *)arg;
+				// struct flock64 flk64 =
+				// 	{
+				// 		.l_type = flk->l_type,
+				// 		.l_whence = flk->l_whence,
+				// 		.l_start = flk->l_start,
+				// 		.l_len = flk->l_len,
+				// 		.l_pid = flk->l_pid
+				// 	};
+				int ret = real_fcntl(fd, cmd, &flk); // INLINE_SYSCALL_CALL(fcntl64, fd, cmd, &flk64);
+				if (ret == -1)
+					return -1;
+				if ((off_t)flk->l_start != flk->l_start || (off_t)flk->l_len != flk->l_len)
+				{
+					//__set_errno(EOVERFLOW);
+					errno = EOVERFLOW;
+					return -1;
+				}
+				// flk->l_type = flk64.l_type;
+				// flk->l_whence = flk64.l_whence;
+				// flk->l_start = flk64.l_start;
+				// flk->l_len = flk64.l_len;
+				// flk->l_pid = flk64.l_pid;
+				// return ret;
+				break;
+			}
+			case F_DUPFD_CLOEXEC:
+			{
+				slog_live("[POSIX][fcntl], pathname=%s, fd=%d, F_DUPFD_CLOEXEC", pathname, fd);
+				// ret = real_fcntl(fd, cmd, arg);
+				ret = dup(fd);
+				break;
+			}
+			/* Since only F_SETLKW{64}/F_OLD_SETLK are cancellation entrypoints and
+		   only OFD locks require LFS handling, all others flags are handled
+		   unmodified by calling __NR_fcntl64.  */
+			default:
+				slog_live("[POSIX][fcntl], pathname=%s, fd=%d, default", pathname, fd);
+				// ret = real_fcntl(fd, cmd, arg);
+				if (!arg)
+					ret = real_fcntl(fd, cmd);
+				else
+					ret = real_fcntl(fd, cmd, arg);
+				break;
+				// return __fcntl64_nocancel_adjusted(fd, cmd, arg);
+			}
+			slog_live("[POSIX]. Ending Hercules 'fcntl', pathname=%s, fd=%d, ret=%d\n", pathname, fd, ret);
+		}
+		else
+		{
+			slog_full("[POSIX]. Calling real 'fcntl', fd=%d", fd);
+			// cmd = FCNTL_ADJUST_CMD(cmd);
+			// switch (cmd)
+			// {
+			// // case F_SETLKW:
+			// case F_SETLKW64: // release the existence of record locks.
+			// 	slog_live("[POSIX][fcntl] fd=%d, F_SETLKW", fd);
+			// 	break;
+			// case F_OFD_SETLKW:
+			// {
+			// 	struct flock *flk = (struct flock *)arg;
+			// 	slog_live("[POSIX][fcntl] fd=%d, F_OFD_SETLKW", fd);
+			// 	break;
+			// }
+			// case F_OFD_GETLK:
+			// case F_OFD_SETLK:
+			// {
+			// 	slog_live("[POSIX][fcntl] fd=%d, F_OFD_SETLK", fd);
+			// 	break;
+			// }
+			// default:
+			// 	slog_live("[POSIX][fcntl] fd=%d, default", fd);
+			// 	break;
+			// }
+			if (!arg)
+				ret = real_fcntl(fd, cmd);
+			else
+				ret = real_fcntl(fd, cmd, arg);
+			slog_full("[POSIX]. Ending Real 'fcntl', fd=%d, ret=%d", fd, ret);
+		}
 
-	// 	return ret;
-	// }
+		return ret;
+	}
 
 	void *prefetch_function(void *th_argv)
 	{

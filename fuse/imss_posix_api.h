@@ -52,7 +52,8 @@ extern "C"
 	int imss_access(const char *path, int permission);
 	int imss_refresh(const char *path);
 	int imss_getattr(const char *path, struct stat *stbuf);
-
+	
+	void free_entries(char ***refs, int n_ent);
 	uint32_t imss_readdir(std::string path, char ***buf, posix_fill_dir_t filler, off_t offset);
 	int imss_open(const char *path, uint64_t *fh);
 	ssize_t imss_read(const char *path, void *buf, size_t size, off_t offset);
@@ -82,6 +83,7 @@ extern "C"
 	int HerculesMove(const char *given_old_path, const char *given_new_pathname, const char *hercules_path);
 
 	int imss_close(const char *path, int fd);
+
 
 #ifdef __cplusplus
 }

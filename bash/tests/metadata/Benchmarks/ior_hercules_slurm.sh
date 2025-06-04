@@ -77,7 +77,7 @@ if [ -z "$CONFIG_PATH" ]; then
 else
    echo "Configuration file pass $CONFIG_PATH"
 #   export HERCULES_DEBUG_LEVEL=SLOG_TIME
-   export HERCULES_DEBUG_LEVEL=none
+   # export HERCULES_DEBUG_LEVEL=none
    source /beegfs/home/javier.garciablas/hercules/scripts/hercules start \
    -f "$CONFIG_PATH" 
    unset HERCULES_DEBUG_LEVEL

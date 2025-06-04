@@ -518,8 +518,8 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
 
-	struct utsname detect;
-	uname(&detect);
+	// struct utsname detect;
+	// uname(&detect);
 
 	for (const auto &it : buffer)
 	{
@@ -581,14 +581,16 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 		{
 			vec.insert(vec.begin(), key);
 
-			// key.erase(0, old_dir.length() - 1);
+			key.erase(0, old_dir.length());
 			// slog_debug("Key aftr erase: %s", key.c_str());
 
 			string new_path = rdir_dest;
-			// new_path.append(key);
+			if (!key.empty())
+				new_path.append(key);
 
 			imss_info_ *data = (imss_info_ *)it.second.first;
-			strcpy(data->uri_, new_path.c_str());
+			slog_debug("Renaming data uri from %s to %s", data->uri_,  new_path.c_str());
+			strncpy(data->uri_, new_path.c_str(), URI_);
 		}
 	}
 

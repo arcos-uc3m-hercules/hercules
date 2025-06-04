@@ -104,6 +104,7 @@ int find_dataset_by_uri_hash(GHashTable *map, const char *dataset_uri, dataset_i
 		exit(-1);
 	}
 
+	slog_debug("Searching for %s on the Hash Map", dataset_uri);
 	*dataset_info_ = (dataset_info *)g_hash_table_lookup(map, dataset_uri);
 	if (*dataset_info_ != NULL)
 	{
@@ -124,6 +125,7 @@ void add_dataset_entry(GHashTable **map, const char *uri, dataset_info *info)
 	// 	*map = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, free_ghashtable_dataset_data);
 	// }
 	g_hash_table_insert(*map, g_strdup(uri), info);
+	slog_debug("[%d] Added element %s to the Hash Map",  g_hash_table_size(*map), info->uri_);
 }
 
 int remove_dataset_entry(GHashTable *map, const char *uri)
@@ -146,8 +148,9 @@ void free_ghashtable_dataset_data(gpointer data)
 	dataset_info *info = (dataset_info *)data;
 	if (info != NULL)
 	{
-		// g_free(data);
-		free(data);
+		g_free(data);
+		// free(data);
+		data = NULL;
 	}
 }
 
@@ -699,7 +702,8 @@ int32_t stat_release()
 	g_array_free(imssd, TRUE);
 	g_array_free(free_imssd, TRUE);
 	// g_array_free(datasetd, TRUE);
-	g_hash_table_unref(datasetd);
+	// g_hash_table_unref(datasetd);
+	g_hash_table_destroy(datasetd);
 	g_array_free(free_datasetd, TRUE);
 
 	pthread_mutex_lock(&lock_network);
@@ -1724,7 +1728,7 @@ int32_t create_dataset(char *dataset_uri,
 
 	// Discover the metadata server that handle the new dataset.
 	uint32_t m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-	char formated_uri[REQUEST_SIZE];
+	char formated_uri[REQUEST_SIZE] = {0};
 	sprintf(formated_uri, "%" PRIu32 " SET %lu %s", opened, msg_size, new_dataset.uri_);
 
 	slog_info("[IMSS] Request to metadata server %d - '%s'", m_srv, formated_uri);
@@ -2605,15 +2609,16 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 	// 	return i;
 	// }
 	// }
-	if (g_hash_table_size(datasetd) > 0)
+	// if (g_hash_table_size(datasetd) > 0)
 	{
 		dataset_info *dataset_info_aux;
-		find_dataset_by_uri_hash(datasetd, dataset_uri, &dataset_info_aux);
+		ret = find_dataset_by_uri_hash(datasetd, dataset_uri, &dataset_info_aux);
 		// if (!strcmp(dataset_uri, "imss://test-dir.0-0/mdtest_tree.0.0/file.mdtest.0.0"))
 		// {
 		// 	fprintf(stderr, "stat dataset\n");
 		// }
-		if (dataset_info_aux)
+		// if (dataset_info_aux)
+		if (ret == 1)
 		{
 			slog_debug("Dataset %s found in the hash table, aux uri=%s.", dataset_uri, dataset_info_aux->uri_);
 			// dataset_info_ = dataset_info_aux;
@@ -2769,7 +2774,7 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 	}
 
 	int32_t server = -1;
-	slog_live("curr_dataset.uri=%s, curr_imss.info.num_storages=%d, curr_dataset.n_servers=%d, curr_imss.info.num_active_storages=%d, curr_dataset.n_servers_when_created=%d", curr_dataset.uri_, curr_imss.info.num_storages, curr_dataset.n_servers, curr_imss.info.num_active_storages, curr_dataset.n_servers_when_created);
+	slog_live("curr_dataset.uri=%s,  curr_dataset.original_name=%s, curr_imss.info.num_storages=%d, curr_dataset.n_servers=%d, curr_imss.info.num_active_storages=%d, curr_dataset.n_servers_when_created=%d", curr_dataset.uri_, curr_dataset.original_name, curr_imss.info.num_storages, curr_dataset.n_servers, curr_imss.info.num_active_storages, curr_dataset.n_servers_when_created);
 	// Search for the server that is supposed to have the specified data element.
 	// slog_debug("curr_dataset.uri_=%s", curr_dataset.uri_);
 	if (curr_imss.info.num_active_storages > 1)
@@ -2778,7 +2783,7 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 		int it = 0;
 		while (true)
 		{
-			if ((server = find_server(num_storages, data_id, curr_dataset.uri_, op_type, TYPE_DATA_SERVER, curr_dataset.session_plcy)) < 0)
+			if ((server = find_server(num_storages, data_id, curr_dataset.original_name, op_type, TYPE_DATA_SERVER, curr_dataset.session_plcy)) < 0)
 			{
 				perror("HERCULES_ERR_FIND_SERVER");
 				slog_fatal("HERCULES_ERR_FIND_SERVER");
@@ -2851,14 +2856,21 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 		}
 	}
 	pthread_mutex_lock(&lock_network);
-	char key_[REQUEST_SIZE] = {0};
 	// Key related to the requested data element.
+	char key_[REQUEST_SIZE] = {0};
 
 	// Request the concerned block to the involved servers.
-	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
-	// for (int32_t i = 0; i < curr_imss.info.num_active_storages; i++)
+	// This is a special case where we need to send the request to all servers to
+	// update the uri of all the subfiles in the old directory.
+	// For example:
+	// Server 0 holds the block 0 imss://dir/$0 and,
+	// Server 1 holds the block 0 imss://dir/file.txt$0
+	// After running: mv dir newdir, we expected to have:
+	// Server 0 holds the block 0 imss://newdir/$0 and,
+	// Server 1 holds the block 0 imss://newdir/file.txt$0
+	for (int32_t i = 0; i < curr_imss.info.num_active_storages; i++)
 	{
-		ucp_ep_h ep = curr_imss.conns.eps[repl_servers[i]];
+		ucp_ep_h ep = curr_imss.conns.eps[i];
 
 		sprintf(key_, "GET 6 0 %s,%s", old_dir, rdir_dest);
 		slog_debug("Request to data %d - %s", i, key_);
@@ -2907,8 +2919,6 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 		}
 
 		free(result);
-		// Important to update
-		// strcpy(curr_dataset.uri_,new_dataset_uri);
 	}
 
 	pthread_mutex_unlock(&lock_network);
@@ -4400,8 +4410,16 @@ char get_type(const char *uri)
 	char ret_data_type = TYPE_ERROR;
 	int32_t recv_msg_len = 0;
 
-	int not_root = find_first_parent_dir(uri, first_parent_dir);
-	slog_debug("uri=%s, first_parent_dir=%s", uri, first_parent_dir);
+	// In case of multiple metadata servers, we use the first parent directory as name to 
+	// locate the block. 
+	find_first_parent_dir(uri, first_parent_dir);
+	int is_root_path = 0;// = 
+	if (!strncmp(uri,"imss://",strlen(uri)))
+	{
+		is_root_path = 1;
+	}
+	
+	slog_debug("uri=%s, first_parent_dir=%s, not_root=%d", uri, first_parent_dir, is_root_path);
 
 	// Discover the metadata server that handles the entity.
 	// uint32_t m_srv = discover_stat_srv(uri);
@@ -4462,13 +4480,24 @@ char get_type(const char *uri)
 	}
 
 	// imss_info *data;
-	if (not_root)
+	if (!is_root_path)
 	{ // another dataset.
 		// data = (imss_info *)result;
-		ret_data_type = ((dataset_info *)result)->type;
+		dataset_info *dataset = (dataset_info *)result;
+		// ret_data_type = ((dataset_info *)result)->type;
+		ret_data_type = dataset->type;
+		// Add the created struture into the underlying IMSSs.
+		// int32_t ret = GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
+		dataset_info *aux_dataset = (dataset_info *)malloc(sizeof(dataset_info));
+
+		memcpy(aux_dataset, dataset, sizeof(dataset_info));
+
+		add_dataset_entry(&datasetd, dataset->uri_, aux_dataset);
+
+		curr_dataset = *aux_dataset;
 	}
 	else
-	{ // root case (not stored as dataset).
+	{ // root case (not stored as dataset, but imss_info).
 		ret_data_type = ((imss_info *)result)->type;
 	}
 

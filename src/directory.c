@@ -222,7 +222,9 @@ int32_t GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 				strcpy(new_path, rdir_dest);
 				if (strlen(path) > 0)
 				{
-					strcat(new_path, "/");
+					// check if the rdir_dest does not have the last slash (it is a directory, must contain it).
+					ConcatLastSlashC(new_path);
+					// strcat(new_path, "/");
 					strcat(new_path, path);
 				}
 				slog_debug("new_path to be inserted=%s", new_path);

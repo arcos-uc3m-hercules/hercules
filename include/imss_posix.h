@@ -27,7 +27,6 @@
 #include <sys/utsname.h>
 #include <sys/epoll.h>
 #include <sys/time.h>
-// #include <fcntl.h>
 // Those are used by reports functions in stat.
 #include <pwd.h>
 #include <sys/sysmacros.h>
@@ -110,6 +109,8 @@ extern "C"
     static DIR *(*real_opendir)(const char *name) = NULL;
     static struct dirent *(*real_readdir)(DIR *dirp) = NULL;
     static struct dirent64 *(*real_readdir64)(DIR *dirp) = NULL;
+    static int (*real_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count) = NULL;
+    static ssize_t (*real_getdents64)(int fd, void *dirp, size_t count) = NULL;
     // static int (*real_readdir)(unsigned int fd, struct old_linux_dirent *dirp, unsigned int count);
     static int (*real_closedir)(DIR *dirp) = NULL;
     static int (*real_statvfs)(const char *path, struct statvfs *buf) = NULL;
@@ -169,7 +170,7 @@ extern "C"
     static ssize_t (*real_pwrite64)(int fd, const void *buf, size_t count, off64_t offset) = NULL;
     // static int (*real_poll)(struct pollfd *fds, nfds_t nfds, int timeout) = NULL;
     // static int (*real_ppoll)(struct pollfd *fds, nfds_t nfds, const struct timespec tmo_p, const sigset_t sigmask) = NULL;
-    // static int (*real_fcntl)(int fd, int cmd, ... /* arg */) = NULL;
+    static int (*real_fcntl)(int fd, int cmd, ... /* arg */) = NULL;
     static int (*real_syncfs)(int fd) = NULL;
     static int (*real_posix_fadvise)(int fd, off_t offset, off_t len, int advice) = NULL;
     // static int (*real_posix_fadvise64)(int fd, off64_t offset, off64_t len, int advice) = NULL;
