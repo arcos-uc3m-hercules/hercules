@@ -119,7 +119,6 @@ extern "C"
 
 		// status = ucp_config_read(NULL, NULL, &config);
 		// ucp_config_print(config, stdout, NULL, UCS_CONFIG_PRINT_CONFIG);
-
 		memset(&ucp_params, 0, sizeof(ucp_params));
 
 		/* UCP initialization */
@@ -131,7 +130,8 @@ extern "C"
 		ucp_params.field_mask = UCP_PARAM_FIELD_FEATURES |
 								UCP_PARAM_FIELD_REQUEST_SIZE |
 								UCP_PARAM_FIELD_REQUEST_INIT |
-								UCP_PARAM_FIELD_NAME;
+								UCP_PARAM_FIELD_NAME |
+								UCP_PARAM_FIELD_MT_WORKERS_SHARED;
 		ucp_params.features = UCP_FEATURE_TAG;
 		// ucp_params.features |= UCP_FEATURE_WAKEUP;
 		ucp_params.request_size = sizeof(struct ucx_context);
@@ -141,7 +141,9 @@ extern "C"
 		// ucp_params.mt_workers_shared = UCS_THREAD_MODE_SINGLE;
 		// slog_info("Before ucp_init");
 		// status = ucp_init(&ucp_params, config, ucp_context);
+
 		status = ucp_init(&ucp_params, NULL, ucp_context);
+		
 		slog_info("After ucp_init, status=%s", ucs_status_string(status));
 		// fprintf(stderr, "After ucp_init, status=%s, stderr=%s\n", ucs_status_string(status), strerror(errno));
 		if (status != UCS_OK)

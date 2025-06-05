@@ -1296,12 +1296,12 @@ extern "C"
 
 	char *__realpath_chk(const char *pathname, char *resolved_path, size_t resolved_len)
 	{
-		if (!real_realpath)
-			real_realpath = (char *(*)(const char *, char *))dlsym(RTLD_NEXT, __func__);
+		if (!real__realpath_chk)
+			real__realpath_chk = (char *(*)(const char *, char *, size_t))dlsym(RTLD_NEXT, __func__);
 
 		if (!init)
 		{
-			return real_realpath(pathname, resolved_path);
+			return real__realpath_chk(pathname, resolved_path, resolved_len);
 			// slog_live("[POSIX]. Calling Real 'realpath', pathname=%s.", pathname);
 		}
 
@@ -1324,7 +1324,7 @@ extern "C"
 		else
 		{
 			slog_live("[POSIX]. Calling real '__realpath_chk', pathname=%s", pathname);
-			p = real_realpath(pathname, resolved_path);
+			p = real__realpath_chk(pathname, resolved_path, resolved_len);
 			slog_live("[POSIX]. Ending real '__realpath_chk', pathname=%s, resolved_path=%s, ret=%d, p=%s\n", pathname, resolved_path, ret, p);
 		}
 		return p;

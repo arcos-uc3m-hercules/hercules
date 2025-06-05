@@ -118,6 +118,7 @@ extern "C"
     static int (*real_statvfs64)(const char *path, struct statvfs64 *buf) = NULL;
     static int (*real_statfs)(const char *path, struct statfs *buf) = NULL;
     static char *(*real_realpath)(const char *path, char *resolved_path) = NULL;
+	static char *(*real__realpath_chk)(const char *pathname, char *resolved_path, size_t resolved_len) = NULL;
     // static int (*real__openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
     static int (*real_openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
     // static int (*real__openat64)(int fd, const char *file, int oflag, ...) = NULL;
