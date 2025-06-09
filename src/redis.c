@@ -324,7 +324,8 @@ int32_t redis_rename(redisContext *context, const char *old_path, const char *ne
 // Function to rename a directory and all its subdirectories in Redis
 int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir) {
     char *filename = get_path_last_part(old_dir); // This can be either a file or a dir
-
+    printf("rename_dir_dir: old dir - %s", old_dir);
+    printf("rename_dir_dir: new dir - %s", new_dir);
     int exists = dir_exists(context, old_dir);
     if (exists <= 0) {
         slog_error("redis_rename_dir_dir: source directory '%s' does not exist or could not be verified", old_dir);
