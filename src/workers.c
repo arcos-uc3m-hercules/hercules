@@ -164,8 +164,8 @@ void *hercules_ucx_server(void *th_argv)
 	p_argv *arguments = (p_argv *)th_argv;
 	// Map that stores server side endpoints
 	void *map_server_eps = NULL;
-	char server_name[PATH_MAX] = {'\0'};
-	char server_tag[PATH_MAX] = {'\0'};
+	char server_name[PATH_MAX] = {0};
+	char server_tag[PATH_MAX] = {0};
 
 	switch (arguments->args.type)
 	{
@@ -184,7 +184,7 @@ void *hercules_ucx_server(void *th_argv)
 	}
 
 	// if (!arguments->thread_id) // thread 0.
-	{ 
+	{
 		map_server_eps = map_server_eps_create();
 		BLOCK_SIZE = arguments->blocksize * 1024;
 	}
@@ -212,6 +212,7 @@ void *hercules_ucx_server(void *th_argv)
 			if (global_finish_threads == 1)
 			{
 				fprintf(stderr, "Ending %s server thread.\n", server_name);
+				map_server_eps_destroy(map_server_eps);
 				// pthread_exit(NULL);
 				pthread_exit((void *)0);
 			}
@@ -328,6 +329,8 @@ void *hercules_ucx_server(void *th_argv)
 
 		t = clock() - t;
 
+		fflush(stdout);
+
 		time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 		slog_info("Serving time %f s\n", time_taken);
 
@@ -357,7 +360,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
-	char mode[MODE_SIZE];
+	char mode[MODE_SIZE] = {0};
 	const char *response_msg = NULL;
 
 	// Save the request to be served.
@@ -365,7 +368,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 	// Elements conforming the request.
 	uint32_t block_size_recv, block_offset;
-	char uri_[URI_];
+	char uri_[URI_] = {0};
 	size_t to_read = 0;
 	int sender = 0;
 
@@ -525,7 +528,17 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			slog_debug("Cleaning %s", key.c_str());
 			const char *response_msg = NULL;
 			ret = map->cleaning_specific(key);
-			if (ret != 0)
+			if (ret == -1)
+			{
+				size_t len = strlen(key.c_str());
+				if (len > 0 && key.c_str()[len - 1] != '/')
+				{
+					key += '/';
+					// std::unique_lock<std::mutex> unlock(*mut);
+					ret = map->cleaning_specific(key);
+				}
+			}
+			if (ret == -1)
 			{
 				fprintf(stderr, "HERCULES_ERR_CLEANING_DATASET: %s\n", key.c_str());
 				slog_error("HERCULES_ERR_CLEANING_DATASET: %s", key.c_str());
@@ -557,8 +570,18 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				std::string new_key = key.substr(found + 1);
 				slog_debug("[RENAME_OP], old_key=%s, new_key=%s", old_key.c_str(), new_key.c_str());
 				// RENAME MAP
-				ret = map->cleaning_specific(new_key);
-				if (ret == 0)
+				// ret = map->cleaning_specific(old_key);
+				// if (ret == -1)
+				// {
+				// 	size_t len = strlen(old_key.c_str());
+				// 	if (len > 0 && old_key.c_str()[len - 1] != '/')
+				// 	{
+				// 		old_key += '/';
+				// 		// std::unique_lock<std::mutex> unlock(*mut);
+				// 		ret = map->cleaning_specific(old_key);
+				// 	}
+				// }
+				// if (ret == 0)
 				{
 					ret = map->rename_data_srv_worker(old_key, new_key);
 				}
@@ -1189,6 +1212,11 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					{
 						slog_debug("Reusing buffer");
 					}
+					if (msg_length > BLOCK_SIZE)
+					{
+						fprintf(stdout, "HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK\n");
+						slog_warn("HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK");
+					}
 
 					if (buffer == NULL)
 					{
@@ -1655,12 +1683,12 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$errimss_no_key_avail$";
 
-	uint32_t operation = 0; // server id.
-	char mode[MODE_SIZE] = {'\0'};
+	uint32_t operation = 0;
+	char mode[MODE_SIZE] = {0};
 	int32_t req_size = 0;
-	char raw_msg[req_size + 1] = {'\0'};
-	char number[16] = {'\0'};
-	char uri_[URI_] = {'\0'};
+	char raw_msg[req_size + 1] = {0};
+	char number[16] = {0};
+	char uri_[URI_] = {0};
 	int extra_info = 0;
 	int num_characters_read = 0;
 	int num_input_read = 0;
@@ -1777,21 +1805,13 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			// }
 			// free(item);
 			free(buffer);
-			break;
 		}
+		break;
 		case READ_OP:
 		{ // case 0.
 			slog_debug("[READ_OP]");
 			// Check if there was an associated block to the key.
 			int err = map->get(key, &address_, &block_size_rtvd);
-			if (err == 0)
-			{
-				if (!key.empty() && key.back() != '/')
-				{
-					key += '/';
-					err = map->get(key, &address_, &block_size_rtvd);
-				}
-			}
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
@@ -1808,35 +1828,35 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 			else
 			{
-				// dataset_info *dataset = (dataset_info*) address_;
-				// printf("[STAT_SERVER] dataset.original=%s",dataset->original_name);
-				// imss_info * data = (imss_info *) address_;
-				// printf("READ_OP SEND data->type=%c",data->type);
-				// Send the requested block.
-				dataset = (dataset_info *)address_;
-				// TODO: check why dataset->n_open is 21893 for imss://
-				slog_debug("Before dataset->n_open=%d", dataset->n_open);
-				// Checks if the clients wants to open the file.
-				switch (operation)
+				if (operation == IMSS_INFO)
 				{
-				case 1: // file opened.
-					pthread_mutex_lock(&memory_protect);
-					dataset->n_open += 1;
-					pthread_mutex_unlock(&memory_protect);
-					slog_debug("File opened");
-					break;
-				default:
-					break;
+					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, address_, IMSS_INFO, arguments->worker_uid);
+				}
+				else
+				{
+					// Send the requested block.
+					dataset = (dataset_info *)address_;
+					// TODO: check why dataset->n_open is 21893 for imss://
+					slog_debug("Before dataset->n_open=%d, dataset uri=%s", dataset->n_open, dataset->uri_);
+					// Checks if the clients wants to open the file.
+					switch (operation)
+					{
+					case 1: // file opened.
+						pthread_mutex_lock(&memory_protect);
+						dataset->n_open += 1;
+						pthread_mutex_unlock(&memory_protect);
+						slog_debug("File opened");
+						break;
+					default:
+						break;
+					}
+					slog_debug("After dataset->n_open=%d", dataset->n_open);
+					msg_t m;
+					m.data = address_;
+					m.size = block_size_rtvd;
+					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
 				}
 
-				slog_debug("After dataset->n_open=%d", dataset->n_open);
-				pthread_mutex_lock(&memory_protect);
-				msg_t m;
-				m.data = address_;
-				m.size = block_size_rtvd;
-				// pthread_mutex_lock(&lock_network);
-				err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
-				pthread_mutex_unlock(&memory_protect);
 
 				if (err < 0)
 				{
@@ -1847,17 +1867,17 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				// pthread_mutex_unlock(&lock_network);
 			}
-			break;
 		}
+		break;
 		case RELEASE:
 		{
 			slog_debug("[stat_worker_thread][READ_OP][RELEASE] Deleting endpoint with %" PRIu64 "", arguments->worker_uid);
-			
+
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			// ucp_destroy(arguments->ucp_context);
 			slog_debug("[stat_worker_thread][READ_OP][RELEASE] Endpoints deleted ");
-			break;
 		}
+		break;
 		case DELETE_OP:
 		{
 			slog_debug("DELETE_OP");
@@ -1920,7 +1940,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				pthread_mutex_unlock(&memory_protect);
 
-				if (ret_map && ret_tree)
+				// char *buffer = NULL;
+				// int32_t numelems_indir = -1;
+				// fprintf(stdout, "Before getdir %s\n", key.c_str());
+				// buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
+				// fprintf(stdout, "After getdir %s, num elements %d\n", key.c_str(), numelems_indir);
+				// if (numelems_indir == -1)
+				// 	fprintf(stdout, "Entry already deleted: %s\n", key.c_str());
+
+				if (ret_map > 0 && ret_tree == 1)
 				{
 					response_msg = MSG_DELETE_OP;
 				}
@@ -1941,8 +1969,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				// pthread_mutex_unlock(&lock_network);
 			}
-			break;
 		}
+		break;
 		case RENAME_OP:
 		{
 			int ret = -1;
@@ -1994,8 +2022,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				return -1;
 			}
 			// pthread_mutex_unlock(&lock_network);
-			break;
 		}
+		break;
 		case RENAME_DIR_DIR_OP:
 		{
 			int ret = -1;
@@ -2050,8 +2078,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				return -1;
 			}
 			// pthread_mutex_unlock(&lock_network);
-			break;
 		}
+		break;
 		case CLOSE_OP:
 		{
 			slog_debug("CLOSE_OP");
@@ -2107,7 +2135,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				pthread_mutex_unlock(&memory_protect);
 
-				// int32_t result = map->delete_metadata_stat_worker(key);
 				// pthread_mutex_lock(&lock_network);
 				ret = SendConfirmationMessage(arguments, response_msg);
 				if (ret == 0)
@@ -2119,8 +2146,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				// pthread_mutex_unlock(&lock_network);
 			}
-			break;
 		}
+		break;
 		case OPEN_OP:
 		{
 			slog_debug("OPEN_OP");
@@ -2166,8 +2193,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					return -1;
 				}
 			}
-			break;
 		}
+		break;
 		default:
 			break;
 		}
@@ -2176,19 +2203,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// Write operations.
 	case SET_OP:
 	{
-		// switch (operation)
-		// {
-		// case INSTANCE_OP:
-		// {
-		// 	slog_debug("NEW INSTANCE OPERATION");
-		// 	slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
-		// 	/* code */
-		// 	break;
-		// }
-		// default:
-		// 	break;
-		// }
-
 		slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
 		// TO CHECK: this mutex can be removed cause' map->get has another mutex.
 		// pthread_mutex_lock(&memory_protect);
@@ -2220,12 +2234,18 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
-			ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
+			if (operation == IMSS_INFO)
+			{
+				ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, IMSS_INFO, arguments->worker_uid, length);
+			}
+			else
+			{
+				ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, DATASET_INFO, arguments->worker_uid, length);
+				// dataset_info *struct_ = (dataset_info *)buffer;
+				slog_debug("END Recv dynamic, n_server_when_created=%d", ((dataset_info *)buffer)->n_servers_when_created);
+			}
+
 			// pthread_mutex_unlock(&lock_network);
-
-			dataset_info *struct_ = (dataset_info *)buffer;
-
-			slog_debug("END Recv dynamic, n_server_when_created=%d", struct_->n_servers_when_created);
 
 			if (ret < 0)
 			{
@@ -2449,7 +2469,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					}
 					// Receive the block into the buffer.
 					ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
-					if (ret == -1)
+					if (ret < 0)
 					{
 						perror("HERCULES_ERR_STAT_SET_OP_RECV_STREAM");
 						slog_error("HERCULES_ERR_STAT_SET_OP_RECV_STREAM");
@@ -2469,8 +2489,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 		}
 		// pthread_mutex_unlock(&memory_protect);
-		break;
 	}
+	break;
 	default:
 		break;
 	}
@@ -2500,7 +2520,6 @@ void *srv_attached_dispatcher(void *th_argv)
 
 	// Variable specifying the ID that will be granted to the next client.
 	uint32_t client_id_ = 0;
-	// char req[256];
 	char *req;
 
 	ret = init_worker(arguments->ucp_context, &ucp_data_worker);
@@ -2675,7 +2694,7 @@ void *dispatcher(void *th_argv)
 	char req[REQUEST_SIZE];
 	struct sockaddr_in server_addr;
 	socklen_t addrlen = sizeof(server_addr);
-	int ret;
+	int ret = 0;
 	int listenfd = -1;
 	int optval = 1;
 	char *tmp_file_path = arguments->tmp_file_path;
@@ -2729,8 +2748,7 @@ void *dispatcher(void *th_argv)
 	while (1)
 	{
 		ucs_status_t status;
-		char mode[MODE_SIZE];
-
+		char mode[MODE_SIZE] = {0};
 		// slog_debug("[DISPATCHER] Waiting for connection requests.");
 		// fprintf(stderr, "[DISPATCHER] Waiting for connection requests.\n");
 		new_socket = accept(global_server_fd_thread, (struct sockaddr *)&server_addr, &addrlen);
@@ -2746,6 +2764,7 @@ void *dispatcher(void *th_argv)
 			// slog_error("ERR_HERCULES_DISPATCHER_ACCEPT");
 			continue;
 		}
+
 		ret = recv(new_socket, req, REQUEST_SIZE, MSG_WAITALL);
 		if (ret < 0)
 		{

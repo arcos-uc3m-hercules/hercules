@@ -18,6 +18,14 @@ void *map_server_eps_create()
 	return reinterpret_cast<void *>(new map_server_eps_t);
 }
 
+void map_server_eps_destroy(void *map)
+	{
+		if (map)
+		{
+			delete reinterpret_cast<map_server_eps_t *>(map);
+		}
+	}
+
 void map_server_eps_put(void *map, uint64_t uuid, ucp_ep_h ep)
 {
 	map_server_eps_t *m = reinterpret_cast<map_server_eps_t *>(map);
@@ -50,7 +58,7 @@ void map_server_eps_erase(void *map, uint64_t uuid, ucp_worker_h ucp_worker)
 		// * ucp_worker_progress(ucp_worker);
 		// * ep_close(ucp_worker, ep, UCP_EP_CLOSE_MODE_FLUSH);
 		// * ucp_ep_destroy(search->second);
-		fprintf(stdout,"Deleting ep %p\n", search->second);
+		// fprintf(stdout,"Deleting ep %p\n", search->second);
 		close_ucx_endpoint(ucp_worker, search->second);
 	}
 	m->erase(uuid);

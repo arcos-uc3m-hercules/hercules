@@ -6,5 +6,11 @@ touch /mnt/hercules/file.out
 mkdir /mnt/hercules/dir
 ls -l /mnt/hercules/
 mv /mnt/hercules/file.out /mnt/hercules/x.out
+ls -l /mnt/hercules/
 mv /mnt/hercules/x.out /mnt/hercules/dir/
 ls -l /mnt/hercules/
+touch /mnt/hercules/file.out
+ls -l /mnt/hercules/
+mv /mnt/hercules/dir/x.out /mnt/hercules/file.out
+ls -l /mnt/hercules/
+HERCULES_DEBUG_LEVEL=all mv /mnt/hercules/file.out /mnt/hercules/dir/file.out

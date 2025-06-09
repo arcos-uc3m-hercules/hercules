@@ -1,6 +1,12 @@
 HERCULES_THREAD_POOL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf ~/hercules/build/hercules_server m 0
 HERCULES_THREAD_POOL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf ~/hercules/build/hercules_server d 0 1
 
+## TO AVOID ENDPOINTS TIMEOUT PASTE THE FOLLOWING LINE BEFORE EACH COMMAND
+UCX_TCP_KEEPINTVL=inf UCX_TCP_KEEPIDLE=inf UCX_TLS=tcp
+
+## DEBUG IO500
+UCX_TCP_KEEPINTVL=inf UCX_TCP_KEEPIDLE=inf UCX_TLS=tcp /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-zen/gcc-9.4.0/mpich-3.2.1-5pgpbav7caqh5rwfpnrizu736maawpgc/bin/mpiexec -np=1 -env HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf -env LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so valgrind /beegfs/home/javier.garciablas/io500/io500 /beegfs/home/javier.garciablas/io500/config-minimal.ini &> valgrind.out
+
 # SERVERS WITH VALGRIND
 spack load valgrind
 HERCULES_THREAD_POOL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf valgrind --fair-sched=yes --leak-check=full ~/hercules/build/hercules_server d 0 1 > valgrind_dataserver.out 2>&1
@@ -44,3 +50,9 @@ HERCULES_THREAD_LEVEL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/jav
 
 # Stop all
 ~/hercules/scripts/hercules stop -f /beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf
+
+## TO COMPILE FOR DEBUG:
+cmake -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_C_FLAGS_DEBUG="-g -O0" \
+      -DCMAKE_CXX_FLAGS_DEBUG="-g -O0" \
+      ..

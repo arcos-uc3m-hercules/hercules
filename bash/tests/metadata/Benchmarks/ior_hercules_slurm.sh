@@ -28,9 +28,10 @@ IOR_AVOID_CACHE=$6
 IOR_PATH=/beegfs/home/javier.garciablas/gsanchez/ior/bin
 #spack load mpich@3.2.1%gcc@=9.4.0
 #spack load openmpi@4.1.5
-spack unload mpich openmpi
+#spack unload mpich openmpi
 #spack load openmpi@4.1.5%gcc@9.4.0 arch=linux-ubuntu20.04-broadwell
-spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
+#spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
+spack load mpich
 whereis mpiexec
 # spack load \
 #    cmake@3.24.3%gcc@9.4.0 arch=linux-ubuntu20.04-broadwell \
@@ -76,7 +77,7 @@ if [ -z "$CONFIG_PATH" ]; then
 else
    echo "Configuration file pass $CONFIG_PATH"
 #   export HERCULES_DEBUG_LEVEL=SLOG_TIME
-   export HERCULES_DEBUG_LEVEL=none
+   # export HERCULES_DEBUG_LEVEL=none
    source /beegfs/home/javier.garciablas/hercules/scripts/hercules start \
    -f "$CONFIG_PATH" 
    unset HERCULES_DEBUG_LEVEL
@@ -117,8 +118,8 @@ TRANSFER_SIZE=$FILE_SIZE_PER_CLIENT
 
 # -W -R for Write and Read verification. 
 # -k to keep the file (do not delete it after test).
-#COMMAND="$IOR_PATH/ior -w -r -k -W -R -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 1"
-COMMAND="$IOR_PATH/ior -w -r -k -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 1"
+COMMAND="$IOR_PATH/ior -w -r -k -W -R -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 10"
+#COMMAND="$IOR_PATH/ior -w -r -k -t ${TRANSFER_SIZE}kb -b ${FILE_SIZE_PER_CLIENT}kb -s 1 -i 10"
 
 if [ "$IOR_FILE_PER_PROCESS" -eq 1 ]; then
 ## -F for File-per-process.

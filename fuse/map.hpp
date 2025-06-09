@@ -105,7 +105,7 @@
 //     __ino_t __st_ino;   /* 32bit file serial number.	*/
 //     __mode_t st_mode;   /* File mode.  */
 //     __nlink_t st_nlink; /* Link count.  */
-// #endif
+// #endifI
 //     __uid_t st_uid; /* User ID of the file's owner.	*/
 //     __gid_t st_gid; /* Group ID of the file's group.*/
 // #ifdef __x86_64__
@@ -153,6 +153,7 @@ extern "C" {
 #endif
 
 void *map_create();
+	void map_destroy(void *map);
 void map_put(void *map, const char *k, int v, struct stat stat, char *aux);
 void map_erase(void *map, const char *k);
 int map_search(void *map, const char *k, int *v, struct stat *stat, char **aux);

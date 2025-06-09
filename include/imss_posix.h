@@ -27,13 +27,14 @@
 #include <sys/utsname.h>
 #include <sys/epoll.h>
 #include <sys/time.h>
-// #include <fcntl.h>
 // Those are used by reports functions in stat.
 #include <pwd.h>
 #include <sys/sysmacros.h>
 #include <limits.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <dirent.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -45,20 +46,19 @@ extern "C"
 
     char *checkHerculesPath(const char *pathname);
     char *convert_path(const char *name);
-    int generalOpen(char *new_path, int flags, mode_t mode, int createFd);
+    int generalOpen(const char *new_path, int flags, mode_t mode, int createFd);
     ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, size_t offset);
-	int GeneralFAccessAt(int dirfd, const char *pathname, int mode, int flags, char *pathname_dir);
-	void SetErrno(int value);
-    
+    int GeneralFAccessAt(int dirfd, const char *pathname, int mode, int flags, char *pathname_dir);
+    void SetErrno(int value);
+
     int IsAbsolutePath(const char *pathname);
     int ResolvePath(const char *path_, char *resolved);
-	void WarnOperationNotSupported(const char *call_name, const char *pathname);
-	void checkOpenFlags(const char *pathname, int flags);
-	uint32_t MurmurOAAT32(const char *key);
-	void *prefetch_function(void *th_argv); 
+    void WarnOperationNotSupported(const char *call_name, const char *pathname);
+    void checkOpenFlags(const char *pathname, int flags);
+    uint32_t MurmurOAAT32(const char *key);
+    void *prefetch_function(void *th_argv);
 
-
-	int __fxstat(int ver, int fd, struct stat *buf);
+    int __fxstat(int ver, int fd, struct stat *buf);
 
     static off_t (*real_lseek)(int fd, off_t offset, int whence) = NULL;
     static off64_t (*real_lseek64)(int fd, off64_t offset, int whence) = NULL;
@@ -76,6 +76,7 @@ extern "C"
     static int (*real___xstat)(int ver, const char *pathname, struct stat *stat_buf) = NULL;
     static int (*real__xstat64)(int ver, const char *path, struct stat64 *stat_buf) = NULL;
     static int (*real_fstat)(int fd, struct stat *buf) = NULL;
+    static int (*real_fstat64)(int fd, struct stat64 *buf) = NULL;
     static int (*real_fstatat)(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag) = NULL;
     static int (*real_fstatat64)(int __fd, const char *__restrict __file, struct stat64 *__restrict __buf, int __flag) = NULL;
     static int (*real_fstatfs)(int fd, struct statfs *buf) = NULL;
@@ -108,6 +109,8 @@ extern "C"
     static DIR *(*real_opendir)(const char *name) = NULL;
     static struct dirent *(*real_readdir)(DIR *dirp) = NULL;
     static struct dirent64 *(*real_readdir64)(DIR *dirp) = NULL;
+    static int (*real_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count) = NULL;
+    static ssize_t (*real_getdents64)(int fd, void *dirp, size_t count) = NULL;
     // static int (*real_readdir)(unsigned int fd, struct old_linux_dirent *dirp, unsigned int count);
     static int (*real_closedir)(DIR *dirp) = NULL;
     static int (*real_statvfs)(const char *path, struct statvfs *buf) = NULL;
@@ -115,6 +118,7 @@ extern "C"
     static int (*real_statvfs64)(const char *path, struct statvfs64 *buf) = NULL;
     static int (*real_statfs)(const char *path, struct statfs *buf) = NULL;
     static char *(*real_realpath)(const char *path, char *resolved_path) = NULL;
+	static char *(*real__realpath_chk)(const char *pathname, char *resolved_path, size_t resolved_len) = NULL;
     // static int (*real__openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
     static int (*real_openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
     // static int (*real__openat64)(int fd, const char *file, int oflag, ...) = NULL;
@@ -167,7 +171,7 @@ extern "C"
     static ssize_t (*real_pwrite64)(int fd, const void *buf, size_t count, off64_t offset) = NULL;
     // static int (*real_poll)(struct pollfd *fds, nfds_t nfds, int timeout) = NULL;
     // static int (*real_ppoll)(struct pollfd *fds, nfds_t nfds, const struct timespec tmo_p, const sigset_t sigmask) = NULL;
-    // static int (*real_fcntl)(int fd, int cmd, ... /* arg */) = NULL;
+    static int (*real_fcntl)(int fd, int cmd, ... /* arg */) = NULL;
     static int (*real_syncfs)(int fd) = NULL;
     static int (*real_posix_fadvise)(int fd, off_t offset, off_t len, int advice) = NULL;
     // static int (*real_posix_fadvise64)(int fd, off64_t offset, off64_t len, int advice) = NULL;

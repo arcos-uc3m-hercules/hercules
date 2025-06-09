@@ -11,6 +11,27 @@
 GNode *tree_root;
 GNode *last_parent = NULL;
 
+// Helper function to print the tree structure
+void print_tree_structure(GNode *root, int depth)
+{
+	if (!root)
+		return;
+
+	for (int i = 0; i < depth; i++)
+	{
+		// fprintf(stdout, "  "); // Indent
+	}
+	// fprintf(stdout,"- %s\n", (const char *)root->data);
+
+	// Recursively print children
+	GNode *child = root->children;
+	while (child)
+	{
+		print_tree_structure(child, depth + 1);
+		child = child->next;
+	}
+}
+
 // Method searching for a certain data node.
 int32_t
 GTree_search_(GNode *parent_node,
@@ -23,8 +44,8 @@ GTree_search_(GNode *parent_node,
 	GNode *child = parent_node->children;
 
 	*found_node = parent_node;
-
-	// Search for the requested data within the children of the current node.
+	// fprintf(stdout, "TreeSearch number of child %ld in %p, %s\n", num_children, parent_node, (char *)parent_node->data);
+	//  Search for the requested data within the children of the current node.
 	for (int32_t i = 0; i < num_children; i++)
 	{
 		// Search for a directory antecesor of the desired node.
@@ -34,7 +55,7 @@ GTree_search_(GNode *parent_node,
 		//		slog_debug("child->data=%s, desired_data=%s", child->data, desired_data);
 		if (desired_data[strlen(desired_data) - 1] == '/' && !strncmp((char *)child->data, desired_data, strlen((char *)child->data)))
 		{ // directory case.
-			slog_debug("directory case");
+			slog_debug("directory case, child=%s, desired_data=%s", child->data, desired_data);
 			// Check if the compared node is the requested one.
 			if (!strcmp((char *)child->data, desired_data))
 			{
@@ -49,13 +70,14 @@ GTree_search_(GNode *parent_node,
 			}
 		}
 		else if (desired_data[strlen(desired_data) - 1] != '/' && !strncmp((char *)child->data, desired_data, strlen((char *)child->data)))
-		{	// regular file.
+		{ // regular file.
 			//			slog_debug("regular file");
 			// Check if the compared node is the requested one.
 			if (!strcmp((char *)child->data, desired_data))
 			{
 				*found_node = child;
-				// The desired data was found.
+				// fprintf(stdout,"found node %p, %s, desird data %s\n", child, (char *)child->data, desired_data);
+				//  The desired data was found.
 				return 1;
 			}
 			else
@@ -107,7 +129,8 @@ GTree_search(GNode *parent_node,
 			 char *desired_data,
 			 GNode **found_node)
 {
-	// Check if the desired data was contained by the provided node.
+	// fprintf(stdout,"Searching for %s\n, parent node %s\n", desired_data, (char *)parent_node->data);
+	//  Check if the desired data was contained by the provided node.
 	if (!strcmp((char *)parent_node->data, desired_data))
 	{
 		*found_node = parent_node;
@@ -135,14 +158,18 @@ GTree_rename(char *old_desired_data, char *new_desired_data)
 		// we remove the node from the tree, and insert the new one.
 		if (strcmp(old_desired_data, (char *)closest_node->data) == 0)
 		{
+			free(closest_node->data);
 			g_node_destroy(closest_node);
 			ret = GTree_insert(new_desired_data);
-			//		slog_debug("GTree_insert=%d", ret);
+			if (ret == -1)
+			{
+				return -1;
+			}
 		}
 	}
 	else
 	{
-		// fprintf(stderr, "Rename Error not found:%s\n", old_desired_data);
+		// //fprintf(stderr, "Rename Error not found:%s\n", old_desired_data);
 		slog_error("Rename Error not found:%s", old_desired_data);
 		return -1;
 	}
@@ -151,8 +178,7 @@ GTree_rename(char *old_desired_data, char *new_desired_data)
 }
 
 // Method renaming dir to dir.
-int32_t
-GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
+int32_t GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 {
 
 	// Node whose elements must be retrieved.
@@ -164,8 +190,15 @@ GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 		uint32_t num_elements_indir = g_node_n_nodes(dir_node, G_TRAVERSE_ALL) - 1;
 		uint32_t num_elements_indir_childrens = g_node_n_children(dir_node);
 		// printf("DIR_NUM_ELEMENTS=%d\n",num_elements_indir+1);
-		char *dir_elements = (char *)malloc((num_elements_indir + 1) * URI_);
-			char *aux_dir_elem = dir_elements;
+		char *dir_elements = (char *)calloc((num_elements_indir + 1), URI_); // (char *)malloc((num_elements_indir + 1) * URI_);
+		if (dir_elements == NULL)
+		{
+			perror("HERCULES_ERR_GTREE_RENAME_DIR_DIR_MEMORY_ALLOC");
+			slog_fatal("HERCULES_ERR_GTREE_RENAME_DIR_DIR_MEMORY_ALLOC");
+			exit(-1);
+		}
+		
+		char *aux_dir_elem = dir_elements;
 		serialize_dir(dir_node, num_elements_indir_childrens, &aux_dir_elem);
 
 		char *aux = dir_elements;
@@ -187,14 +220,26 @@ GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 				}
 				char *new_path = (char *)malloc(PATH_MAX);
 				strcpy(new_path, rdir_dest);
-				strcat(new_path, "/");
-				strcat(new_path, path);
-				// slog_debug("new_path to be inserted=%s", new_path);
+				if (strlen(path) > 0)
+				{
+					// check if the rdir_dest does not have the last slash (it is a directory, must contain it).
+					ConcatLastSlashC(new_path);
+					// strcat(new_path, "/");
+					strcat(new_path, path);
+				}
+				slog_debug("new_path to be inserted=%s", new_path);
 
 				GTree_insert(new_path);
+				free(new_path);
 			}
 			aux += URI_;
 		}
+		if (dir_elements != NULL)
+			free(dir_elements);
+
+		if (dir_node->data != NULL)
+			free(dir_node->data);
+
 		g_node_destroy(dir_node);
 	}
 	else
@@ -216,9 +261,11 @@ int32_t GTree_delete(char *desired_data)
 	{
 		if (strcmp(desired_data, (char *)closest_node->data) == 0)
 		{
+			// fprintf(stdout,"deleting address %p, %s, desired data %s\n", closest_node, (char *)closest_node->data, desired_data);
+			free(closest_node->data);
 			g_node_destroy(closest_node); // Delete Node
+			ret = 1;
 		}
-		ret = 1;
 	}
 	else
 	{
@@ -245,7 +292,7 @@ int32_t GTree_insert(char *desired_data)
 		// slog_debug("last_parent->data=%s, desired_data=%s", last_parent->data, desired_data);
 		char *data_search = (char *)calloc(256, sizeof(char));
 		if (desired_data[strlen(desired_data) - 1] == '/')
-		{
+		{ // skip last slash.
 			memcpy(data_search, desired_data, strlen(desired_data) - 1);
 		}
 		else
@@ -267,10 +314,10 @@ int32_t GTree_insert(char *desired_data)
 		free(father);
 		free(data_search);
 	}
-	else
-	{
-		//		slog_debug("last_parent is NULL");
-	}
+	// else
+	// {
+	// 	//		slog_debug("last_parent is NULL");
+	// }
 
 	// Check if the node has been already inserted.
 	if (closest_node == NULL)
@@ -312,7 +359,7 @@ int32_t GTree_insert(char *desired_data)
 
 			// String that will be introduced as a new node.
 			// char *new_data = (char *)malloc(new_position + 1);
-			char *new_data = (char *)malloc(strlen(desired_data) + 1);
+			char *new_data = (char *)calloc(strlen(desired_data) + 1, sizeof(char)); // (char *)malloc(strlen(desired_data) + 1);
 			strcpy(new_data, desired_data);
 			// New node to be introduced.
 			// printf("new_node=%s\n",new_data);
@@ -320,6 +367,7 @@ int32_t GTree_insert(char *desired_data)
 
 			// Introduce it as a child of the closest one found.
 			// slog_debug("[GTree] inserting in the tree=%s", new_data);
+			// fprintf(stdout,"Inserting node %p, %s on  %p, %s\n", new_node, (char *)new_node->data, closest_node, (char *)closest_node->data);
 			g_node_append(closest_node, new_node);
 
 			return 0;
@@ -351,8 +399,23 @@ serialize_dir_childrens(GNode *visited_node,
 		// If the child is a leaf one, just store the corresponding info.
 		/*if (!num_grandchildren)
 		{*/
-		// Add the child's uri to the buffer.
-		memcpy(*buffer, (char *)child->data, URI_);
+		if (child->data == NULL)
+		{
+			perror("HERCULES_ERR_SERIALIZE_DIR_CHILDRENS_CHILD_DATA");
+			slog_fatal("HERCULES_ERR_SERIALIZE_DIR_CHILDRENS_CHILD_DATA");
+			exit(-1);
+		}
+		// if (strlen((char *)child->data) < URI_)
+		// {
+		// 	char error_msg[MAX_ERR_MSG_LEN] = {0};
+		// 	sprintf(error_msg, "HERCULES_ERR_SERIALIZE_DIR_CHILDRENS_DATA_INCONSISTENCY: data len = %lu, data = %s", strlen((char *)child->data), (char *)child->data);
+		// 	perror(error_msg);
+		// 	slog_fatal("%s", error_msg);
+		// 	exit(-1);
+		// }
+		// // Add the child's uri to the buffer.
+		memset(*buffer, 0, URI_);
+		memcpy(*buffer, (char *)child->data, strlen((char *)child->data));
 		*buffer += URI_;
 		/*}
 		else
@@ -373,7 +436,8 @@ serialize_dir(GNode *visited_node,
 {
 	// serialize_dir_childrens(dir_node, num_children, &aux_dir_elem);
 	// Add the concerned uri into the buffer.
-	memcpy(*buffer, (char *)visited_node->data, URI_);
+	memset(*buffer, 0, URI_);
+	memcpy(*buffer, (char *)visited_node->data, strlen((char *)visited_node->data));
 	*buffer += URI_;
 
 	GNode *child = visited_node->children;
@@ -388,7 +452,8 @@ serialize_dir(GNode *visited_node,
 		if (!num_grandchildren)
 		{
 			// Add the child's uri to the buffer.
-			memcpy(*buffer, (char *)child->data, URI_);
+			memset(*buffer, 0, URI_);
+			memcpy(*buffer, (char *)child->data, strlen((char *)child->data));
 			*buffer += URI_;
 		}
 		else
@@ -405,6 +470,14 @@ serialize_dir(GNode *visited_node,
 // WARNING: this function reserves memory that must be freed.
 /**********************************************************/
 
+void print_child_node(GNode *node, gpointer data)
+{
+	// Cast the node's data back to a const char*
+	const char *node_name = (const char *)node->data;
+
+	fprintf(stdout,"  Child Node: %s\n", node_name);
+}
+
 // Method retrieving a buffer with all the files within a directory.
 char *
 GTree_getdir(char *desired_dir,
@@ -413,9 +486,12 @@ GTree_getdir(char *desired_dir,
 	// Node whose elements must be retrieved.
 	GNode *dir_node;
 
+	// print_tree_structure(tree_root, 0);
+
 	// Check if the node is inserted.
 	if (!GTree_search(tree_root, desired_dir, &dir_node))
 	{
+		// fprintf(stdout,"Number of files in node %p, %s: %d\n", dir_node, (char * )dir_node->data, -1);
 		*numdir_elems = -1;
 		return NULL;
 	}
@@ -427,6 +503,8 @@ GTree_getdir(char *desired_dir,
 
 	// Number of children of the directory node.
 	uint32_t num_children = g_node_n_children(dir_node);
+	// fprintf(stdout,"Number of files in node %p, %s: %d\n", dir_node, (char * )dir_node->data, num_children);
+	// g_node_children_foreach(dir_node, G_TRAVERSE_ALL, print_child_node, NULL);
 	// *numdir_elems = num_children + 1; //+1 because of the actual directory + childrens
 	*numdir_elems = num_children; // actual directory is concat in the front-end.
 
@@ -439,7 +517,15 @@ GTree_getdir(char *desired_dir,
 
 	// Buffer containing the whole set of elements within a certain directory.
 	// char *dir_elements = (char *) malloc(sizeof(char)*num_elements_indir*URI_);
-	char *dir_elements = (char *)malloc((num_children + 1) * URI_);
+	// char *dir_elements = (char *)calloc(1, (num_children + 1) * URI_);
+	char *dir_elements = (char *)calloc(num_children + 1, URI_);
+	if (dir_elements == NULL)
+	{
+		perror("HERCULES_ERR_GTREE_GETDIR_ALLOC_MEMORY");
+		slog_fatal("HERCULES_ERR_GTREE_GETDIR_ALLOC_MEMORY");
+		exit(-1);
+	}
+
 	char *aux_dir_elem = dir_elements;
 
 	// Call the serialization function storing all dir elements in the buffer.

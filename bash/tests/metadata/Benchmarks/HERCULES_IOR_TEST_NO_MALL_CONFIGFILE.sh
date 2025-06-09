@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SCRIPT_NAME="ior_hercules_slurm.sh"
-FILE_SIZE=$((1024*1024*1))
+FILE_SIZE=$((1024*1024*100))
 #FILE_SIZE=$((1024*10))
 
 ATTACHED=1
@@ -24,22 +24,23 @@ DEBUG_LEVEL="none"
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="RR"
 
-NUM_DATA_SERVERS_RANGE=( 8 )
+NUM_DATA_SERVERS_RANGE=( 16 )
 #NUM_DATA_SERVERS_RANGE=( 4 8 16 32 )
-NUM_METADATA_SERVERS_RANGE=( 8 )
+NUM_METADATA_SERVERS_RANGE=( 1 )
 #NUM_METADATA_SERVERS_RANGE=( 4 8 16 32 )
-NODES_FOR_CLIENTS_RANGE=( 8 )
+NODES_FOR_CLIENTS_RANGE=( 16 )
 #NODES_FOR_CLIENTS_RANGE=( 1 4 8 16 32 )
 #CLIENTS_PER_NODE_RANGE=( 1 2 4 8 16 32 )
-CLIENTS_PER_NODE_RANGE=( 1 )
+CLIENTS_PER_NODE_RANGE=( 16 )
 BLOCK_SIZE_RANGE=( 512 )
+THREAD_POOL=8
 
 MAX_ITERATIONS=1
 
 # set -o xtrace
 #set -x
 
-jid=1
+jid=-1
 
 # Checks if template configuration file exists.
 if [ ! -f ${TEMPLATE_CONFIG_PATH} ]; then
@@ -110,6 +111,7 @@ do
 						sed -i "s|^DATA_HOSTFILE = .*|DATA_HOSTFILE = $DATA_HOSTFILE|g" "$TEMPLATE_CONFIG_PATH"
 						sed -i "s|^METADATA_HOSTFILE = .*|METADATA_HOSTFILE = $METADATA_HOSTFILE|g" "$TEMPLATE_CONFIG_PATH"
 						sed -i "s|^DEBUG_LEVEL = .*|DEBUG_LEVEL = $DEBUG_LEVEL|g" "$TEMPLATE_CONFIG_PATH"
+						sed -i "s|^THREAD_POOL = .*|THREAD_POOL = $THREAD_POOL|g" "$TEMPLATE_CONFIG_PATH"
 					
 						cat $TEMPLATE_CONFIG_PATH > "$CONFIG_PATH"
 						cp $TEMPLATE_CONFIG_PATH."_TEMP" $TEMPLATE_CONFIG_PATH
@@ -120,12 +122,12 @@ do
 					set -x
 
 					## The first job does not have dependencie (do not wait for another job to end). 
-					if [ "$jid" -eq 1 ]; then
-						jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
+					# if [ "$jid" -eq 1 ]; then
+						# jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
 					## The following jobs wait for the previous job to finish.
-					else
+					# else
 						jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT"  "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
-					fi
+					# fi
 					echo $jid
 					### exit 0
 					set +x
