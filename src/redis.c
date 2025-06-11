@@ -53,6 +53,10 @@ void redis_close(redisContext *context)
 // Method inserting a new path.
 int32_t redis_insert_data(redisContext *context, const char *desired_data)
 {
+    if (strcmp(desired_data, "imss://")) {
+        return 0;
+    }
+
     char *parent_dir = get_parent_dir(desired_data);
     char *data_to_insert = get_path_last_part(desired_data); // This can be either a file or a dir
 
