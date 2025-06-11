@@ -117,7 +117,7 @@ char* get_parent_dir(const char* path) {
     }
 
     // Calculate the length of the parent directory path
-    size_t parent_len = last_slash - temp;
+    size_t parent_len = last_slash - temp + 1; // + 1 so the / is returned too
 
     // Allocate memory for the parent directory path
     char* parent_dir = (char*)malloc(parent_len + 1);
@@ -174,7 +174,6 @@ char* get_path_last_part(const char* path) {
             return NULL;
         }
         snprintf(result_with_slash, result_len + 2, "%s/", result);
-        free(result);
         result = result_with_slash;
     }
 
@@ -402,7 +401,7 @@ int rename_subdirectories(redisContext *context, const char *old_dir, const char
     long cursor = 0;
     char *old_dir_last_part = get_path_last_part(old_dir);
     do {
-        redisReply *reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s/*", cursor, old_dir);
+        redisReply *reply = (redisReply *)redisCommand(context, "SCAN %ld MATCH %s*", cursor, old_dir);
         if (reply == NULL) {
             slog_error("Error: %s\n", context->errstr);
             return -1;
