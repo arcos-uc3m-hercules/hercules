@@ -57,6 +57,8 @@ char att_imss_uri[URI_];
 static long iov_cnt = 1;
 
 extern pthread_mutex_t hiredis_mut;
+pthread_mutex_t mp = PTHREAD_MUTEX_INITIALIZER;
+
 extern redisContext *hiredis_context;
 
 ucp_worker_h *ucp_worker_threads;
@@ -1503,16 +1505,6 @@ void *garbage_collector(void *th_argv)
 	// Obtain the current map class element from the set of arguments.
 	map_records *map = (map_records *)th_argv;
 
-	for (;;)
-	{
-		// Gnodetraverse_garbage_collector(map);//Future
-		sleep(GARBAGE_COLLECTOR_PERIOD);
-		pthread_mutex_lock(&mutex_garbage);
-		map->cleaning();
-		pthread_mutex_unlock(&mutex_garbage);
-	}
-	pthread_exit(NULL);
-}
 
 // Thread method to copy datasets from Hercules to Disk.
 void *Checkpoint(void *th_argv)
@@ -1662,23 +1654,24 @@ void *Snapshot(void *th_argv)
 	pthread_exit(NULL);
 }
 
+
 int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 {
 	ucs_status_t status;
 	int ret = 0;
 	const char *response_msg = NULL;
 
-	// Obtain the current map class element from the set of arguments.
+	// obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
 
 	uint16_t current_offset = 0;
 
-	// Resources specifying if the ZMQ_SNDMORE flag was set in the sender.
+	// resources specifying if the zmq_sndmore flag was set in the sender.
 	int64_t more = -1;
 	size_t more_size = sizeof(more);
 
-	// Code to be sent if the requested to-be-read key does not exist.
-	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
+	// code to be sent if the requested to-be-read key does not exist.
+	char err_code[] = "$errimss_no_key_avail$";
 
 	uint32_t operation = 0;
 	char mode[MODE_SIZE] = {0};
@@ -1690,11 +1683,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	int num_characters_read = 0;
 	int num_input_read = 0;
 
-	// Save the request to be served.
-	slog_info("Request - '%s'", req);
+	// save the request to be served.
+	slog_info("request - '%s'", req);
 	num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
 
-	if (!strcmp(mode, "GET"))
+	if (!strcmp(mode, "get"))
 		more = GET_OP;
 	else
 		more = SET_OP;
@@ -1703,19 +1696,19 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	slog_info("mode=%s, operation=%d, number=%s, uri=%s, block_size_recv=%ld, num_characters_read=%d", mode, operation, number, uri_, block_size_recv, num_characters_read);
 
-	// Create an std::string in order to be managed by the map structure.
+	// create an std::string in order to be managed by the map structure.
 	std::string key;
 	key.assign((const char *)uri_);
 
-	// Information associated to the arriving key.
+	// information associated to the arriving key.
 	void *address_ = NULL;
 	uint64_t block_size_rtvd = 0;
 	dataset_info *dataset;
 
-	// Differentiate between READ and WRITE operations.
+	// differentiate between read and write operations.
 	switch (more)
 	{
-	// Read operations.
+	// read operations.
 	case GET_OP:
 	{
 		switch (block_size_recv)
@@ -1724,7 +1717,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			char *buffer = NULL;
 			int32_t numelems_indir = -1;
-			// Retrieve all elements inside the requested directory.
+			// retrieve all elements inside the requested directory.
 			pthread_mutex_lock(&hiredis_mut);
 			slog_info("[workers][stat_worker_helper] calling redis_getdir, key=%s", key.c_str());
 			buffer = redis_getdir(hiredis_context, ( char const *)key.c_str(), (int32_t *)&numelems_indir);
@@ -1732,7 +1725,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			pthread_mutex_unlock(&hiredis_mut);
 			if (numelems_indir == -1)
 			{
-				// Add an extra slash to check if it a directory.
+				// add an extra slash to check if it a directory.
 				if (!key.empty() && key.back() != '/')
 				{
 					key += '/';
@@ -1933,7 +1926,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					pthread_mutex_lock(&hiredis_mut);
                     ret_tree = redis_delete_data(hiredis_context, (char *)key.c_str());
 					pthread_mutex_unlock(&hiredis_mut);
-					slog_debug("delete_metadata_stat_worker=%d, GTree_delete=%d", ret_map, ret_tree);
+					slog_debug("delete_metadata_stat_worker=%d, redis_delete=%d", ret_map, ret_tree);
 				}
 				pthread_mutex_unlock(&memory_protect);
 
@@ -2115,7 +2108,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{
 					slog_debug("Deleting %s", key.c_str());
 					int32_t result = map->delete_metadata_stat_worker(key);
-					slog_debug("[READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
                     if (hiredis_context == NULL)
 					{
 						perror("HERCULES_ERR_STATWORKER_NOCONN");
@@ -2276,7 +2268,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			pthread_mutex_lock(&hiredis_mut);
 			insert_successful = redis_insert_data(hiredis_context, (char *)key.c_str());
 			pthread_mutex_unlock(&hiredis_mut);			
-			slog_debug("insert_successful=%d", insert_successful);
+            slog_debug("insert_successful=%d", insert_successful);
 			if (insert_successful == -1)
 			{
 				slog_error("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
@@ -2497,6 +2489,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	return 0;
 }
+
 
 /**
  * @brief Obsolete: Server dispatcher thread method.
