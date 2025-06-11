@@ -53,7 +53,7 @@ void redis_close(redisContext *context)
 // Method inserting a new path.
 int32_t redis_insert_data(redisContext *context, const char *desired_data)
 {
-    if (strcmp(desired_data, "imss://")) {
+    if (strcmp(desired_data, "imss://") == 0) {
         return 0;
     }
 
