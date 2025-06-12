@@ -418,8 +418,7 @@ int rename_subdirectories(redisContext *context, const char *old_dir, const char
             char new_key[URI_];
 
             // Construct the new key by replacing the old directory prefix with the new one
-            snprintf(new_key, sizeof(new_key), "%s/%s%s", new_dir, old_dir_last_part, old_key + strlen(old_dir));
-            // Rename the key
+            snprintf(new_key, sizeof(new_key), "%s%s", new_dir, old_key + strlen(old_dir));
             if (rename_key(context, old_key, new_key) != 0) {
                 freeReplyObject(reply);
                 return -1;
