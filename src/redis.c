@@ -287,15 +287,11 @@ char *redis_getdir(redisContext *context, const char *desired_dir, int32_t *numd
 
     // Number of elements contained by the directory
     uint32_t num_children = reply->elements;
-    *numdir_elems = num_children + 1; // +1 for the actual directory + children
+    *numdir_elems = num_children;	
 
     // Buffer containing the whole set of elements within a certain directory
     char *dir_elements = (char *)malloc((num_children + 1) * URI_);
     char *aux_dir_elements = dir_elements;
-
-    memcpy(aux_dir_elements, desired_dir, URI_);
-    aux_dir_elements += URI_;
-
     char sub_dir[URI_];
     
     for (int32_t i = 0; i < num_children; i++) {
