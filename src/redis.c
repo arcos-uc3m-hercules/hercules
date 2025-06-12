@@ -327,8 +327,6 @@ int32_t redis_rename(redisContext *context, const char *old_path, const char *ne
 // Function to rename a directory and all its subdirectories in Redis
 int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const char *new_dir) {
     char *filename = get_path_last_part(old_dir); // This can be either a file or a dir
-    printf("rename_dir_dir: old dir - %s", old_dir);
-    printf("rename_dir_dir: new dir - %s", new_dir);
     int exists = dir_exists(context, old_dir);
     if (exists <= 0) {
         slog_error("redis_rename_dir_dir: source directory '%s' does not exist or could not be verified", old_dir);
@@ -363,6 +361,11 @@ int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const c
 }
 
 int dir_exists(redisContext *context, const char *path) {
+    // Root exists
+    if (strcmp(path, "imss://") == 0) {
+        return 0;
+    }
+
     char *dir_name = get_path_last_part(path);
     char *parent_dir = get_parent_dir(path);
 
@@ -372,12 +375,7 @@ int dir_exists(redisContext *context, const char *path) {
     }
 
     redisReply *reply;
-    // If parent is root, check for the key of the whole path (root is never inserted as a key)
-    if (strcmp(parent_dir, "imss://") == 0) {
-        reply = (redisReply *)redisCommand(context, "EXISTS %s", path);
-    } else {
-        reply = (redisReply *)redisCommand(context, "SISMEMBER %s %s", parent_dir, dir_name);
-    }
+    reply = (redisReply *)redisCommand(context, "SISMEMBER %s %s", parent_dir, dir_name);
 
     if (!reply) {
         slog_error("Redis error checking if dir exists");
@@ -417,7 +415,7 @@ int rename_subdirectories(redisContext *context, const char *old_dir, const char
         // Iterate over the keys and rename them
         for (size_t i = 0; i < reply->element[1]->elements; i++) {
             const char *old_key = reply->element[1]->element[i]->str;
-            char new_key[256];
+            char new_key[URI_];
 
             // Construct the new key by replacing the old directory prefix with the new one
             snprintf(new_key, sizeof(new_key), "%s/%s%s", new_dir, old_dir_last_part, old_key + strlen(old_dir));
