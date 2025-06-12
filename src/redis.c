@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+#define URI "imss://"
 
 
 pthread_mutex_t hiredis_mut = PTHREAD_MUTEX_INITIALIZER;
@@ -53,7 +54,7 @@ void redis_close(redisContext *context)
 // Method inserting a new path.
 int32_t redis_insert_data(redisContext *context, const char *desired_data)
 {
-    if (strcmp(desired_data, "imss://") == 0) {
+    if (strcmp(desired_data, URI) == 0) {
         return 0;
     }
 
@@ -108,8 +109,8 @@ char* get_parent_dir(const char* path) {
         return NULL;
     }
 
-    // Remove trailing '/' unless it's part of "imss://"
-    if (len > strlen("imss://") && temp[len - 1] == '/') {
+    // Remove trailing '/' unless it's part of URI
+    if (len > strlen(URI) && temp[len - 1] == '/') {
         temp[len - 1] = '\0';
     }
 
@@ -117,7 +118,7 @@ char* get_parent_dir(const char* path) {
     const char* last_slash = strrchr(temp, '/');
     if (last_slash == NULL || last_slash == temp + strlen("imss:/")) {
         free(temp);
-        return strdup("imss://");
+        return strdup(URI);
     }
 
     // Calculate the length of the parent directory path
@@ -150,8 +151,8 @@ char* get_path_last_part(const char* path) {
         return NULL;
     }
 
-    // Remove trailing '/' unless it's part of "imss://"
-    if (len > strlen("imss://") && temp[len - 1] == '/') {
+    // Remove trailing '/' unless it's part of URI
+    if (len > strlen(URI) && temp[len - 1] == '/') {
         temp[len - 1] = '\0';
     }
 
@@ -168,7 +169,7 @@ char* get_path_last_part(const char* path) {
     }
 
     // Restore the trailing '/' if it was removed
-    if (len > strlen("imss://") && path[len - 1] == '/') {
+    if (len > strlen(URI) && path[len - 1] == '/') {
         size_t result_len = strlen(result);
         char* result_with_slash = (char*)malloc(result_len + 2); // +1 for '/' and +1 for '\0'
         if (result_with_slash == NULL) {
@@ -187,7 +188,7 @@ char* get_path_last_part(const char* path) {
 
 int parent_dir_exists(redisContext *context, const char *parent_dir) {
     // If the parent directory is the root, it exists
-    if (strcmp(parent_dir, "imss://") == 0)
+    if (strcmp(parent_dir, URI) == 0)
     {
         return 1;
     }
@@ -358,7 +359,7 @@ int32_t redis_rename_dir_dir(redisContext *context, const char *old_dir, const c
 
 int dir_exists(redisContext *context, const char *path) {
     // Root exists
-    if (strcmp(path, "imss://") == 0) {
+    if (strcmp(path, URI) == 0) {
         return 0;
     }
 
