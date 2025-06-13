@@ -344,6 +344,7 @@ extern "C"
 	char *convert_path(const char *name)
 	{
 		char *path = (char *)calloc(PATH_MAX, sizeof(char));
+		char *original_path = path; // To free later
 		char *new_path = (char *)calloc(PATH_MAX, sizeof(char));
 
 		if (path == NULL || new_path == NULL)
@@ -405,7 +406,7 @@ extern "C"
 			strcat(new_path, path);
 		}
 
-		free(path);
+		free(original_path);
 
 		new_path[PATH_MAX - 1] = '\0';
 
