@@ -44,20 +44,27 @@ extern "C"
 
 		// Retrieve the map for the parent directory's children from 'hierarchical_map'.
 		auto it = hiermap->find(first_parent_dir);
+		// Map *new_directory_children_map = NULL;
+		Map *parent_children_map = NULL;
 		if (it == hiermap->end())
-		{
-			slog_debug("Error: Parent directory %s does not exist or has not been added as a directory element.", k);
-			return -1;
+		{ // parent map does not exists locally, we add it to the hierarchical map.
+			slog_warn("Parent directory %s does not exist or has not been added as a directory element. Creating it.", first_parent_dir);
+			parent_children_map = new Map();
+			(*hiermap)[first_parent_dir] = parent_children_map;
+		}
+		else
+		{ // parent map exists locally, we get the pointer.
+			parent_children_map = it->second;
 		}
 
-		Map *parent_children_map = it->second;
-
 		map_put(parent_children_map, k, v, stat_info, aux);
+		slog_debug("Element %s inserted on the directory map %s", k, first_parent_dir)
 
 		// If the newly added element is a directory, a new std::map for its children
 		// must also be created and stored in 'HierarchicalMap'.
 		if (S_ISDIR(stat_info.st_mode))
 		{
+			slog_debug("%s is a directory.", k);
 			if (hiermap->find(k) == hiermap->end())
 			{
 				// std::map<std::string, struct stat> *new_directory_children_map = new std::map<std::string, struct stat>();
@@ -87,6 +94,7 @@ extern "C"
 		{
 			// Parent Map found.
 			// Map *parent_children_map = parent_map->second;
+			slog_debug("Parent %s map found for %s", parent_map->first.c_str(), k);
 			return parent_map->second;
 		}
 		else

@@ -365,10 +365,11 @@ extern "C"
 
 		// Seek for the dataset on the local map. If it not found,
 		// we open it.
+
 		TIMING_NO_RETURN(fd_lookup((char *)imss_path, &fd, &stats, &aux), "fd_lookup", 0);
 		if (fd < 0)
 		{ // not found.
-			slog_debug("Opening file %s", imss_path);
+			slog_debug("Opening dataset %s", imss_path);
 			ds = open_dataset((char *)imss_path, 0);
 			slog_debug("[imss_getattr] ds=%d", ds);
 			if (ds >= (int32_t)0) // TODO: add ds == -EEXIST in the condition and remove the else.
@@ -380,8 +381,8 @@ extern "C"
 
 				if (data == NULL)
 				{
-					perror("HERCULES_ERR_GETATTR_MEMORY_ALLOC_1");
-					slog_error("HERCULES_ERR_GETATTR_MEMORY_ALLOC_1");
+					perror("HERCULES_ERR_GETATTR_MEMORY_ALLOC_BLOCK0");
+					slog_fatal("HERCULES_ERR_GETATTR_MEMORY_ALLOC_BLOCK0");
 					return -ENOMEM;
 				}
 
@@ -397,6 +398,8 @@ extern "C"
 				slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
 				// Put the file descriptor (ds), stats info and data on the local map.
 				// map_put(map, imss_path, ds, stats, (char *)data);
+				print_file_type(stats, path);
+				
 				HierarchicalMapPut(hierarchical_map, imss_path, ds, stats, (char *)data);
 			}
 			else if (ds == -EEXIST)
