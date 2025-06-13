@@ -1376,9 +1376,9 @@ extern "C"
 		// }
 		// else
 		{
-			slog_live("[POSIX]. Calling real 'realpath', pathname=%s", pathname);
+			slog_full("[POSIX]. Calling real 'realpath', pathname=%s", pathname);
 			p = real_realpath(pathname, resolved_path);
-			slog_live("[POSIX]. Ending real 'realpath', pathname=%s, resolved_path=%s, ret=%d\n", pathname, resolved_path, ret);
+			slog_full("[POSIX]. Ending real 'realpath', pathname=%s, resolved_path=%s, ret=%d\n", pathname, resolved_path, ret);
 		}
 		return p;
 	}

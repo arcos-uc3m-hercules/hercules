@@ -174,8 +174,19 @@ int add_dataset_entry_in_pool(const gchar *dataset_uri, dataset_info *info)
 	GHashTable *parent_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, parent_dir);
 	if (!parent_subdir_children_table)
 	{
-		slog_error("Parent directory %s of %s has not been added to the pool of hash tables.", parent_dir, dataset_uri);
-		return -1;
+		slog_warn("Parent directory %s of %s has not been added to the pool of hash tables. Creating the new hash table.", parent_dir, dataset_uri);
+		// create the parent hash table to add this entry.
+		parent_subdir_children_table = g_hash_table_new(g_str_hash, g_str_equal);
+		if (!parent_subdir_children_table)
+		{
+			perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+			slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+			exit(-1);
+		}
+		// Insert the new directory's children hash table into 'pool_hash_tables_datasetd'.
+		// The key is a copy of the new directory's dataset_uri.
+		g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(parent_dir), parent_subdir_children_table);
+		// return -1;
 	}
 
 	// Add the dataset in the parent directory hash table.
@@ -184,6 +195,7 @@ int add_dataset_entry_in_pool(const gchar *dataset_uri, dataset_info *info)
 	// If the dataset corresponds to a directory, we create a new GHashtable to store its children.
 	if (info->type == TYPE_DIRECTORY)
 	{
+		slog_debug("%s is a directory, creating the new hash table.", info->uri_);
 		// TODO: change "g_hash_table_new" for "g_hash_table_new_full".
 		GHashTable *new_directory_children_table = g_hash_table_new(g_str_hash, g_str_equal);
 		if (!new_directory_children_table)
@@ -2841,7 +2853,7 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 		// if (dataset_info_aux)
 		if (ret == 1)
 		{
-			slog_debug("Dataset %s found in the hash table, aux uri=%s.", dataset_uri, dataset_info_aux->uri_);
+			slog_debug("Dataset %s found in the hash table, aux uri=%s", dataset_uri, dataset_info_aux->uri_);
 			// dataset_info_ = dataset_info_aux;
 			memcpy(dataset_info_, dataset_info_aux, sizeof(dataset_info));
 
@@ -4770,7 +4782,8 @@ char get_type(const char *uri)
 
 		memcpy(aux_dataset, dataset, sizeof(dataset_info));
 
-		add_dataset_entry(&datasetd, dataset->uri_, aux_dataset);
+		// add_dataset_entry(&datasetd, dataset->uri_, aux_dataset);
+		add_dataset_entry_in_pool(uri, aux_dataset);
 
 		curr_dataset = *aux_dataset;
 	}

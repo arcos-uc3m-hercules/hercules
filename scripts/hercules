@@ -107,7 +107,7 @@ WaitForServers() {
             fi
         else # if slurm is available.
         set -x
-            ret=$(srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
+            ret=$(srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
         fi
         ret=$?
         
@@ -624,12 +624,10 @@ do
             echo "[+] Removing temporal files on ${node}"
         fi
         set -x
-        srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${RM} 2> /dev/null
+        srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${RM} 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         echo "[+] Starting metadata server $i on $node..."
-        #srun  -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
-        # srun  -N 1 -n 1 --exclusive --cpus-per-task=18 -w $node -- $COMMAND &
-        srun  -N 1 -n 1 --cpus-per-task=18 -w $node -- $COMMAND &
+        srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
         set +x
     fi
     i=$((i+1))
@@ -703,19 +701,12 @@ do
         if [[ "${VERBOSE}" -eq "1" ]]; then
             echo "[+] Removing temporal files on $node"
         fi
-        srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
+        srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         if [[ "${VERBOSE}" -eq "1" ]]; then
             echo "[+] Starting data server $i on $node..."
         fi
-        #srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w $node -- $COMMAND &
-        #max_cores=$(sinfo -n $node -o "%C" | tail -n 1 | awk -F'/' '{print $4}')
-        # set -x
-        # sinfo -n $node -o "%C"
-        # set +x
-        #srun  -N 1 -n 1 -c 8 -m block:block:block --mem=0G -w $node -- $COMMAND &
-        # srun  -N 1 -n 1 --exclusive --cpus-per-task=18 -w $node -- $COMMAND &
-        srun  -N 1 -n 1 --cpus-per-task=18 -w $node -- $COMMAND &
+        srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
     fi
     i=$(($i+1))
 done
@@ -741,17 +732,21 @@ done
 
 case $MPI_DS in
     "open-mpi")
-        # echo "[+] Option openmpi"
-        export HERCULES_MPI_ENV_DEF="-x"
-        export HERCULES_MPI_HOSTFILE_DEF="-hostfile"
-        export HERCULES_MPI_PPN="--npernode"
-        #export H_MPI_NNFC=""
+        # export HERCULES_MPI_ENV_DEF="-x"
+        # export HERCULES_MPI_HOSTFILE_DEF="-hostfile"
+        # export HERCULES_MPI_PPN="--npernode"
+        export HERCULES_MPI_ENV_DEF="-x "
+        export HERCULES_MPI_HOSTFILE_DEF="-hostfile "
+        export HERCULES_MPI_PPN="-N "
+        export HERCULES_MPI_NP="-np "
+
     ;;
     "mpich" | "impi")
         # echo "[+] Option mpich | impi"
         export HERCULES_MPI_ENV_DEF="-env"
-        export HERCULES_MPI_HOSTFILE_DEF="-f"
-        export HERCULES_MPI_PPN="-ppn"
+        export HERCULES_MPI_HOSTFILE_DEF="-f="
+        export HERCULES_MPI_PPN="-ppn="
+        export HERCULES_MPI_NP="-np="
     ;;
     *)
         # Check!
