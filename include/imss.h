@@ -61,7 +61,8 @@ static uint64_t BLOCK_SIZE;
 
 // GHashMap functions.
 // int replace_dataset_entry_key(const char *old_uri, const char *new_uri);
-gboolean replace_uri_base_path(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
+gboolean replace_uri_base_path_dir(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
+gboolean replace_uri_base_path_regular_file(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
 
 int32_t get_data_location(int32_t, int32_t, int32_t);
 
@@ -123,8 +124,8 @@ typedef struct
 	// URI identifying a certain dataset.
 	char uri_[URI_];
 	// Byte specifying the type of structure.
-	// L = Local, D = Distributed.
-	char type; // = 'D';
+	// R = Regular file, D = Directory, I = Hercules instance.
+	char type; 
 	// Policy that was followed in order to write the dataset.
 	char policy[MAX_POLICY_LEN];
 	// Original name when the data was created for the first time, need it for policy CRC16_ in distributed operation rename
@@ -346,7 +347,7 @@ RETURNS:	> 0 - Number identifying the retrieved dataset among the client's sessi
 
 RETURNS:	 0 - Release operation took place successfully.
 -1 - In case of error.*/
-	int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id);
+	int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id, int is_dir);
 
 	int32_t close_dataset(const char *dataset_uri, int fd);
 
@@ -426,7 +427,7 @@ The current function does not allocate memory.
 	// Method retrieving a multiple datasets
 	int32_t
 	readv_multiple(char *dataset_uri,
-		int32_t dataset_id,
+				   int32_t dataset_id,
 				   int32_t curr_block,
 				   int32_t prefetch,
 				   char *buffer,
@@ -514,7 +515,7 @@ char ** locations = get_dataloc(datasetd, data_id, &num_storages);
 
 	int32_t
 	set_ndata(char *dataset_uri,
-		int32_t dataset_id,
+			  int32_t dataset_id,
 			  int32_t data_id,
 			  char *buffer,
 			  uint32_t size);
@@ -540,7 +541,7 @@ RETURNS:	0 - No entity associated to the URI provided exists.
 	char get_type(const char *uri);
 
 	// Method retriving list of servers to read.
-	int32_t split_location_servers(char *dataset_uri,int **list_servers, int32_t dataset_id, int32_t curr_blk, int32_t end_blk);
+	int32_t split_location_servers(char *dataset_uri, int **list_servers, int32_t dataset_id, int32_t curr_blk, int32_t end_blk);
 
 	// Method writing multiple data to a specific server
 
@@ -588,8 +589,11 @@ RETURNS:	0 - Resources were released successfully.
 
 	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
 	int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir);
-	void ConcatLastSlash(std::string &pathname);
-	void ConcatLastSlashC(char *pathname);
+	int ConcatLastSlash(std::string &pathname);
+	int ConcatLastSlashC(char *pathname);
+	int RemoveLastSlash(std::string &pathname);
+	int RemoveLastSlashC(char *pathname);
+
 
 	/**
 	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.

@@ -1,12 +1,5 @@
-#include <map>
-#include <iostream>
-#include <vector>
-#include <cstddef>
-#include <cstring>
-// #include <sys/stat.h>
-#include <fcntl.h>
-#include <stdint.h>
-#include <mutex>
+
+#include "map.hpp"
 
 // to manage logs.
 #include "slog.h"
@@ -16,17 +9,9 @@ extern uint64_t IMSS_BLKSIZE;
 #define GB 1073741824
 
 using std::string;
-typedef std::map<std::string, struct elements> Map;
 
 // for sincronization in the map.
 std::mutex map_lock;
-
-struct elements
-{
-	int fd;
-	struct stat stat;
-	char *aux;
-} elements;
 
 extern "C"
 {
@@ -46,7 +31,21 @@ extern "C"
 
 	// Insert the element "p = {v,stat,aux}" with key "k" to the map "map".
 	// This info is used by the "fd_lookup" function to avoid extra calls for the block 0.
-	void map_put(void *map, char *k, int v, struct stat stat, char *aux)
+	// void map_put(void *map, char *k, int v, struct stat stat, char *aux)
+	void map_put(void *map, const char *k, int v, struct stat stat, char *aux)
+	{
+		std::unique_lock<std::mutex> lck(map_lock);
+		std::pair<std::map<std::string, struct elements>::iterator, bool> ret;
+		Map *m = reinterpret_cast<Map *>(map);
+		struct elements p = {v, stat, aux};
+		ret = m->insert(std::pair<std::string, struct elements>(std::string(k), p));
+		if (ret.second == false)
+		{
+			slog_debug("Element %s already existed.", k);
+		}
+	}
+
+	void map_hierarchical_put(void *map, char *k, int v, struct stat stat, char *aux)
 	{
 		std::unique_lock<std::mutex> lck(map_lock);
 		std::pair<std::map<std::string, struct elements>::iterator, bool> ret;
@@ -68,7 +67,6 @@ extern "C"
 	}
 
 	// Removes the element with key "k" from the map "map".
-	// int map_erase(void* map, char* k) {
 	void map_erase(void *map, const char *k)
 	{
 		std::unique_lock<std::mutex> lck(map_lock);
@@ -111,6 +109,10 @@ extern "C"
 		}
 	}
 
+	/**
+	 * @brief Rename the name of a regular file on the local map.
+	 * @return On success, 1 is returned.
+	 */
 	int map_rename(void *map, const char *oldname, const char *newname)
 	{
 		std::unique_lock<std::mutex> lck(map_lock);
@@ -118,10 +120,14 @@ extern "C"
 		auto node = m->extract(oldname);
 		node.key() = newname;
 		m->insert(std::move(node));
-
+		// TODO: add error handling.
 		return 1;
 	}
 
+	/**
+	 * @brief Rename the name of a directory (and all its entries) on the local map.
+	 * @return On success, 1 is returned. -1 if there are no elements to rename.
+	 */
 	int map_rename_dir_dir(void *map, const char *old_dir, const char *rdir_dest)
 	{
 		std::unique_lock<std::mutex> lck(map_lock);
@@ -129,20 +135,46 @@ extern "C"
 
 		std::vector<string> vec;
 
+		size_t len_old_dir = strlen(old_dir);
+		size_t len_curr_key = 0;
+		string key;
+		int found = 0;
 		for (auto it = m->cbegin(); it != m->cend(); ++it)
 		{
-			string key = it->first;
-
-			int found = key.find(old_dir);
+			key = it->first;
+			found = key.find(old_dir);
 			if (found != std::string::npos)
 			{
+				len_curr_key = key.length();
+				slog_debug("len_old_dir=%lu, len_curr_key=%lu, old_dir %s found in %s", len_old_dir, len_curr_key, old_dir, key.c_str());
+				if (len_old_dir < len_curr_key)
+				{
+					if (key[len_old_dir] != '/')
+					{
+						slog_debug("Skipping %s", key.c_str());
+						continue;
+					}
+				}
+				// free(it->second.aux);
 				vec.insert(vec.begin(), key);
 			}
 		}
 
+		if (vec.size() == 0)
+		{
+			// NO elements to rename.
+			slog_debug("No elements to rename.");
+			return -1;
+		}
+
+		// if (vec.size() > 0)
+		// 	fprintf(stdout, "Renaming %lu elements\n", vec.size());
+		slog_debug("Renaming %lu/%lu elements", vec.size(), m->size());
+
 		std::vector<string>::iterator i;
 		for (i = vec.begin(); i < vec.end(); i++)
 		{
+			// m->erase(*i);
 			string key = *i;
 			key.erase(0, strlen(old_dir) - 1);
 

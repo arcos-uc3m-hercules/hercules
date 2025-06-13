@@ -39,7 +39,7 @@ std::shared_ptr<map_records> g_map;
 ucp_worker_h ucp_worker = NULL;
 
 ucp_address_t *req_addr = NULL;
-ucp_ep_h *metadata_endpoints = NULL; 
+ucp_ep_h *metadata_endpoints = NULL;
 size_t req_addr_len = 0;
 
 unsigned long number_active_storage_servers = 0; // stores the current number of active storage servers.
@@ -213,7 +213,7 @@ int32_t main(int32_t argc, char **argv)
 		printf("Log path = %s\n", log_path);
 		fflush(stdout);
 	}
-	slog_info(",Time(msec), Comment, RetCode");
+	slog_time(",Time(msec), Comment, RetCode");
 
 	slog_debug("[SERVER] Starting server.");
 	if (args.type == TYPE_DATA_SERVER)
@@ -528,8 +528,8 @@ int32_t main(int32_t argc, char **argv)
 	else
 	{
 		// Create the tree_root node.
-		char *root_data = (char *)calloc(8, sizeof(char));
-		strcpy(root_data, args.imss_uri);
+		char *root_data = (char *)calloc(URI_, sizeof(char));
+		strncpy(root_data, args.imss_uri, URI_);
 		tree_root = g_node_new((void *)root_data);
 		if (pthread_mutex_init(&tree_mut, NULL) != 0)
 		{

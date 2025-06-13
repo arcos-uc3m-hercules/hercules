@@ -10,9 +10,10 @@ PROCESS_PER_NODE=$3
 ## Uncomment when working in Unito.
 ## MDTEST is part of the IOR package.
 MDTEST_PATH=/beegfs/home/javier.garciablas/gsanchez/ior/bin
-spack unload mpich openmpi
-spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
-whereis mpiexec
+#spack unload mpich openmpi
+#spack load mpich@3.2.1%gcc@=9.4.0 arch=linux-ubuntu20.04-zen
+spack load mpich
+#whereis mpiexec
 
 echo "Running $NUMBER_OF_PROCESS processes with $PROCESS_PER_NODE processes per node, slurm nodes: $SLURM_NNODES"
 
@@ -27,9 +28,17 @@ COMMAND="$MDTEST_PATH/mdtest -n ${NUMBER_OF_FILES_PER_PROCESS}"
 # -C only create files/dirs
 # COMMAND="$COMMAND -C"
 
+# Number of iterations.
+COMMAND="$COMMAND -i 5"
+
+# Verbose
+COMMAND="$COMMAND -V 1"
+
 ## Add the working directory.
 ## The -u flag tells the program to assign a unique working directory per task.
 COMMAND="$COMMAND -u -d /beegfs/home/javier.garciablas/hercules/bash/tests/metadata/Benchmarks/mdtest_output/"
+
+
 
 set -x
 

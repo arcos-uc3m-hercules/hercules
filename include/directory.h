@@ -4,13 +4,16 @@
 #include <glib.h>
 
 //Wrapper to the GTree_search_ function that compares if the parent node is requested.
-int32_t GTree_search(GNode * parent_node, char * desired_data, GNode ** found_node);
+int32_t GTree_search(GNode * parent_node, const char * desired_data, GNode ** found_node);
 
 //Method retrieving a buffer with all the files within a directory.
 char *  GTree_getdir(char * desired_dir, int32_t * numdir_elems);
 
-//Method deleting a new path.
-int32_t GTree_delete(char * desired_data);
+/** 
+ * @brief Method deleting an entry of the tree.
+ * @return On success, 1 is returned, 0 on error.
+ * */
+int32_t GTree_delete(std::string desired_data);
 
 //Method renaming a new path.
 int32_t GTree_rename(char * old_desired_data,char * new_desired_data);

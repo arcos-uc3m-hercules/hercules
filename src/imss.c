@@ -25,6 +25,8 @@
 /**********************************************************************************/
 /******************************** GLOBAL VARIABLES ********************************/
 /**********************************************************************************/
+char *IMSS_ROOT = NULL; // Not default
+
 // __thread
 int32_t id_current_dataset; // Dataset whose policy has been set last.
 dataset_info curr_dataset;	// Currently managed dataset.
@@ -34,7 +36,7 @@ uint32_t process_rank; // Process identifier within the deployment.
 
 uint32_t n_stat_servers = 1; // Number of metadata servers available.
 uint32_t *stat_ids = NULL;
-void *stat_mon; // Metadata monitoring socket.
+// void *stat_mon; // Metadata monitoring socket.
 
 uint32_t NUM_DATA_SERVERS;
 
@@ -44,8 +46,9 @@ int32_t imssd_pos;		// Next position within the vextor were a new IMSS will be i
 int32_t imssd_max_size; // Maximum number of elements that could be introduced into the imss array.
 
 // GArray
-GHashTable *datasetd;  // Set of dataset metadata structures.
-GArray *free_datasetd; // Set of free entries within the 'datasetd' vector.
+GHashTable *datasetd;				   // Set of dataset metadata structures.
+GHashTable *pool_hash_tables_datasetd; // Set of Hash tables.
+GArray *free_datasetd;				   // Set of free entries within the 'datasetd' vector.
 // GHashTable *dataset_uri_map = NULL;
 int32_t datasetd_pos;	   // Next position within the vextor were a new dataset will be inserted.
 int32_t datasetd_max_size; // Maximum number of elements that could be introduced into the dataset array.
@@ -58,6 +61,7 @@ int32_t len_client_node; // Length of the previous node name.
 char client_ip[16];		 // IP number of the node where the client is taking execution.
 
 dataset_info empty_dataset;
+dataset_info *root_directory_info = NULL;
 imss empty_imss;
 
 int32_t found_in; // Variable storing the position where a certain structure was stored in a certain vector.
@@ -71,8 +75,8 @@ int32_t IMSS_WRITE_ASYNC = 1;
 
 /* UCP objects */
 ucp_context_h ucp_context_client; // = (ucp_context_h)NULL;
-ucp_worker_h ucp_worker_meta; // = (ucp_worker_h)NULL;
-ucp_worker_h ucp_worker_data; // = (ucp_worker_h)NULL;
+ucp_worker_h ucp_worker_meta;	  // = (ucp_worker_h)NULL;
+ucp_worker_h ucp_worker_data;	  // = (ucp_worker_h)NULL;
 
 // void *map_ep;		   // map_ep used for async write
 // int32_t is_client = 1; // also used for async write
@@ -109,13 +113,46 @@ int find_dataset_by_uri_hash(GHashTable *map, const char *dataset_uri, dataset_i
 	if (*dataset_info_ != NULL)
 	{
 		// Found the element
-		return 1; // Or whatever success code
+		return 1; 
 	}
 	else
 	{
 		// Not found
-		return 0; // Or whatever not-found code
+		return 0; 
 	}
+}
+
+int find_dataset_by_uri_hash_pool(const char *dataset_uri, dataset_info **dataset_info_)
+{
+	slog_debug("Searching for %s on the Hash Map", dataset_uri);
+
+	// Get the parent directory.
+	char parent_dir[PATH_MAX] = {0};
+	find_last_parent_dir(dataset_uri, parent_dir);
+
+	// Look up the parent directory's children hash table in 'pool_hash_tables_datasetd'.
+	GHashTable *parent_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, parent_dir);
+
+	if (!parent_subdir_children_table)
+	{
+		slog_debug("Search: Directory '%s' not found in file system structure.", parent_dir);
+		return -1;
+	}
+
+	// Look up the element by its uri within the parent's children hash table.
+	*dataset_info_ = (dataset_info *)g_hash_table_lookup(parent_subdir_children_table, dataset_uri);
+
+	if (*dataset_info_ != NULL)
+	{
+		slog_debug("Search: Found element '%s' in directory '%s'.", (*dataset_info_)->uri_, parent_dir);
+		return 1;
+	}
+	else
+	{
+		slog_debug("Search: Element '%s' not found in directory '%s'.", dataset_uri, parent_dir);
+		return 0;
+	}
+
 }
 
 void add_dataset_entry(GHashTable **map, const char *uri, dataset_info *info)
@@ -125,7 +162,41 @@ void add_dataset_entry(GHashTable **map, const char *uri, dataset_info *info)
 	// 	*map = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, free_ghashtable_dataset_data);
 	// }
 	g_hash_table_insert(*map, g_strdup(uri), info);
-	slog_debug("[%d] Added element %s to the Hash Map",  g_hash_table_size(*map), info->uri_);
+	slog_debug("[%d] Added element %s to the Hash Map", g_hash_table_size(*map), info->uri_);
+}
+
+int add_dataset_entry_in_pool(const gchar *dataset_uri, dataset_info *info)
+{
+	char parent_dir[PATH_MAX] = {0};
+	find_last_parent_dir(dataset_uri, parent_dir);
+	slog_debug("parent dir=%s of dataset_uri=%s", parent_dir, dataset_uri);
+	// Retrieve the hash table for the parent directory's children from 'main_filesystem_table'.
+	GHashTable *parent_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, parent_dir);
+	if (!parent_subdir_children_table)
+	{
+		slog_error("Parent directory %s of %s has not been added to the pool of hash tables.", parent_dir, dataset_uri);
+		return -1;
+	}
+
+	// Add the dataset in the parent directory hash table.
+	g_hash_table_insert(parent_subdir_children_table, g_strdup(dataset_uri), info);
+
+	// If the dataset corresponds to a directory, we create a new GHashtable to store its children.
+	if (info->type == TYPE_DIRECTORY)
+	{
+		// TODO: change "g_hash_table_new" for "g_hash_table_new_full".
+		GHashTable *new_directory_children_table = g_hash_table_new(g_str_hash, g_str_equal);
+		if (!new_directory_children_table)
+		{
+			perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+			slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+			exit(-1);
+		}
+		// Insert the new directory's children hash table into 'pool_hash_tables_datasetd'.
+		// The key is a copy of the new directory's dataset_uri.
+		g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(dataset_uri), new_directory_children_table);
+	}
+	return 0;
 }
 
 int remove_dataset_entry(GHashTable *map, const char *uri)
@@ -143,6 +214,11 @@ int remove_dataset_entry(GHashTable *map, const char *uri)
 	}
 }
 
+/**
+ * @brief Callback function which releases resources of a dataset when calling the "remove"
+ * method of a ghashtable.
+ * @param data pointer to the dataset to be freed.
+ */
 void free_ghashtable_dataset_data(gpointer data)
 {
 	dataset_info *info = (dataset_info *)data;
@@ -154,6 +230,18 @@ void free_ghashtable_dataset_data(gpointer data)
 	}
 }
 
+/**
+ * @brief Callback function which frees the memory allocated for an entry on the ghashtable.
+ * @param data pointer to the data to be freed.
+ */
+void free_ghashtable_entry(gpointer data)
+{
+	if (data)
+	{
+		g_free(data);
+	}
+}
+
 // --- GHashTable foreach callback for printing ---
 void print_entry(gpointer key, gpointer value, gpointer user_data)
 {
@@ -162,27 +250,12 @@ void print_entry(gpointer key, gpointer value, gpointer user_data)
 	slog_debug("  Key: %s -> Value: {URI: %s, Original name: %s}", uri_key, info->uri_, info->original_name);
 }
 
-// int replace_dataset_entry_key(const char *old_uri, const char *new_uri)
-// {
-// 	/*********RENAME GARRAY DATASET*******/
-// 	// dataset_info *dataset_info_;
-// 	// int ret = find_dataset_by_uri_hash(datasetd, old_uri, &dataset_info_);
-// 	// if (ret == 0)
-// 	// { // if the old name is not in the local g_array we finish this function.
-// 	// 	return -1;
-// 	// }
-// 	// add_dataset_entry(&datasetd, new_uri, dataset_info_);
-// 	// remove_dataset_entry(datasetd, old_uri);
-// 	// return 0;
-// 	replace_uri_base_path(datasetd, old_uri, new_uri);
-// }
-
-gboolean replace_uri_base_path(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri)
+gboolean replace_uri_base_path_dir(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri)
 {
 
 	if (!hash_table || !old_base_uri || !new_base_uri)
 	{
-		slog_warn("Invalid input to replace_uri_base_path.");
+		slog_warn("Invalid input to replace_uri_base_path_dir.");
 		return FALSE;
 	}
 
@@ -201,17 +274,34 @@ gboolean replace_uri_base_path(GHashTable *hash_table, const char *old_base_uri,
 
 	// Iterate through the hash table.
 	// g_hash_table_iter_next advances the iterator and sets current_key/current_value.
+	size_t len_old_base_uri = strlen(old_base_uri);
+	size_t len_current_key = 0;
 	while (g_hash_table_iter_next(&iter, &current_key, &current_value))
 	{
 		slog_debug("Comparing %s - %s", old_base_uri, current_key);
+		const char *curr_key_str = (const char *)current_key;
 		// Check if the current key matches the old base URI prefix.
-		if (g_str_has_prefix((char *)current_key, old_base_uri))
+		if (g_str_has_prefix(curr_key_str, old_base_uri))
 		{
+			len_current_key = strlen(curr_key_str);
+			// check if current_key is a child of the old uri.
+			// for example, imss://dir10 is not a child of imss://dir1, but
+			// imss://dir1 is a substring (prefix) of imss://dir10.
+			if (len_old_base_uri < len_current_key)
+			{
+				if (curr_key_str[len_old_base_uri] != '/')
+				{ // current_key is not a child of old_base_uri.
+					slog_debug("Skipping %s", curr_key_str);
+					continue;
+				}
+			}
 			slog_debug("  Found matching key: '%s'", current_key);
-			keys_to_replace = g_list_append(keys_to_replace, g_strdup((const char *)current_key));
+			keys_to_replace = g_list_append(keys_to_replace, g_strdup(curr_key_str));
 		}
 	}
 
+	// fprintf(stdout, "Renaming %u/%u elements\n", g_list_length(keys_to_replace), g_hash_table_size(hash_table));
+	slog_debug("Renaming %u/%u elements", g_list_length(keys_to_replace), g_hash_table_size(hash_table));
 	for (GList *l = keys_to_replace; l != NULL; l = l->next)
 	{
 
@@ -246,12 +336,41 @@ gboolean replace_uri_base_path(GHashTable *hash_table, const char *old_base_uri,
 
 	if (!modified_any)
 	{
-		slog_debug("No entries found with prefix '%s' to modify.\n", old_base_uri);
+		slog_debug("No entries found with prefix '%s' to modify.", old_base_uri);
 	}
 
-	g_hash_table_foreach(hash_table, print_entry, NULL);
+	// g_hash_table_foreach(hash_table, print_entry, NULL);
 
 	return modified_any;
+}
+
+gboolean replace_uri_base_path_regular_file(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri)
+{
+
+	if (!hash_table || !old_base_uri || !new_base_uri)
+	{
+		slog_warn("Invalid input to replace_uri_base_path_regular_file.");
+		return FALSE;
+	}
+
+	dataset_info *info = (dataset_info *)g_hash_table_lookup(hash_table, old_base_uri);
+
+	if (info)
+	{
+		// Update the URI with the new one.
+		slog_debug("Replaceing uri %s to %s", info->uri_, new_base_uri);
+		strncpy(info->uri_, new_base_uri, URI_);
+		// Remove the old dataset info and insert the new one.
+		g_hash_table_steal(hash_table, old_base_uri);
+		g_hash_table_insert(hash_table, g_strdup(new_base_uri), info);
+	}
+	else
+	{
+		slog_warn("%s was not found in the hash map.");
+		return FALSE;
+	}
+
+	return TRUE;
 }
 
 int32_t imss_comm_cleanup()
@@ -280,12 +399,11 @@ int32_t imss_comm_cleanup()
 }
 
 // Method inserting an element into a certain control GArray vector.
-int32_t
-GInsert(int32_t *pos,
-		int32_t *max,
-		char *item,
-		GArray *garray_insert,
-		GArray *garray_free)
+int32_t GInsert(int32_t *pos,
+				int32_t *max,
+				char *item,
+				GArray *garray_insert,
+				GArray *garray_free)
 {
 	// Position where the element will be inserted.
 	int32_t inserted_pos = -1;
@@ -320,11 +438,10 @@ GInsert(int32_t *pos,
 }
 
 // Method inserting an element into a certain control GArray vector.
-int32_t
-Get_fd(int32_t *pos,
-	   int32_t *max,
-	   GArray *garray_insert,
-	   GArray *garray_free)
+int32_t Get_fd(int32_t *pos,
+			   int32_t *max,
+			   GArray *garray_insert,
+			   GArray *garray_free)
 {
 	// Position where the element will be inserted.
 	int32_t inserted_pos = -1;
@@ -395,9 +512,8 @@ int32_t find_imss(const char *imss_uri, imss *imss_)
 }
 
 // Method deleting a certains IMSS in the vector
-int32_t
-delete_imss(char *imss_uri,
-			imss *imss_)
+int32_t delete_imss(char *imss_uri,
+					imss *imss_)
 {
 	int32_t pos = find_imss(imss_uri, imss_);
 	if (pos != -1)
@@ -491,6 +607,13 @@ int32_t stat_init(char *stat_hostfile,
 	if ((datasetd = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_dataset_data)) == NULL)
 	{
 		perror("HERCULES_ERR_STATINIT_GARRAYDATASET");
+		free(stat_addr);
+		return -1;
+	}
+
+	if ((pool_hash_tables_datasetd = g_hash_table_new(g_str_hash, g_str_equal)) == NULL)
+	{
+		perror("HERCULES_ERR_STATINIT_GARRAYDATASETPOOL");
 		free(stat_addr);
 		return -1;
 	}
@@ -761,7 +884,7 @@ uint32_t discover_stat_srv(const char *_uri)
  */
 uint32_t get_dir(std::string requested_uri_obj, char ***items)
 {
-	ConcatLastSlash(requested_uri_obj);
+	// ConcatLastSlash(requested_uri_obj);
 
 	const char *requested_uri = NULL;
 	requested_uri = requested_uri_obj.c_str();
@@ -801,14 +924,24 @@ uint32_t get_dir(std::string requested_uri_obj, char ***items)
 
 	int arr_lengths[number_metadata_servers] = {0};
 	pthread_mutex_lock(&lock_network);
-
+	size_t len_requested_uri = strlen(requested_uri);
 	// Search in all servers.
 	for (int i = m_srv; i < m_srv + number_metadata_servers; i++)
 	{
 		ucp_ep_h ep = stat_eps[i];
 
 		// GETDIR request.
-		sprintf(getdir_req, "%" PRIu32 " GET %d %s", stat_ids[i], GETDIR, requested_uri);
+		// Concat the last slash to tell the metadata server this uri is from a directory.
+
+		if (requested_uri[len_requested_uri - 1] == '/')
+		{
+			sprintf(getdir_req, "%" PRIu32 " GET %d %s", stat_ids[i], GETDIR, requested_uri);
+		}
+		else
+		{
+			sprintf(getdir_req, "%" PRIu32 " GET %d %s/", stat_ids[i], GETDIR, requested_uri);
+		}
+
 		slog_debug("[IMSS] Request to metadata %d - '%s'", i, getdir_req);
 		if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, getdir_req) == 0)
 		{
@@ -1105,7 +1238,6 @@ int32_t open_imss(char *imss_uri)
 		}
 
 		new_imss.conns.id[i] = i;
-
 		// Save the current socket value when the IMSS ip matches the clients' one.
 		if (!strncmp((new_imss.info.ips)[i], client_node, len_client_node) || !strncmp((new_imss.info.ips)[i], client_ip, strlen(new_imss.info.ips[i])))
 		{
@@ -1154,6 +1286,31 @@ int32_t open_imss(char *imss_uri)
 
 	// Add the created struture into the underlying IMSSs.
 	GInsert(&imssd_pos, &imssd_max_size, (char *)&new_imss, imssd, free_imssd);
+
+	// Adds the root directory on the pool of hash tables.
+	GHashTable *root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
+	if (!root_subdir_children_table)
+	{
+		perror("HERCULES_ERR_OPEN_IMSS_INIT_ROOT_SUBDIR_CHILDREN_TABLE");
+		slog_error("HERCULES_ERR_OPEN_IMSS_INIT_ROOT_SUBDIR_CHILDREN_TABLE");
+		g_hash_table_destroy(pool_hash_tables_datasetd);
+		pool_hash_tables_datasetd = NULL;
+		return -1;
+	}
+	g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(IMSS_ROOT), root_subdir_children_table);
+
+	root_directory_info = (dataset_info *)g_malloc(sizeof(dataset_info));
+	if (!root_directory_info)
+	{
+		perror("HERCULES_ERR_OPEN_IMSS_MALLOC_ROOT_INFO");
+		slog_error("HERCULES_ERR_OPEN_IMSS_MALLOC_ROOT_INFO");
+		g_hash_table_destroy(pool_hash_tables_datasetd);
+		pool_hash_tables_datasetd = NULL;
+		return -1;
+	}
+	strncpy(root_directory_info->uri_, IMSS_ROOT, sizeof(root_directory_info->uri_));
+	root_directory_info->type = TYPE_HERCULES_INSTANCE;
+
 	// return 0;
 	return new_imss.info.num_active_storages;
 }
@@ -1542,34 +1699,28 @@ int32_t create_dataset(char *dataset_uri,
 		return -EINVAL;
 	}
 
-	int32_t associated_imss_indx;
+	int32_t associated_imss_indx = 0;
 	// Check if the IMSS storing the dataset exists within the clients session.
+	// TODO: imss_check can return the imss structure pointer to avoid double g_array_index call.
 	slog_live("[IMSS] Before imss_check  %s ", dataset_uri);
 	if ((associated_imss_indx = imss_check(dataset_uri)) == -1)
 	{
 		slog_fatal("[IMSS] HERCULES_ERR_IMSS_CHECK_NOT_FOUND, associated_imss_indx=%d", associated_imss_indx);
 		return -ENOENT;
 	}
-	// else
-	// {
+
 	imss associated_imss;
 	slog_live("[IMSS] After imss_check, associated_imss_indx=%d", associated_imss_indx);
 	associated_imss = g_array_index(imssd, imss, associated_imss_indx);
-	// }
 
 	dataset_info new_dataset;
 
 	// Checks if parent directories exists.
-	// char *last = dataset_uri + strlen(dataset_uri) - 1;
-	// slog_live("last=%s", last);
-	// if (last[0] == '/')
-	// {
-	// 	last[0] = '\0';
-	// }
 	int offset = 0, first_parent_offset = 0;
 	// Skip the uri "imss://", and iterates the "dataset_uri" to
 	// find the parent directory position.
 	// TODO: change "imss://" to a variable from the configuration file.
+	// TODO: prefer using strstr to find the first or last slash depending on the case.
 	for (int j = strlen("imss://"); j < strlen(dataset_uri) - 1; ++j)
 	{
 		// slog_live("dataset_uri[%d]=%c", j, dataset_uri[j]);
@@ -1589,17 +1740,31 @@ int32_t create_dataset(char *dataset_uri,
 		char parent_dir[PATH_MAX] = {0};
 		strncpy(parent_dir, dataset_uri, offset);
 		slog_live("dataset_uri=%s, parent directory = %s", dataset_uri, parent_dir);
-		dataset_info parent_dataset;
-
+		dataset_info parent_dataset; // TODO: change to dynamic memory.
+		slog_debug("Checking if parent dir of %s exists", dataset_uri);
 		ret = stat_dataset(parent_dir, &parent_dataset, 0);
 		if (ret < 0 && ret != -3)
-		{
+		{ // case where parent directory does not exists.
 			/********** TO CHECK */
-			char err_msg[MAX_ERR_MSG_LEN];
+			char err_msg[MAX_ERR_MSG_LEN] = {0};
 			sprintf(err_msg, "Parent directory %s does not exists", parent_dir);
 			slog_error("%s", err_msg);
 			perror(err_msg);
 			return -ENOENT;
+		}
+		if (ret == -3)
+		{ // if parent dir exists on the remote server, we added to the local pool of hash table.
+			slog_debug("Inserting %s on the pool of hash maps.", parent_dir);
+			GHashTable *new_directory_children_table = g_hash_table_new(g_str_hash, g_str_equal);
+			if (!new_directory_children_table)
+			{
+				perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+				slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+				exit(-1);
+			}
+			// Insert the new directory's children hash table into 'pool_hash_tables_datasetd'.
+			// The key is a copy of the new directory's dataset_uri.
+			g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(parent_dir), new_directory_children_table);
 		}
 	}
 
@@ -1608,6 +1773,7 @@ int32_t create_dataset(char *dataset_uri,
 	slog_debug("ret=%d", ret);
 	if (ret == 1 || ret == -3)
 	{ // 1: The dataset exists in the local GArray.
+		// -3: The dataset was retrieved from the remote metadata server.
 		slog_live("[IMSS] ERRIMSS_CREATEDATASET_ALREADYEXISTS, associated_imss.conns.matching_server=%d", associated_imss.conns.matching_server);
 		new_dataset.imss_d = associated_imss_indx;
 		new_dataset.local_conn = associated_imss.conns.matching_server;
@@ -1632,9 +1798,11 @@ int32_t create_dataset(char *dataset_uri,
 		// GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
 		if (ret == -3)
 		{ // -3: The dataset is not in the local GArray.
+
 			dataset_info *aux_dataset = (dataset_info *)malloc(sizeof(dataset_info));
 			memcpy(aux_dataset, &new_dataset, sizeof(dataset_info));
-			add_dataset_entry(&datasetd, dataset_uri, aux_dataset);
+			// add_dataset_entry(&datasetd, dataset_uri, aux_dataset);
+			add_dataset_entry_in_pool(dataset_uri, aux_dataset);
 		}
 
 		// fprintf(stderr, "dataset already exists, ret=%d\n", ret);
@@ -1729,7 +1897,16 @@ int32_t create_dataset(char *dataset_uri,
 	// Discover the metadata server that handle the new dataset.
 	uint32_t m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
 	char formated_uri[REQUEST_SIZE] = {0};
-	sprintf(formated_uri, "%" PRIu32 " SET %lu %s", opened, msg_size, new_dataset.uri_);
+	size_t len_dataset_uri = strlen(new_dataset.uri_);
+	if (opened == 2 && new_dataset.uri_[len_dataset_uri - 1] != '/')
+	{ // "opened==2" indicates a directory case (see mkdir) and checks if the last slash is missing (mandatory for the metadata server).
+		// add the last slash.
+		sprintf(formated_uri, "%" PRIu32 " SET %lu %s/", opened, msg_size, new_dataset.uri_);
+	}
+	else
+	{ // this can be also a directory case but the uri already contains the last slash.
+		sprintf(formated_uri, "%" PRIu32 " SET %lu %s", opened, msg_size, new_dataset.uri_);
+	}
 
 	slog_info("[IMSS] Request to metadata server %d - '%s'", m_srv, formated_uri);
 
@@ -1780,11 +1957,11 @@ int32_t create_dataset(char *dataset_uri,
 
 	memcpy(aux_dataset, &new_dataset, sizeof(dataset_info));
 
-	add_dataset_entry(&datasetd, dataset_uri, aux_dataset);
+	// add_dataset_entry(&datasetd, dataset_uri, aux_dataset);
+	add_dataset_entry_in_pool(dataset_uri, aux_dataset);
 
 	// Add the created struture into the underlying IMSSs.
 	// ret = GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
-	// add_dataset_entry(&datasetd, dataset_uri, &new_dataset);
 	// free(new_dataset);
 	slog_live("[IMSS] dataset_create: GInsert %d", entry_number);
 	// return ret;
@@ -1825,17 +2002,15 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	}
 
 	if (new_dataset.is_link != 0)
-	{
+	{ // link case.
 		slog_debug("is_link=%d, link name=%s", new_dataset.is_link, new_dataset.link);
 		stat_dataset_res = stat_dataset(new_dataset.link, &new_dataset, 0);
 		// check if it comes from Hercules
 		if (strncmp(new_dataset.link, "imss://", strlen("imss://")))
 		{
 			// return open(new_dataset.link);
-
 			// map_put(map, imss_path, file_desc, stats, aux);
 			slog_debug("No Hercules link %s", new_dataset.link);
-
 			// dataset_uri = new_dataset.link;
 			strcpy(dataset_uri, new_dataset.link);
 			return -2;
@@ -1946,7 +2121,8 @@ int32_t open_dataset(char *dataset_uri, int opened)
 
 	memcpy(aux_dataset, &new_dataset, sizeof(dataset_info));
 
-	add_dataset_entry(&datasetd, dataset_uri, aux_dataset);
+	// add_dataset_entry(&datasetd, dataset_uri, aux_dataset);
+	add_dataset_entry_in_pool(dataset_uri, aux_dataset);
 
 	curr_dataset = *aux_dataset;
 	// curr_dataset = g_array_index(datasetd, dataset_info, ret);
@@ -2132,7 +2308,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 }
 
 // Method deleting a dataset.
-int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
+int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id, int is_dir)
 {
 	ucp_ep_h ep;
 	// Formated dataset uri to be sent to the metadata server.
@@ -2159,13 +2335,31 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id)
 
 	ep = stat_eps[m_srv];
 
+	size_t len_dataset_uri = strlen(dataset_uri);
+
 	// sprintf(formated_uri, "%" PRIu32 " GET 4 %s", stat_ids[m_srv], dataset_uri); // delete
-	sprintf(formated_uri, "%d GET 4 %s", 4, dataset_uri); // delete
+	// delete OP
+	if (is_dir)
+	{ // directory.
+		// check if the last slash is missing (required by the metadata server to identify directories).
+		if (dataset_uri[len_dataset_uri - 1] != '/')
+		{
+			sprintf(formated_uri, "%d GET 4 %s/", 4, dataset_uri);
+		}
+		else
+		{
+			sprintf(formated_uri, "%d GET 4 %s", 4, dataset_uri);
+		}
+	}
+	else
+	{ // regular file.
+		sprintf(formated_uri, "%d GET 4 %s", 4, dataset_uri);
+	}
 
 	slog_debug("[IMSS] formated_uri='%s'", formated_uri);
 
 	pthread_mutex_lock(&lock_network);
-	slog_debug("Request to metadata %d - %s\n", m_srv, formated_uri);
+	slog_debug("Request to metadata %d - %s", m_srv, formated_uri);
 
 	// Send the request.
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
@@ -2236,8 +2430,31 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	/*********RENAME GARRAY DATASET*******/
 	// dataset_info *dataset_info_;
 
+	// Look up the parent directory's children hash table in 'pool_hash_tables_datasetd'.
+	GHashTable *parent_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, old_dir);
+	slog_debug("Replacing basepath of files in the directory %s", old_dir);
+	replace_uri_base_path_dir(parent_subdir_children_table, old_dir, rdir_dest);
+
+	// Find the parent hash table.
+	char parent_dir[PATH_MAX] = {0};
+	find_last_parent_dir(old_dir, parent_dir);
+	
+	// Look up the parent directory's children hash table in 'pool_hash_tables_datasetd'.
+	// GHashTable *
+	parent_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, parent_dir);
+	
+	if (!parent_subdir_children_table)
+	{
+		slog_debug("Search: Directory '%s' not found in file system structure.", parent_dir);
+		return -1;
+	}
+	slog_debug("Replacing %s to %s in the hash map", old_dir, rdir_dest);
+	replace_uri_base_path_regular_file(parent_subdir_children_table, old_dir, rdir_dest);
+	
 	// Iterate through all the datasetd to change each corresponding file path.
-	replace_uri_base_path(datasetd, old_dir, rdir_dest);
+	// replace_uri_base_path_dir(parent_subdir_children_table, old_dir, rdir_dest);
+
+
 
 	// int hash_table_len = g_hash_table_size(datasetd);
 	// for (int32_t i = 0; i < hash_table_len; i++)
@@ -2316,7 +2533,9 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	pthread_mutex_lock(&lock_network);
 
 	// Send the request.
-	sprintf(formated_uri, "%" PRIu32 " GET 6 %s,%s", stat_ids[m_srv], old_dir, rdir_dest);
+	// "Slash" are concat in the format because are used by the metadata to recognize directories.
+
+	sprintf(formated_uri, "%" PRIu32 " GET 6 %s/,%s/", stat_ids[m_srv], old_dir, rdir_dest);
 	slog_debug("Request to metadata %d - %s", m_srv, formated_uri);
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
 	{
@@ -2383,7 +2602,8 @@ int32_t rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 	// 		return -1;
 	// 	}
 	// }
-	replace_uri_base_path(datasetd, old_dataset_uri, new_dataset_uri);
+	// replace_uri_base_path(datasetd, old_dataset_uri, new_dataset_uri);
+	replace_uri_base_path_regular_file(datasetd, old_dataset_uri, new_dataset_uri);
 
 	/*********RENAME METADATA*******/
 	// Formated dataset uri to be sent to the metadata server.
@@ -2612,7 +2832,8 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 	// if (g_hash_table_size(datasetd) > 0)
 	{
 		dataset_info *dataset_info_aux;
-		ret = find_dataset_by_uri_hash(datasetd, dataset_uri, &dataset_info_aux);
+		// ret = find_dataset_by_uri_hash(datasetd, dataset_uri, &dataset_info_aux);
+		ret = find_dataset_by_uri_hash_pool(dataset_uri, &dataset_info_aux);
 		// if (!strcmp(dataset_uri, "imss://test-dir.0-0/mdtest_tree.0.0/file.mdtest.0.0"))
 		// {
 		// 	fprintf(stderr, "stat dataset\n");
@@ -2726,22 +2947,23 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 
 		// Retrieve the corresponding dataset_info structure and the associated IMSS.
 		// curr_dataset = g_array_index(datasetd, dataset_info, dataset_id);
-		dataset_info *aux_dataset = NULL; // Currently managed dataset.
-		ret = find_dataset_by_uri_hash(datasetd, dataset_uri, &aux_dataset);
+		dataset_info *dataset_info_aux = NULL; // Currently managed dataset.
+		// ret = find_dataset_by_uri_hash(datasetd, dataset_uri, &aux_dataset);
+		ret = find_dataset_by_uri_hash_pool(dataset_uri, &dataset_info_aux);
 		if (ret == 0)
 		{
 			slog_error("Uri not found:%s", dataset_uri);
 			fprintf(stderr, "Uri not found:%s\n", dataset_uri);
 			return -1;
 		}
-		if (aux_dataset == NULL)
+		if (dataset_info_aux == NULL)
 		{
 			perror("HERCULES_ERR_GET_DATA_LOCATION_URI_NOT_STORED");
 			return -1;
 		}
 
 		// curr_dataset = *aux_dataset;
-		memcpy(&curr_dataset, aux_dataset, sizeof(dataset_info));
+		memcpy(&curr_dataset, dataset_info_aux, sizeof(dataset_info));
 		// curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
 		curr_imss = g_array_index(imssd, imss, curr_dataset.imss_d);
 		slog_debug("curr_dataset.uri=%s, curr_dataset.imss_d=%d, curr_dataset.repl_factor=%d, dataset_id=%d, curr_dataset.policy=%s, curr_dataset.n_servers=%d, curr_dataset.n_servers_when_created=%d", curr_dataset.uri_, curr_dataset.imss_d, curr_dataset.repl_factor, dataset_id, curr_dataset.policy, curr_dataset.n_servers, curr_dataset.n_servers_when_created);
@@ -2831,7 +3053,6 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 	int32_t n_server;
 	// Server containing the corresponding data to be retrieved.
 	if ((n_server = get_data_location(rdir_dest, dataset_id, data_id, GET)) == -1)
-
 		return -1;
 
 	// Servers that the data block is going to be requested to.
@@ -2917,7 +3138,6 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 			// free(result);
 			// return -1;
 		}
-
 		free(result);
 	}
 
@@ -2955,7 +3175,7 @@ int32_t rename_dataset_srv_worker(char *old_dataset_uri, char *new_dataset_uri, 
 	}
 
 	pthread_mutex_lock(&lock_network);
-	char key_[REQUEST_SIZE];
+	char key_[REQUEST_SIZE] = {0};
 
 	// Request the concerned block to the involved servers.
 	for (int32_t i = 0; i < curr_dataset.repl_factor; i++)
@@ -4355,49 +4575,107 @@ int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir)
 {
 	int last_parent_offset = 0;
 	size_t uri_len = strlen(dataset_uri);
-	// for (int j = strlen("imss://"); j < uri_len; ++j)
-	for (int j = uri_len; j > strlen("imss://"); --j)
+
+	if (dataset_uri[uri_len - 1] == '/')
 	{
-		if (dataset_uri[j] == '/')
-		{
-			// mnt/hercules/dir/subdir/ must return the offset to get /mnt/hercules/dir/subdir/
-			// mnt/hercules/dir/subdir/file.txt must return the offset to get /mnt/hercules/dir/subdir/
-			{ // Search for the last directory offset on the path.
-				last_parent_offset = j;
-				// break;
-			}
-		}
+		// To avoid the last slash when the uri contains it.
+		uri_len--;
 	}
 
+	// for (int j = strlen("imss://"); j < uri_len; ++j)
+	// for (int j = uri_len - 1; j > strlen("imss://") - 1; --j)
+
+	// Search for the last directory offset on the path.
+	for (int j = uri_len - 1; j > strlen(IMSS_ROOT) - 1; --j)
+	{
+		// slog_debug("checking if %c is /", dataset_uri[j]);
+		if (dataset_uri[j] == '/')
+		{
+			last_parent_offset = j;
+			break;
+		}
+	}
 	if (last_parent_offset > 0)
 	{
-		last_parent_offset++;
+		// last_parent_offset++;
 		strncpy(last_parent_dir, dataset_uri, last_parent_offset);
 		last_parent_dir[last_parent_offset] = '\0'; // To ensure null-termination.
 	}
 	else
-	{
-		strcpy(last_parent_dir, dataset_uri);
+	{ // the dataset is on the Hercules root.
+		// strcpy(last_parent_dir, dataset_uri);
+		strcpy(last_parent_dir, IMSS_ROOT);
 	}
+	slog_debug("last parent offset=%d, dataset_uri=%s, uri_len=%d, last parent dir=%s", last_parent_offset, dataset_uri, uri_len, last_parent_dir);
 	return last_parent_offset;
 }
 
-void ConcatLastSlashC(char *pathname)
+/**
+ * @brief C function to concat last slash to "pathname" if it does not have it.
+ * @param pathname char pointer to the string.
+ * @return 0 if "pathname" already contains the last slash, 1 if it was added.
+ */
+int ConcatLastSlashC(char *pathname)
 {
+	int ret = 0;
 	int len = strlen(pathname);
 	if (len > 0 && pathname[len - 1] != '/')
 	{
 		slog_debug("Concating last slash to %s", pathname);
 		strcat((char *)pathname, "/");
+		ret = 1;
 	}
+	return ret;
 }
 
-void ConcatLastSlash(std::string &pathname)
+/**
+ * @brief C function to remove last slash to "pathname" if it have it.
+ * @param pathname char pointer to the string.
+ * @return 0 if "pathname" does not contain the last slash, 1 if it was removed.
+ */
+int RemoveLastSlashC(char *pathname)
 {
+	int ret = 0;
+	int len = strlen(pathname);
+	if (len > 0 && pathname[len - 1] == '/')
+	{
+		slog_debug("Removing last slash from %s", pathname);
+		pathname[len - 1] = '\0';
+		ret = 1;
+	}
+	return ret;
+}
+
+/**
+ * @brief C++ function to concat last slash to "pathname" if it does not have it.
+ * @param pathname string type concat the slash.
+ * @return 0 if "pathname" already contains the last slash, 1 if it was added.
+ */
+int ConcatLastSlash(std::string &pathname)
+{
+	int ret = 0;
 	if (!pathname.empty() && pathname.back() != '/')
 	{
 		pathname += '/';
+		ret = 1;
 	}
+	return ret;
+}
+
+/**
+ * @brief C++ function to remove last slash to "pathname" if it have it.
+ * @param pathname string type pointer to the string.
+ * @return 0 if "pathname" does not contain the last slash, 1 if it was removed.
+ */
+int RemoveLastSlash(std::string &pathname)
+{
+	int ret = 0;
+	if (!pathname.empty() && pathname.back() == '/')
+	{
+		pathname.pop_back();
+		ret = 1;
+	}
+	return ret;
 }
 
 // Method specifying the type (DATASET or IMSS INSTANCE) of a provided URI.
@@ -4410,15 +4688,15 @@ char get_type(const char *uri)
 	char ret_data_type = TYPE_ERROR;
 	int32_t recv_msg_len = 0;
 
-	// In case of multiple metadata servers, we use the first parent directory as name to 
-	// locate the block. 
+	// In case of multiple metadata servers, we use the first parent directory as name to
+	// locate the block.
 	find_first_parent_dir(uri, first_parent_dir);
-	int is_root_path = 0;// = 
-	if (!strncmp(uri,"imss://",strlen(uri)))
+	int is_root_path = 0; // =
+	if (!strncmp(uri, "imss://", strlen(uri)))
 	{
 		is_root_path = 1;
 	}
-	
+
 	slog_debug("uri=%s, first_parent_dir=%s, not_root=%d", uri, first_parent_dir, is_root_path);
 
 	// Discover the metadata server that handles the entity.

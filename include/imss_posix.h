@@ -1,7 +1,8 @@
 #ifndef IMSS_POSIX_H
 #define IMSS_POSIX_H
 
-#include "map.hpp"
+// #include "map.hpp"
+#include "hierarchical_map.hpp"
 #include "mapfd.hpp"
 #include "cfg_parse.h"
 #include "flags.h"

@@ -55,7 +55,7 @@ char att_imss_uri[URI_];
 
 static long iov_cnt = 1;
 
-pthread_mutex_t tree_mut = PTHREAD_MUTEX_INITIALIZER;
+// pthread_mutex_t tree_mut = PTHREAD_MUTEX_INITIALIZER;
 
 ucp_worker_h *ucp_worker_threads;
 ucp_address_t **local_addr;
@@ -312,10 +312,10 @@ void *hercules_ucx_server(void *th_argv)
 		switch (arguments->args.type)
 		{
 		case TYPE_DATA_SERVER:
-			TIMING_NO_RETURN(srv_worker_helper(arguments, req, map_server_eps), "srv_worker_helper %d", arguments->thread_id);
+			TIMING_NO_RETURN(srv_worker_helper(arguments, req, map_server_eps), ("srv_worker_helper %s", req), arguments->thread_id);
 			break;
 		case TYPE_METADATA_SERVER:
-			TIMING_NO_RETURN(stat_worker_helper(arguments, req, map_server_eps), "stat_worker_helper %d", arguments->thread_id);
+			TIMING_NO_RETURN(stat_worker_helper(arguments, req, map_server_eps), ("stat_worker_helper %s", req), arguments->thread_id);
 			break;
 		default:
 			fprintf(stderr, "HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args.type);
@@ -416,6 +416,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	}
 
 	slog_debug(" Request - mode '%s', block_size_recv '%" PRIu32 "', block_offset '%" PRIu32 "', uri_ '%s', more %ld", mode, block_size_recv, block_offset, uri_, more);
+
+	// REMOVE LAST SLASH OF THE URI.
 
 	// Create an std::string in order to be managed by the map structure.
 	std::string key;
@@ -524,16 +526,16 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			slog_debug("Cleaning %s", key.c_str());
 			const char *response_msg = NULL;
 			ret = map->cleaning_specific(key);
-			if (ret == -1)
-			{
-				size_t len = strlen(key.c_str());
-				if (len > 0 && key.c_str()[len - 1] != '/')
-				{
-					key += '/';
-					// std::unique_lock<std::mutex> unlock(*mut);
-					ret = map->cleaning_specific(key);
-				}
-			}
+			// if (ret == -1)
+			// {
+			// 	size_t len = strlen(key.c_str());
+			// 	if (len > 0 && key.c_str()[len - 1] != '/')
+			// 	{
+			// 		key += '/';
+			// 		// std::unique_lock<std::mutex> unlock(*mut);
+			// 		ret = map->cleaning_specific(key);
+			// 	}
+			// }
 			if (ret == -1)
 			{
 				fprintf(stderr, "HERCULES_ERR_CLEANING_DATASET: %s\n", key.c_str());
@@ -1703,8 +1705,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	// Create an std::string in order to be managed by the map structure.
 	std::string key;
+	std::string key_for_tree;
 	key.assign((const char *)uri_);
+	key_for_tree.assign((const char *)uri_);
 
+	// On the tree structure, we preserve the received key.
+	// For the map strcuture, we normalice the key (removing the last slash if exists)
+	// this allows to remove an extra "find" operation (with and without the last slash).
+	// So, we are assuming that imsss://dir/mydir/ == imsss://dir/mydir and imsss://dir/mydir/myfile == imsss://dir/mydir/myfile/
+	RemoveLastSlash(key);
 	// Information associated to the arriving key.
 	void *address_ = NULL;
 	uint64_t block_size_rtvd = 0;
@@ -1723,23 +1732,27 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			char *buffer = NULL;
 			int32_t numelems_indir = -1;
 			// Retrieve all elements inside the requested directory.
-			pthread_mutex_lock(&tree_mut);
-			slog_info("Calling GTree_getdir, key=%s", key.c_str());
-			buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
-			pthread_mutex_unlock(&tree_mut);
-			if (numelems_indir == -1)
-			{
-				// Add an extra slash to check if it a directory.
-				if (!key.empty() && key.back() != '/')
-				{
-					key += '/';
+			// pthread_mutex_lock(&tree_mut);
 
-					pthread_mutex_lock(&tree_mut);
-					buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
-					pthread_mutex_unlock(&tree_mut);
-				}
-			}
-			slog_info("[workers] Ending GTree_getdir, key=%s, numelems_indir=%d", key.c_str(), numelems_indir);
+			// directories always must to have the last slash.
+			ConcatLastSlash(key_for_tree);
+
+			slog_info("Calling GTree_getdir, key=%s", key_for_tree.c_str());
+			buffer = GTree_getdir((char *)key_for_tree.c_str(), &numelems_indir);
+			// pthread_mutex_unlock(&tree_mut);
+			// if (numelems_indir == -1)
+			// {
+			// 	// Add an extra slash to check if it a directory.
+			// 	if (!key.empty() && key.back() != '/')
+			// 	{
+			// 		key += '/';
+
+			// 		// pthread_mutex_lock(&tree_mut);
+			// 		buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
+			// 		// pthread_mutex_unlock(&tree_mut);
+			// 	}
+			// }
+			slog_info("[workers] Ending GTree_getdir, key=%s, numelems_indir=%d", key_for_tree.c_str(), numelems_indir);
 
 			if (numelems_indir == -1)
 			{ // error case.
@@ -1829,7 +1842,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// Send the requested block.
 					dataset = (dataset_info *)address_;
 					// TODO: check why dataset->n_open is 21893 for imss://
-					slog_debug("Before dataset->n_open=%d, dataset uri=%s", dataset->n_open, dataset->uri_);
+					slog_debug("Before dataset->n_open=%d, dataset uri=%s, operation=%d", dataset->n_open, dataset->uri_, operation);
 					// Checks if the clients wants to open the file.
 					switch (operation)
 					{
@@ -1848,7 +1861,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					m.size = block_size_rtvd;
 					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
 				}
-
 
 				if (err < 0)
 				{
@@ -1875,16 +1887,16 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			slog_debug("DELETE_OP");
 			int err = map->get(key, &address_, &block_size_rtvd);
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
-			if (err == 0)
-			{
-				// const char *last = key.c_str() + strlen(key.c_str()) - 1;
-				// if (last[0] != '/')
-				if (!key.empty() && key.back() != '/')
-				{
-					key += '/';
-					err = map->get(key, &address_, &block_size_rtvd);
-				}
-			}
+			// if (err == 0)
+			// {
+			// 	// const char *last = key.c_str() + strlen(key.c_str()) - 1;
+			// 	// if (last[0] != '/')
+			// 	if (!key.empty() && key.back() != '/')
+			// 	{
+			// 		key += '/';
+			// 		err = map->get(key, &address_, &block_size_rtvd);
+			// 	}
+			// }
 
 			if (err == 0)
 			{
@@ -1920,9 +1932,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{
 					// TODO: before delete, it's better to check if the file is on the structures.
 					ret_map = map->delete_metadata_stat_worker(key);
-					pthread_mutex_lock(&tree_mut);
-					ret_tree = GTree_delete((char *)key.c_str());
-					pthread_mutex_unlock(&tree_mut);
+					// pthread_mutex_lock(&tree_mut);
+					ret_tree = GTree_delete(key_for_tree);
+					// pthread_mutex_unlock(&tree_mut);
 					slog_debug("delete_metadata_stat_worker=%d, GTree_delete=%d", ret_map, ret_tree);
 				}
 				pthread_mutex_unlock(&memory_protect);
@@ -1961,14 +1973,25 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		case RENAME_OP:
 		{
 			int ret = -1;
-			std::size_t found = key.find(',');
+			std::size_t found = key_for_tree.find(',');
 			if (found != std::string::npos)
 			{
-				std::string old_key = key.substr(0, found);
-				// std::string new_key = key.substr(found + 1, key.length());
-				std::string new_key = key.substr(found + 1);
+				// Keys for the tree.
+				std::string old_key_tree = key_for_tree.substr(0, found);
+				std::string new_key_tree = key_for_tree.substr(found + 1);
 
-				slog_debug("[RENAME] old_key=%s, new_key=%s\n", old_key.c_str(), new_key.c_str());
+				// Keys for the map.
+				std::string old_key;
+				std::string new_key;
+				// old_key.copy(old_key_tree.c_str());
+				// new_key.copy(new_key_tree.c_str());
+				old_key = old_key_tree;
+				new_key = new_key_tree;
+				// Checks and removes the last slash for the keys to be used on the map.
+				RemoveLastSlash(old_key);
+				RemoveLastSlash(new_key);
+
+				slog_debug("[RENAME] old_key=%s, new_key=%s, old_key_tree=%s, new_key_tree=%s", old_key.c_str(), new_key.c_str(), old_key_tree.c_str(), new_key_tree.c_str());
 
 				// RENAME MAP
 				ret = map->rename_metadata_stat_worker(old_key, new_key);
@@ -1977,9 +2000,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// RENAME TREE
 				if (ret != -1)
 				{
-					pthread_mutex_lock(&tree_mut);
-					ret = GTree_rename((char *)old_key.c_str(), (char *)new_key.c_str());
-					pthread_mutex_unlock(&tree_mut);
+					// pthread_mutex_lock(&tree_mut);
+					ret = GTree_rename((char *)old_key_tree.c_str(), (char *)new_key_tree.c_str());
+					// pthread_mutex_unlock(&tree_mut);
 					slog_debug("[RENAME] GTree_rename=%d", ret);
 				}
 			}
@@ -2008,26 +2031,35 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		case RENAME_DIR_DIR_OP:
 		{
 			int ret = -1;
-			std::size_t found = key.find(',');
+			std::size_t found = key_for_tree.find(',');
 			if (found != std::string::npos)
 			{
-				std::string old_dir = key.substr(0, found);
-				std::string rdir_dest = key.substr(found + 1);
+				std::string old_key_tree = key_for_tree.substr(0, found);
+				std::string new_key_tree = key_for_tree.substr(found + 1);
+				
+				
+				// Keys for the map.
+				std::string old_key;
+				std::string new_key;
+				old_key = old_key_tree;
+				new_key = new_key_tree;
+				// Checks and removes the last slash for the keys to be used on the map.
+				RemoveLastSlash(old_key);
+				RemoveLastSlash(new_key);
 
-				slog_debug("[RENAME_DIR_DIR_OP] old_key=%s, new_key=%s\n", old_dir.c_str(), rdir_dest.c_str());
-
+				slog_debug("[RENAME_DIR_DIR_OP] old_key=%s, new_key=%s, old_key_tree=%s, new_key_tree=%s\n", old_key.c_str(), new_key.c_str(), old_key_tree.c_str(), new_key_tree.c_str());
 				// RENAME MAP
-				ret = map->rename_metadata_dir_stat_worker(old_dir, rdir_dest);
+				ret = map->rename_metadata_dir_stat_worker(old_key, new_key);
 
 				// RENAME TREE
 				if (ret == 0)
 				{
-					pthread_mutex_lock(&tree_mut);
-					ret = GTree_rename_dir_dir((char *)old_dir.c_str(), (char *)rdir_dest.c_str());
-					pthread_mutex_unlock(&tree_mut);
+					// pthread_mutex_lock(&tree_mut);
+					ret = GTree_rename_dir_dir((char *)old_key_tree.c_str(), (char *)new_key_tree.c_str());
+					// pthread_mutex_unlock(&tree_mut);
 				}
 
-				slog_debug("old_dir=%s, rdir_dest=%s, ret=%d", old_dir.c_str(), rdir_dest.c_str(), ret);
+				slog_debug("old_dir=%s, dir_dest=%s, ret=%d", old_key_tree.c_str(), new_key_tree.c_str(), ret);
 			}
 			else
 			{
@@ -2093,12 +2125,19 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				if (!strncmp(dataset->status, "dest", strlen("dest")) && dataset->n_open == 0)
 				{
 					slog_debug("Deleting %s", key.c_str());
-					int32_t result = map->delete_metadata_stat_worker(key);
-					slog_debug("[READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result);
-					pthread_mutex_lock(&tree_mut);
-					GTree_delete((char *)key.c_str());
-					pthread_mutex_unlock(&tree_mut);
-					response_msg = MSG_DELETE_OP;
+					int32_t result_map = map->delete_metadata_stat_worker(key);
+					slog_debug("[READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result_map);
+					// pthread_mutex_lock(&tree_mut);
+					int32_t result_tree = GTree_delete(key_for_tree);
+					slog_debug("result map=%d, result_tree=%d", result_map, result_tree);
+					if (result_tree != 1 && result_map > 0)
+					{
+						response_msg = MSG_DELETE_OP;
+					}
+					else
+					{
+						response_msg = MSG_ERROR_OP;
+					}
 				}
 				else
 				{
@@ -2123,15 +2162,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			slog_debug("OPEN_OP");
 			int err = map->get(key, &address_, &block_size_rtvd);
-			if (err == 0)
-			{
-				if (!key.empty() && key.back() != '/')
-				{
-					//  Adds an extra slash to check if it is a directory.
-					key += '/';
-					err = map->get(key, &address_, &block_size_rtvd);
-				}
-			}
+			// if (err == 0)
+			// {
+			// 	if (!key.empty() && key.back() != '/')
+			// 	{
+			// 		//  Adds an extra slash to check if it is a directory.
+			// 		key += '/';
+			// 		err = map->get(key, &address_, &block_size_rtvd);
+			// 	}
+			// }
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
@@ -2174,11 +2213,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// Write operations.
 	case SET_OP:
 	{
-		slog_debug("[SET_OP] Creating dataset %s.", key.c_str());
+		slog_debug("[SET_OP] Creating dataset %s", key.c_str());
 		// TO CHECK: this mutex can be removed cause' map->get has another mutex.
 		// pthread_mutex_lock(&memory_protect);
 		// If the record was not already stored, add the block.
-		if (!map->get(key, &address_, &block_size_rtvd))
+		if (!TIMING(map->get(key, &address_, &block_size_rtvd), "map->get", int32_t, arguments->thread_id))
 		{
 			// pthread_mutex_unlock(&memory_protect);
 			slog_debug("Recv dynamic buffer size %ld", block_size_recv);
@@ -2186,7 +2225,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			size_t length = 0;
 			int32_t ret = -1;
 			// pthread_mutex_lock(&lock_network);
-			length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+			length = TIMING(get_recv_data_length(arguments->ucp_worker, arguments->worker_uid), "get_recv_data_length", size_t, arguments->thread_id);
 			if (length == 0)
 			{
 				perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
@@ -2196,22 +2235,32 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				return -1;
 			}
 			// Receive the block into the buffer.
-			void *buffer = (void *)malloc(length * sizeof(char));
+
+			void *buffer = NULL;
+			// try to reutilizate memory from the memory pool.
+			if (TIMING(StsQueue.size(mem_pool), "mem_pool size", int, arguments->thread_id) > 0)
+			{
+				buffer = (void *)TIMING(StsQueue.pop(mem_pool), "mem_pool pop", void *, arguments->thread_id);
+			}
+			if (buffer == NULL)
+			{
+				// if there are not free block on the memory pool, then perform dynamic alloc.
+				buffer = (void *)TIMING(malloc(length * sizeof(char)), "malloc buffer", void *, arguments->thread_id);
+			}
+
 			if (buffer == NULL)
 			{
 				perror("HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC");
 				slog_error("HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC");
-				// pthread_mutex_unlock(&memory_protect);
-				// pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
 			if (operation == IMSS_INFO)
 			{
-				ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, IMSS_INFO, arguments->worker_uid, length);
+				ret = TIMING(recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, IMSS_INFO, arguments->worker_uid, length), "recv_dynamic_stream IMSS_INFO", int32_t, arguments->thread_id);
 			}
 			else
 			{
-				ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, DATASET_INFO, arguments->worker_uid, length);
+				ret = TIMING(recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, DATASET_INFO, arguments->worker_uid, length), "recv_dynamic_stream DATASET_INFO", int32_t, arguments->thread_id);
 				// dataset_info *struct_ = (dataset_info *)buffer;
 				slog_debug("END Recv dynamic, n_server_when_created=%d", ((dataset_info *)buffer)->n_servers_when_created);
 			}
@@ -2228,7 +2277,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 
 			int32_t insert_successful = -1;
-			insert_successful = map->put(key, buffer, length);
+			insert_successful = TIMING(map->put(key, buffer, length), "map->put", int32_t, arguments->thread_id);
 			slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);
 
 			if (insert_successful != 0)
@@ -2241,10 +2290,10 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 
 			// Insert the received uri into the directory tree.
-			pthread_mutex_lock(&tree_mut);
+			// pthread_mutex_lock(&tree_mut);
 			// slog_debug("Inserting %s into directory tree", key.c_str());
-			insert_successful = GTree_insert((char *)key.c_str());
-			pthread_mutex_unlock(&tree_mut);
+			insert_successful = TIMING(GTree_insert((char *)key_for_tree.c_str()), "*GTree_insert", int32_t, arguments->thread_id);
+			// pthread_mutex_unlock(&tree_mut);
 			slog_debug("insert_successful=%d", insert_successful);
 			if (insert_successful == -1)
 			{
@@ -2256,7 +2305,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 
 			// Update the pointer.
-			arguments->pt += block_size_recv;
+			// arguments->pt += block_size_recv;
 			slog_debug("Dataset %s has been created.", key.c_str());
 		}
 		// If was already stored:
@@ -2310,7 +2359,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// Positions to be updated.
 				uint32_t *update_positions = (uint32_t *)data_ref;
 
-				pthread_mutex_lock(&memory_protect);
+				// pthread_mutex_lock(&memory_protect);
 				// Set of positions that are going to be updated (those are just under the concerned dataset but not pointed by it).
 				uint16_t *data_locations = (uint16_t *)((char *)address_ + sizeof(dataset_info));
 
@@ -2424,7 +2473,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						// pthread_mutex_unlock(&lock_network);
 						return -1;
 					}
-					// Clear the corresponding memory region.
+
 					void *buffer = (void *)malloc(block_size_recv);
 					if (buffer == NULL)
 					{
@@ -2462,7 +2511,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		break;
 	}
 
-	slog_debug(" Terminated meta helper\n");
+	slog_debug(" Terminated meta helper");
 
 	return 0;
 }
@@ -2789,7 +2838,10 @@ void *dispatcher(void *th_argv)
 	pthread_exit(NULL);
 }
 
-// Thread method attending client read-write data requests.
+/**
+ * @deprecated
+ * @brief Thread method attending client read-write data requests.
+ * */
 void *srv_worker(void *th_argv)
 {
 
@@ -2933,7 +2985,10 @@ void *srv_worker(void *th_argv)
 	}
 }
 
-// Thread method attending client read-write metadata requests.
+/**
+ * @deprecated
+ * @brief Thread method attending client read-write metadata requests. *
+ * */
 void *stat_worker(void *th_argv)
 {
 

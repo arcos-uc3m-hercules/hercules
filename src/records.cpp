@@ -245,22 +245,22 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	if (it == buffer.end())
 	{
 		slog_debug("%s not found in the map", key.c_str());
-		// size_t len = strlen(key.c_str());
-		// if (len > 0 && key.c_str()[len - 1] != '/')
-		if (!key.empty() && key.back() != '/')
-		{ // check if the key does not have the last slash (e.g., directory case).
-			key += '/';
-			it = buffer.find(key);
-		}
-		if (it == buffer.end())
-		{
-			slog_debug("%s not found in the map", key.c_str());
-			// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
-			// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
-			return 0;
-		}
+		// if (!key.empty() && key.back() != '/')
+		// { // check if the key does not have the last slash (e.g., directory case).
+		// 	key += '/';
+		// 	it = buffer.find(key);
+		// 	if (it == buffer.end())
+		// 	{
+		// 		slog_debug("%s not found in the map", key.c_str());
+		// 		// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
+		// 		// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
+		// 		return 0;
+		// 	}
+		// } else {
+		return 0;
+		// }
 	}
-	slog_debug("%s found in the map", key.c_str());
+	slog_debug("%s found in the map as %s", key.c_str(), it->first.c_str());
 
 	// fprintf(stderr,"GET-%s \n", key.c_str());
 	// fprintf(stderr,"Nodename    - %s	GET-%s \n", detect.nodename, key.c_str());
@@ -388,6 +388,10 @@ int32_t map_records::update_simple(std::string key, int value)
 	return 1;
 }
 
+/**
+ * @brief Method deleting a record from the map.
+ * @return Number of elements deleted.
+ * */
 int32_t map_records::delete_metadata_stat_worker(std::string key)
 {
 	// TO CHECK: is the memory being free?
@@ -407,20 +411,21 @@ int32_t map_records::delete_metadata_stat_worker(std::string key)
 	free(it->second.first);
 
 	// erase the element from the map.
-	int num_elements_erased = buffer.erase(key);
-	if (num_elements_erased == 0)
-	{
-		// const char *last = key.c_str() + strlen(key.c_str()) - 1;
-		// if (last[0] != '/')
-		size_t len = strlen(key.c_str());
-		if (len > 0 && key.c_str()[len - 1] != '/')
-		{
-			key += '/';
-			num_elements_erased = delete_metadata_stat_worker(key);
-		}
-	}
+	// int num_elements_erased =
+	// if (num_elements_erased == 0)
+	// {
+	// 	// const char *last = key.c_str() + strlen(key.c_str()) - 1;
+	// 	// if (last[0] != '/')
+	// 	size_t len = strlen(key.c_str());
+	// 	if (len > 0 && key.c_str()[len - 1] != '/')
+	// 	{
+	// 		key += '/';
+	// 		num_elements_erased = delete_metadata_stat_worker(key);
+	// 	}
+	// }
 
-	return num_elements_erased;
+	return buffer.erase(key);
+	;
 }
 
 /***
@@ -521,12 +526,27 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 	// struct utsname detect;
 	// uname(&detect);
 
+	size_t len_old_dir = old_dir.length();
+	size_t len_curr_key = 0;
 	for (const auto &it : buffer)
 	{
 		string key = it.first;
 		int found = key.find(old_dir);
+
 		if (found != std::string::npos)
 		{
+			len_curr_key = key.length();
+			slog_debug("len_old_dir=%lu, len_curr_key=%lu, old_dir %s found in %s", len_old_dir, len_curr_key, old_dir.c_str(), key.c_str());
+
+			if (len_old_dir < len_curr_key)
+			{
+				if (key[len_old_dir] != '/' && key[len_old_dir] != '$')
+				{
+					slog_debug("Skipping %s", key.c_str());
+					continue;
+				}
+			}
+
 			vec.insert(vec.begin(), key);
 
 			key.erase(0, old_dir.length());
@@ -573,12 +593,31 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
 
+	size_t len_old_dir = old_dir.length();
 	for (const auto &it : buffer)
 	{
 		string key = it.first;
 		int found = key.find(old_dir);
 		if (found != std::string::npos)
 		{
+			size_t len_curr_key = key.length();
+			slog_debug("len_old_dir=%lu, len_curr_key=%lu, old_dir %s found in %s", len_old_dir, len_curr_key, old_dir.c_str(), key.c_str());
+
+			if (len_old_dir < len_curr_key)
+			{
+				if (key[len_old_dir] != '/')
+				{
+					slog_debug("Skipping %s", key.c_str());
+					continue;
+				}
+			}
+			// if(found < len_curr_key ) {
+			//	if (key.c_str()[found] != '/')
+			//	{
+			//		continue;
+			//	}
+			// }
+
 			vec.insert(vec.begin(), key);
 
 			key.erase(0, old_dir.length());
@@ -589,7 +628,7 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 				new_path.append(key);
 
 			imss_info_ *data = (imss_info_ *)it.second.first;
-			slog_debug("Renaming data uri from %s to %s", data->uri_,  new_path.c_str());
+			slog_debug("Renaming data uri from %s to %s", data->uri_, new_path.c_str());
 			strncpy(data->uri_, new_path.c_str(), URI_);
 		}
 	}

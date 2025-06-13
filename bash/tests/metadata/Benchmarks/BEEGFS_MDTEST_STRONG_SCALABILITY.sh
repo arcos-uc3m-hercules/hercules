@@ -3,8 +3,8 @@
 SCRIPT_NAME="mdtest_beegfs_slurm.sh"
 TOTAL_NUMBER_OF_FILES=10000
 
-NODES_FOR_CLIENTS_RANGE=( 1 2 4 8 16 )
-#NODES_FOR_CLIENTS_RANGE=( 16 )
+#NODES_FOR_CLIENTS_RANGE=( 1 2 4 8 16 )
+NODES_FOR_CLIENTS_RANGE=( 16 )
 CLIENTS_PER_NODE_RANGE=( 16 )
 TEST_TYPE="strong"
 
@@ -18,8 +18,6 @@ for NODES_FOR_CLIENTS in "${NODES_FOR_CLIENTS_RANGE[@]}"
 do
 	for PROCESS_PER_NODE in "${CLIENTS_PER_NODE_RANGE[@]}"
 	do
-		for BLOCK_SIZE in "${BLOCK_SIZE_RANGE[@]}"
-		do
 			## Calculates the number of nodes to be allocated.
 			NUMBER_OF_NODES=$((NODES_FOR_CLIENTS))
 			## Calculates the total number of process to be launched.
@@ -44,7 +42,6 @@ do
 				echo $jid
 			# fi
 			set +x
-		done
 	done
 done	 
 done

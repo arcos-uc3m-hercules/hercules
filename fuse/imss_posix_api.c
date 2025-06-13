@@ -9,7 +9,8 @@ gcc -Wall imss.c `pkg-config fuse --cflags --libs` -o imss
  */
 
 #define FUSE_USE_VERSION 26
-#include "map.hpp"
+// #include "map.hpp"
+#include "hierarchical_map.hpp"
 #include "mapprefetch.hpp"
 #include "hercules.hpp"
 #include "imss_posix_api.h"
@@ -43,8 +44,9 @@ extern int32_t N_BLKS;
 extern char POLICY[MAX_POLICY_LEN];
 extern uint64_t IMSS_BLKSIZE;
 extern uint64_t IMSS_DATA_BSIZE;
-extern void *map;
+// extern void *map;
 extern void *map_prefetch;
+extern void *hierarchical_map;
 
 extern uint16_t PREFETCH;
 extern uint16_t threshold_read_servers;
@@ -182,43 +184,15 @@ extern "C"
 	 */
 	void fd_lookup(char *path, int *fd, struct stat *s, char **aux)
 	{
-		// pthread_mutex_lock(&lock_file);
 		*fd = -1;
 		// Seek for the fd on the map.
-		int found = map_search(map, path, fd, s, aux);
-		// pthread_mutex_unlock(&lock_file);
+		// int found = map_search(map, path, fd, s, aux);
+		int found = HierarchicalMapSearch(hierarchical_map, path, fd, s, aux);
 
 		if (found == -1)
 		{
-			// if the file was not find with the current name,
-			// try again adding an extra slash if they does not have it.
+			// the file was not find.
 			slog_warn("file not found on the local map, %s", path);
-			char aux_path[MAX_PATH] = {0};
-			size_t len = strlen(path);
-			if (len > 0 && path[len - 1] != '/')
-			{
-				strcpy(aux_path, path);
-				strcat(aux_path, "/");
-				found = map_search(map, aux_path, fd, s, aux);
-			}
-			else
-			{
-				strncpy(aux_path, path, strlen(path) - 1);
-				found = map_search(map, aux_path, fd, s, aux);
-			}
-
-			if (found == -1)
-			{
-				*fd = -1;
-				slog_warn("file not found, %s", aux_path);
-			}
-			else
-			{
-				// if the fd was find with the aux_path, we replace it.
-				// strcat(path, "/");
-				// TODO: change for strncpy.
-				strcpy(path, aux_path);
-			}
 		}
 		if (*fd != -1)
 		{ // print data if the fd exists.
@@ -298,7 +272,7 @@ extern "C"
 
 		// HERE STATS->ST_NLINK RETURNS 0, IT MUST BE 1.
 		slog_debug("ret=%d, ds=%d, st_size=%ld, stats->st_nlink=%lu, old_stats.st_nlink=%lu", ret, ds, stats->st_size, stats->st_nlink, old_stats.st_nlink);
-		map_update(map, imss_path, ds, *stats);
+		HierarchicalMapUpdate(hierarchical_map, imss_path, ds, *stats);
 
 		return 0;
 	}
@@ -308,7 +282,7 @@ extern "C"
 		if (refs == NULL)
 		{
 			return;
-		}	
+		}
 
 		// slog_debug("Freeing memory of %d entries", n_ent);
 		if (*refs != NULL)
@@ -346,7 +320,7 @@ extern "C"
 		struct timespec spec;
 		memset(stbuf, 0, sizeof(struct stat));
 		clock_gettime(CLOCK_REALTIME, &spec);
-
+		// TODO: check if this fields are not overwritten in the line.
 		stbuf->st_atim = spec;
 		stbuf->st_mtim = spec;
 		stbuf->st_ctim = spec;
@@ -355,7 +329,7 @@ extern "C"
 		stbuf->st_blksize = IMSS_DATA_BSIZE; // block size in bytes.
 
 		slog_debug("before get_type, imss_path=%s", imss_path);
-		char type = TIMING(get_type(imss_path), "get type", char, 0);	
+		char type = TIMING(get_type(imss_path), "get type", char, 0);
 		slog_debug("after get_type(%s):%c", imss_path, type);
 
 		int32_t ds = -1;
@@ -377,15 +351,9 @@ extern "C"
 		}
 		case TYPE_DIRECTORY:
 		{
-
-			ConcatLastSlashC((char *)path);
-			// int len = strlen(path);
-			// if (path[len - 1] != '/')
-			// {
-			// 	strcat((char *)path, "/");
-			// }
+			// ConcatLastSlashC((char *)path);
+			break;
 		}
-		break;
 		case TYPE_REGULAR_FILE: // Case file
 		{
 			break;
@@ -417,7 +385,7 @@ extern "C"
 					return -ENOMEM;
 				}
 
-				//  data is filled in "get data".
+				//  "data" is filled in "get data".
 				// get block 0.
 				ret = get_ndata((char *)imss_path, ds, 0, data, 0, 0);
 				if (ret < 0)
@@ -426,10 +394,10 @@ extern "C"
 					return -ENOENT;
 				}
 				memcpy(&stats, data, sizeof(struct stat));
-				// pthread_mutex_lock(&lock_file);
 				slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
 				// Put the file descriptor (ds), stats info and data on the local map.
-				map_put(map, imss_path, ds, stats, (char *)data);
+				// map_put(map, imss_path, ds, stats, (char *)data);
+				HierarchicalMapPut(hierarchical_map, imss_path, ds, stats, (char *)data);
 			}
 			else if (ds == -EEXIST)
 			{ // file aready exists on the remote metadata server.
@@ -454,7 +422,9 @@ extern "C"
 				// pthread_mutex_lock(&lock_file);
 				slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
 				// Put the file descriptor (ds), stats info and data on the local map.
-				map_put(map, imss_path, ds, stats, (char *)data);
+				// map_put(map, imss_path, ds, stats, (char *)data);
+				HierarchicalMapPut(hierarchical_map, imss_path, ds, stats, (char *)data);
+
 				// fprintf(stderr, "[imss_getattr] ds=%d, %s\n", ds, strerror(EEXIST));
 				return 0;
 			}
@@ -520,91 +490,6 @@ extern "C"
 		slog_debug("[IMSS] imss_path=%s, n_ent=%d", imss_path.c_str(), n_ent);
 		// buf = refs;
 		return n_ent;
-
-		// if (n_ent < 0)
-		// {
-		// 	// strcat(imss_path, "/");
-		// 	// slog_debug("[IMSS] imss_path=%s", imss_path);
-		// 	// fprintf(stderr,"try again imss_path=%s\n",imss_path);
-		// 	// n_ent = get_dir((char *)imss_path, &buffer, &refs);
-		// 	// if (n_ent < 0)
-		// 	// {
-		// 	// 	fprintf(stderr, "[IMSS-FUSE]	Error retrieving directories for URI=%s\n", path);
-		// 	return -ENOENT;
-		// 	// }
-		// }
-		// // slog_debug("[IMSS] Before flush data");
-		// // flush_data();
-
-		// // Fill buffer
-		// // TODO: Check if subdirectory
-		// slog_debug("[IMSS] imss_readdir %s has=%" PRIu32, imss_path.c_str(), n_ent);
-		// // reserve memory for the string contaning all the entries.
-		// *buf=(char *)calloc(1, n_ent*URI_*sizeof(char *)+1);
-		// char *aux_pointer = *buf;
-		// uint64_t aux_i = 0;
-		// for (uint32_t i = 0; i < n_ent; ++i)
-		// {
-
-		// 	clock_t t;
-		// 	double time_taken;
-		// 	t = clock();
-		// 	if(i%1000==0){
-		// 		t = clock() - t;
-		// 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
-		// 		// print a message every 1000 files.
-		// 		printf("[%s][%.2f] Reading entry %" PRIu32 " of %" PRIu32 ", please wait, it=%" PRIu64 "\n", imss_path.c_str(), time_taken, i, n_ent, aux_i);
-		// 	}
-		// 	aux_i++;
-		// 	if (i == 0)
-		// 	{
-		// 		// slog_debug("[IMSS]. y ..");
-		// 		filler(aux_pointer, "..", NULL, 0);
-		// 		filler(aux_pointer, ".", NULL, 0);
-		// 	}
-		// 	else
-		// 	{
-		// 		// slog_debug("[IMSS]%s", refs[i]);
-		// 		// the stbuf is not used after here.
-		// 		// struct stat stbuf;
-		// 		// int error = imss_getattr(refs[i] + 6, &stbuf);
-		// 		// if (!error)
-		// 		{
-		// 			// char *last = refs[i] + strlen(refs[i]) - 1;
-		// 			// // slog_info("last=%s of %s", last, refs[i]);
-		// 			// if (last[0] == '/')
-		// 			// {
-		// 			// 	last[0] = '\0';
-		// 			// }
-		// 			// int offset = 0;
-		// 			// for (int j = 0; j < strlen(refs[i]); ++j)
-		// 			// {
-		// 			// 	if (refs[i][j] == '/')
-		// 			// 	{
-		// 			// 		offset = j;
-		// 			// 	}
-		// 			// }
-		// 			// fprintf(stdout, "expected element %s\n", refs[i]+imss_path_len);
-		// 			// filler(buf, refs[i] + offset + 1, &stbuf, 0); // original
-		// 			// slog_full("refs[i] + offset + 1=%s", refs[i] + offset + 1);
-		// 			// fprintf(stdout,"refs[%d]=%s, strlen(refs[i])=%lu, last=%s, refs[i] + offset + 1=%s\n", i, refs[i], strlen(refs[i]), last, refs[i] + offset + 1);
-		// 			// filler(*buf, refs[i] + offset + 1, NULL, 0);
-		// 			// filler(buf, refs[i], NULL, 0);
-		// 			filler(aux_pointer, refs[i]+imss_path_len, NULL, 0);
-		// 		}
-		// 	}
-		// 	if (refs[i] != NULL)
-		// 	{
-		// 		free(refs[i]);
-		// 	}
-		// }
-		// // Free resources
-		// if (refs != NULL)
-		// {
-		// 	free(refs);
-		// }
-		// printf("Ending imss_readdir\n");
-		// return 0;
 	}
 
 	int imss_open(const char *path, uint64_t *fh)
@@ -680,7 +565,8 @@ extern "C"
 			memcpy(&stats, data, sizeof(struct stat));
 			// pthread_mutex_lock(&lock_file);
 			// storing block 0 on the local map.
-			map_put(map, imss_path, file_desc, stats, (char *)data);
+			// map_put(map, imss_path, file_desc, stats, (char *)data);
+			HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data);
 			print_file_type(stats, imss_path);
 			// if (PREFETCH != 0)
 			// {
@@ -1633,7 +1519,7 @@ extern "C"
 			stats.st_size = size + off;
 			stats.st_blocks = curr_blk - 1;
 			slog_debug("[imss_write] Updating stat, st_size=%ld, st_nlink=%lu", stats.st_size, stats.st_nlink);
-			map_update(map, rpath, ds, stats);
+			HierarchicalMapUpdate(hierarchical_map, rpath, ds, stats);
 		}
 		// free(rpath);
 
@@ -1807,7 +1693,7 @@ extern "C"
 		stats.st_size = size + off;
 		stats.st_blocks = end_blk - 1;
 		pthread_mutex_lock(&lock);
-		map_update(map, rpath, ds, stats);
+		HierarchicalMapUpdate(hierarchical_map, rpath, ds, stats);
 		pthread_mutex_unlock(&lock);
 		return size; /////////////
 	}
@@ -2149,7 +2035,7 @@ extern "C"
 		{ // if the file was deleted by the close, we delete registers from the
 			// local tree and local map.
 			clear_dataset(path);
-			map_erase(map, path);
+			HierarchicalMapErase(hierarchical_map, path);
 		}
 
 		// TODO: Tell data server the file is ready to be copied to disk.
@@ -2215,14 +2101,12 @@ extern "C"
 		}
 		pthread_mutex_unlock(&lock); // unlock.
 
-		map_erase(map, rpath);
-		slog_debug("map_erase(map, rpath:%s)", rpath);
-		// if(ret < 1){
-		// 	slog_debug("No elements erased by map_erase, ret:%d", ret);
-		// }
+		HierarchicalMapErase(hierarchical_map, rpath);
+		slog_debug("HierarchicalMapErase(map, rpath:%s)", rpath);
 
 		pthread_mutex_lock(&lock_file); // lock.
-		map_put(map, rpath, *fh, ds_stat, (char *)buff);
+		// map_put(map, rpath, *fh, ds_stat, (char *)buff);
+		HierarchicalMapPut(hierarchical_map, rpath, *fh, ds_stat, (char *)buff);
 		slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath, *fh, ds_stat.st_blksize);
 		// if (PREFETCH != 0)
 		// {
@@ -2314,12 +2198,12 @@ extern "C"
 		else
 		{
 			// If not in the local map, open de dataset.
-			file_desc = open_dataset((char *)imss_path, 1);
+			file_desc = open_dataset((char *)imss_path, 0);
 			if (file_desc < 0)
 			{ // files does not exist.
 				return -ENOENT;
 			}
-			
+
 			// Get initial block (0).
 			char *data = NULL;
 			data = (char *)malloc(IMSS_DATA_BSIZE * sizeof(char));
@@ -2330,7 +2214,8 @@ extern "C"
 				return -ENOMEM;
 			}
 			memcpy(&stats, data, sizeof(struct stat));
-			map_put(map, imss_path, file_desc, stats, (char *)data);
+			// map_put(map, imss_path, file_desc, stats, (char *)data);
+			HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data);
 			buff = data;
 		}
 
@@ -2364,7 +2249,7 @@ extern "C"
 		{
 			// Those operations must be performed by the server itself when it knows no more process are using the file.
 			// Erase metadata in the backend.
-			ret = delete_dataset(imss_path, file_desc);
+			ret = delete_dataset(imss_path, file_desc, S_ISDIR(header.st_mode));
 			slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
 
 			switch (ret)
@@ -2377,7 +2262,7 @@ extern "C"
 			{
 				// ******************************* TO CHECK!
 				pthread_mutex_lock(&lock_file);
-				map_erase(map, imss_path);
+				HierarchicalMapErase(hierarchical_map, imss_path);
 				pthread_mutex_unlock(&lock_file);
 
 				slog_debug("Calling map_release_prefetch %s", path);
@@ -2509,7 +2394,8 @@ extern "C"
 				ret = get_ndata(new_path_1, file_desc, 0, aux, 0, 0);
 				memcpy(&stats, aux, sizeof(struct stat));
 				pthread_mutex_lock(&lock_file);
-				map_put(map, new_path_1, file_desc, stats, aux);
+				// map_put(map, new_path_1, file_desc, stats, aux);
+				HierarchicalMapPut(hierarchical_map, new_path_1, file_desc, stats, aux);
 				// if (PREFETCH != 0)
 				// {
 				// 	char *buff = (char *)malloc(PREFETCH * IMSS_DATA_BSIZE);
@@ -2544,18 +2430,11 @@ extern "C"
 			return res;
 		}
 
-		map_erase(map, rpath2);
-		slog_debug("map_erase(map, rpath:%s), ret:%d", rpath2, ret);
+		HierarchicalMapErase(hierarchical_map, rpath2);
+		slog_debug("HierarchicalMapErase(map, rpath:%s), ret:%d", rpath2, ret);
 		// if(ret < 1){
 		// 	slog_debug("No elements erased by map_erase, ret:%d", ret);
 		// }
-
-		pthread_mutex_lock(&lock_file); // lock.
-		// map_put(map, rpath2, file_desc, ds_stat, aux);
-		// slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat, buff:%s)", rpath, *fh, buff);
-		slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath2, file_desc, ds_stat.st_blksize);
-
-		pthread_mutex_unlock(&lock_file); // unlock.
 		free(rpath1);
 		free(rpath2);
 		return 0;
@@ -3227,7 +3106,7 @@ extern "C"
 		strcat(full_path, name);
 
 		slog_debug("pos=%d, full_path=%s, given_old_path=%s, hercules_path=%s, last_parent_dir=%s\n", pos, full_path, old_path, new_path, last_parent_dir);
-		
+
 		// Check all cases.
 		int op_not_allowed = 0;
 		if (old_is_dir && new_is_dir)
@@ -3236,21 +3115,19 @@ extern "C"
 			// create the new path to the given_old_path file because it will be moved to a directory.
 			slog_debug("Moving Hercules directory %s to directory %s", old_path, new_path);
 
-			ConcatLastSlashC(new_path);
-			// if (!strcmp(given_old_path, full_path))
-			// {
-			// 	ret = -EPERM;
-			// 	return ret;
-			// }
-
-			map_rename_dir_dir(map, old_path, new_path);
+			// ret = map_rename_dir_dir(map, old_path, new_path);
+			ret = HierarchicalMapRenameDirDir(hierarchical_map, old_path, new_path);
+			if (ret == -1)
+			{
+				// perror("HERCULES_ERR_RENAME_DIR_NO_ELEMENTS_FOUND");
+				slog_warn("No elements to rename: %s to %s", old_path, new_path);
+			}
 
 			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
 			rename_dataset_metadata_dir_dir(old_path, new_path);
 
 			// RENAME SRV_WORKER(MAP)
 			rename_dataset_srv_worker_dir_dir(old_path, new_path, -1, 0);
-
 		}
 		else if (old_is_dir && !new_is_dir)
 		{ // old is a directory and new is a regular file: NOT POSSIBLE.
@@ -3262,9 +3139,11 @@ extern "C"
 		{ // old is a regular file and new is a directory.
 		  // copy the old file into the directory.
 			// TODO: check flags.
+			int slash_added = ConcatLastSlashC(new_path);
 			aux_path = old_path;
 			pos = 0;
 			// get the basename of the old regular file.
+			// TODO: change this to "strstr" or something similar to find the last slash.
 			for (int c = 0; c < strlen(aux_path); ++c)
 			{
 				if (aux_path[c] == '/')
@@ -3279,11 +3158,8 @@ extern "C"
 			slog_debug("name=%s, aux_path=%s, strlen(aux_path)=%d, pos=%d", name, aux_path, strlen(aux_path), pos);
 			char destination_path[MAX_PATH] = {0};
 			strncpy(destination_path, new_path, sizeof(destination_path) - strlen(destination_path) - 1);
-			// if (aux_path[strlen(new_path)] != '/')
-			// {
-			// 	strncat(destination_path, "/", sizeof(destination_path) - strlen(destination_path) - 1);
-			// }
-			ConcatLastSlashC(destination_path);
+
+			// ConcatLastSlashC(destination_path);
 			strncat(destination_path, name, sizeof(destination_path) - strlen(destination_path) - 1);
 			slog_debug("Moving Hercules regular file %s into the Hercules directory %s", old_path, destination_path);
 
@@ -3304,9 +3180,16 @@ extern "C"
 				// errno = EEXIST;
 				return ret;
 			}
+
+			// Data server does not need the last slash.
+			if (slash_added)
+				RemoveLastSlashC(new_path);
+
 			// RENAME SRV_WORKER(MAP)
 			rename_dataset_srv_worker(old_path, destination_path, -1, 0);
-			map_rename(map, old_path, destination_path);
+
+			// map_rename(map, old_path, destination_path);
+			HierarchicalMapRename(hierarchical_map, old_path, destination_path);
 		}
 		else if (!old_is_dir && !new_is_dir)
 		{ // old is a regular file and new is a regular file.
@@ -3329,8 +3212,8 @@ extern "C"
 
 			// replace the old name by the new one.
 			// replace_dataset_entry_key(old_path, new_path);
-
-			map_rename(map, old_path, new_path);
+			// map_rename(map, old_path, new_path);
+			HierarchicalMapRename(hierarchical_map, old_path, new_path);
 		}
 
 		if (op_not_allowed)

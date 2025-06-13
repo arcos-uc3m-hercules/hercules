@@ -48,7 +48,10 @@ public:
 	std::string get_head_element();
 	int32_t erase_head_element();
 	// Used in stat_worker threads
-	// Method deleting a record.
+	/**
+	 * @brief Method deleting a record from the map.  
+	 * @return Number of elements deleted.
+	 * */ 
 	int32_t delete_metadata_stat_worker(std::string key);
 
 	// Method storing a new record.

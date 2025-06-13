@@ -25,7 +25,7 @@ int32_t N_BLKS = 1;			// Default 1
 int32_t N_META_SERVERS = 1;
 char *METADATA_FILE = NULL; // Not default
 char *IMSS_HOSTFILE = NULL; // Not default
-char *IMSS_ROOT = NULL;
+extern char *IMSS_ROOT;
 char *META_HOSTFILE = NULL;
 uint64_t STORAGE_SIZE = 16;			 // In GB
 uint64_t META_BUFFSIZE = 16;		 // In GB
@@ -63,7 +63,8 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 // pthread_mutex_t system_lock = PTHREAD_MUTEX_INITIALIZER;
 
 int LD_PRELOAD = 0;
-void *map;
+// void *map = NULL;
+void *hierarchical_map = NULL;
 void *map_prefetch;
 char *MOUNT_POINT;
 size_t MOUNT_POINT_LEN = 0;
@@ -391,6 +392,13 @@ extern "C"
 		// strcat(new_path, "imss://");
 		strncpy(new_path, "imss://", PATH_MAX);
 
+		size_t len_path = strlen(path);
+		if (path[len_path - 1] == '/')
+		{
+			// deletes the last slash.
+			path[len_path - 1] = '\0';
+		}
+
 		// add the path to the new_path, which has the URL prefix.
 		if (desplacements < len)
 		{
@@ -412,7 +420,7 @@ extern "C"
 		map_fd = map_fd_create();
 
 		// Getting a mostly unique id for the distributed deployment.
-		char hostname_[512], hostname[1024];
+		char hostname_[512] = {0}, hostname[1024] = {0};
 		int ret = gethostname(&hostname_[0], 512);
 		if (ret == -1)
 		{
@@ -532,7 +540,19 @@ extern "C"
 		// }
 
 		// map_prefetch = map_create_prefetch();
-		map = map_create();
+
+		// Map used to store "stats" of the datasets.
+		// stats_map = map_create();
+		// void *root_stat_map = map_create();
+		// Hierarchical map used to store the "stats" maps.
+		// std::string root_;
+		// root_.assign(IMSS_ROOT);
+		hierarchical_map = HierarchicalMapCreate(std::string(IMSS_ROOT));
+		// Store the Hercules root.
+		// hierarchical_map[IMSS_ROOT] = (Map *)root_stat_map;
+		// struct stat fakestat;
+		// hierarchical_map_put(hierarchical_map, IMSS_ROOT, 0, fakestat, NULL);
+
 		if (MULTIPLE_READ == 1)
 		{
 			int ret;
@@ -578,8 +598,10 @@ extern "C"
 		// free_prefetch(map_prefetch);
 		imss_comm_cleanup();
 		//   t_s = clock() - t_s;
-		map_free(map);
-		map_destroy(map);
+		// map_free(map);
+		HierarchicalMapFree(hierarchical_map);
+		// map_destroy(map);
+		HierarchicalMapDestroy(hierarchical_map);
 		//   time_taken = ((double)t_s) / (CLOCKS_PER_SEC);
 		// fprintf(stderr, "End 'run_me_last', pid=%d, release=%d\n", g_pid, release);
 		slog_live("End 'run_me_last', pid=%d", g_pid);
@@ -2410,8 +2432,7 @@ extern "C"
 					return ret;
 				}
 				stats.st_size = 0;
-				// stats.st_blocks = 0;
-				map_update(map, new_path, ret, stats);
+				HierarchicalMapUpdate(hierarchical_map, new_path, ret, stats);
 			}
 		}
 		// pthread_mutex_unlock(&system_lock);
@@ -2625,13 +2646,11 @@ extern "C"
 		char *new_path = checkHerculesPath(path);
 		if (new_path != NULL)
 		{
-			// char *last = new_path + strlen(new_path) - 1;
-			// if (last[0] != '/')
-			size_t len = strlen(new_path);
-			if (len > 0 && new_path[len - 1] != '/')
-			{
-				strcat(new_path, "/");
-			}
+			// size_t len = strlen(new_path);
+			// if (len > 0 && new_path[len - 1] != '/')
+			// {
+			// 	strcat(new_path, "/");
+			// }
 			slog_live("[POSIX]. Calling Hercules 'mkdir', path=%s, new_path=%s", path, new_path);
 
 			// char *new_path;
@@ -3362,82 +3381,6 @@ extern "C"
 				}
 			}
 
-			// char type = get_type(new_path);
-			// switch (type)
-			// {
-			// case TYPE_DIRECTORY:
-			// case TYPE_HERCULES_INSTANCE: // Directory case?
-			// {
-			// 	char *last = new_path + strlen(new_path) - 1;
-			// 	size_t len = strlen(new_path);
-			// 	if (len > 0 && new_path[len - 1] != '/')
-			// 	{
-			// 		strcat(new_path, "/");
-			// 	}
-			// 	ret = imss_rmdir(new_path);
-			// 	break;
-			// }
-			// case TYPE_REGULAR_FILE: // is regular file.
-			// {
-			// 	ret = imss_unlink(new_path);
-			// 	break;
-			// }
-			// default:
-			// {
-			// 	slog_error("HERCULES_ERR_NOT_SUPPORTED_TYPE");
-			// 	perror("HERCULES_ERR_NOT_SUPPORTED_TYPE");
-			// 	ret = -1;
-			// 	break;
-			// }
-			// }
-
-			// if (ret == 3)
-			// {
-			// 	int ret_map = map_fd_erase_by_pathname(map_fd, new_path);
-			// 	if (ret_map == -1)
-			// 	{
-			// 		slog_error("[POSIX]. Error Hercules no file descriptor found for the pathname=%s", new_path);
-			// 	}
-			// }
-			// if(ret != -1)
-			// 	ret = 0;
-
-			// if (type == '0')
-			// {
-			// 	// char *last = new_path + strlen(new_path) - 1;
-			// 	// if (last[0] != '/')
-			// 	size_t len = strlen(new_path);
-			// 	if (len > 0 && new_path[len - 1] != '/')
-			// 	{
-			// 		strcat(new_path, "/");
-			// 	}
-			// 	type = get_type(new_path);
-			// 	slog_live("[POSIX] type=%d, new_path=%s", type, new_path);
-			// 	if (type == 2)
-			// 	{
-			// 		ret = imss_rmdir(new_path);
-			// 	}
-
-			// 	if (type != 0)
-			// 	{
-			// 		ret = imss_unlink(new_path);
-			// 	}
-			// }
-			// else
-			// {
-			// 	slog_live("[POSIX] type=%d, new_path=%s", type, new_path);
-			// 	ret = imss_unlink(new_path);
-			// 	if (ret == 3)
-			// 	{
-			// 		int ret_map = map_fd_erase_by_pathname(map_fd, new_path);
-			// 		if (ret_map == -1)
-			// 		{
-			// 			slog_error("[POSIX]. Error Hercules no file descriptor found for the pathname=%s", new_path);
-			// 		}
-			// 	}
-			// 	ret = 0;
-			// }
-
 			// unlink error.
 			if (ret < 0)
 			{
@@ -3492,13 +3435,6 @@ extern "C"
 		char *new_path = checkHerculesPath(path);
 		if (new_path != NULL)
 		{
-			// char *last = new_path + strlen(new_path) - 1;
-			// if (last[0] != '/')
-			size_t len = strlen(new_path);
-			if (len > 0 && new_path[len - 1] != '/')
-			{
-				strcat(new_path, "/");
-			}
 
 			slog_live("[POSIX]. Calling Hercules 'rmdir', path=%s, new_path=%s", path, new_path);
 			ret = imss_rmdir(new_path);
@@ -3549,11 +3485,11 @@ extern "C"
 			case TYPE_DIRECTORY:
 			case TYPE_HERCULES_INSTANCE: // Directory case?
 			{
-				size_t len = strlen(new_path);
-				if (len > 0 && new_path[len - 1] != '/')
-				{
-					strcat(new_path, "/");
-				}
+				// size_t len = strlen(new_path);
+				// if (len > 0 && new_path[len - 1] != '/')
+				// {
+				// 	strcat(new_path, "/");
+				// }
 				ret = imss_rmdir(new_path);
 				break;
 			}
@@ -4064,7 +4000,7 @@ extern "C"
 		std::string pathname_obj = map_fd_search_by_val(map_fd, dirfd(dirp));
 		if (!pathname_obj.empty())
 		{
-			ConcatLastSlash(pathname_obj);
+			// ConcatLastSlash(pathname_obj);
 			const char *pathname = pathname_obj.c_str();
 
 			slog_live("[POSIX]. Calling Hercules 'readdir', pathname=%s, to_read=%d", pathname_obj.c_str(), to_read);
@@ -4082,6 +4018,13 @@ extern "C"
 				n_ent = imss_readdir(pathname_obj, &ori_buf, OptFiller, 0);
 				to_read = 0;
 				imss_path_len = pathname_obj.length();
+				if (pathname_obj[imss_path_len - 1] != '/')
+				{ // is directory but does not contains the last slash.
+					// this help us to avoid the last slash comming from the child entries.
+					// for example, from imss://dir/filey.out we extract filey.out moving the pointer
+					// "imss_path_len" (length of the parent directory) bytes.
+					imss_path_len++;
+				}
 			}
 
 			long int pos = TIMING(telldir(dirp), "telldir", long int, rank);
@@ -4108,6 +4051,7 @@ extern "C"
 					// uint32_t offset = URI_*(pos-1);
 					// printf("idx=%d\n", idx);
 					token = (char *)ori_buf[idx] + imss_path_len;
+					slog_live("[POSIX] ori_buf[%d]=%s, current token=%s, pos=%d", pos, ori_buf[idx], token, pos);
 				}
 
 				size_t len = strlen(token);

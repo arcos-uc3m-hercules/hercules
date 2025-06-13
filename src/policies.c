@@ -167,7 +167,7 @@ int32_t RoundRobin(int32_t n_servers, int32_t n_msg, const char *fname)
 // 	return next_server;
 // }
 
-int32_t Hashed(int32_t n_servers, int32_t n_msg, char *fname)
+int32_t Hashed(int32_t n_servers, int32_t n_msg, const char *fname)
 {
 	int32_t next_server = 0;
 	// Key identifying the current to-be-sent file block.
@@ -192,7 +192,7 @@ int32_t Hashed(int32_t n_servers, int32_t n_msg, char *fname)
 	return next_server;
 }
 
-int32_t CRC(int32_t n_servers, char *fname, int32_t bytes_)
+int32_t CRC(int32_t n_servers, const char *fname, int32_t bytes_)
 {
 	int32_t next_server = -1;
 	char key[strlen(fname) + 64];
@@ -208,6 +208,9 @@ int32_t CRC(int32_t n_servers, char *fname, int32_t bytes_)
 	return next_server;
 }
 
+/** 
+ * @deprecated
+ */
 void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
 {
 	// Dataset metadata request.
@@ -254,7 +257,7 @@ int32_t find_server(
 {
 	int32_t next_server = -1;
 	// TODO: delete passed_name from all functions.
-	char passed_name[PATH_MAX] = {0};
+	// char passed_name[PATH_MAX] = {0};
 
 	// if (!strcmp(fname, "imss://test-dir.0-0/mdtest_tree.0.0/file.mdtest.0.0"))
 	// {
@@ -289,33 +292,36 @@ int32_t find_server(
 	// Follow a hashed distribution.
 	case HASHED_:
 	{
-		FindNameForPolicy(fname, passed_name, server_type);
-		if (passed_name != NULL)
-		{
-			next_server = Hashed(n_servers, n_msg, passed_name);
-		}
+		// FindNameForPolicy(fname, passed_name, server_type);
+		// if (passed_name != NULL)
+		// {
+		// next_server = Hashed(n_servers, n_msg, passed_name);
+		next_server = Hashed(n_servers, n_msg, fname);
+		// }
 	}
 	break;
 
 	// Following another hashed distribution using Redis's CRC16.
 	case CRC16_:
 	{
-		FindNameForPolicy(fname, passed_name, server_type);
-		if (passed_name != NULL)
-		{
-			next_server = CRC(n_servers, passed_name, 16);
-		}
+		// FindNameForPolicy(fname, passed_name, server_type);
+		// if (passed_name != NULL)
+		// {
+		// 	next_server = CRC(n_servers, passed_name, 16);
+		next_server = CRC(n_servers, fname, 16);
+		// }
 	}
 	break;
 
 	// Following another hashed distribution using Redis's CRC64.
 	case CRC64_:
 	{
-		FindNameForPolicy(fname, passed_name, server_type);
-		if (passed_name != NULL)
-		{
-			next_server = CRC(n_servers, passed_name, 64);
-		}
+		// FindNameForPolicy(fname, passed_name, server_type);
+		// if (passed_name != NULL)
+		// {
+		// 	next_server = CRC(n_servers, passed_name, 64);
+		next_server = CRC(n_servers, fname, 64);
+		// }
 	}
 	break;
 
