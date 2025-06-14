@@ -107,7 +107,8 @@ WaitForServers() {
             fi
         else # if slurm is available.
         set -x
-            ret=$(srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
+            #ret=$(srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
+            ret=$(srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
         fi
         ret=$?
         
@@ -624,10 +625,12 @@ do
             echo "[+] Removing temporal files on ${node}"
         fi
         set -x
-        srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${RM} 2> /dev/null
+        #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${RM} 2> /dev/null
+        srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${RM} 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         echo "[+] Starting metadata server $i on $node..."
-        srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
+        #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
+        srun  -N 1 -n 1 --cpus-per-task=18 -w $node -- $COMMAND &
         set +x
     fi
     i=$((i+1))
@@ -701,12 +704,14 @@ do
         if [[ "${VERBOSE}" -eq "1" ]]; then
             echo "[+] Removing temporal files on $node"
         fi
-        srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
+        #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
+        srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
         ## If slurm is being used, the service is deploy using srun.
         if [[ "${VERBOSE}" -eq "1" ]]; then
             echo "[+] Starting data server $i on $node..."
         fi
-        srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
+        #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
+        srun  -N 1 -n 1 --cpus-per-task=18 -w $node -- $COMMAND &
     fi
     i=$(($i+1))
 done

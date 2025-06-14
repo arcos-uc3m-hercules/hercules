@@ -84,9 +84,9 @@ int data_ready = 0;
 int ready(char *tmp_file_path, const char *msg)
 {
 	// fprintf(stderr, "Trying to create the file %s with the message %s\n", tmp_file_path, msg);
-	char status[25];
-	char err_msg[MAX_ERR_MSG_LEN];
-	char cwd[PATH_MAX];
+	char status[25] = {0};
+	char err_msg[MAX_ERR_MSG_LEN] = {0};
+	char cwd[PATH_MAX] = {0};
 	FILE *tmp_file; // make the file pointer as temporary file.
 
 	if (getcwd(cwd, sizeof(cwd)) == NULL)
@@ -1147,6 +1147,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			slog_debug("[WRITE_OP] WRITE NORMAL CASE. Size %ld, offset=%ld", block_size_recv, block_offset);
 			//  search for the block to know if it was previously stored.
 			int ret = 0;
+			int is_block_zero = 0;
 			// Checks if it is data for the Snapshot operation or regular data.
 			if (snapshot_op)
 			{
@@ -1155,6 +1156,12 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			else
 			{
 				ret = TIMING(map->get(key, &address_, &block_size_rtvd);, "Does it exist? map->get", int, arguments->thread_id);
+			}
+
+			std::size_t found = key.find("$0");
+			if (found != std::string::npos)
+			{
+				is_block_zero = 1;
 			}
 
 			// if the block was not already stored:
@@ -1189,32 +1196,39 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
-					slog_debug("[WRITE_OP] msg_length=%lu", msg_length);
-					buffer = (void *)StsQueue.pop(mem_pool);
-					if (buffer == NULL)
+					slog_debug("[WRITE_OP] msg_length=%lu, is_block_zero=%d, snapshot_op=%d", msg_length, is_block_zero, snapshot_op);
+
+					if (is_block_zero || snapshot_op)
 					{
-						if (snapshot_op)
-						{ // Snapshot operation sends data bigger than BLOCK_SIZE.
-							// buffer = TIMING((void *)mem_type_malloc(msg_length * sizeof(char));, "[write] mem_type_malloc snapshot", void *, arguments->thread_id);
-							buffer = (void *)malloc(msg_length * sizeof(char));
-							slog_debug("Allocating buffer of size %lu, snapshot_op=%d", msg_length, snapshot_op);
-						}
-						else
+						// Snapshot operation sends data bigger than BLOCK_SIZE, and
+						// block 0 is usually smaller than BLOCK_SIZE
+						buffer = (void *)malloc(msg_length * sizeof(char));
+						// fprintf(stdout, "Using %lu bytes for block %s\n", msg_length,  key.c_str());
+						size_asigned_to_block = msg_length; // TODO: check if this follows the snapshot requirements.
+					}
+					else
+					{
+						// reutilizate memory from the memory pool.
+						buffer = (void *)StsQueue.pop(mem_pool);
+						if (buffer == NULL)
 						{
+
 							// buffer = TIMING((void *)mem_type_malloc(BLOCK_SIZE * sizeof(char));, "[write] mem_type_malloc", void *, arguments->thread_id);
 							buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
 							slog_debug("Allocating buffer of size %lu", BLOCK_SIZE);
 						}
+						else
+						{
+							slog_debug("Reusing buffer");
+						}
+						size_asigned_to_block = BLOCK_SIZE;
 					}
-					else
-					{
-						slog_debug("Reusing buffer");
-					}
-					if (msg_length > BLOCK_SIZE)
-					{
-						fprintf(stdout, "HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK\n");
-						slog_warn("HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK");
-					}
+
+					// if (msg_length > BLOCK_SIZE)
+					// {
+					// 	fprintf(stdout, "HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK\n");
+					// 	slog_warn("HERCULES_ERR_MEMORY_INCONSISTENCY_BLOCK");
+					// }
 
 					if (buffer == NULL)
 					{
@@ -1223,7 +1237,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
-					size_asigned_to_block = BLOCK_SIZE;
 
 					// Receive the data from the front end.
 					// pthread_mutex_lock(&lock_network);
@@ -2036,8 +2049,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			{
 				std::string old_key_tree = key_for_tree.substr(0, found);
 				std::string new_key_tree = key_for_tree.substr(found + 1);
-				
-				
+
 				// Keys for the map.
 				std::string old_key;
 				std::string new_key;
@@ -2517,8 +2529,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 }
 
 /**
- * @brief Obsolete: Server dispatcher thread method.
- *
+ * @brief Server dispatcher thread method.
+ * @deprecated
  * */
 void *srv_attached_dispatcher(void *th_argv)
 {

@@ -377,7 +377,8 @@ extern "C"
 				int ret = 0;
 				// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
 				void *data = NULL;
-				data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+				// data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+				data = (void *)malloc(sizeof(struct stat) + 1);
 
 				if (data == NULL)
 				{
@@ -399,15 +400,14 @@ extern "C"
 				// Put the file descriptor (ds), stats info and data on the local map.
 				// map_put(map, imss_path, ds, stats, (char *)data);
 				print_file_type(stats, path);
-				
+
 				HierarchicalMapPut(hierarchical_map, imss_path, ds, stats, (char *)data);
 			}
 			else if (ds == -EEXIST)
 			{ // file aready exists on the remote metadata server.
 				int ret = 0;
-				// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
 				void *data = NULL;
-				data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+				data = (void *)malloc(sizeof(struct stat) * sizeof(char)+1);
 				if (data == NULL)
 				{
 					perror("HERCULES_ERR_GETATTR_MEMORY_ALLOC_2");
@@ -428,7 +428,6 @@ extern "C"
 				// map_put(map, imss_path, ds, stats, (char *)data);
 				HierarchicalMapPut(hierarchical_map, imss_path, ds, stats, (char *)data);
 
-				// fprintf(stderr, "[imss_getattr] ds=%d, %s\n", ds, strerror(EEXIST));
 				return 0;
 			}
 			else
@@ -554,7 +553,7 @@ extern "C"
 			}
 
 			// aux = (char *)malloc(IMSS_DATA_BSIZE);
-			void *data = (void *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+			void *data = (void *)malloc(sizeof(struct stat) * sizeof(char)+1);
 			ret = get_ndata(imss_path, file_desc, 0, data, 0, 0);
 			if (ret < 0)
 			{
@@ -2093,10 +2092,11 @@ extern "C"
 		print_file_type(ds_stat, path);
 
 		// Write initial block
-		void *buff = (void *)malloc(IMSS_DATA_BSIZE);
+		void *buff = (void *)malloc(sizeof(struct stat)+1);
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 		pthread_mutex_lock(&lock); // lock.
 		// stores block 0.
+		// fprintf(stdout, "size of stat=%lu bytes\n", sizeof(struct stat));
 		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0);
 		if (ret < 0)
 		{
@@ -2105,7 +2105,7 @@ extern "C"
 		pthread_mutex_unlock(&lock); // unlock.
 
 		HierarchicalMapErase(hierarchical_map, rpath);
-		slog_debug("HierarchicalMapErase(map, rpath:%s)", rpath);
+		slog_debug("HierarchicalMapErase(hierarchical_map, rpath:%s)", rpath);
 
 		pthread_mutex_lock(&lock_file); // lock.
 		// map_put(map, rpath, *fh, ds_stat, (char *)buff);
@@ -2209,7 +2209,7 @@ extern "C"
 
 			// Get initial block (0).
 			char *data = NULL;
-			data = (char *)malloc(IMSS_DATA_BSIZE * sizeof(char));
+			data = (char *)malloc(sizeof(struct stat) * sizeof(char)+1);
 			if (data == NULL)
 			{
 				perror("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
@@ -2264,13 +2264,13 @@ extern "C"
 			case 0: // dataset was delete.
 			{
 				// ******************************* TO CHECK!
-				pthread_mutex_lock(&lock_file);
+				// pthread_mutex_lock(&lock_file);
 				HierarchicalMapErase(hierarchical_map, imss_path);
-				pthread_mutex_unlock(&lock_file);
+				// pthread_mutex_unlock(&lock_file);
 
-				slog_debug("Calling map_release_prefetch %s", path);
+				// slog_debug("Calling map_release_prefetch %s", path);
 				// map_release_prefetch(map_prefetch, imss_path);
-				slog_debug("Finish map_release_prefetch %s", path);
+				// slog_debug("Finish map_release_prefetch %s", path);
 				// *******************************
 				// ret = release_dataset(file_desc);
 				ret = release_dataset(imss_path);
@@ -2393,7 +2393,7 @@ extern "C"
 				{ // dataset was not found.
 					return -1;
 				}
-				aux = (char *)malloc(IMSS_DATA_BSIZE);
+				aux = (char *)malloc(sizeof(struct stat)+1);
 				ret = get_ndata(new_path_1, file_desc, 0, aux, 0, 0);
 				memcpy(&stats, aux, sizeof(struct stat));
 				pthread_mutex_lock(&lock_file);
@@ -2434,7 +2434,7 @@ extern "C"
 		}
 
 		HierarchicalMapErase(hierarchical_map, rpath2);
-		slog_debug("HierarchicalMapErase(map, rpath:%s), ret:%d", rpath2, ret);
+		slog_debug("HierarchicalMapErase(hierarchical_map, rpath:%s)", rpath2);
 		// if(ret < 1){
 		// 	slog_debug("No elements erased by map_erase, ret:%d", ret);
 		// }
@@ -2563,7 +2563,7 @@ extern "C"
 		// Assing file handler and create dataset
 		int fd;
 		struct stat stats;
-		char *buff;
+		char *buff = NULL;
 		fd_lookup((char *)rpath, &fd, &stats, &buff);
 
 		if (fd >= 0)
@@ -3108,7 +3108,7 @@ extern "C"
 			strcat(full_path, new_path + strlen("imss://"));
 		strcat(full_path, name);
 
-		slog_debug("pos=%d, full_path=%s, given_old_path=%s, hercules_path=%s, last_parent_dir=%s\n", pos, full_path, old_path, new_path, last_parent_dir);
+		slog_debug("pos=%d, full_path=%s, given_old_path=%s, hercules_path=%s, last_parent_dir=%s", pos, full_path, old_path, new_path, last_parent_dir);
 
 		// Check all cases.
 		int op_not_allowed = 0;

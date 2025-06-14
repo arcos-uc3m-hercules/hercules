@@ -335,10 +335,10 @@ extern "C"
 		// send_param.memory_type  = UCS_MEMORY_TYPE_HOST;
 		send_param.user_data = &ctx;
 
-		slog_info("[COMM][send_req] before ucp_tag_send_nbx");
+		slog_info("[COMM] before ucp_tag_send_nbx");
 		request = (struct ucx_context *)ucp_tag_send_nbx(ep, msg, msg_len, tag_req, &send_param);
 		// request = (struct ucx_context *)ucp_tag_send_sync_nbx(ep, msg, msg_len, tag_req, &send_param);
-		slog_info("[COMM][send_req] after ucp_tag_send_nbx");
+		slog_info("[COMM] after ucp_tag_send_nbx");
 		// slog_info("[COMM][send_req] before ucx_wait");
 		status = ucx_wait(ucp_worker, request, "send", req); // original
 		if (request == NULL)

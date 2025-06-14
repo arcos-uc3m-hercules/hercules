@@ -38,13 +38,12 @@ extern "C"
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 		std::pair<std::map<std::string, struct elements>::iterator, bool> ret;
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
-
+		slog_debug("Putting %s on the hierarchical map.", k);
 		char first_parent_dir[PATH_MAX] = {0};
 		find_last_parent_dir(k, first_parent_dir);
 
 		// Retrieve the map for the parent directory's children from 'hierarchical_map'.
 		auto it = hiermap->find(first_parent_dir);
-		// Map *new_directory_children_map = NULL;
 		Map *parent_children_map = NULL;
 		if (it == hiermap->end())
 		{ // parent map does not exists locally, we add it to the hierarchical map.
@@ -80,6 +79,55 @@ extern "C"
 		return 0;
 	}
 
+	Map *HierarchicalMapGetDir(void *hierarchical_map, const char *k)
+	{
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+
+		// Look up the parent directory's children map in 'HierarchicalMap'.
+		auto parent_map = hiermap->find(std::string(k));
+
+		if (parent_map != hiermap->end())
+		{
+			// Parent Map found.
+			// Map *parent_children_map = parent_map->second;
+			slog_debug("%s map found, requested=%s", parent_map->first.c_str(), k);
+			return parent_map->second;
+		}
+		else
+		{
+			slog_debug("Parent map %s not found.", k);
+			return NULL;
+		}
+	}
+
+	int HierarchicalMapRenameKey(void *hierarchical_map, const char *old_dir, const char *new_dir)
+	{
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+
+		// Look up the parent directory's children map in 'HierarchicalMap'.
+		auto parent_map = hiermap->find(std::string(old_dir));
+
+		if (parent_map != hiermap->end())
+		{
+			// Get the value associated with the parent map.
+			Map *parent_children_map = parent_map->second;
+
+			// Insert the new key with the old value.
+			(*hiermap)[new_dir] = parent_children_map;
+
+			// Erase the old entry.
+			hiermap->erase(parent_map);
+
+			slog_debug("Parent %s map changed to %s", old_dir, new_dir);
+			return 1;
+		}
+		else
+		{
+			slog_debug("Parent map %s not found.", old_dir);
+			return 0;
+		}
+	}
+
 	Map *HierarchicalMapGetChild(void *hierarchical_map, const char *k)
 	{
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
@@ -112,6 +160,7 @@ extern "C"
 		Map *parent_children_map = HierarchicalMapGetChild(hierarchical_map, k);
 		if (parent_children_map != NULL)
 		{ // Parent Map found.
+			slog_debug("looking up %s in th parent map", k);
 			// Look up the stat_info on the parent's children map.
 			return map_search(parent_children_map, k, v, stat_info, aux);
 		}
@@ -184,12 +233,20 @@ extern "C"
 	int HierarchicalMapRenameDirDir(void *hierarchical_map, const char *old_dir, const char *rdir_dest)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+		int ret = -1;
 
+		// Find the hash map of this dir.
+		Map *old_map = HierarchicalMapGetDir(hierarchical_map, old_dir);
+		// Map *new_map = HierarchicalMapGetDir(hierarchical_map, rdir_dest);
 		// Look up the parent directory's children map in 'hierarchical_map'.
-		Map *parent_children_map = HierarchicalMapGetChild(hierarchical_map, old_dir);
-		if (parent_children_map != NULL)
+		// Map *parent_children_map = HierarchicalMapGetChild(hierarchical_map, old_dir);
+		if (old_map != NULL)
 		{
-			return map_rename_dir_dir(parent_children_map, old_dir, rdir_dest);
+			slog_debug("Renaming entries of %s to %s", old_dir, rdir_dest);
+			map_rename_dir_dir(old_map, old_dir, rdir_dest);
+			ret = HierarchicalMapRenameKey(hierarchical_map, old_dir, rdir_dest);
+			return ret;
 		}
 		else
 		{

@@ -77,7 +77,7 @@ uint32_t rank = -1;
 static int init = 0;
 
 // log path.
-char log_path[1000] = {0};
+char log_path[PATH_MAX] = {0};
 pid_t g_pid = -1;
 
 // prefech.
@@ -418,7 +418,7 @@ extern "C"
 		gettimeofday(&start, NULL);
 
 		map_fd = map_fd_create();
-
+		
 		// Getting a mostly unique id for the distributed deployment.
 		char hostname_[512] = {0}, hostname[1024] = {0};
 		int ret = gethostname(&hostname_[0], 512);
@@ -463,7 +463,7 @@ extern "C"
 		// log init.
 		time_t t = time(NULL);
 		struct tm tm = *localtime(&t);
-		sprintf(log_path, "./client-thread-%ld.%02d-%02d.%d", pthread_self(), tm.tm_hour, tm.tm_min, getpid());
+		sprintf(log_path, "client-thread-%ld.%02d-%02d.%d", pthread_self(), tm.tm_hour, tm.tm_min, getpid());
 		// {
 		// 	fprintf(stderr, "LOG PATH= %s\n", log_path); // this line raise an exception running a python app with threads.
 		// }
@@ -579,6 +579,7 @@ extern "C"
 		elapsed = seconds + useconds / 1e6;
 
 		init = 1;
+		// fprintf(stdout, "Client %d ready\n", rank);
 		// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 	}
 
@@ -608,6 +609,7 @@ extern "C"
 		map_fd_destroy(map_fd);
 
 		init = 0;
+		slog_close();
 	}
 
 	void check_ld_preload(void)
