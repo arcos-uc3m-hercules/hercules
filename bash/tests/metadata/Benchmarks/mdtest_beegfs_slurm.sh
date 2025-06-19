@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=ior_g    # Job name
+#SBATCH --job-name=mdtest_g    # Job name
 #SBATCH --output=logs/beegfs/%j_mdtest.log   # Standard output and error log
-#SBATCH --time=01:00:00               # Time limit hrs:min:sec
+#SBATCH --time=06:00:00               # Time limit hrs:min:sec
 
 NUMBER_OF_FILES_PER_PROCESS=$1
 NUMBER_OF_PROCESS=$2
@@ -36,6 +36,7 @@ COMMAND="$COMMAND -V 1"
 
 ## Add the working directory.
 ## The -u flag tells the program to assign a unique working directory per task.
+## !!! BE SURE THIS PATH IS EMPTY BEFORE RUNNING THE EXPERIMENT.
 COMMAND="$COMMAND -u -d /beegfs/home/javier.garciablas/hercules/bash/tests/metadata/Benchmarks/mdtest_output/"
 
 

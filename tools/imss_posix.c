@@ -26,6 +26,7 @@ int32_t N_META_SERVERS = 1;
 char *METADATA_FILE = NULL; // Not default
 char *IMSS_HOSTFILE = NULL; // Not default
 extern char *IMSS_ROOT;
+extern size_t IMSS_ROOT_LEN;
 char *META_HOSTFILE = NULL;
 uint64_t STORAGE_SIZE = 16;			 // In GB
 uint64_t META_BUFFSIZE = 16;		 // In GB
@@ -418,6 +419,8 @@ extern "C"
 		struct timeval start, end;
 		gettimeofday(&start, NULL);
 
+		slog_time("Info,,Rank,Function,Time(msec),Comment");
+
 		map_fd = map_fd_create();
 		
 		// Getting a mostly unique id for the distributed deployment.
@@ -445,6 +448,7 @@ extern "C"
 		MOUNT_POINT = args.mount_point;
 		MOUNT_POINT_LEN = strlen(MOUNT_POINT);
 		IMSS_ROOT = args.imss_uri;
+		IMSS_ROOT_LEN = strlen(IMSS_ROOT);
 		IMSS_HOSTFILE = args.data_hostfile;
 		N_SERVERS = args.num_data_servers;
 		IMSS_SRV_PORT = args.data_port;
@@ -499,7 +503,7 @@ extern "C"
 		slog_live(" -- POLICY: %s", POLICY);
 
 		// Metadata server
-		if (stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank) == -1)
+		if (TIMING(stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank),"stat init", int32_t, rank) == -1)
 		{
 			// In case of error notify and exit
 			slog_error("Stat init failed, cannot connect to Metadata server.");
@@ -522,7 +526,7 @@ extern "C"
 		if (DEPLOYMENT == 2)
 		{
 			// Make the connection to all data servers.
-			num_active_storages = open_imss(IMSS_ROOT);
+			num_active_storages = TIMING(open_imss(IMSS_ROOT), "open imss", int32_t, rank);
 			if (num_active_storages < 0)
 			{
 				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
@@ -556,8 +560,7 @@ extern "C"
 
 		if (MULTIPLE_READ == 1)
 		{
-			int ret;
-
+			int ret = 0;
 			pthread_attr_t tattr;
 			ret = pthread_attr_init(&tattr);
 			ret = pthread_attr_setdetachstate(&tattr, PTHREAD_CREATE_DETACHED);
@@ -570,17 +573,18 @@ extern "C"
 		}
 
 		slog_live("IMSS EXIST=%d\n", is_alive(IMSS_ROOT));
-		slog_live("[CLIENT %d] ready!\n", rank);
-
+		// slog_live("[CLIENT %d] ready!\n", rank);
+		
 		gettimeofday(&end, NULL);
 		long seconds, useconds;
 		double elapsed;
 		seconds = end.tv_sec - start.tv_sec;
 		useconds = end.tv_usec - start.tv_usec;
 		elapsed = seconds + useconds / 1e6;
-
+		
 		init = 1;
-		// fprintf(stdout, "Client %d ready\n", rank);
+		slog_live("Client %d ready in %f sec.", rank, elapsed);
+		// fprintf(stdout, "Client %d ready in %f sec.\n", rank, elapsed);
 		// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 	}
 
@@ -2649,14 +2653,8 @@ extern "C"
 		char *new_path = checkHerculesPath(path);
 		if (new_path != NULL)
 		{
-			// size_t len = strlen(new_path);
-			// if (len > 0 && new_path[len - 1] != '/')
-			// {
-			// 	strcat(new_path, "/");
-			// }
 			slog_live("[POSIX]. Calling Hercules 'mkdir', path=%s, new_path=%s", path, new_path);
 
-			// char *new_path;
 			ret = imss_mkdir(new_path, mode);
 			if (ret < 0)
 			{
@@ -3562,7 +3560,7 @@ extern "C"
 		if (old_path != NULL && new_path != NULL)
 		{ // move from Hercules to Hercules.
 			slog_live("[POSIX]. Calling Hercules 'rename', old_given_path=%s, new_given_pathname=%s, old path=%s, new_path=%s", old_given_path, new_given_pathname, old_path, new_path);
-			ret = imss_rename(old_path, new_path);
+			ret = TIMING(imss_rename(old_path, new_path), "imss_rename", int, rank);
 			if (ret < 0)
 			{
 				errno = -ret;

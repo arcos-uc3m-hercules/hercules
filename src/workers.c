@@ -616,30 +616,34 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// check if the old key and new key has been passed in the string separed by a comma.
 			if (found != std::string::npos)
 			{
+
+				
 				std::string old_dir = key.substr(0, found);
 				std::string rdir_dest = key.substr(found + 1);
-
+				
 				// RENAME MAP
 				slog_debug("rename_data_dir_srv_worker, old_dir=%s, dest_dir=%s", old_dir.c_str(), rdir_dest.c_str());
 				ret = map->rename_data_dir_srv_worker(old_dir, rdir_dest);
+				SendConfirmationMessage(arguments, MSG_RENAME_OP);
 			}
 
 			if (ret != 0)
 			{
 				response_msg = MSG_ERROR_OP;
+				SendConfirmationMessage(arguments, response_msg);
 			}
-			else
-			{
-				response_msg = MSG_RENAME_OP;
-			}
+			// else
+			// {
+			// 	response_msg = MSG_RENAME_OP;
+			// }
 
-			ret = SendConfirmationMessage(arguments, response_msg);
-			if (ret == 0)
-			{
-				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
-				slog_error("ERR_HERCULES_PUBLISH_RENAMEMSG");
-				return 1;
-			}
+			// ret = SendConfirmationMessage(arguments, response_msg);
+			// if (ret == 0)
+			// {
+			// 	perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
+			// 	slog_error("ERR_HERCULES_PUBLISH_RENAMEMSG");
+			// 	return 1;
+			// }
 			break;
 		}
 		case READV: // Only 1 server work
@@ -1212,7 +1216,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						buffer = (void *)StsQueue.pop(mem_pool);
 						if (buffer == NULL)
 						{
-
 							// buffer = TIMING((void *)mem_type_malloc(BLOCK_SIZE * sizeof(char));, "[write] mem_type_malloc", void *, arguments->thread_id);
 							buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
 							slog_debug("Allocating buffer of size %lu", BLOCK_SIZE);
@@ -2066,11 +2069,13 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// RENAME TREE
 				if (ret == 0)
 				{
+					// Send confirmation before renaming the tree.
 					// pthread_mutex_lock(&tree_mut);
 					ret = GTree_rename_dir_dir((char *)old_key_tree.c_str(), (char *)new_key_tree.c_str());
 					// pthread_mutex_unlock(&tree_mut);
 				}
-
+				SendConfirmationMessage(arguments, MSG_RENAME_OP);
+				return 0;
 				slog_debug("old_dir=%s, dir_dest=%s, ret=%d", old_key_tree.c_str(), new_key_tree.c_str(), ret);
 			}
 			else
@@ -2080,23 +2085,26 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// fprintf(stderr, "No extra characters found.\n");
 			}
 
+			// return 0;
+
 			if (ret == -1)
 			{
 				response_msg = MSG_ERROR_OP;
+				SendConfirmationMessage(arguments, response_msg);
 			}
-			else
-			{
-				response_msg = MSG_RENAME_OP;
-			}
-			// pthread_mutex_lock(&lock_network);
-			ret = SendConfirmationMessage(arguments, response_msg);
-			if (ret == 0)
-			{
-				perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
-				slog_error("HERCULES_ERR_PUBLISH_RENAMEMSG");
-				// pthread_mutex_unlock(&lock_network);
-				return -1;
-			}
+			// else
+			// {
+			// 	response_msg = MSG_RENAME_OP;
+			// }
+			// // pthread_mutex_lock(&lock_network);
+			// ret = SendConfirmationMessage(arguments, response_msg);
+			// if (ret == 0)
+			// {
+			// 	perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
+			// 	slog_error("HERCULES_ERR_PUBLISH_RENAMEMSG");
+			// 	// pthread_mutex_unlock(&lock_network);
+			// 	return -1;
+			// }
 			// pthread_mutex_unlock(&lock_network);
 		}
 		break;

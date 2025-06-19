@@ -143,7 +143,7 @@ extern "C"
 		// status = ucp_init(&ucp_params, config, ucp_context);
 
 		status = ucp_init(&ucp_params, NULL, ucp_context);
-		
+
 		slog_info("After ucp_init, status=%s", ucs_status_string(status));
 		// fprintf(stderr, "After ucp_init, status=%s, stderr=%s\n", ucs_status_string(status), strerror(errno));
 		if (status != UCS_OK)
@@ -717,7 +717,10 @@ extern "C"
 	{
 		ucs_status_t *arg_status = (ucs_status_t *)arg;
 
-		fprintf(stderr, "[0x%x] failure handler called with status %d (%s)\n", (unsigned int)pthread_self(), status, ucs_status_string(status));
+		if (status != UCS_ERR_CONNECTION_RESET && status != UCS_ERR_ENDPOINT_TIMEOUT)
+		{
+			fprintf(stderr, "[0x%x] failure handler called with status %d (%s)\n", (unsigned int)pthread_self(), status, ucs_status_string(status));
+		}
 
 		*arg_status = status;
 	}

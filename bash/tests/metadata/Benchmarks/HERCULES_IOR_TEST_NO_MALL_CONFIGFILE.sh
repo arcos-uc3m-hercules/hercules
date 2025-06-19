@@ -4,7 +4,7 @@ SCRIPT_NAME="ior_hercules_slurm.sh"
 FILE_SIZE=$((1024*1024*100))
 #FILE_SIZE=$((1024*10))
 
-ATTACHED=0
+ATTACHED=1
 
 # 0 = Shared single file, 1 = File per process.
 IOR_FILE_PER_PROCESS=1

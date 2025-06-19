@@ -119,6 +119,13 @@ extern "C"
 			hiermap->erase(parent_map);
 
 			slog_debug("Parent %s map changed to %s", old_dir, new_dir);
+
+			parent_map = hiermap->find(std::string(new_dir));
+			if (parent_map != hiermap->end())
+			{
+				slog_debug("New dir %s is on the hierarchical map", new_dir);
+			}
+
 			return 1;
 		}
 		else
@@ -160,7 +167,7 @@ extern "C"
 		Map *parent_children_map = HierarchicalMapGetChild(hierarchical_map, k);
 		if (parent_children_map != NULL)
 		{ // Parent Map found.
-			slog_debug("looking up %s in th parent map", k);
+			slog_debug("looking up %s in the parent map", k);
 			// Look up the stat_info on the parent's children map.
 			return map_search(parent_children_map, k, v, stat_info, aux);
 		}
@@ -245,7 +252,29 @@ extern "C"
 		{
 			slog_debug("Renaming entries of %s to %s", old_dir, rdir_dest);
 			map_rename_dir_dir(old_map, old_dir, rdir_dest);
+			
 			ret = HierarchicalMapRenameKey(hierarchical_map, old_dir, rdir_dest);
+
+			old_map = HierarchicalMapGetDir(hierarchical_map, old_dir);
+			if (old_map != NULL)
+			{
+				slog_warn("%s is still a valid path", old_dir);
+			}
+			else
+			{
+				slog_debug("%s not found in the map", old_dir);
+			}
+
+			Map *new_map = HierarchicalMapGetDir(hierarchical_map, rdir_dest);
+			if (new_map != NULL)
+			{
+				slog_debug("%s is a valid path", rdir_dest);
+			}
+			else
+			{
+				slog_warn("%s not found in the map", rdir_dest);
+			}
+
 			return ret;
 		}
 		else
