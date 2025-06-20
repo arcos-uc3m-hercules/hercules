@@ -150,7 +150,7 @@ int find_dataset_by_uri_hash_pool(const char *dataset_uri, dataset_info **datase
 
 	if (!parent_subdir_children_table)
 	{
-		slog_debug("Search: Directory '%s' not found in file system structure.", parent_dir);
+		slog_debug("Directory '%s' not found in file system structure.", parent_dir);
 		return -1;
 	}
 
@@ -159,12 +159,12 @@ int find_dataset_by_uri_hash_pool(const char *dataset_uri, dataset_info **datase
 
 	if (*dataset_info_ != NULL)
 	{
-		slog_debug("Search: Found element '%s' in directory '%s'.", (*dataset_info_)->uri_, parent_dir);
+		slog_debug("Found element '%s' in directory '%s'.", (*dataset_info_)->uri_, parent_dir);
 		return 1;
 	}
 	else
 	{
-		slog_debug("Search: Element '%s' not found in directory '%s'.", dataset_uri, parent_dir);
+		slog_debug("Element '%s' not found in directory '%s'.", dataset_uri, parent_dir);
 		return 0;
 	}
 }
@@ -3174,9 +3174,10 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 	// After running: mv dir newdir, we expected to have:
 	// Server 0 holds the block 0 imss://newdir/$0 and,
 	// Server 1 holds the block 0 imss://newdir/file.txt$0
+	ucp_ep_h ep;
 	for (int32_t i = 0; i < curr_imss.info.num_active_storages; i++)
 	{
-		ucp_ep_h ep = curr_imss.conns.eps[i];
+		ep = curr_imss.conns.eps[i];
 
 		sprintf(key_, "GET 6 0 %s,%s", old_dir, rdir_dest);
 		slog_debug("Request to data %d - %s", i, key_);
@@ -3188,8 +3189,11 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 			slog_error("ERR_HERCULES_RENAME_DATASET_SRV_WORKER_DIR_DIR_SEND_REQ");
 			return -1;
 		}
+	}
 
-		size_t msg_length = 0;
+	size_t msg_length = 0;
+	for (int32_t i = 0; i < curr_imss.info.num_active_storages; i++) {
+		ep = curr_imss.conns.eps[i];
 		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
 		if (msg_length == 0)
 		{

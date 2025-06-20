@@ -178,7 +178,7 @@ extern "C"
 		{
 			// m->erase(*i);
 			string key = *i;
-			key.erase(0, strlen(old_dir) - 1);
+			key.erase(0, strlen(old_dir));
 
 			string new_path = rdir_dest;
 			new_path.append(key);

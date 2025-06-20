@@ -526,16 +526,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			slog_debug("Cleaning %s", key.c_str());
 			const char *response_msg = NULL;
 			ret = map->cleaning_specific(key);
-			// if (ret == -1)
-			// {
-			// 	size_t len = strlen(key.c_str());
-			// 	if (len > 0 && key.c_str()[len - 1] != '/')
-			// 	{
-			// 		key += '/';
-			// 		// std::unique_lock<std::mutex> unlock(*mut);
-			// 		ret = map->cleaning_specific(key);
-			// 	}
-			// }
 			if (ret == -1)
 			{
 				fprintf(stderr, "HERCULES_ERR_CLEANING_DATASET: %s\n", key.c_str());
@@ -616,34 +606,32 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// check if the old key and new key has been passed in the string separed by a comma.
 			if (found != std::string::npos)
 			{
-
-				
 				std::string old_dir = key.substr(0, found);
 				std::string rdir_dest = key.substr(found + 1);
 				
 				// RENAME MAP
 				slog_debug("rename_data_dir_srv_worker, old_dir=%s, dest_dir=%s", old_dir.c_str(), rdir_dest.c_str());
 				ret = map->rename_data_dir_srv_worker(old_dir, rdir_dest);
-				SendConfirmationMessage(arguments, MSG_RENAME_OP);
+				// SendConfirmationMessage(arguments, MSG_RENAME_OP);
 			}
 
 			if (ret != 0)
 			{
 				response_msg = MSG_ERROR_OP;
-				SendConfirmationMessage(arguments, response_msg);
+				// SendConfirmationMessage(arguments, response_msg);
 			}
-			// else
-			// {
-			// 	response_msg = MSG_RENAME_OP;
-			// }
+			else
+			{
+				response_msg = MSG_RENAME_OP;
+			}
 
-			// ret = SendConfirmationMessage(arguments, response_msg);
-			// if (ret == 0)
-			// {
-			// 	perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
-			// 	slog_error("ERR_HERCULES_PUBLISH_RENAMEMSG");
-			// 	return 1;
-			// }
+			ret = SendConfirmationMessage(arguments, response_msg);
+			if (ret == 0)
+			{
+				perror("ERR_HERCULES_PUBLISH_RENAMEMSG");
+				slog_error("ERR_HERCULES_PUBLISH_RENAMEMSG");
+				return 1;
+			}
 			break;
 		}
 		case READV: // Only 1 server work

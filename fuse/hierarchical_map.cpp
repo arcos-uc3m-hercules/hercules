@@ -44,20 +44,20 @@ extern "C"
 
 		// Retrieve the map for the parent directory's children from 'hierarchical_map'.
 		auto it = hiermap->find(first_parent_dir);
-		Map *parent_children_map = NULL;
+		Map *parent_map = NULL;
 		if (it == hiermap->end())
 		{ // parent map does not exists locally, we add it to the hierarchical map.
 			slog_warn("Parent directory %s does not exist or has not been added as a directory element. Creating it.", first_parent_dir);
-			parent_children_map = new Map();
-			(*hiermap)[first_parent_dir] = parent_children_map;
+			parent_map = new Map();
+			(*hiermap)[first_parent_dir] = parent_map;
 		}
 		else
 		{ // parent map exists locally, we get the pointer.
-			parent_children_map = it->second;
+			parent_map = it->second;
 		}
 
-		map_put(parent_children_map, k, v, stat_info, aux);
-		slog_debug("Element %s inserted on the directory map %s", k, first_parent_dir)
+		map_put(parent_map, k, v, stat_info, aux);
+		slog_debug("Element %s inserted on the directory map %s", k, first_parent_dir);
 
 		// If the newly added element is a directory, a new std::map for its children
 		// must also be created and stored in 'HierarchicalMap'.
@@ -84,6 +84,7 @@ extern "C"
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		// Look up the parent directory's children map in 'HierarchicalMap'.
+		slog_debug("Seeking for directory on the directory table %s", k);
 		auto parent_map = hiermap->find(std::string(k));
 
 		if (parent_map != hiermap->end())
@@ -105,6 +106,7 @@ extern "C"
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		// Look up the parent directory's children map in 'HierarchicalMap'.
+		slog_debug("Looking for the parent of %s", old_dir);
 		auto parent_map = hiermap->find(std::string(old_dir));
 
 		if (parent_map != hiermap->end())
@@ -252,7 +254,7 @@ extern "C"
 		{
 			slog_debug("Renaming entries of %s to %s", old_dir, rdir_dest);
 			map_rename_dir_dir(old_map, old_dir, rdir_dest);
-			
+
 			ret = HierarchicalMapRenameKey(hierarchical_map, old_dir, rdir_dest);
 
 			old_map = HierarchicalMapGetDir(hierarchical_map, old_dir);
@@ -274,6 +276,11 @@ extern "C"
 			{
 				slog_warn("%s not found in the map", rdir_dest);
 			}
+
+			char first_parent_dir[PATH_MAX] = {0};
+			find_last_parent_dir(old_dir, first_parent_dir);
+			Map *old_map = HierarchicalMapGetDir(hierarchical_map, first_parent_dir);
+			map_rename_dir_dir(old_map, old_dir, rdir_dest);
 
 			return ret;
 		}
