@@ -90,24 +90,35 @@ char *strclr(const char *clr, char *str, ...)
     return output;
 }
 
+// TODO: check this for multithreading.
+FILE *fp = NULL;
+int opened = 0;
+
 /*
  * Append log info to log file.
  */
 void slog_to_file(char *out, const char *fname, SlogDate *sdate)
 {
-    char filename[PATH_MAX];
+    char filename[PATH_MAX] = {0};
+
+    // Getting current directory.
+    char cwd[512] = {0};
+    if (getcwd(cwd, sizeof(cwd)) == NULL)
+    {
+        perror("[SLOG] Error getting the current working directory.");
+        return;
+    }
 
     if (slg.filestamp)
     { /* Create log filename with date. (eg example-2017-01-21.log) */
-        snprintf(filename, sizeof(filename), "%s-%02d-%02d-%02d.log",
-                 fname, sdate->year, sdate->mon, sdate->day);
+        snprintf(filename, sizeof(filename), "%s/%s-%02d-%02d-%02d.log",
+                 cwd, fname, sdate->year, sdate->mon, sdate->day);
     }
     else
     { /* Create log filename using regular name. (eg example.log) */
         snprintf(filename, sizeof(filename), "%s.log", fname);
     }
 
-    FILE *fp = NULL;
     // fprintf(stderr, "[SLOG] filename='%s'\n", filename);
     // if (fp == NULL)
     // {
@@ -119,11 +130,22 @@ void slog_to_file(char *out, const char *fname, SlogDate *sdate)
         fprintf(stderr, "[SLOG] Error opening file='%s'\n", filename);
         return;
     }
+    opened = 1;
+}
 
+void AppendToFile(char *out)
+{
     /* Append log line to log file. */
     fprintf(fp, "%s", out);
+    fflush(fp);
+}
 
-    fclose(fp);
+void CloseFile()
+{
+    if (opened)
+    {
+        fclose(fp);
+    }
 }
 
 /*
@@ -369,7 +391,9 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
             output = slog_get(&mdate, (char *)"%s\n", prints);
 
             /* Add log line to file. */
-            slog_to_file(output, slg.fname, &mdate);
+            if (!opened)
+                slog_to_file(output, slg.fname, &mdate);
+            AppendToFile(output);
         }
     }
 
@@ -396,6 +420,11 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
 
     // fprintf(stderr,"prev_errno=%d, actual_errno=%d\t", prev_errno, errno);
     errno = prev_errno;
+}
+
+void slog_close() 
+{
+    CloseFile();
 }
 
 void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int debugColor, int filestamp, int t_safe, unsigned int rank)

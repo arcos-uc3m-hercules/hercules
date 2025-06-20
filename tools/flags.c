@@ -64,7 +64,7 @@
  */
 int __sflags_(const char *mode, int *optr)
 {
-    register int ret, m, o;
+    int ret, m, o;
 
     switch (*mode++)
     {

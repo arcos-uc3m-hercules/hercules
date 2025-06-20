@@ -292,6 +292,13 @@ extern "C"
      */
     void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int debugColor, int filestamp, int t_safe, unsigned int rank);
 
+    /**
+     * @brief Close the file descriptor of the log file.
+     * This function is added to preven opening and closing the file
+     * every time a message is appended.
+     */
+    void slog_close();
+
     /*
      * FUNCTION: getLevel.
      * DESCRIPTION: Function to get slog level when it comes as string from args.

@@ -142,7 +142,7 @@ int ResolvePath(const char *path_, char *resolved)
 		 * lstat() fails we still can return successfully if
 		 * there are no more path components left.
 		 */
-		strncat(resolved, next_token, strlen(next_token));
+		strncat(resolved, next_token, PATH_MAX);
 		// strncat(resolved, next_token, strlen(resolved));
 		resolved_len = strlen(resolved);
 		if (resolved_len >= PATH_MAX)

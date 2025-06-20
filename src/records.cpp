@@ -745,14 +745,6 @@ int32_t map_records::cleaning_specific(std::string new_key)
 	slog_debug("Passing first loop, vec.size()=%d", vec.size());
 	if (vec.size() == 0)
 	{
-		// size_t len = strlen(new_key.c_str());
-		// if (len > 0 && new_key.c_str()[len - 1] != '/')
-		// {
-		// 	new_key += '/';
-		// 	// std::unique_lock<std::mutex> unlock(*mut);
-		// 	ret = cleaning_specific(new_key);
-		// }
-		// return ret;
 		return -1;
 	}
 
@@ -763,9 +755,11 @@ int32_t map_records::cleaning_specific(std::string new_key)
 	{
 		// std::cout << "Garbage Collector: Deleting " << *i << "\n";
 		auto item = buffer.find(*i);
+		// block size of the curren item.
 		item_mem_size = item->second.second;
-		// checks if the mem pool has a slot.
-		if (StsQueue.size(mem_pool) + item_mem_size >= MAX_POOL_SIZE)
+		// checks if the mem pool has a slot, 
+		// or if the current item memory size fits the block size (block 0 can have different size).
+		if (StsQueue.size(mem_pool) + item_mem_size >= MAX_POOL_SIZE || item_mem_size != BLOCK_SIZE )
 		{
 			slog_debug("Freeing memory of key %s", item->first.c_str());
 			free(item->second.first); // free the memory of this block.

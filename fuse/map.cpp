@@ -77,14 +77,14 @@ extern "C"
 		if (search != m->end())
 		{
 			free(search->second.aux);
-			slog_debug("[map] erasing element with key %s", k);
+			slog_debug("erasing element with key %s", k);
 		}
 		else
 		{
-			slog_debug("[map] element with key %s was not find", k);
+			slog_debug("element with key %s was not find", k);
 		}
 		int num_elements_erased = m->erase(std::string(k));
-		slog_debug("[map] finish map_erase, num_elements_erased=%d", num_elements_erased);
+		slog_debug("finish map_erase, num_elements_erased=%d", num_elements_erased);
 		// return ret;
 	}
 
@@ -125,13 +125,17 @@ extern "C"
 	}
 
 	/**
-	 * @brief Rename the name of a directory (and all its entries) on the local map.
+	 * @brief Rename the name of all the entries of a directory on the local map.
 	 * @return On success, 1 is returned. -1 if there are no elements to rename.
 	 */
-	int map_rename_dir_dir(void *map, const char *old_dir, const char *rdir_dest)
+	// int map_rename_dir_dir(void *old_map, void *new_map, const char *old_dir, const char *rdir_dest)
+	int map_rename_dir_dir(void *old_map, const char *old_dir, const char *rdir_dest)
 	{
 		std::unique_lock<std::mutex> lck(map_lock);
-		Map *m = reinterpret_cast<Map *>(map);
+		Map *m = reinterpret_cast<Map *>(old_map);
+		// Map *new_m = reinterpret_cast<Map *>(new_map);
+
+		// TODO: check for map size. If zero then return inmediatly.
 
 		std::vector<string> vec;
 
@@ -159,6 +163,7 @@ extern "C"
 				vec.insert(vec.begin(), key);
 			}
 		}
+		slog_debug("Renaming %lu/%lu elements", vec.size(), m->size());
 
 		if (vec.size() == 0)
 		{
@@ -167,24 +172,23 @@ extern "C"
 			return -1;
 		}
 
-		// if (vec.size() > 0)
-		// 	fprintf(stdout, "Renaming %lu elements\n", vec.size());
-		slog_debug("Renaming %lu/%lu elements", vec.size(), m->size());
 
 		std::vector<string>::iterator i;
 		for (i = vec.begin(); i < vec.end(); i++)
 		{
 			// m->erase(*i);
 			string key = *i;
-			key.erase(0, strlen(old_dir) - 1);
+			key.erase(0, strlen(old_dir));
 
 			string new_path = rdir_dest;
 			new_path.append(key);
 
 			auto node = m->extract(*i);
 			node.key() = new_path;
+			slog_debug("New path %s", new_path.c_str());
 			m->insert(std::move(node));
 		}
+
 		return 1;
 	}
 
