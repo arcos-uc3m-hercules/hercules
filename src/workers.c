@@ -608,7 +608,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			{
 				std::string old_dir = key.substr(0, found);
 				std::string rdir_dest = key.substr(found + 1);
-				
+
 				// RENAME MAP
 				slog_debug("rename_data_dir_srv_worker, old_dir=%s, dest_dir=%s", old_dir.c_str(), rdir_dest.c_str());
 				ret = map->rename_data_dir_srv_worker(old_dir, rdir_dest);
@@ -1500,7 +1500,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 }
 
 // Thread method searching and cleaning nodes with st_nlink=0
-void *garbage_collector(void *th_argv)
+void *GarbageCollector(void *th_argv)
 {
 	// fprintf(stderr, "Init garbage collector\n");
 	slog_debug("Init garbage collector");
@@ -2701,8 +2701,14 @@ void *srv_attached_dispatcher(void *th_argv)
 	pthread_exit(NULL);
 }
 
-// Metadata dispatcher thread method.
-void *dispatcher(void *th_argv)
+/**
+ * @brief Dispatcher thread method distributing clients among the pool of metadata server threads. It asign a thread of a server (metadata or data) to attend future
+ * request of that client by sending its address to the client.
+ *
+ * @param th_argv arguments for this method.
+ * @return void*
+ */
+void *Dispatcher(void *th_argv)
 {
 	// Enable thread cancellation
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -2713,22 +2719,22 @@ void *dispatcher(void *th_argv)
 	// Cast from generic pointer type to p_argv struct type pointer.
 	p_argv *arguments = (p_argv *)th_argv;
 
-	uint32_t client_id_ = 0;
-	char req[REQUEST_SIZE];
+	// uint32_t client_id_ = 0;
 	struct sockaddr_in server_addr;
 	socklen_t addrlen = sizeof(server_addr);
 	int ret = 0;
-	int listenfd = -1;
+	// int listenfd = -1;
 	int optval = 1;
 	char *tmp_file_path = arguments->tmp_file_path;
 	u_int16_t hercules_thread_pool_size = arguments->hercules_thread_pool_size;
-	int client = 0;
+	int client_id_counter = 0;
 
 	// Get a socket file descriptor.
 	global_server_fd_thread = socket(AF_INET, SOCK_STREAM, 0);
 	if (global_server_fd_thread < 0)
 	{
 		perror("HERCULES_ERR_DISPATCHER_SOCKET");
+		slog_fatal("HERCULES_ERR_DISPATCHER_SOCKET");
 		ready(tmp_file_path, "ERROR");
 		pthread_exit(NULL);
 	}
@@ -2738,6 +2744,7 @@ void *dispatcher(void *th_argv)
 	if (ret < 0)
 	{
 		perror("HERCULES_ERR_DISPATCHER_SET_SOCKET_OPT");
+		slog_fatal("HERCULES_ERR_DISPATCHER_SET_SOCKET_OPT");
 		ready(tmp_file_path, "ERROR");
 		pthread_exit(NULL);
 	}
@@ -2766,12 +2773,10 @@ void *dispatcher(void *th_argv)
 	}
 
 	/* Accept next connection */
-	// listenfd = sockfd;
 	int new_socket = -1;
 	while (1)
 	{
 		ucs_status_t status;
-		char mode[MODE_SIZE] = {0};
 		// slog_debug("[DISPATCHER] Waiting for connection requests.");
 		// fprintf(stderr, "[DISPATCHER] Waiting for connection requests.\n");
 		new_socket = accept(global_server_fd_thread, (struct sockaddr *)&server_addr, &addrlen);
@@ -2788,61 +2793,138 @@ void *dispatcher(void *th_argv)
 			continue;
 		}
 
-		ret = recv(new_socket, req, REQUEST_SIZE, MSG_WAITALL);
-		if (ret < 0)
+		// Allocate memory for arguments to pass to the new thread.
+		client_handler_args *args = (client_handler_args *)malloc(sizeof(client_handler_args));
+		if (args == NULL)
 		{
-			slog_error("HERCULES_ERR_DISPATCHER_RECV");
+			perror("HERCULES_ERR_DISPATCHER_MEMORY_ALLOC");
+			slog_error("HERCULES_ERR_DISPATCHER_MEMORY_ALLOC");
+			close(new_socket);
+			continue;
 		}
 
-		sscanf(req, "%" PRIu32 " %s", &client_id_, mode);
+		args->client_socket = new_socket;
+		args->client_id_counter = client_id_counter++;
+		args->hercules_thread_pool_size = hercules_thread_pool_size;
 
-		char *req_content = strstr(req, mode);
-		req_content += 4;
-
-		slog_debug("req=%s, req_content=%s", req, req_content);
-
-		// Check if the client is requesting connection resources.
-		if (!strncmp(req_content, "HELLO!", 6))
+		// new thread to attend this client connection.
+		pthread_t client_thread;
+		ret = pthread_create(&client_thread, NULL, HandleClient, (void *)args);
+		if (ret != 0)
 		{
-			// Case where a client (front-end) is connecting to the data server.
-			// fprintf(stderr, "HERCULES_THREAD_POOL_SIZE = %d, client=%d\n", hercules_thread_pool_size, client);
-			ret = send(new_socket, &local_addr_len[(client % hercules_thread_pool_size)], sizeof(local_addr_len[(client % hercules_thread_pool_size)]), 0);
-			if (ret == -1)
-			{
-				slog_error("HERCULES_ERR_DISPATCHER_SEND1");
-			}
-			ret = send(new_socket, local_addr[(client % hercules_thread_pool_size)], local_addr_len[(client % hercules_thread_pool_size)], 0);
-			if (ret == -1)
-			{
-				slog_error("HERCULES_ERR_DISPATCHER_SEND2");
-			}
-			client++;
-			slog_debug("Replied client %d, hercules_thread_pool_size=%d.", client, hercules_thread_pool_size);
+			perror("HERCULES_ERR_PTHREAD_CREATE_HANDLE_CLIENT");
+			slog_error("HERCULES_ERR_PTHREAD_CREATE_HANDLE_CLIENT");
+			free(args);
+			close(new_socket); // Close the socket if we can't handle it.
 		}
-		else if (!strncmp(req_content, "MAIN!", 5))
+		else
 		{
-			// Case where a data server is connecting to the metadata server.
-			// TO FIX: 0 must be a dynamic value depending on the number of
-			// metadata servers.
-			ret = send(new_socket, &local_addr_len[(client % hercules_thread_pool_size)], sizeof(local_addr_len[(client % hercules_thread_pool_size)]), 0);
-			ret = send(new_socket, local_addr[(client % hercules_thread_pool_size)], local_addr_len[(client % hercules_thread_pool_size)], 0);
-			slog_debug("Sent address %lu (%lu) to the client %d", local_addr[(client % hercules_thread_pool_size)], local_addr_len[(client % hercules_thread_pool_size)], client);
+			// Detach the thread. This means the resources of the thread
+			// will be automatically released when it terminates.
+			pthread_detach(client_thread);
 		}
-		// Check if someone is requesting identity resources.
-		else if (*((int32_t *)req) == WHO)
-		{
-			ret = send(new_socket, &local_addr_len[client], sizeof(local_addr_len[client]), 0);
-			ret = send(new_socket, local_addr[client], local_addr_len[client], 0);
-			slog_debug("Replied client %s.", arguments->my_uri);
-		}
-
-		slog_debug("\n");
-
-		// MIRAR ucp_worker_release_address(ucp_worker_threads[client_id_ % hercules_thread_pool_size], local_addr);
-		close(new_socket);
 	}
 	close(global_server_fd_thread);
 
+	pthread_exit(NULL);
+}
+
+void *HandleClient(void *args)
+{
+	int ret = 0;
+
+	client_handler_args *client_args = (client_handler_args *)args;
+	int new_socket = client_args->client_socket;
+	uint32_t current_client_id = client_args->client_id_counter;
+	u_int16_t hercules_thread_pool_size = client_args->hercules_thread_pool_size;
+
+	char req[REQUEST_SIZE] = {0};
+	char mode[MODE_SIZE] = {0};
+	uint32_t client_id_from_req = 0;
+	slog_debug("Client %u connected, socket %d.", current_client_id, new_socket);
+
+	ret = recv(new_socket, req, REQUEST_SIZE, MSG_WAITALL);
+	if (ret < 0)
+	{
+		perror("HERCULES_ERR_HANDLE_CLIENT_DISPATCHER_RECV");
+		slog_error("HERCULES_ERR_HANDLE_CLIENT_DISPATCHER_RECV");
+		close(new_socket);
+		free(client_args);
+		pthread_exit(NULL);
+	}
+	if (ret == 0)
+	{
+		slog_debug("Client %u disconnected (recv returned 0) on socket %d.", current_client_id, new_socket);
+		close(new_socket);
+		free(client_args);
+		pthread_exit(NULL);
+	}
+	sscanf(req, "%" PRIu32 " %s", &client_id_from_req, mode);
+
+	char *req_content = strstr(req, mode);
+	req_content += 4;
+
+	slog_debug("Client %u, req=%s, req_content=%s", current_client_id, req, req_content);
+
+	// Determine the index for local_addr and local_addr_len based on the client_id_counter.
+	uint32_t resource_idx = current_client_id % hercules_thread_pool_size;
+
+	// Check if the client is requesting connection resources.
+	if (!strncmp(req_content, "HELLO!", 6))
+	{
+		// Case where a client (front-end) is connecting to the data server.
+		ret = send(new_socket, &local_addr_len[resource_idx], sizeof(local_addr_len[resource_idx]), 0);
+		if (ret == -1)
+		{
+			slog_error("HERCULES_ERR_DISPATCHER_HELLO_SEND1 for client %u", current_client_id);
+		}
+		ret = send(new_socket, local_addr[resource_idx], local_addr_len[resource_idx], 0);
+		if (ret == -1)
+		{
+			slog_error("HERCULES_ERR_DISPATCHER_HELLO_SEND2 for client %u", current_client_id);
+		}
+		slog_debug("Replied client %u, hercules_thread_pool_size=%d, with resource_idx %u", current_client_id, hercules_thread_pool_size, resource_idx);
+	}
+	else if (!strncmp(req_content, "MAIN!", 5))
+	{
+		// Case where a data server is connecting to the metadata server.
+		ret = send(new_socket, &local_addr_len[resource_idx], sizeof(local_addr_len[resource_idx]), 0);
+		if (ret == -1)
+		{
+			slog_error("HERCULES_ERR_DISPATCHER_MAIN_SEND1 for client %u", current_client_id);
+		}
+		ret = send(new_socket, local_addr[resource_idx], local_addr_len[resource_idx], 0);
+		if (ret == -1)
+		{
+			slog_error("HERCULES_ERR_DISPATCHER_MAIN_SEND2 for client %u", current_client_id);
+		}
+		slog_debug("Client %u, sent address %lu (%lu) to the client %d", current_client_id, local_addr[resource_idx], local_addr_len[resource_idx]);
+	}
+	// Check if someone is requesting identity resources.
+	else if (*((int32_t *)req) == WHO)
+	{
+		ret = send(new_socket, &local_addr_len[resource_idx], sizeof(local_addr_len[resource_idx]), 0);
+		if (ret == -1)
+		{
+			slog_error("HERCULES_ERR_DISPATCHER_WHO_SEND1 for client %u", current_client_id);
+		}
+		ret = send(new_socket, local_addr[resource_idx], local_addr_len[resource_idx], 0);
+		if (ret == -1)
+		{
+			slog_error("HERCULES_ERR_DISPATCHER_WHO_SEND2 (WHO) for client %u", current_client_id);
+		}
+		slog_debug("Replied to client for WHO request.", current_client_id);
+	}
+	else
+	{
+		slog_error("Client %u sent unknown request: %s", current_client_id, req);
+	}
+
+	// slog_debug("\n");
+
+	// MIRAR ucp_worker_release_address(ucp_worker_threads[client_id_from_req % hercules_thread_pool_size], local_addr);
+	close(new_socket);
+	free(client_args);
 	pthread_exit(NULL);
 }
 

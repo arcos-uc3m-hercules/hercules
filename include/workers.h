@@ -63,6 +63,14 @@ typedef struct
 	struct arguments args;
 } p_argv;
 
+// Structure to pass arguments to the client handling thread (Dispatcher).
+typedef struct {
+    int client_socket;
+    uint32_t client_id_counter; // To maintain the client_id_ for modulo operation
+    u_int16_t hercules_thread_pool_size;
+    // Add other necessary arguments here (e.g., local_addr, local_addr_len, slog functions if not global)
+} client_handler_args;
+
 // Thread method attending client data requests.
 void *hercules_ucx_server(void *th_argv);
 void *srv_worker(void *th_argv);
@@ -71,7 +79,7 @@ void *Checkpoint(void *th_argv);
 void *Snapshot(void *th_argv);
 
 // Thread method searching and cleaning nodes with st_nlink=0
-void *garbage_collector(void *th_argv);
+void *GarbageCollector(void *th_argv);
 
 // Thread method attending client metadata requests.
 void *stat_worker(void *th_argv);
@@ -81,8 +89,16 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps);
 void *srv_attached_dispatcher(void *th_argv);
 
 // Dispatcher thread method distributing clients among the pool of metadata server threads.
-void *dispatcher(void *th_argv);
+void *Dispatcher(void *th_argv);
+void *HandleClient(void *args);
 
+/**
+ * @brief Function to write on disk the status of an Hercules process.
+ * 
+ * @param tmp_file_path pathname where the file will be written.
+ * @param msg string message to be written in the file.
+ * @return int, 0 if the file was correctly write, -1 on error.
+ */
 int ready(char *tmp_file_path, const char *msg);
 
 #endif

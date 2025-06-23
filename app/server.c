@@ -581,11 +581,11 @@ int32_t main(int32_t argc, char **argv)
 	if (args.type == TYPE_DATA_SERVER)
 	{
 		region_locks = (pthread_mutex_t *)calloc(hercules_thread_pool_size, sizeof(pthread_mutex_t));
-		extra_threads = 2;
+		extra_threads = 3; // dispatcher + garbage collector + snapshot.
 	}
 	else
 	{
-		extra_threads = 1;
+		extra_threads = 2; // dispatcher + garbage collector.
 	}
 
 	total_threads = hercules_thread_pool_size + extra_threads;
@@ -615,10 +615,10 @@ int32_t main(int32_t argc, char **argv)
 
 		// Deploy all dispatcher + service threads.
 		if (i == 0)
-		{
+		{ // dispatcher.
 			slog_debug("[SERVER] Creating dispatcher thread.");
 			// Deploy a thread distributing incomming clients among all ports.
-			if (pthread_create(&threads[i], NULL, dispatcher, (void *)&arguments[i]) == -1)
+			if (pthread_create(&threads[i], NULL, Dispatcher, (void *)&arguments[i]) == -1)
 			{
 				// Notify thread error deployment.
 				ready(tmp_file_path, "ERROR");
@@ -627,9 +627,22 @@ int32_t main(int32_t argc, char **argv)
 				return -1;
 			}
 		}
-		else if (i == 1 && args.type == TYPE_DATA_SERVER)
-		{
-			// TO FIX: This thread must be running only by the data server.
+		else if (i == 1)
+		{ // garbage collector.
+			slog_debug("[SERVER] Creating checkpoint thread.");
+			// Add the reference to the map into the set of thread arguments.
+			arguments[i].map = map;
+			if (pthread_create(&threads[i], NULL, GarbageCollector, (void *)&arguments[i]) == -1)
+			{
+				// Notify thread error deployment.
+				ready(tmp_file_path, "ERROR");
+				perror("HERCULES_ERR_GARBAGE_COLLECTOR_DEPLOY");
+				slog_error("HERCULES_ERR_GARBAGE_COLLECTOR_DEPLOY");
+				pthread_exit(NULL);
+			}
+		}
+		else if (i == 2 && args.type == TYPE_DATA_SERVER)
+		{ // snapshot.
 			slog_debug("[SERVER] Creating checkpoint thread.");
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
@@ -644,7 +657,7 @@ int32_t main(int32_t argc, char **argv)
 			}
 		}
 		else
-		{
+		{ // hercules ucx server.
 			aux_idx = i - extra_threads;
 			// fprintf(stdout, "Init worker %d\n", aux_idx);
 			ret = init_worker(ucp_context, &ucp_worker_threads[aux_idx]);

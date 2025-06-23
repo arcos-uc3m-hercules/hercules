@@ -186,7 +186,7 @@ void *imss_server(void *arg_)
 		}
 	}
 
-	if (pthread_create(&thread_garbage_collector, NULL, garbage_collector, (void *)buffer_map.get()) == -1)
+	if (pthread_create(&thread_garbage_collector, NULL, GarbageCollector, (void *)buffer_map.get()) == -1)
 	{
 		perror("HERCULES_ERR_GARBAGECOLLECTOR_DEPLOY");
 		pthread_exit(NULL);
@@ -302,7 +302,7 @@ imss_metadata(void *arg_)
 		if (!i)
 		{
 			// Deploy a thread distributing incomming clients among all ports.
-			if (pthread_create(&threads[i], NULL, dispatcher, (void *)&arguments[i]) == -1)
+			if (pthread_create(&threads[i], NULL, Dispatcher, (void *)&arguments[i]) == -1)
 			{
 				perror("HERCULES_ERR_METADISPATCHER_DEPLOY");
 				pthread_exit(NULL);
