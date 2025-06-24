@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <memory>
 // #include <shared_mutex>
 #include "hercules.hpp"
 
@@ -59,6 +60,12 @@ public:
 	int32_t put_snapshot(std::string key, int value);
 	int32_t put_broadcast(std::string key, void *address, uint64_t length);
 
+	// Gargabe collector functions.
+	int32_t put_garbage_collector(std::string key);
+	int32_t garbage_collector_pop(std::string key);
+	int32_t garbage_collector_search(std::string key);
+	
+
 	// Method retrieving the address associated to a certain record.
 	int32_t get(std::string key, void **add_, uint64_t *size_);
 	int32_t get_snapshot(std::string key, int *to_copy);
@@ -81,7 +88,7 @@ public:
 	int32_t rename_metadata_dir_stat_worker(std::string old_dir, std::string rdir_dest);
 	// Used in str_worker threads
 	// Method deleting the address associated to a certain record.
-	int32_t cleaning();
+	int32_t cleaning(char server_type);
 	int32_t cleaning_specific(std::string new_key);
 	int32_t freeAllMemory();
 	int32_t erase_broadcast_element(std::string key);
@@ -116,6 +123,7 @@ private:
 	// Map structure tracking stored records (by default sorts keys with '<' op).
 	// <key(file uri), <data, lenght>>
 	std::map<std::string, std::pair<void *, uint64_t>> buffer;
+	std::vector<std::string> buffer_garbage_collector;
 	std::map<std::string, int> buffer_snapshot;
 	// std::unordered_map<std::string, int> buffer_broadcast;
 	std::map<std::string, std::pair<void *, uint64_t>> buffer_broadcast;

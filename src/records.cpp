@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include "imss.h"
 #include "queue.h"
+#include "directory.h"
 
 using std::make_pair;
 using std::map;
@@ -189,6 +190,17 @@ int32_t map_records::put(std::string key, void *address, uint64_t length)
 	// }
 	quantity_occupied = quantity_occupied + length;
 	buffer.insert({key, value});
+	return 0;
+}
+
+int32_t map_records::put_garbage_collector(std::string key)
+{
+	// Construct a pair object storing the couple of values associated to a key.
+	// Block the access to the map structure.
+	std::unique_lock<std::mutex> lock(*mut);
+	// Add a new value to the map.
+	slog_debug("Inserting %s into the garbage collector map", key.c_str());
+	buffer_garbage_collector.push_back(key);
 	return 0;
 }
 
@@ -425,7 +437,83 @@ int32_t map_records::delete_metadata_stat_worker(std::string key)
 	// }
 
 	return buffer.erase(key);
-	;
+}
+
+/**
+ * @brief Method deleting a record from the garbage collector vector.
+ * @return Number of elements deleted.
+ * */
+int32_t map_records::garbage_collector_search(std::string key)
+{
+	int ret = 0;
+	std::unique_lock<std::mutex> lock(*mut);
+
+	// deletes the block number if contains.
+	int found_symbol_pos = key.find('$');
+	std::string expected_key;
+	if (found_symbol_pos != std::string::npos)
+	{
+		expected_key = key.substr(0, found_symbol_pos);
+	}
+	else
+	{
+		expected_key = key;
+	}
+	slog_debug("passed key=%s, expected_key=%s", key.c_str(), expected_key.c_str());
+
+
+	// find the element.
+	auto it = std::find(buffer_garbage_collector.begin(), buffer_garbage_collector.end(), expected_key);
+	if (it != buffer_garbage_collector.end())
+	{
+		slog_debug("Key %s found!", expected_key.c_str());
+		ret = 1;
+	}
+	else
+	{
+		slog_warn("Key %s was not found.", expected_key.c_str());
+		ret = 0;
+	}
+	return ret;
+}
+
+/**
+ * @brief Method deleting a record from the garbage collector vector.
+ * @return Number of elements deleted.
+ * */
+int32_t map_records::garbage_collector_pop(std::string key)
+{
+	int ret = 0;
+	std::unique_lock<std::mutex> lock(*mut);
+
+	// deletes the block number if contains.
+	int found_symbol_pos = key.find('$');
+	std::string expected_key;
+	if (found_symbol_pos != std::string::npos)
+	{
+		expected_key = key.substr(0, found_symbol_pos);
+	}
+	else
+	{
+		expected_key = key;
+	}
+	slog_debug("passed key=%s, expected_key=%s", key.c_str(), expected_key.c_str());
+
+
+	// find the element.
+	auto it = std::find(buffer_garbage_collector.begin(), buffer_garbage_collector.end(), expected_key);
+	if (it != buffer_garbage_collector.end())
+	{
+		slog_debug("Key %s found! Removing it from the garbage collector.", expected_key.c_str());
+		buffer_garbage_collector.erase(it);
+		ret = 1;
+	}
+	else
+	{
+		slog_warn("Key %s was not found.", expected_key.c_str());
+		ret = 0;
+	}
+	return ret;
 }
 
 /***
@@ -660,46 +748,55 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 /**
  * Find and set corresponding buffer map memory blocks to be reused.
  */
-int32_t map_records::cleaning()
+int32_t map_records::cleaning(char server_type)
 {
 	std::vector<string> vec;
-
-	for (const auto &it : buffer)
+	string partner_key;
+	string partner_path;
+	int pos_partner = 0, found_partner = 0;
+	auto expected_key = buffer_garbage_collector.begin();
+	// for (const auto &expected_key : buffer_garbage_collector)
+	while (expected_key != buffer_garbage_collector.end())
 	{
-		string key = it.first;
-		// Verify if this is a block 0.
-		int found = key.find("$0");
 
-		if (found != std::string::npos)
-		{
-
-			// comprobar la estructura st_ulink
-			struct stat *st_p = (struct stat *)it.second.first;
-			// std::cout << key << "stlink:" <<st_p->st_nlink<<'\n';
-			if (st_p->st_nlink == 0)
+		slog_debug("key to delete=%s", (*expected_key).c_str());
+		if (server_type == TYPE_DATA_SERVER)
+		{ // data server.
+		  // struct stat *st_p = (struct stat *)it.second.first;
+		  // std::cout << key << "stlink:" <<st_p->st_nlink<<'\n';
+			// borrar todos los bloques con mismo path/key
+			for (const auto &it2 : buffer)
 			{
-				// borrar todos los bloques con mismo path/key
-				for (const auto &it2 : buffer)
+				partner_key = it2.first;
+				pos_partner = partner_key.find('$');
+				partner_path = partner_key.substr(0, pos_partner);
+				found_partner = partner_path.compare(*expected_key);
+				if (found_partner == 0)
 				{
-					string partner_key = it2.first;
-					if (partner_key.compare(key) != 0)
-					{ // para no borrar el actual con el que estoy comparando
-						int pos = key.find('$');
-						string path = key.substr(0, pos);
-
-						int pos_partner = partner_key.find('$');
-						string partner_path = partner_key.substr(0, pos_partner);
-
-						int found_partner = partner_path.compare(path);
-						if (found_partner == 0)
-						{
-							vec.insert(vec.begin(), partner_key);
-						}
-					}
+					vec.insert(vec.begin(), partner_key);
 				}
-				vec.insert(vec.begin(), key);
 			}
 		}
+		else
+		{ // metadata server.
+			// TODO: before delete, it's better to check if the file is on the structures.
+			int32_t ret_map = 0, ret_tree = 0;
+			std::string key;
+			std::string key_for_tree;
+			key = *expected_key;
+			key_for_tree = *expected_key;
+
+			// key for map does not need the last slash.
+			RemoveLastSlash(key);
+			slog_debug("Deleting %s from the metadata map.", key.c_str());
+			ret_map = delete_metadata_stat_worker(key);
+			// pthread_mutex_lock(&tree_mut);
+			slog_debug("Deleting %s from the gtree.", key_for_tree.c_str());
+			ret_tree = GTree_delete(key_for_tree);
+			// pthread_mutex_unlock(&tree_mut);
+			slog_debug("delete_metadata_stat_worker=%d, GTree_delete=%d", ret_map, ret_tree);
+		}
+		expected_key = buffer_garbage_collector.erase(expected_key);
 	}
 
 	// Block the access to the map structure.
@@ -757,9 +854,9 @@ int32_t map_records::cleaning_specific(std::string new_key)
 		auto item = buffer.find(*i);
 		// block size of the curren item.
 		item_mem_size = item->second.second;
-		// checks if the mem pool has a slot, 
+		// checks if the mem pool has a slot,
 		// or if the current item memory size fits the block size (block 0 can have different size).
-		if (StsQueue.size(mem_pool) + item_mem_size >= MAX_POOL_SIZE || item_mem_size != BLOCK_SIZE )
+		if (StsQueue.size(mem_pool) + item_mem_size >= MAX_POOL_SIZE || item_mem_size != BLOCK_SIZE)
 		{
 			slog_debug("Freeing memory of key %s", item->first.c_str());
 			free(item->second.first); // free the memory of this block.

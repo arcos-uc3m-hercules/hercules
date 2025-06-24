@@ -198,7 +198,7 @@ int32_t main(int32_t argc, char **argv)
 	// POLICY = args.policy;
 	strncpy(POLICY, args.policy, sizeof(POLICY));
 
-	char log_path[PATH_MAX];
+	char log_path[PATH_MAX] = {0};
 	// char *workdir = getenv("PWD");
 	slog_debug("Server type=%c\n", args.type);
 	struct tm tm = *localtime(&t);
@@ -545,13 +545,14 @@ int32_t main(int32_t argc, char **argv)
 
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(buffer_size * KB));
+	std::shared_ptr<map_records> garbage_collector_map(new map_records(buffer_size * KB));
 
 	// copy the reference to a global map.
 	g_map = map;
 
 	int64_t data_reserved;
 	// Pointer to the allocated buffer memory.
-	char *buffer;
+	char *buffer = NULL;
 	// Size of the buffer involved.
 	uint64_t size = (uint64_t)buffer_size * KB;
 	// Check if the requested data is available in the current node.

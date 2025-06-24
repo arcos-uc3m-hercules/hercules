@@ -5,7 +5,6 @@
 #include <string.h>
 #include <directory.h>
 #include <stdio.h>
-#include "records.hpp"
 
 // Pointer to the tree's root node.
 GNode *tree_root;
@@ -22,7 +21,7 @@ void print_tree_structure(GNode *root, int depth)
 	{
 		fprintf(stdout, "  "); // Indent
 	}
-	fprintf(stdout,"- %s\n", (const char *)root->data);
+	fprintf(stdout, "- %s\n", (const char *)root->data);
 
 	// Recursively print children
 	GNode *child = root->children;
@@ -218,18 +217,18 @@ int32_t GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 		uint32_t num_elements_indir = g_node_n_nodes(dir_node, G_TRAVERSE_ALL) - 1;
 		uint32_t num_elements_indir_childrens = g_node_n_children(dir_node);
 		// printf("DIR_NUM_ELEMENTS=%d\n",num_elements_indir+1);
-		char *dir_elements = (char *)calloc((num_elements_indir + 1), URI_);
-		if (dir_elements == NULL)
+		char *dir_elements_buff = (char *)calloc((num_elements_indir + 1), URI_);
+		if (dir_elements_buff == NULL)
 		{
 			perror("HERCULES_ERR_GTREE_RENAME_DIR_DIR_MEMORY_ALLOC");
 			slog_fatal("HERCULES_ERR_GTREE_RENAME_DIR_DIR_MEMORY_ALLOC");
 			exit(-1);
 		}
 
-		char *aux_dir_elem = dir_elements;
+		char *aux_dir_elem = dir_elements_buff;
 		serialize_dir(dir_node, num_elements_indir_childrens, &aux_dir_elem);
 
-		char *aux = dir_elements;
+		char *aux = dir_elements_buff;
 		for (int i = 0; i < num_elements_indir + 1; i++)
 		{
 
@@ -261,8 +260,8 @@ int32_t GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 			}
 			aux += URI_;
 		}
-		if (dir_elements != NULL)
-			free(dir_elements);
+		if (dir_elements_buff != NULL)
+			free(dir_elements_buff);
 
 		if (dir_node->data != NULL)
 			free(dir_node->data);
@@ -476,16 +475,16 @@ int32_t GTree_insert(char *desired_data)
 }
 
 // Method serializing the number of childrens within a directory into a buffer.
-int32_t
-serialize_dir_childrens(GNode *visited_node,
-						uint32_t num_children,
-						char **buffer)
+// int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char **buffer)
+int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char **buffer, std::shared_ptr<map_records> map)
 {
 	// Add the concerned uri into the buffer.
 	// memcpy(*buffer, (char *)visited_node->data, URI_);
 	// *buffer += URI_;
 
 	GNode *child = visited_node->children;
+	int found = 0;
+	int num_dirty_child = 0;
 	// printf("node=%s  num_children=%d\n",(char *) visited_node->data,num_children);
 	for (int32_t i = 0; i < num_children; i++)
 	{
@@ -502,27 +501,23 @@ serialize_dir_childrens(GNode *visited_node,
 			slog_fatal("HERCULES_ERR_SERIALIZE_DIR_CHILDRENS_CHILD_DATA");
 			exit(-1);
 		}
-		// if (strlen((char *)child->data) < URI_)
-		// {
-		// 	char error_msg[MAX_ERR_MSG_LEN] = {0};
-		// 	sprintf(error_msg, "HERCULES_ERR_SERIALIZE_DIR_CHILDRENS_DATA_INCONSISTENCY: data len = %lu, data = %s", strlen((char *)child->data), (char *)child->data);
-		// 	perror(error_msg);
-		// 	slog_fatal("%s", error_msg);
-		// 	exit(-1);
-		// }
-		// // Add the child's uri to the buffer.
-		// memset(*buffer, 0, URI_);
-		memcpy(*buffer, (char *)child->data, strlen((char *)child->data));
-		*buffer += URI_;
-		/*}
-		else
 
-			serialize_dir(child, num_grandchildren, buffer);*/
+		// Check if the child data is dirty.
+		found = map->garbage_collector_search(std::string((char *)(child->data)));
+		if (!found)
+		{
+			memcpy(*buffer, (char *)child->data, strlen((char *)child->data));
+			*buffer += URI_;
+		}
+		else
+		{
+			num_dirty_child++;
+		}
 
 		child = child->next;
 	}
 
-	return 0;
+	return num_dirty_child;
 }
 
 // Method serializing the number of elements within a directory into a buffer.
@@ -575,9 +570,8 @@ void print_child_node(GNode *node, gpointer data)
 }
 
 // Method retrieving a buffer with all the files within a directory.
-char *
-GTree_getdir(char *desired_dir,
-			 int32_t *numdir_elems)
+// extern std::shared_ptr<map_records> g_map;
+char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, std::shared_ptr<map_records> map)
 {
 	// Node whose elements must be retrieved.
 	GNode *dir_node;
@@ -617,27 +611,31 @@ GTree_getdir(char *desired_dir,
 	}
 
 	// Buffer containing the whole set of elements within a certain directory.
-	// char *dir_elements = (char *) malloc(sizeof(char)*num_elements_indir*URI_);
-	// char *dir_elements = (char *)calloc(1, (num_children + 1) * URI_);
-	char *dir_elements = (char *)calloc(num_children + 1, URI_);
-	if (dir_elements == NULL)
+	// char *dir_elements_buff = (char *) malloc(sizeof(char)*num_elements_indir*URI_);
+	// char *dir_elements_buff = (char *)calloc(1, (num_children + 1) * URI_);
+	char *dir_elements_buff = (char *)calloc(num_children + 1, URI_);
+	if (dir_elements_buff == NULL)
 	{
 		perror("HERCULES_ERR_GTREE_GETDIR_ALLOC_MEMORY");
 		slog_fatal("HERCULES_ERR_GTREE_GETDIR_ALLOC_MEMORY");
 		exit(-1);
 	}
 
-	char *aux_dir_elem = dir_elements;
+	char *aux_dir_elem = dir_elements_buff;
+	int num_dirty_child = 0;
 
 	// Call the serialization function storing all dir elements in the buffer.
 	// TO CHECK!
 	//	slog_info("serialize_dir_childrens(dir_node=%s, num_children=%d, &aux_dir_elem)", dir_node->data, num_children);
 	pthread_mutex_lock(&tree_mut);
-	serialize_dir_childrens(dir_node, num_children, &aux_dir_elem);
+	num_dirty_child = serialize_dir_childrens(dir_node, num_children, &aux_dir_elem, map);
 	pthread_mutex_unlock(&tree_mut);
 	// slog_info("ending serialize_dir_childrens, aux_dir_elem=%s", *aux_dir_elem);
+	slog_debug("directory %s has %d elements but %d are dirty", desired_dir, *numdir_elems, num_dirty_child);
+	*numdir_elems -= num_dirty_child;
+	slog_debug("valid numdir_elems=%d", *numdir_elems);
 
-	return dir_elements;
+	return dir_elements_buff;
 }
 
 // Method that will be called for each tree node freeing the associated data element.

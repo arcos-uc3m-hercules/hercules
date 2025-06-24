@@ -47,7 +47,7 @@
 #define TYPE_HERCULES_INSTANCE 'I' // for Hercules instances
 #define TYPE_REGULAR_FILE 'R'      // for regular files
 #define TYPE_DIRECTORY 'D'         // for directories
-#define TYPE_ERROR 'E'         // unkown file type
+#define TYPE_ERROR 'E'             // unkown file type
 
 static const ucp_tag_t tag_req = 0x1337a880u;
 static const ucp_tag_t tag_data = 0x2337a880u;
@@ -66,6 +66,10 @@ static const char MSG_NODELETE_OP[] = "NODELETE";
 static const char MSG_CLOSE_OP[] = "CLOSE";
 static const char MSG_OPEN_OP[] = "OPEN";
 static const char MSG_UPDATED_OP[] = "UPDATED!";
+
+static const char STATUS_ATACH[] = "ATTACH";
+static const char STATUS_DEST[] = "DEST";
+static const char STATUS_DIRTY[] = "DIRTY";
 
 // static const char *RESPONSES_MESSAGES[] = {
 //     "OK",

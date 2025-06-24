@@ -1914,7 +1914,7 @@ int32_t create_dataset(char *dataset_uri,
 		new_dataset.n_open = 0;
 	}
 	// mark the file as attach. It helps to delete the file in case of a close and delete.
-	strncpy(new_dataset.status, "attach", strlen("attach"));
+	strncpy(new_dataset.status, STATUS_ATACH, strlen(STATUS_ATACH) + 1);
 
 	if (link == NO_LINK)
 	{
@@ -3192,7 +3192,8 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 	}
 
 	size_t msg_length = 0;
-	for (int32_t i = 0; i < curr_imss.info.num_active_storages; i++) {
+	for (int32_t i = 0; i < curr_imss.info.num_active_storages; i++)
+	{
 		ep = curr_imss.conns.eps[i];
 		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
 		if (msg_length == 0)
@@ -4679,9 +4680,9 @@ int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir)
 	slog_debug("root=%s, root len=%d, dataset_uri=%s", IMSS_ROOT, IMSS_ROOT_LEN, dataset_uri);
 	// int last_parent_offset = 0;
 	size_t uri_len = strlen(dataset_uri);
-	
+
 	const char *path_start = dataset_uri + IMSS_ROOT_LEN;
-    size_t path_len = uri_len - IMSS_ROOT_LEN;
+	size_t path_len = uri_len - IMSS_ROOT_LEN;
 
 	size_t actual_path_len = path_len;
 	if (actual_path_len > 0 && path_start[actual_path_len - 1] == '/')
@@ -4711,7 +4712,7 @@ int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir)
 	if (last_slash_in_path != NULL)
 	{
 		// Parent directory exists within the path after IMSS_ROOT
-        last_parent_offset_from_uri_start = (last_slash_in_path - dataset_uri);
+		last_parent_offset_from_uri_start = (last_slash_in_path - dataset_uri);
 		slog_debug("last_parent_offset_from_uri_start=%d", last_parent_offset_from_uri_start);
 		// last_parent_offset++;
 		strncpy(last_parent_dir, dataset_uri, last_parent_offset_from_uri_start);

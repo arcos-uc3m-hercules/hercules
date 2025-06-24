@@ -141,7 +141,7 @@ int ready(char *tmp_file_path, const char *msg)
 int SendConfirmationMessage(const p_argv *arguments, const char *msg)
 {
 	int ret = 0;
-	slog_debug("Seding msg %s", msg);
+	slog_debug("Sending msg %s", msg);
 	ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, (const void *)msg, strlen(msg) + 1, arguments->worker_uid);, "Send data", int);
 	return ret;
 }
@@ -445,8 +445,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
 				if (ret < 0)
 				{
-					slog_error("HERCULES_ERR_WORKER_SEND_READ_OP");
-					perror("HERCULES_ERR_WORKER_SEND_READ_OP");
+					perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
+					slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
 					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
@@ -454,6 +454,35 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			}
 			else
 			{
+
+				// Here we do not need to check the number of links to the dataset
+				// because to know if the file is dirty, we use the metadata server.
+				// check if it is the block 0.
+				// int is_block_zero = 0;
+				// std::size_t found = key.find("$0");
+				// if (found != std::string::npos)
+				// {
+				// 	is_block_zero = 1;
+				// }
+
+				// if (is_block_zero)
+				// { // if it is the block zero, check if it is dirty.
+				// 	struct stat *stats;
+				// 	stats = (struct stat *)address_;
+				// 	if (stats->st_nlink == 0)
+				// 	{
+				// 		slog_debug("%s has %d links", stats->st_nlink);
+				// 		ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
+				// 		if (ret < 0)
+				// 		{
+				// 			perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_DIRTY_BLOCK");
+				// 			slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_DIRTY_BLOCK");
+				// 			// pthread_mutex_unlock(&lock_network);
+				// 			return -1;
+				// 		}
+				// 	}
+				// }
+
 				if (to_read <= 0)
 				{
 					to_read = block_size_rtvd;
@@ -476,8 +505,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				{
 					// Send the requested block.
 
-					// struct stat *stats;
-					// stats = (struct stat *)address_;
 					// slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, stat->st_nlink=%lu, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, stats->st_nlink, is_shared_memory);
 					slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, is_shared_memory);
 					size_t ret_send_data = 0;
@@ -523,19 +550,23 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		case DELETE_OP:
 		{
 			slog_debug("DELETE_OP");
-			slog_debug("Cleaning %s", key.c_str());
+			// slog_debug("Cleaning %s", key.c_str());
 			const char *response_msg = NULL;
-			ret = map->cleaning_specific(key);
-			if (ret == -1)
-			{
-				fprintf(stderr, "HERCULES_ERR_CLEANING_DATASET: %s\n", key.c_str());
-				slog_error("HERCULES_ERR_CLEANING_DATASET: %s", key.c_str());
-				response_msg = MSG_ERROR_OP;
-			}
-			else
-			{
-				response_msg = MSG_OK_OP;
-			}
+			// for data server we need to look up for all the blocks.
+			// buffer_garbage_collector.put(key, NULL, 0);
+			map->put_garbage_collector(key);
+
+			// ret = map->cleaning_specific(key);
+			// if (ret == -1)
+			// {
+			// 	fprintf(stderr, "HERCULES_ERR_CLEANING_DATASET: %s\n", key.c_str());
+			// 	slog_error("HERCULES_ERR_CLEANING_DATASET: %s", key.c_str());
+			// 	response_msg = MSG_ERROR_OP;
+			// }
+			// else
+			// {
+			response_msg = MSG_OK_OP;
+			// }
 
 			ret = SendConfirmationMessage(arguments, response_msg);
 			if (ret == 0)
@@ -1352,9 +1383,16 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			{
 				slog_debug("[WRITE_OP] Key find %s", key.c_str());
 				// Receive the block into the buffer.
-				std::size_t found = key.find("$0");
-				if (found != std::string::npos)
+				// std::size_t found = key.find("$0");
+				// if (found != std::string::npos)
+				if (is_block_zero)
 				{ // block 0.
+					// check if it is in the garbage collector map. 
+					ret = map->garbage_collector_pop(key);
+					if (ret == 0)
+					{
+						slog_debug("%s has not been found on the garbage collector map.", key.c_str());
+					}
 					// //pthread_mutex_lock(&memory_protect);
 					slog_debug("[WRITE_OP] Updating block $0 (%d)", block_size_rtvd);
 					struct stat *old, *latest;
@@ -1505,14 +1543,17 @@ void *GarbageCollector(void *th_argv)
 	// fprintf(stderr, "Init garbage collector\n");
 	slog_debug("Init garbage collector");
 	// Obtain the current map class element from the set of arguments.
-	map_records *map = (map_records *)th_argv;
+	p_argv *arguments = (p_argv *)th_argv;
+	std::shared_ptr<map_records> map = arguments->map;
 
 	for (;;)
 	{
 		// Gnodetraverse_garbage_collector(map);//Future
 		sleep(GARBAGE_COLLECTOR_PERIOD);
+		// fprintf(stdout,"Running garbage collector\n");
+		// slog_debug("Running garbage collector");
 		pthread_mutex_lock(&mutex_garbage);
-		map->cleaning();
+		map->cleaning(arguments->args.type);
 		pthread_mutex_unlock(&mutex_garbage);
 	}
 	pthread_exit(NULL);
@@ -1742,20 +1783,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			ConcatLastSlash(key_for_tree);
 
 			slog_info("Calling GTree_getdir, key=%s", key_for_tree.c_str());
-			buffer = GTree_getdir((char *)key_for_tree.c_str(), &numelems_indir);
-			// pthread_mutex_unlock(&tree_mut);
-			// if (numelems_indir == -1)
-			// {
-			// 	// Add an extra slash to check if it a directory.
-			// 	if (!key.empty() && key.back() != '/')
-			// 	{
-			// 		key += '/';
-
-			// 		// pthread_mutex_lock(&tree_mut);
-			// 		buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
-			// 		// pthread_mutex_unlock(&tree_mut);
-			// 	}
-			// }
+			buffer = GTree_getdir((char *)key_for_tree.c_str(), &numelems_indir, map);
 			slog_info("[workers] Ending GTree_getdir, key=%s, numelems_indir=%d", key_for_tree.c_str(), numelems_indir);
 
 			if (numelems_indir == -1)
@@ -1829,7 +1857,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// pthread_mutex_lock(&lock_network);
 				if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
 				{
-					perror("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_ERR");
+					perror("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_DYNAMIC_STREAM_NON_EXISTING_BLOCK");
+					slog_error("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_DYNAMIC_STREAM_NON_EXISTING_BLOCK");
 					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
@@ -1838,7 +1867,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			else
 			{
 				if (operation == IMSS_INFO)
-				{
+				{ // Hercules instance case.
 					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, address_, IMSS_INFO, arguments->worker_uid);
 				}
 				else
@@ -1847,40 +1876,53 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					dataset = (dataset_info *)address_;
 					// TODO: check why dataset->n_open is 21893 for imss://
 					slog_debug("Before dataset->n_open=%d, dataset uri=%s, operation=%d", dataset->n_open, dataset->uri_, operation);
-					// Checks if the clients wants to open the file.
-					switch (operation)
-					{
-					case 1: // file opened.
-						pthread_mutex_lock(&memory_protect);
-						dataset->n_open += 1;
-						pthread_mutex_unlock(&memory_protect);
-						slog_debug("File opened");
-						break;
-					default:
-						break;
-					}
-					slog_debug("After dataset->n_open=%d", dataset->n_open);
-					msg_t m;
-					m.data = address_;
-					m.size = block_size_rtvd;
-					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
-				}
 
-				if (err < 0)
-				{
-					perror("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_STREAM");
-					slog_error("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_STREAM");
-					// pthread_mutex_unlock(&lock_network);
-					return -1;
+					// Check if it not a dirty dataset.
+					// To know that, the status dataset must to be marked as "dirty".
+					if (!strncmp(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY)))
+					{
+						slog_debug("%s exists but is a dirty block", key.c_str());
+						if (send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid) < 0)
+						{
+							perror("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_DYNAMIC_STREAM_DIRTY_BLOCK");
+							slog_error("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_DYNAMIC_STREAM_DIRTY_BLOCK");
+							return -1;
+						}
+					}
+					else
+					{
+						// Checks if the clients wants to open the file.
+						switch (operation)
+						{
+						case 1: // file opened.
+							pthread_mutex_lock(&memory_protect);
+							dataset->n_open += 1;
+							pthread_mutex_unlock(&memory_protect);
+							slog_debug("File opened");
+							break;
+						default:
+							break;
+						}
+						slog_debug("After dataset->n_open=%d", dataset->n_open);
+						msg_t m;
+						m.data = address_;
+						m.size = block_size_rtvd;
+						err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
+						if (err < 0)
+						{
+							perror("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_STREAM");
+							slog_error("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_STREAM");
+							// pthread_mutex_unlock(&lock_network);
+							return -1;
+						}
+					}
 				}
-				// pthread_mutex_unlock(&lock_network);
 			}
 		}
 		break;
 		case RELEASE:
 		{
 			slog_debug("[stat_worker_thread][READ_OP][RELEASE] Deleting endpoint with %" PRIu64 "", arguments->worker_uid);
-
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			// ucp_destroy(arguments->ucp_context);
 			slog_debug("[stat_worker_thread][READ_OP][RELEASE] Endpoints deleted ");
@@ -1891,16 +1933,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			slog_debug("DELETE_OP");
 			int err = map->get(key, &address_, &block_size_rtvd);
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
-			// if (err == 0)
-			// {
-			// 	// const char *last = key.c_str() + strlen(key.c_str()) - 1;
-			// 	// if (last[0] != '/')
-			// 	if (!key.empty() && key.back() != '/')
-			// 	{
-			// 		key += '/';
-			// 		err = map->get(key, &address_, &block_size_rtvd);
-			// 	}
-			// }
 
 			if (err == 0)
 			{
@@ -1923,23 +1955,30 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				switch (operation)
 				{
 				case 4: // unlink.
-					strncpy(dataset->status, "dest", strlen("dest") + 1);
-					slog_debug("Dataset mark as dest");
+					strncpy(dataset->status, STATUS_DEST, strlen(STATUS_DEST) + 1);
+					slog_debug("Dataset mark as %s", dataset->status);
 					break;
 				default:
 					break;
 				}
 
-				slog_debug("dataset->n_open=%d, dataset->status=%s", dataset->n_open, dataset->status);
-				int32_t ret_map = 0, ret_tree = 0;
 				if (dataset->n_open == 0) // if no more process has the file opened.
 				{
-					// TODO: before delete, it's better to check if the file is on the structures.
-					ret_map = map->delete_metadata_stat_worker(key);
-					// pthread_mutex_lock(&tree_mut);
-					ret_tree = GTree_delete(key_for_tree);
-					// pthread_mutex_unlock(&tree_mut);
-					slog_debug("delete_metadata_stat_worker=%d, GTree_delete=%d", ret_map, ret_tree);
+					// 	// TODO: before delete, it's better to check if the file is on the structures.
+					// 	ret_map = map->delete_metadata_stat_worker(key);
+					// 	// pthread_mutex_lock(&tree_mut);
+					// 	ret_tree = GTree_delete(key_for_tree);
+					// 	// pthread_mutex_unlock(&tree_mut);
+					// 	slog_debug("delete_metadata_stat_worker=%d, GTree_delete=%d", ret_map, ret_tree);
+					// buffer_garbage_collector.put(key, address_, block_size_rtvd);
+					strncpy(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY) + 1);
+					slog_debug("Dataset mark as %s", dataset->status);
+					map->put_garbage_collector(key_for_tree);
+					response_msg = MSG_DELETE_OP;
+				}
+				else
+				{
+					response_msg = MSG_NODELETE_OP;
 				}
 				pthread_mutex_unlock(&memory_protect);
 
@@ -1951,14 +1990,14 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// if (numelems_indir == -1)
 				// 	fprintf(stdout, "Entry already deleted: %s\n", key.c_str());
 
-				if (ret_map > 0 && ret_tree == 1)
-				{
-					response_msg = MSG_DELETE_OP;
-				}
-				else
-				{
-					response_msg = MSG_NODELETE_OP;
-				}
+				// if (ret_map > 0 && ret_tree == 1)
+				// {
+				// 	response_msg = MSG_DELETE_OP;
+				// }
+				// else
+				// {
+				// 	response_msg = MSG_NODELETE_OP;
+				// }
 
 				slog_debug("response_msg=%s", response_msg);
 				// pthread_mutex_lock(&lock_network);
@@ -2130,22 +2169,13 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 				slog_debug("After dataset->n_open=%d, status=%s", dataset->n_open, dataset->status);
 				// if file status is marked as "dest", it is delete after close.
-				if (!strncmp(dataset->status, "dest", strlen("dest")) && dataset->n_open == 0)
+				if (!strncmp(dataset->status, STATUS_DEST, strlen(STATUS_DEST)) && dataset->n_open == 0)
 				{
-					slog_debug("Deleting %s", key.c_str());
-					int32_t result_map = map->delete_metadata_stat_worker(key);
-					slog_debug("[READ_OP][DELETE_OP] delete_metadata_stat_worker=%d", result_map);
-					// pthread_mutex_lock(&tree_mut);
-					int32_t result_tree = GTree_delete(key_for_tree);
-					slog_debug("result map=%d, result_tree=%d", result_map, result_tree);
-					if (result_tree != 1 && result_map > 0)
-					{
-						response_msg = MSG_DELETE_OP;
-					}
-					else
-					{
-						response_msg = MSG_ERROR_OP;
-					}
+					// Mark the dataset as dirty to prevent future reads.
+					strncpy(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY) + 1);
+					slog_debug("Dataset mark as %s", dataset->status);
+					map->put_garbage_collector(key_for_tree);
+					response_msg = MSG_DELETE_OP;
 				}
 				else
 				{
@@ -2170,15 +2200,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			slog_debug("OPEN_OP");
 			int err = map->get(key, &address_, &block_size_rtvd);
-			// if (err == 0)
-			// {
-			// 	if (!key.empty() && key.back() != '/')
-			// 	{
-			// 		//  Adds an extra slash to check if it is a directory.
-			// 		key += '/';
-			// 		err = map->get(key, &address_, &block_size_rtvd);
-			// 	}
-			// }
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
@@ -2197,6 +2218,17 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			else
 			{
 				dataset = (dataset_info *)address_;
+				if (!strncmp(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY)))
+				{ // dataset is dirty. We will delete from the
+					slog_debug("Dirty dataset found %s, recovering from the garbage collector.", key.c_str());
+					int ret = map->garbage_collector_pop(key);
+					if (ret == 0)
+					{
+						slog_debug("%s has not been found on the garbage collector map, but it found as dirty.", key.c_str());
+					}
+					strncpy(dataset->status, STATUS_ATACH, strlen(STATUS_ATACH) + 1);
+				}
+
 				slog_debug("Before dataset->n_open=%d", dataset->n_open);
 				pthread_mutex_lock(&memory_protect);
 				dataset->n_open += 1;
@@ -2222,12 +2254,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	case SET_OP:
 	{
 		slog_debug("[SET_OP] Creating dataset %s", key.c_str());
-		// TO CHECK: this mutex can be removed cause' map->get has another mutex.
-		// pthread_mutex_lock(&memory_protect);
 		// If the record was not already stored, add the block.
 		if (!TIMING(map->get(key, &address_, &block_size_rtvd), "map->get", int32_t, arguments->thread_id))
 		{
-			// pthread_mutex_unlock(&memory_protect);
 			slog_debug("Recv dynamic buffer size %ld", block_size_recv);
 			// Get the length of the message to be received.
 			size_t length = 0;
@@ -2238,7 +2267,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			{
 				perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
 				slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
-				// pthread_mutex_unlock(&memory_protect);
 				// pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
@@ -2319,6 +2347,18 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		// If was already stored:
 		else
 		{
+			dataset = (dataset_info *)address_;
+			if (!strncmp(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY)))
+			{ // dataset is dirty. We will delete from the
+				slog_debug("Dirty dataset found %s, recovering from the garbage collector.", key.c_str());
+				int ret = map->garbage_collector_pop(key);
+				if (ret == 0)
+				{
+					slog_debug("%s has not been found on the garbage collector map, but it found as dirty.", key.c_str());
+				}
+				strncpy(dataset->status, STATUS_ATACH, strlen(STATUS_ATACH) + 1);
+			}
+
 			// Follow a certain behavior if the received block was already stored.
 			slog_debug("LOCAL DATASET_UPDATE %ld", block_size_recv);
 			switch (1) // TO CKECK!
@@ -2399,8 +2439,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 			default:
 			{
-				// fprintf(stderr, "num_input_read=%d\n", num_input_read);
-				int new_server_status = 0;
+				slog_debug("num_input_read=%d, operation=%d", num_input_read, operation) int new_server_status = 0;
 				int flag = 0;
 				switch (num_input_read)
 				{
@@ -2482,7 +2521,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						return -1;
 					}
 
-					void *buffer = (void *)malloc(block_size_recv);
+					void *buffer = NULL;
+					// = (void *)malloc(block_size_recv);
+					buffer = address_;
 					if (buffer == NULL)
 					{
 						perror("HERCULES_ERR_STAT_MEMORY_ALLOC");
@@ -2503,7 +2544,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					}
 
 					// pthread_mutex_unlock(&lock_network);
-					free(buffer);
+					// free(buffer);
 					// slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 				}
 
