@@ -49,7 +49,7 @@ pthread_t metadata_th;
 // ZeroMQ context entity conforming all sockets.
 
 // Initial buffer address.
-extern char *buffer_address;
+// extern char *buffer_address;
 // Set of locks dealing with the memory buffer access.
 extern pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
@@ -224,7 +224,7 @@ void *imss_server(void *arg_)
 
 	free(region_locks);
 	// Free the memory buffer.
-	free(buffer_address);
+	// free(buffer_address);
 
 	pthread_exit(NULL);
 }

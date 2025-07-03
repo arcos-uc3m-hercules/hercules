@@ -34,7 +34,7 @@ int32_t
 GTree_rename_dir_dir(char *old_dir, char *rdir_dest);
 
 // Method inserting a new path.
-int32_t GTree_insert(char *desired_data);
+int32_t GTree_insert(char *desired_data, GNode **new_node);
 
 // Method that will be called for each tree node freeing the associated data element.
 int32_t gnodetraverse(GNode *node, void *data);

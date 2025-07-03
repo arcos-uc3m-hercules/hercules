@@ -31,7 +31,7 @@ char *META_HOSTFILE = NULL;
 uint64_t STORAGE_SIZE = 16;			 // In GB
 uint64_t META_BUFFSIZE = 16;		 // In GB
 uint64_t IMSS_BLKSIZE = 1024;		 // In KB
-uint64_t IMSS_BUFFSIZE = 2;			 // In GB
+// uint64_t IMSS_BUFFSIZE = 2;			 // In GB
 uint64_t IMSS_DATA_BSIZE = 512 * KB; // In Bytes.
 int32_t REPL_FACTOR = NONE;			 // Default none
 int32_t REPL_TYPE = ASYNC;			 // Default async
@@ -452,7 +452,7 @@ extern "C"
 		IMSS_HOSTFILE = args.data_hostfile;
 		N_SERVERS = args.num_data_servers;
 		IMSS_SRV_PORT = args.data_port;
-		IMSS_BUFFSIZE = args.bufsize;
+		// IMSS_BUFFSIZE = args.bufsize;
 		META_HOSTFILE = args.meta_hostfile;
 		METADATA_PORT = args.stat_port;
 		N_META_SERVERS = args.num_metadata_servers;
@@ -486,7 +486,7 @@ extern "C"
 		slog_live(" -- HERCULES_HOSTFILE: %s", IMSS_HOSTFILE);
 		slog_live(" -- HERCULES_N_SERVERS: %d", N_SERVERS);
 		slog_live(" -- HERCULES_SRV_PORT: %d", IMSS_SRV_PORT);
-		slog_live(" -- HERCULES_BUFFSIZE: %ld", IMSS_BUFFSIZE);
+		// slog_live(" -- HERCULES_BUFFSIZE: %ld", IMSS_BUFFSIZE);
 		slog_live(" -- META_HOSTFILE: %s", META_HOSTFILE);
 		slog_live(" -- HERCULES_META_PORT: %d", METADATA_PORT);
 		slog_live(" -- HERCULES_META_SERVERS: %d", N_META_SERVERS);

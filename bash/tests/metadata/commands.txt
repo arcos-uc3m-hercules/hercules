@@ -56,3 +56,18 @@ cmake -DCMAKE_BUILD_TYPE=Debug \
       -DCMAKE_C_FLAGS_DEBUG="-g -O0" \
       -DCMAKE_CXX_FLAGS_DEBUG="-g -O0" \
       ..
+
+## PROFILING
+# Step 1
+GMON_OUT_PREFIX=profile_metadata HERCULES_THREAD_POOL=1 HERCULES_DEBUG_LEVEL=SLOG_FULL HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf gprof ~/hercules/build/hercules_server gmon.out
+GMON_OUT_PREFIX=profile_run_data HERCULES_THREAD_POOL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf ~/hercules/build/hercules_server d 0 1
+# Step 2
+Run the app
+# Step 3: stop servers
+~/hercules/scripts/hercules stop -f /beegfs/home/javier.garciablas/hercules/bash/tests/metadata/configurations_hercules/hercules.conf
+# Analyze the data
+gprof ~/hercules/build/hercules_server profile_run_metadata.XXXXXX > hercules_metadata_server_profiling.txt
+less hercules_metadata_server_profiling.txt
+--
+gprof ~/hercules/build/hercules_server profile_run_data.XXXXX > hercules_data_server_profiling.txt
+less hercules_data_server_profiling.txt

@@ -47,9 +47,9 @@ int32_t GTree_search_(GNode *parent_node,
 
 	*found_node = parent_node;
 	// fprintf(stdout, "TreeSearch number of child %ld in %p, %s\n", num_children, parent_node, (char *)parent_node->data);
+	slog_debug("TreeSearch number of child %ld in %p, %s\n", num_children, parent_node, (char *)parent_node->data);
 	//  Search for the requested data within the children of the current node.
 	for (int32_t i = 0; i < num_children; i++)
-
 	// while (child != NULL)
 	{
 		const char *child_data_str = (const char *)child->data;
@@ -65,6 +65,7 @@ int32_t GTree_search_(GNode *parent_node,
 			if (!strcmp(child_data_str, desired_data))
 			{
 				*found_node = child;
+				slog_debug("data was found after %d iterations", i);
 				// The desired data was found.
 				return 1;
 			}
@@ -82,6 +83,7 @@ int32_t GTree_search_(GNode *parent_node,
 			if (!strcmp(child_data_str, desired_data))
 			{
 				*found_node = child;
+				slog_debug("data was found after %d iterations", i);
 				// fprintf(stdout,"found node %p, %s, desird data %s\n", child, (char *)child->data, desired_data);
 				//  The desired data was found.
 				return 1;
@@ -168,7 +170,7 @@ int32_t GTree_rename(char *old_desired_data, char *new_desired_data)
 	GNode *closest_node;
 
 	// Check if the node has been already inserted.
-	// slog_debug("old_desired_data=%s, new_desired_data=%s", old_desired_data, new_desired_data);
+	slog_debug("old_desired_data=%s, new_desired_data=%s", old_desired_data, new_desired_data);
 	// pthread_mutex_lock(&tree_mut);
 	int32_t ret = GTree_search(tree_root, old_desired_data, &closest_node);
 	// slog_debug("ret from GTree_search = %d", ret);
@@ -184,7 +186,8 @@ int32_t GTree_rename(char *old_desired_data, char *new_desired_data)
 			free(closest_node->data);
 			g_node_destroy(closest_node);
 			pthread_mutex_unlock(&tree_mut);
-			ret = GTree_insert(new_desired_data);
+			GNode *new_node;
+			ret = GTree_insert(new_desired_data, &new_node);
 			if (ret == -1)
 			{
 				return -1;
@@ -201,79 +204,180 @@ int32_t GTree_rename(char *old_desired_data, char *new_desired_data)
 	return 1;
 }
 
+// --- Helper function to print the tree structure for verification ---
+void print_tree_recursive(GNode *node, int indent)
+{
+	if (!node)
+		return;
+
+	// for (int i = 0; i < indent; i++) {
+	//     slog_debug("  ");
+	// }
+	slog_debug("%s", (char *)node->data);
+
+	GNode *child = g_node_first_child(node);
+	while (child)
+	{
+		print_tree_recursive(child, indent + 1);
+		child = g_node_next_sibling(child);
+	}
+}
+
+// --- Helper function to update a node's path ---
+static void update_node_path(GNode *node, const char *old_prefix, const char *new_prefix)
+{
+	char *current_path = (char *)node->data;
+	if (!current_path)
+	{
+		slog_debug("Warning: Node data is NULL, skipping path update for node %p.", (void *)node);
+		return;
+	}
+
+	size_t old_prefix_len = strlen(old_prefix);
+	char new_full_path[PATH_MAX];
+
+	// Check if current_path actually starts with old_prefix
+	if (strncmp(current_path, old_prefix, old_prefix_len) == 0)
+	{
+		// Now, we must ensure it's a "directory prefix" match.
+		// If old_prefix is "/a/b/" and current_path is "/a/bc/", this is not a match.
+		// We need to check the character right after the old_prefix.
+		// It must be either '/' (if it's a subdirectory) or '\0' (if it's the directory itself).
+		// Since old_prefix is guaranteed to end with a '/', we just check if
+		// current_path's remainder is what follows it.
+		if (current_path[old_prefix_len - 1] == '/' || current_path[old_prefix_len] == '\0')
+		{
+			// Correctly calculate the suffix by skipping the old_prefix part
+			const char *suffix = current_path + old_prefix_len;
+
+			strcpy(new_full_path, new_prefix);
+			// Ensure new_prefix (rdir_dest) ends with a slash if it's a directory
+			ConcatLastSlashC(new_full_path); // Ensure new_prefix has trailing slash
+			strcat(new_full_path, suffix);	 // Append the rest of the path (the suffix)
+
+			slog_debug("Changing path from '%s' to '%s'", current_path, new_full_path);
+
+			g_free(current_path);				  // Free the old g_strdup'd string
+			node->data = g_strdup(new_full_path); // Assign the new g_strdup'd string
+		}
+		else
+		{
+			// This case occurs for paths like "/home/user-temp/" when old_prefix is "/home/user/"
+			// This is not a direct child path of old_prefix, so skip.
+			slog_debug("Path '%s' does not represent a child or self of old prefix '%s'. Skipping update.", current_path, old_prefix);
+			return;
+		}
+	}
+	else
+	{
+		// Path doesn't start with the old prefix at all.
+		slog_debug("Path '%s' does not start with old prefix '%s'. Skipping update.", current_path, old_prefix);
+		return;
+	}
+}
+
+// GNodeTraverseFunc for g_node_traverse for renaming
+static gboolean rename_dir_traverse_func(GNode *node, gpointer data)
+{
+	char **prefixes = (char **)data;
+	const char *old_dir_prefix = prefixes[0];
+	const char *rdir_dest_prefix = prefixes[1];
+
+	update_node_path(node, old_dir_prefix, rdir_dest_prefix);
+
+	return FALSE; // Continue traversal (TRUE would stop traversal, but we want to rename all)
+}
+
 // Method renaming dir to dir.
 int32_t GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 {
+	slog_debug("printing tree");
+	print_tree_recursive(tree_root, 0);
 
 	// Node whose elements must be retrieved.
 	GNode *dir_node;
 	// pthread_mutex_lock(&tree_mut);
+	slog_debug("Renaming dir %s to %s", old_dir, rdir_dest);
 	int32_t ret = GTree_search(tree_root, old_dir, &dir_node);
 	// pthread_mutex_unlock(&tree_mut);
 	// Check if the node has been already inserted.
 	if (ret == 1)
-	{
+	{ // node found.
 
-		uint32_t num_elements_indir = g_node_n_nodes(dir_node, G_TRAVERSE_ALL) - 1;
-		uint32_t num_elements_indir_childrens = g_node_n_children(dir_node);
-		// printf("DIR_NUM_ELEMENTS=%d\n",num_elements_indir+1);
-		char *dir_elements_buff = (char *)calloc((num_elements_indir + 1), URI_);
-		if (dir_elements_buff == NULL)
-		{
-			perror("HERCULES_ERR_GTREE_RENAME_DIR_DIR_MEMORY_ALLOC");
-			slog_fatal("HERCULES_ERR_GTREE_RENAME_DIR_DIR_MEMORY_ALLOC");
-			exit(-1);
-		}
+		char *prefixes[2];
+		prefixes[0] = old_dir;
+		prefixes[1] = rdir_dest;
 
-		char *aux_dir_elem = dir_elements_buff;
-		serialize_dir(dir_node, num_elements_indir_childrens, &aux_dir_elem);
+		g_node_traverse(dir_node, G_IN_ORDER, G_TRAVERSE_ALL, -1, rename_dir_traverse_func, prefixes);
 
-		char *aux = dir_elements_buff;
-		for (int i = 0; i < num_elements_indir + 1; i++)
-		{
+		slog_debug("Successfully renamed dir %s to %s", old_dir, rdir_dest);
 
-			if (strstr(aux, old_dir) != NULL)
-			{
-				char *path = aux;
+		// // Counts the total number of nodes in the entire subtree (starting in "dir_node" and excluding it) recursively.
+		// uint32_t num_elements_indir = g_node_n_nodes(dir_node, G_TRAVERSE_ALL) - 1;
+		// // Counts the number of direct children of "dir_node".
+		// uint32_t num_elements_indir_childrens = g_node_n_children(dir_node);
+		// // printf("DIR_NUM_ELEMENTS=%d\n",num_elements_indir+1);
+		// slog_debug("Num of sub-children=%d, Num of direct-children=%d", num_elements_indir, num_elements_indir_childrens);
+		// char *dir_elements_buff = (char *)calloc((num_elements_indir + 1), URI_);
+		// if (dir_elements_buff == NULL)
+		// {
+		// 	perror("HERCULES_ERR_GTREE_RENAME_DIR_DIR_MEMORY_ALLOC");
+		// 	slog_fatal("HERCULES_ERR_GTREE_RENAME_DIR_DIR_MEMORY_ALLOC");
+		// 	exit(-1);
+		// }
 
-				size_t len = strlen(old_dir);
-				if (len > 0)
-				{
-					char *p = path;
-					while ((p = strstr(p, old_dir)) != NULL)
-					{
-						memmove(p, p + len, strlen(p + len) + 1);
-					}
-				}
-				char *new_path = (char *)malloc(PATH_MAX);
-				strcpy(new_path, rdir_dest);
-				if (strlen(path) > 0)
-				{
-					// check if the rdir_dest does not have the last slash (it is a directory, must contain it).
-					ConcatLastSlashC(new_path);
-					// strcat(new_path, "/");
-					strcat(new_path, path);
-				}
-				// slog_debug("new_path to be inserted=%s", new_path);
-				GTree_insert(new_path);
-				free(new_path);
-			}
-			aux += URI_;
-		}
-		if (dir_elements_buff != NULL)
-			free(dir_elements_buff);
+		// char *aux_dir_elem = dir_elements_buff;
+		// serialize_dir(dir_node, num_elements_indir_childrens, &aux_dir_elem);
 
-		if (dir_node->data != NULL)
-			free(dir_node->data);
+		// // The first element is the old_dir.
+		// char *aux = dir_elements_buff;
+		// size_t len = 0;
+		// // Changes the prefix (directory name) of all elements in the old_dir to the new_dir.
+		// for (int i = 0; i < num_elements_indir + 1; i++)
+		// {
+		// 	if (strstr(aux, old_dir) != NULL)
+		// 	{
+		// 		char *path = aux;
+		// 		len = strlen(old_dir);
+		// 		if (len > 0)
+		// 		{
+		// 			char *p = path;
+		// 			while ((p = strstr(p, old_dir)) != NULL)
+		// 			{
+		// 				memmove(p, p + len, strlen(p + len) + 1);
+		// 			}
+		// 		}
+		// 		char *new_path = (char *)malloc(PATH_MAX);
+		// 		strcpy(new_path, rdir_dest);
+		// 		if (strlen(path) > 0)
+		// 		{
+		// 			// check if the rdir_dest does not have the last slash (it is a directory, must contain it).
+		// 			ConcatLastSlashC(new_path);
+		// 			strcat(new_path, path);
+		// 		}
+		// 		slog_debug("new_path to be inserted=%s", new_path);
+		// 		GTree_insert(new_path);
+		// 		free(new_path);
+		// 	}
+		// 	aux += URI_;
+		// }
+		// if (dir_elements_buff != NULL)
+		// 	free(dir_elements_buff);
 
-		pthread_mutex_lock(&tree_mut);
-		g_node_destroy(dir_node);
-		pthread_mutex_unlock(&tree_mut);
+		// if (dir_node->data != NULL)
+		// 	free(dir_node->data);
+
+		// pthread_mutex_lock(&tree_mut);
+		// g_node_destroy(dir_node);
+		// pthread_mutex_unlock(&tree_mut);
 	}
 	else
 	{ //  error case.
+		slog_debug("Old dir %s does not exists.", old_dir);
 		return -1;
 	}
+	print_tree_recursive(tree_root, 0);
+
 	return 0;
 }
 
@@ -315,7 +419,7 @@ int32_t GTree_delete(std::string desired_data)
 }
 
 // Method inserting a new path.
-int32_t GTree_insert(char *desired_data)
+int32_t GTree_insert(char *desired_data, GNode **new_node)
 {
 	// Closest node to the one requested (or even the requested one itself).
 	GNode *closest_node = NULL;
@@ -420,6 +524,8 @@ int32_t GTree_insert(char *desired_data)
 		if (ret)
 		{
 			//			// slog_debug("closest_node=%s", closest_node->data);
+			slog_debug("%s already inserted on the tree, add=%p", closest_node->data, closest_node);
+			*new_node = closest_node;
 			return 0;
 		}
 	}
@@ -460,14 +566,16 @@ int32_t GTree_insert(char *desired_data)
 	strncpy(new_data, desired_data, len_desired_data);
 	// 		// New node to be introduced.
 	// 		// printf("new_node=%s\n",new_data);
-	GNode *new_node = g_node_new((void *)new_data);
+	// GNode *
+	*new_node = g_node_new((void *)new_data);
 
 	// Introduce it as a child of the closest one found.
 	// // slog_debug("[GTree] inserting in the tree=%s", new_data);
 	// fprintf(stdout,"Inserting node %p, %s on  %p, %s\n", new_node, (char *)new_node->data, closest_node, (char *)closest_node->data);
 	pthread_mutex_lock(&tree_mut);
 	// slog_debug("Appending %s in %s", new_node->data, closest_node->data);
-	TIMING_NO_RETURN(g_node_append(closest_node, new_node), "\t\tg_node_append", 0);
+	TIMING_NO_RETURN(g_node_append(closest_node, *new_node), "\t\tg_node_append", 0);
+	slog_debug("new node add during insert=%p", *new_node);
 	// print_tree_structure(tree_root, 0);
 	pthread_mutex_unlock(&tree_mut);
 
@@ -533,10 +641,10 @@ serialize_dir(GNode *visited_node,
 
 	GNode *child = visited_node->children;
 	// printf("node=%s  num_nodes=%d\n",(char *) visited_node->data,num_nodes);
+	slog_debug("node=%s  num_nodes=%d", (char *)visited_node->data, num_nodes);
 	for (int32_t i = 0; i < num_nodes; i++)
 	{
 		// Number of children of the current child node.
-
 		uint32_t num_grandchildren = g_node_n_children(child);
 
 		// If the child is a leaf one, just store the corresponding info.

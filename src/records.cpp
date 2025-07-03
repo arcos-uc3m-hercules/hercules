@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <inttypes.h>
+#include <cmath>
 #include "records.hpp"
 #include <condition_variable>
 #include "imss.h"
@@ -22,7 +23,7 @@ using std::pair;
 using std::string;
 
 extern StsHeader *mem_pool;
-size_t MAX_POOL_SIZE = 10L * GB;
+// size_t MAX_POOL_SIZE = 10L * GB;
 
 // __thread
 extern int32_t current_dataset;	  // Dataset whose policy has been set last.
@@ -32,6 +33,14 @@ extern imss curr_imss;
 extern std::mutex mtx;
 extern std::condition_variable cv;
 extern int data_ready;
+
+// for garbage collector.
+extern pthread_mutex_t mutex_garbage;
+extern pthread_cond_t global_run_garbage_collector_cond;
+extern pthread_cond_t global_free_space_cond;
+
+// to protect the amount of memory used.
+pthread_mutex_t mutex_quantity_occupied = PTHREAD_MUTEX_INITIALIZER;
 
 map_records::map_records(const uint64_t nsize)
 {
@@ -52,9 +61,82 @@ void map_records::set_size(const uint64_t nsize)
 	total_size = nsize;
 }
 
-int64_t map_records::get_size()
+uint64_t map_records::get_size()
 {
 	return total_size;
+}
+
+/**
+ * @brief Checks if there are enough memory for "required space".
+ * @param required_space Requested memory.
+ * @return 1 if there are enough memory, 0 on other case.
+ */
+int map_records::CheckForMemorySpace(uint64_t required_space)
+{
+	int ret = 1;
+	pthread_mutex_lock(&mutex_quantity_occupied);
+	if (quantity_occupied + required_space > total_size)
+	{
+		ret = 0;
+	}
+	pthread_mutex_unlock(&mutex_quantity_occupied);
+	return ret;
+}
+
+/**
+ * @brief Increase the counter of how much memory is in use.
+ * Also checks if there are enough memory to alloc the "required space".
+ * @param required_space Space to be used by the new block.
+ * @return 1 if there are enough memory, 0 on other case.
+ */
+int map_records::IncreaseMemoryOccupied(uint64_t required_space)
+{
+	int ret = 1;
+	pthread_mutex_lock(&mutex_quantity_occupied);
+	if (quantity_occupied + required_space > total_size)
+	{
+		ret = 0;
+	}
+	else
+	{
+		quantity_occupied = quantity_occupied + required_space;
+	}
+	pthread_mutex_unlock(&mutex_quantity_occupied);
+	return ret;
+}
+
+/**
+ * @brief Decrease the counter of how much memory is in use.
+ * @param freed_space Size of the memory freed.
+ * @return 1 if the counter was correctly decreased, 0 in other case,
+ * for example, if the counter is below of 0.
+ */
+int map_records::DecreaseMemoryOccupied(uint64_t freed_space)
+{
+	int ret = 1;
+	pthread_mutex_lock(&mutex_quantity_occupied);
+	if (quantity_occupied - freed_space < 0)
+	{
+		perror("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_INCONSISTENCY");
+		slog_error("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_INCONSISTENCY: memory usage cannot be less than 0: %lu", quantity_occupied - freed_space);
+		// ret = 0;
+	}
+	else
+	{
+		quantity_occupied = quantity_occupied - freed_space;
+	}
+	pthread_mutex_unlock(&mutex_quantity_occupied);
+	return ret;
+}
+
+double map_records::get_storage_usage_percentage()
+{
+	if (total_size == 0)
+	{ // to avoid division by zero.
+		return 0.0;
+	}
+
+	return static_cast<double>(quantity_occupied) * 100.0 / total_size;
 }
 
 std::string map_records::get_head_element()
@@ -167,28 +249,60 @@ void map_records::print_map()
 }
 
 // Method storing a new record.
-int32_t map_records::put(std::string key, void *address, uint64_t length)
+int32_t map_records::put(std::string key, void *address, uint64_t length, int reused_buffer)
 {
 	// Construct a pair object storing the couple of values associated to a key.
 	std::pair<void *, uint64_t> value(address, length);
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
-	// Add a new couple to the map.
-	// fprintf(stderr, "total_size=%ld bytes, quantity_occupied=%ld bytes\n",total_size, quantity_occupied);
-	if (quantity_occupied + length > total_size && total_size > 0)
-	{ // out of space
-		fprintf(stderr, "[Map record] Out of space  %ld/%ld.\n", quantity_occupied + length, total_size);
-		slog_error("Out of space  %ld/%ld.\n", quantity_occupied + length, total_size);
-		return -1;
+
+	// check if there are space to alloc this block.
+	double hercules_usage_percentage = get_storage_usage_percentage();
+	// fprintf(stderr, "Memory used: %.2f%%\n", hercules_usage_percentage);
+	slog_debug("Memory used: %.2f%%", hercules_usage_percentage);
+	if (hercules_usage_percentage >= 80.0)
+	{
+		fprintf(stderr, "Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", hercules_usage_percentage);
+		slog_debug("Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.", hercules_usage_percentage);
+		// unlock garbage collector.
+		pthread_mutex_lock(&mutex_garbage);
+		slog_debug("garbage collector mutex adquire");
+		fprintf(stderr, "Sending signal to gargabe collector.\n");
+		// Unlock the garbage collector.
+		pthread_cond_signal(&global_run_garbage_collector_cond);
+		pthread_mutex_unlock(&mutex_garbage);
 	}
+
+	// fprintf(stderr, "total_size=%ld bytes, quantity_occupied=%ld bytes\n",total_size, quantity_occupied);
+	// TODO: lock until garbage collector finish.
+	// check for space and finish on error.
+	pthread_mutex_lock(&mutex_garbage);
+	while (!CheckForMemorySpace(length))
+	{ // out of space
+		fprintf(stderr, "Out of space  %ld/%ld GB.\n", (quantity_occupied + length)/GB, total_size/GB);
+		slog_error("Out of space  %ld/%ld.\n", quantity_occupied + length, total_size);
+		fprintf(stderr, "Waiting for resources.\n");
+		slog_warn("Waiting for resources.");
+		// Unlock the garbage collector.
+		pthread_cond_signal(&global_run_garbage_collector_cond);
+		// wait for resources.
+		pthread_cond_wait(&global_free_space_cond, &mutex_garbage);
+	}
+	pthread_mutex_unlock(&mutex_garbage);
 
 	// struct utsname detect;
 	// uname(&detect);
 	// DPRINT("Nodename    - %s add in map=%s\n", detect.nodename, key.c_str());
-	// fprintf(stderr, "key=%s, quantity=%ld total size=%ld\n", key.c_str(), quantity_occupied, total_size);
+	// fprintf(stderr, "key=%s, quantity=%ld, total size=%ld, length=%ld\n", key.c_str(), quantity_occupied, total_size, length);
 	// if(quantity_occupied % ) {
 	// }
-	quantity_occupied = quantity_occupied + length;
+	if (!reused_buffer)
+	{
+		// Increase only when a malloc was perform.
+		// quantity_occupied = quantity_occupied + length;
+		IncreaseMemoryOccupied(length);
+	}
+	// Add a new couple to the map.
 	buffer.insert({key, value});
 	return 0;
 }
@@ -461,7 +575,6 @@ int32_t map_records::garbage_collector_search(std::string key)
 	}
 	slog_debug("passed key=%s, expected_key=%s", key.c_str(), expected_key.c_str());
 
-
 	// find the element.
 	auto it = std::find(buffer_garbage_collector.begin(), buffer_garbage_collector.end(), expected_key);
 	if (it != buffer_garbage_collector.end())
@@ -498,7 +611,6 @@ int32_t map_records::garbage_collector_pop(std::string key)
 		expected_key = key;
 	}
 	slog_debug("passed key=%s, expected_key=%s", key.c_str(), expected_key.c_str());
-
 
 	// find the element.
 	auto it = std::find(buffer_garbage_collector.begin(), buffer_garbage_collector.end(), expected_key);
@@ -758,7 +870,6 @@ int32_t map_records::cleaning(char server_type)
 	// for (const auto &expected_key : buffer_garbage_collector)
 	while (expected_key != buffer_garbage_collector.end())
 	{
-
 		slog_debug("key to delete=%s", (*expected_key).c_str());
 		if (server_type == TYPE_DATA_SERVER)
 		{ // data server.
@@ -775,6 +886,19 @@ int32_t map_records::cleaning(char server_type)
 				{
 					vec.insert(vec.begin(), partner_key);
 				}
+			}
+
+			// Block the access to the map structure.
+			std::unique_lock<std::mutex> lock(*mut);
+			std::vector<string>::iterator i;
+			uint64_t item_mem_size = 0;
+			for (i = vec.begin(); i < vec.end(); i++)
+			{
+				// find the element on all the datasets map.
+				auto item = buffer.find(*i);
+				FreeMemory(item);
+				// erase the dataset information from the map.
+				buffer.erase(*i);
 			}
 		}
 		else
@@ -799,24 +923,34 @@ int32_t map_records::cleaning(char server_type)
 		expected_key = buffer_garbage_collector.erase(expected_key);
 	}
 
-	// Block the access to the map structure.
-	std::unique_lock<std::mutex> lock(*mut);
-	std::vector<string>::iterator i;
-	for (i = vec.begin(); i < vec.end(); i++)
+	return 0;
+}
+
+/**
+ * @brief Check if the memory used by the block pointing by "item" will be reused (pushed on the memory pool)
+ * or if it will be actually freed.
+ * @param item Element pointing to an Hercules block.
+ */
+void map_records::FreeMemory(std::map<std::string, std::pair<void *, uint64_t>>::iterator item)
+{
+	// block size of the curren item.
+	uint64_t item_mem_size = item->second.second;
+	int ret = 0;
+	// checks if the mem pool has a slot,
+	// or if the current item memory size fits the block size (block 0 can have different size).
+	if (StsQueue.size(mem_pool) + item_mem_size >= total_size || item_mem_size != BLOCK_SIZE)
 	{
-		// find the element on all the datasets map.
-		auto item = buffer.find(*i);
+		slog_debug("Freeing memory of key %s", item->first.c_str());
+		// quantity_occupied = quantity_occupied - item_mem_size;
+		ret = DecreaseMemoryOccupied(item_mem_size);
+		free(item->second.first); // free the memory of this block.
+	}
+	else
+	{
+		slog_debug("Pushing memory of key %s into mem_pool", item->first.c_str());
 		// push the memory pointer of this block inside the mem pool to be reused.
 		StsQueue.push(mem_pool, item->second.first);
-		// erase the dataset information from the map.
-		buffer.erase(*i);
 	}
-
-	/*for(const auto & it : buffer){
-	  string key = it.first;
-	  std::cout <<"Garbage Collector: Exist " << key << '\n';
-	  }*/
-	return 0;
 }
 
 int32_t map_records::cleaning_specific(std::string new_key)
@@ -847,27 +981,12 @@ int32_t map_records::cleaning_specific(std::string new_key)
 
 	// Block the access to the map structure.
 	std::vector<string>::iterator i;
-	uint64_t item_mem_size = 0;
 	for (i = vec.begin(); i != vec.end(); i++)
 	{
 		// std::cout << "Garbage Collector: Deleting " << *i << "\n";
 		auto item = buffer.find(*i);
-		// block size of the curren item.
-		item_mem_size = item->second.second;
-		// checks if the mem pool has a slot,
-		// or if the current item memory size fits the block size (block 0 can have different size).
-		if (StsQueue.size(mem_pool) + item_mem_size >= MAX_POOL_SIZE || item_mem_size != BLOCK_SIZE)
-		{
-			slog_debug("Freeing memory of key %s", item->first.c_str());
-			free(item->second.first); // free the memory of this block.
-		}
-		else
-		{
-			slog_debug("Pushing memory of key %s into mem_pool", item->first.c_str());
-			// push the memory pointer of this block inside the mem pool to be reused.
-			StsQueue.push(mem_pool, item->second.first);
-		}
-		quantity_occupied = quantity_occupied - item_mem_size;
+		FreeMemory(item);
+		// quantity_occupied = quantity_occupied - item_mem_size;
 		// fprintf(stderr, "quantity_occupied = %lu\n", quantity_occupied);
 		// erase the dataset information from the map.
 		// fprintf(stderr, "Erasing element with key %s\n", i);

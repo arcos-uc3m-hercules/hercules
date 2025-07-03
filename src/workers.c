@@ -21,7 +21,6 @@
 #include "map_server_eps.hpp"
 
 // Lock dealing when cleaning blocks
-pthread_mutex_t mutex_garbage = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_snapshot = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_checkpoint = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t memory_protect = PTHREAD_MUTEX_INITIALIZER;
@@ -33,7 +32,7 @@ pthread_mutex_t memory_protect = PTHREAD_MUTEX_INITIALIZER;
 // pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
 // Initial buffer address.
-char *buffer_address;
+// char *buffer_address;
 // Set of locks dealing with the memory buffer access.
 pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
@@ -63,13 +62,19 @@ size_t *local_addr_len;
 
 int global_finish_threads = 0;
 int global_finish_checkpoint = 1; // TODO: change to 0 when finish the implementation.
-int global_finish_snapshot = 0;
+int global_finish_snapshot = 1;
+int global_finish_garbage_collector = 0;
 int global_server_fd_thread = -1;
 pthread_cond_t global_broadcast_cond;
 pthread_cond_t global_finish_cond;
 pthread_cond_t global_run_snapshot_cond;
 pthread_cond_t global_run_checkpoint_cond;
 pthread_mutex_t global_finish_mut = PTHREAD_MUTEX_INITIALIZER;
+
+// Garbage collector.
+pthread_mutex_t mutex_garbage = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t global_run_garbage_collector_cond;
+pthread_cond_t global_free_space_cond;
 
 size_t global_offset = 0;
 
@@ -207,9 +212,8 @@ void *hercules_ucx_server(void *th_argv)
 			msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, tag_req, tag_mask, 1, &info_tag);
 			if (global_finish_threads == 1)
 			{
-				fprintf(stderr, "Ending %s server thread.\n", server_name);
 				map_server_eps_destroy(map_server_eps);
-				// pthread_exit(NULL);
+				fprintf(stderr, "Ending %s server thread.\n", server_name);
 				pthread_exit((void *)0);
 			}
 		} while (msg_tag == NULL);
@@ -1191,16 +1195,13 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			if (ret == 0)
 			{
 				slog_debug("[WRITE_OP] NO key find %s", key.c_str());
-				// clock_t tp;
-				// tp = clock();
 				void *buffer = NULL;
-				// tp = clock() - tp;
-				// double time_taken2 = ((double)tp) / CLOCKS_PER_SEC; // in seconds
 				//  Receive the block into the buffer.
 				clock_t tr;
 				// get the buffer data length.
 				size_t msg_length = 0;
 				int size_asigned_to_block = 0;
+				int reused_memory = 1;
 				// If data is stored in shared memory due LOCAL policy, the server does not need to receive the data.
 				if (!is_shared_memory)
 				{ // Data is not in shared memory.
@@ -1237,6 +1238,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						{
 							// buffer = TIMING((void *)mem_type_malloc(BLOCK_SIZE * sizeof(char));, "[write] mem_type_malloc", void *, arguments->thread_id);
 							buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
+							reused_memory = 0;
 							slog_debug("Allocating buffer of size %lu", BLOCK_SIZE);
 						}
 						else
@@ -1339,7 +1341,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				}
 				else
 				{
-					insert_successful = TIMING(map->put(key, buffer, size_asigned_to_block);, "new block map->put", int, arguments->thread_id);
+					insert_successful = TIMING(map->put(key, buffer, size_asigned_to_block, reused_memory);, "new block map->put", int, arguments->thread_id);
 				}
 				slog_debug("[WRITE_OP] insert_successful=%d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
 				// tr = clock() - tr;
@@ -1375,7 +1377,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				}
 
 				// Update the pointer.
-				arguments->pt += block_size_recv;
+				// arguments->pt += block_size_recv;
 				// }
 			}
 			// if the block was already stored:
@@ -1387,7 +1389,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// if (found != std::string::npos)
 				if (is_block_zero)
 				{ // block 0.
-					// check if it is in the garbage collector map. 
+					// check if it is in the garbage collector map.
 					ret = map->garbage_collector_pop(key);
 					if (ret == 0)
 					{
@@ -1546,14 +1548,28 @@ void *GarbageCollector(void *th_argv)
 	p_argv *arguments = (p_argv *)th_argv;
 	std::shared_ptr<map_records> map = arguments->map;
 
+	pthread_cond_init(&global_run_garbage_collector_cond, NULL);
+	pthread_cond_init(&global_free_space_cond, NULL);
+
 	for (;;)
 	{
 		// Gnodetraverse_garbage_collector(map);//Future
-		sleep(GARBAGE_COLLECTOR_PERIOD);
+		// sleep(GARBAGE_COLLECTOR_PERIOD);
+		pthread_mutex_lock(&mutex_garbage);
+		pthread_cond_wait(&global_run_garbage_collector_cond, &mutex_garbage);
+
+		if (global_finish_garbage_collector == 1)
+		{
+			fprintf(stderr, "Ending garbage collector thread.\n");
+			pthread_mutex_unlock(&mutex_garbage);
+			pthread_exit((void *)0);
+		}
 		// fprintf(stdout,"Running garbage collector\n");
 		// slog_debug("Running garbage collector");
-		pthread_mutex_lock(&mutex_garbage);
 		map->cleaning(arguments->args.type);
+		// pthread_cond_signal(&global_free_space_cond);
+		// Unlock all threads waiting for resources.
+		pthread_cond_broadcast(&global_free_space_cond);
 		pthread_mutex_unlock(&mutex_garbage);
 	}
 	pthread_exit(NULL);
@@ -2026,10 +2042,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// Keys for the map.
 				std::string old_key;
 				std::string new_key;
-				// old_key.copy(old_key_tree.c_str());
-				// new_key.copy(new_key_tree.c_str());
 				old_key = old_key_tree;
 				new_key = new_key_tree;
+
 				// Checks and removes the last slash for the keys to be used on the map.
 				RemoveLastSlash(old_key);
 				RemoveLastSlash(new_key);
@@ -2043,9 +2058,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// RENAME TREE
 				if (ret != -1)
 				{
-					// pthread_mutex_lock(&tree_mut);
 					ret = GTree_rename((char *)old_key_tree.c_str(), (char *)new_key_tree.c_str());
-					// pthread_mutex_unlock(&tree_mut);
 					slog_debug("[RENAME] GTree_rename=%d", ret);
 				}
 			}
@@ -2089,16 +2102,16 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				RemoveLastSlash(old_key);
 				RemoveLastSlash(new_key);
 
-				slog_debug("[RENAME_DIR_DIR_OP] old_key=%s, new_key=%s, old_key_tree=%s, new_key_tree=%s\n", old_key.c_str(), new_key.c_str(), old_key_tree.c_str(), new_key_tree.c_str());
+				slog_debug("[RENAME_DIR_DIR_OP] old_key=%s, new_key=%s, old_key_tree=%s, new_key_tree=%s", old_key.c_str(), new_key.c_str(), old_key_tree.c_str(), new_key_tree.c_str());
 				// RENAME MAP
-				ret = map->rename_metadata_dir_stat_worker(old_key, new_key);
+				ret = TIMING(map->rename_metadata_dir_stat_worker(old_key, new_key), "rename_metadata_dir_stat_worker", int, arguments->args.id);
 
 				// RENAME TREE
 				if (ret == 0)
 				{
 					// Send confirmation before renaming the tree.
 					// pthread_mutex_lock(&tree_mut);
-					ret = GTree_rename_dir_dir((char *)old_key_tree.c_str(), (char *)new_key_tree.c_str());
+					ret = TIMING(GTree_rename_dir_dir((char *)old_key_tree.c_str(), (char *)new_key_tree.c_str()), "GTree_rename_dir_dir", int, arguments->args.id);
 					// pthread_mutex_unlock(&tree_mut);
 				}
 				SendConfirmationMessage(arguments, MSG_RENAME_OP);
@@ -2261,6 +2274,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			// Get the length of the message to be received.
 			size_t length = 0;
 			int32_t ret = -1;
+			int reused_memory = 1;
 			// pthread_mutex_lock(&lock_network);
 			length = TIMING(get_recv_data_length(arguments->ucp_worker, arguments->worker_uid), "get_recv_data_length", size_t, arguments->thread_id);
 			if (length == 0)
@@ -2282,6 +2296,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			{
 				// if there are not free block on the memory pool, then perform dynamic alloc.
 				buffer = (void *)TIMING(malloc(length * sizeof(char)), "malloc buffer", void *, arguments->thread_id);
+				reused_memory = 0;
 			}
 
 			if (buffer == NULL)
@@ -2313,28 +2328,27 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			}
 
 			int32_t insert_successful = -1;
-			insert_successful = TIMING(map->put(key, buffer, length), "map->put", int32_t, arguments->thread_id);
+			// Insert the received uri into the directory tree.
+			// slog_debug("Inserting %s into directory tree", key.c_str());
+			GNode *new_node = NULL;
+			insert_successful = TIMING(GTree_insert((char *)key_for_tree.c_str(), &new_node), "*GTree_insert", int32_t, arguments->thread_id);
+			slog_debug("insert_successful=%d, new node add=%p", insert_successful, new_node);
+			if (insert_successful == -1)
+			{
+				slog_error("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
+				perror("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
+				free(buffer);
+				// pthread_mutex_unlock(&memory_protect);
+				return -1;
+			}
+
+			insert_successful = TIMING(map->put(key, buffer, length, reused_memory), "map->put", int32_t, arguments->thread_id);
 			slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);
 
 			if (insert_successful != 0)
 			{
 				slog_error("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
 				perror("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
-				free(buffer);
-				// pthread_mutex_unlock(&memory_protect);
-				return -1;
-			}
-
-			// Insert the received uri into the directory tree.
-			// pthread_mutex_lock(&tree_mut);
-			// slog_debug("Inserting %s into directory tree", key.c_str());
-			insert_successful = TIMING(GTree_insert((char *)key_for_tree.c_str()), "*GTree_insert", int32_t, arguments->thread_id);
-			// pthread_mutex_unlock(&tree_mut);
-			slog_debug("insert_successful=%d", insert_successful);
-			if (insert_successful == -1)
-			{
-				slog_error("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
-				perror("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
 				free(buffer);
 				// pthread_mutex_unlock(&memory_protect);
 				return -1;

@@ -20,7 +20,7 @@ extern pthread_mutex_t tree_mut;
 extern imss curr_imss;
 
 // Initial buffer address.
-extern char *buffer_address;
+// extern char *buffer_address;
 // Set of locks dealing with the memory buffer access.
 extern pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
@@ -37,7 +37,6 @@ std::shared_ptr<map_records> g_map;
 
 /* UCP objects */
 ucp_worker_h ucp_worker = NULL;
-
 ucp_address_t *req_addr = NULL;
 ucp_ep_h *metadata_endpoints = NULL;
 size_t req_addr_len = 0;
@@ -49,11 +48,14 @@ pthread_t *threads;
 extern int global_finish_threads;
 extern int global_finish_checkpoint;
 extern int global_finish_snapshot;
+extern int global_finish_garbage_collector;
 extern int global_server_fd_thread;
 extern pthread_cond_t global_finish_cond;
 extern pthread_cond_t global_run_snapshot_cond;
 extern pthread_cond_t global_run_checkpoint_cond;
+extern pthread_cond_t global_run_garbage_collector_cond;
 extern pthread_mutex_t global_finish_mut;
+extern pthread_mutex_t mutex_garbage;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
@@ -131,7 +133,8 @@ int32_t main(int32_t argc, char **argv)
 	uint64_t bind_port = 0;
 	char *stat_add = NULL;
 	char *deployfile = NULL;
-	int64_t buffer_size = 0, stat_port = 0, num_servers = 0;
+	// int64_t buffer_size = 0, 
+	int64_t stat_port = 0, num_servers = 0;
 	ucp_ep_params_t ep_params;
 	ucp_address_t *peer_addr = NULL;
 	size_t addr_len = 0;
@@ -235,8 +238,8 @@ int32_t main(int32_t argc, char **argv)
 		bind_port = args.stat_port;
 	}
 
-	// buffer size provided
-	buffer_size = args.bufsize;
+	// buffer size provided.
+	// buffer_size = args.bufsize * KB;
 	// fprintf(stderr, "buffer_size=%lu\n", buffer_size);
 
 	/* Initialize the UCX required objects */
@@ -257,7 +260,7 @@ int32_t main(int32_t argc, char **argv)
 	// fprintf(stderr, "max_system_ram_allowed=%lu\n", max_system_ram_allowed);
 
 	// make sure we don't use more memory than available
-	if (max_storage_size >= max_system_ram_allowed || max_storage_size < 0)
+	if (max_storage_size >= max_system_ram_allowed || max_storage_size == 0)
 	{
 		max_storage_size = max_system_ram_allowed;
 	}
@@ -265,6 +268,15 @@ int32_t main(int32_t argc, char **argv)
 	// init memory pool
 	slog_info("[main] before sts queue create");
 	// fprintf(stderr, "max_storage_size=%lu\n", max_storage_size);
+	fprintf(stderr,"Free memory: %lu GB\n", max_storage_size/GB);
+	if (max_storage_size == 0)
+	{
+		fprintf(stderr,"Not enough memory.\n");
+		slog_debug("Not enough memory.");
+		exit(1);
+	}
+	
+
 	mem_pool = StsQueue.create();
 	// figure out how many blocks we need and allocate them
 	num_blocks = max_storage_size / (args.block_size * KB);
@@ -544,22 +556,18 @@ int32_t main(int32_t argc, char **argv)
 	/***************************************************************/
 
 	// Map tracking saved records.
-	std::shared_ptr<map_records> map(new map_records(buffer_size * KB));
-	std::shared_ptr<map_records> garbage_collector_map(new map_records(buffer_size * KB));
-
+	std::shared_ptr<map_records> map(new map_records(max_storage_size));
 	// copy the reference to a global map.
 	g_map = map;
 
-	int64_t data_reserved;
+	int64_t data_reserved = 0;
 	// Pointer to the allocated buffer memory.
-	char *buffer = NULL;
-	// Size of the buffer involved.
-	uint64_t size = (uint64_t)buffer_size * KB;
+	// char *buffer = NULL;
 	// Check if the requested data is available in the current node.
-	if ((data_reserved = memalloc(size, &buffer)) == -1)
-		return -1;
+	// if ((data_reserved = memalloc(buffer_size, &buffer)) == -1)
+	// 	return -1;
 	// fprintf(stderr, "data_reserved=%lu\n", data_reserved);
-	buffer_address = buffer;
+	// buffer_address = buffer;
 
 	// Metadata bytes written into the buffer.
 	uint64_t bytes_written = 0;
@@ -630,7 +638,7 @@ int32_t main(int32_t argc, char **argv)
 		}
 		else if (i == 1)
 		{ // garbage collector.
-			slog_debug("[SERVER] Creating checkpoint thread.");
+			slog_debug("[SERVER] Creating garbage collector thread.");
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
 			if (pthread_create(&threads[i], NULL, GarbageCollector, (void *)&arguments[i]) == -1)
@@ -695,7 +703,7 @@ int32_t main(int32_t argc, char **argv)
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
 			// Specify the address used by each thread to write inside the buffer.
-			arguments[i].pt = (char *)(aux_idx * buffer_segment + buffer_address);
+			// arguments[i].pt = (char *)(aux_idx * buffer_segment + buffer_address);
 			arguments[i].thread_id = aux_idx;
 
 			// HERCULES server.	Metadata and data servers use the same "hercules_ucx_server" method,
@@ -728,24 +736,6 @@ int32_t main(int32_t argc, char **argv)
 			return -1;
 		}
 	}
-
-	// dataset_info new_dataset;
-	// strcpy(new_dataset.uri_, args.imss_uri);
-	// strcpy(new_dataset.policy, POLICY);
-	// new_dataset.num_data_elem = 1;
-	// new_dataset.data_entity_size = args.block_size * 1024; // dataset in kilobytes
-	// // new_dataset.imss_d = curr_dataset.imss_d;			  // associated_imss_indx;
-	// new_dataset.imss_d = -1;
-	// new_dataset.local_conn = -1;
-	// new_dataset.size = 0;
-	// new_dataset.is_link = 0;
-	// new_dataset.n_open = 1;
-	// new_dataset.n_servers = args.num_data_servers;
-	// new_dataset.n_servers_when_created = init_number_of_server;
-	// new_dataset.repl_factor = 1;
-	// new_dataset.repl_type = SYNC;
-	// strcpy(new_dataset.original_name, args.imss_uri);
-	// new_dataset.type = TYPE_DIRECTORY;
 
 	// Notify to the metadata server the deployment of a new HERCULES.
 	if ((args.type == TYPE_DATA_SERVER) && !args.id && stat_port)
@@ -991,7 +981,7 @@ int32_t main(int32_t argc, char **argv)
 	fprintf(stderr, "Ending %c server\n", args.type);
 
 	// Free the memory buffer.
-	free(buffer);
+	// free(buffer);
 	return 0;
 }
 
@@ -1154,9 +1144,30 @@ void handle_signal_server(int signal)
 			if (args.type == TYPE_METADATA_SERVER)
 			{
 				global_finish_threads = 1;
+
+				if (global_finish_garbage_collector != 1)
+				{ // Garbage collector still running.
+					fprintf(stderr,"Waiting for mutext garbage collector\n");
+					global_finish_garbage_collector = 1;
+					pthread_mutex_lock(&mutex_garbage);
+					pthread_cond_signal(&global_run_garbage_collector_cond);
+					pthread_mutex_unlock(&mutex_garbage);
+					fprintf(stderr,"Send signal to mutext garbage\n");
+				}
 			}
 			else
 			{
+
+				if (global_finish_garbage_collector != 1)
+				{ // Garbage collector still running.
+					fprintf(stderr,"Waiting for mutext garbage collector\n");
+					global_finish_garbage_collector = 1;
+					pthread_mutex_lock(&mutex_garbage);
+					pthread_cond_signal(&global_run_garbage_collector_cond);
+					pthread_mutex_unlock(&mutex_garbage);
+					fprintf(stderr,"Send signal to mutext garbage\n");
+				}
+
 				if (global_finish_snapshot != 1)
 				{ // Snapshot still running.
 

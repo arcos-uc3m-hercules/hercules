@@ -43,20 +43,25 @@ public:
 	map_records(const uint64_t nsize);
 	~map_records();
 	void set_size(const uint64_t nsize);
-	int64_t get_size();
+	uint64_t get_size();
+	int CheckForMemorySpace(uint64_t required_space);
+	int IncreaseMemoryOccupied(uint64_t required_space);
+	int DecreaseMemoryOccupied(uint64_t freed_space);
+	double get_storage_usage_percentage();
 	void print_map();
+	void FreeMemory(std::map<std::string, std::pair<void *, uint64_t>>::iterator item);
 	// const char *get_head_element();
 	std::string get_head_element();
 	int32_t erase_head_element();
 	// Used in stat_worker threads
 	/**
-	 * @brief Method deleting a record from the map.  
+	 * @brief Method deleting a record from the map.
 	 * @return Number of elements deleted.
-	 * */ 
+	 * */
 	int32_t delete_metadata_stat_worker(std::string key);
 
 	// Method storing a new record.
-	int32_t put(std::string key, void *address, uint64_t length);
+	int32_t put(std::string key, void *address, uint64_t length, int reused_buffer);
 	int32_t put_snapshot(std::string key, int value);
 	int32_t put_broadcast(std::string key, void *address, uint64_t length);
 
@@ -64,7 +69,6 @@ public:
 	int32_t put_garbage_collector(std::string key);
 	int32_t garbage_collector_pop(std::string key);
 	int32_t garbage_collector_search(std::string key);
-	
 
 	// Method retrieving the address associated to a certain record.
 	int32_t get(std::string key, void **add_, uint64_t *size_);
