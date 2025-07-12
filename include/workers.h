@@ -4,6 +4,7 @@
 // #include "imss.h"
 #include "comms.h"
 #include "records.hpp"
+#include "hierarchical_records.hpp"
 #include "shared_memory.h"
 // #include "hercules.hpp"
 #include <memory>
@@ -36,12 +37,14 @@
 #define GB 1073741824
 
 //#define MAX_THREAD_POOL_SIZE 16
+extern void *hierarchical_map;
 
 // Set of arguments passed to each server thread.
 typedef struct
 {
 	// Pointer to the corresponding type storing key-address couples.
 	std::shared_ptr<map_records> map = NULL;
+	void *hierarchical_map;
 	// Pointer to the corresponding buffer region assigned to a thread.
 	char *pt;
 	// Integer specifying the port that a certain thread will listen to.

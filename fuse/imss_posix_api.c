@@ -189,7 +189,10 @@ extern "C"
 		*fd = -1;
 		// Seek for the fd on the map.
 		// int found = map_search(map, path, fd, s, aux);
-		int found = HierarchicalMapSearch(hierarchical_map, path, fd, s, aux);
+		size_t hierarchical_map_size = HierarchicalMapGetSize(hierarchical_map);
+		char msg[PATH_MAX] = {0};
+		sprintf(msg, "HierarchicalMapSearch %lu", hierarchical_map_size);
+		int found = TIMING(HierarchicalMapSearch(hierarchical_map, path, fd, s, aux), msg, int, 0);
 
 		if (found == -1)
 		{
@@ -3091,7 +3094,6 @@ extern "C"
 	int imss_rename(char *old_path, char *new_path)
 	{
 		int ret = 0;
-		char full_path[PATH_MAX] = {0};
 		const char *name = NULL;
 		int old_is_dir = 0;
 		int new_is_dir = 0;
@@ -3112,7 +3114,7 @@ extern "C"
 		int fd = 0;
 		char *buff = NULL;
 		int old_exists = 0;
-		fd_lookup((char *)old_path, &fd, &old_file_stat, &buff);
+		TIMING_NO_RETURN(fd_lookup((char *)old_path, &fd, &old_file_stat, &buff),"fd_lookup old_path", 0);
 		if (fd >= 0)
 		{					// file found in the local map.
 			old_exists = 0; // 0 indicates the file exists.
@@ -3199,17 +3201,18 @@ extern "C"
 		}
 		slog_debug("new_exists=%d, aux_path=%s", new_exists, aux_path);
 		// get the basename of the path.
-		size_t actual_basename_len = 0;
-		name = get_basename(aux_path, &actual_basename_len);
+		// size_t actual_basename_len = 0;
+		// name = get_basename(aux_path, &actual_basename_len);
 		// concat the MOUNT POINT.
-		strcpy(full_path, MOUNT_POINT);
-		// if the new path exists, we concat the dir name (hercules_path + strlen("imss://")) to the full path.
-		// this makes the old directory to be stored inside the existing directory.
-		if (new_exists)
-			strcat(full_path, new_path + strlen("imss://"));
-		strncat(full_path, name, actual_basename_len);
+		// strcpy(full_path, MOUNT_POINT);
+		// // if the new path exists, we concat the dir name (hercules_path + strlen("imss://")) to the full path.
+		// // this makes the old directory to be stored inside the existing directory.
+		// if (new_exists)
+		// 	strcat(full_path, new_path + strlen("imss://"));
+		// strncat(full_path, name, actual_basename_len);
 
-		slog_debug("pos=%d, full_path=%s, given_old_path=%s, hercules_path=%s, last_parent_dir=%s", pos, full_path, old_path, new_path, last_parent_dir);
+		// slog_debug("pos=%d, full_path=%s, given_old_path=%s, hercules_path=%s, last_parent_dir=%s", pos, full_path, old_path, new_path, last_parent_dir);
+		slog_debug("pos=%d, given_old_path=%s, hercules_path=%s, last_parent_dir=%s", pos, old_path, new_path, last_parent_dir);
 
 		// Check all cases.
 		int op_not_allowed = 0;
@@ -3236,7 +3239,8 @@ extern "C"
 		else if (old_is_dir && !new_is_dir)
 		{ // old is a directory and new is a regular file: NOT POSSIBLE.
 			// cannot overwrite non-directory 'FILENAME' with directory 'DIRNAME'.
-			slog_debug("Cannot overwrite non-directory %s with directory %s", old_path, full_path);
+			// slog_debug("Cannot overwrite non-directory %s with directory %s", old_path, full_path);
+			slog_debug("Cannot overwrite non-directory %s with directory %s", old_path, new_path);
 			op_not_allowed = 1;
 		}
 		else if (!old_is_dir && new_is_dir)
@@ -3259,6 +3263,7 @@ extern "C"
 			// pos++; // +1 to avoid the found slash.
 			// memset(name, 0, sizeof(name));
 			// strncpy(name, aux_path + pos, strlen(aux_path) - pos);
+			size_t actual_basename_len = 0;
 			name = get_basename(aux_path, &actual_basename_len);
 			slog_debug("name=%s, aux_path=%s, strlen(aux_path)=%d, pos=%d", name, aux_path, strlen(aux_path), pos);
 			char destination_path[MAX_PATH] = {0};

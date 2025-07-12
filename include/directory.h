@@ -31,7 +31,7 @@ int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char
 
 // Method renaming dir to dir.
 int32_t
-GTree_rename_dir_dir(char *old_dir, char *rdir_dest);
+GTree_rename_dir_dir(char *old_dir, char *rdir_dest, GNode *dir_node);
 
 // Method inserting a new path.
 int32_t GTree_insert(char *desired_data, GNode **new_node);

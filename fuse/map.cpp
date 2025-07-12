@@ -143,51 +143,64 @@ extern "C"
 		size_t len_curr_key = 0;
 		string key;
 		int found = 0;
-		for (auto it = m->cbegin(); it != m->cend(); ++it)
+		auto search = m->find(std::string(old_dir));
+		if (search != m->end())
 		{
-			key = it->first;
-			found = key.find(old_dir);
-			if (found != std::string::npos)
-			{
-				len_curr_key = key.length();
-				slog_debug("len_old_dir=%lu, len_curr_key=%lu, old_dir %s found in %s", len_old_dir, len_curr_key, old_dir, key.c_str());
-				if (len_old_dir < len_curr_key)
-				{
-					if (key[len_old_dir] != '/')
-					{
-						slog_debug("Skipping %s", key.c_str());
-						continue;
-					}
-				}
-				// free(it->second.aux);
-				vec.insert(vec.begin(), key);
-			}
+			slog_debug("Found %s, renaming to %s", old_dir, rdir_dest);
+			auto node = m->extract(old_dir);
+			node.key() = rdir_dest;
+			m->insert(std::move(node));
+			return 1;
 		}
-		slog_debug("Renaming %lu/%lu elements", vec.size(), m->size());
-
-		if (vec.size() == 0)
+		else
 		{
-			// NO elements to rename.
-			slog_debug("No elements to rename.");
 			return -1;
 		}
 
+		// for (auto it = m->cbegin(); it != m->cend(); ++it)
+		// {
+		// 	key = it->first;
+		// 	found = key.find(old_dir);
+		// 	if (found != std::string::npos)
+		// 	{
+		// 		len_curr_key = key.length();
+		// 		slog_debug("len_old_dir=%lu, len_curr_key=%lu, old_dir %s found as %s", len_old_dir, len_curr_key, old_dir, key.c_str());
+		// 		if (len_old_dir < len_curr_key)
+		// 		{
+		// 			if (key[len_old_dir] != '/')
+		// 			{
+		// 				slog_debug("Skipping %s", key.c_str());
+		// 				continue;
+		// 			}
+		// 		}
+		// 		// free(it->second.aux);
+		// 		vec.insert(vec.begin(), key);
+		// 	}
+		// }
+		// slog_debug("Renaming %lu/%lu elements", vec.size(), m->size());
 
-		std::vector<string>::iterator i;
-		for (i = vec.begin(); i < vec.end(); i++)
-		{
-			// m->erase(*i);
-			string key = *i;
-			key.erase(0, strlen(old_dir));
+		// if (vec.size() == 0)
+		// {
+		// 	// NO elements to rename.
+		// 	slog_debug("No elements to rename.");
+		// 	return -1;
+		// }
 
-			string new_path = rdir_dest;
-			new_path.append(key);
+		// std::vector<string>::iterator i;
+		// for (i = vec.begin(); i < vec.end(); i++)
+		// {
+		// 	// m->erase(*i);
+		// 	string key = *i;
+		// 	key.erase(0, strlen(old_dir));
 
-			auto node = m->extract(*i);
-			node.key() = new_path;
-			slog_debug("New path %s", new_path.c_str());
-			m->insert(std::move(node));
-		}
+		// 	string new_path = rdir_dest;
+		// 	new_path.append(key);
+
+		// 	auto node = m->extract(*i);
+		// 	node.key() = new_path;
+		// 	slog_debug("New path %s", new_path.c_str());
+		// 	m->insert(std::move(node));
+		// }
 
 		return 1;
 	}

@@ -23,7 +23,6 @@ using std::pair;
 using std::string;
 
 extern StsHeader *mem_pool;
-// size_t MAX_POOL_SIZE = 10L * GB;
 
 // __thread
 extern int32_t current_dataset;	  // Dataset whose policy has been set last.
@@ -42,7 +41,7 @@ extern pthread_cond_t global_free_space_cond;
 // to protect the amount of memory used.
 pthread_mutex_t mutex_quantity_occupied = PTHREAD_MUTEX_INITIALIZER;
 
-map_records::map_records(const uint64_t nsize)
+map_records::map_records(const int64_t nsize)
 {
 	total_size = nsize;
 	mut = new std::mutex();
@@ -56,12 +55,12 @@ map_records::~map_records()
 	delete mut;
 }
 
-void map_records::set_size(const uint64_t nsize)
+void map_records::set_size(const int64_t nsize)
 {
 	total_size = nsize;
 }
 
-uint64_t map_records::get_size()
+int64_t map_records::get_size()
 {
 	return total_size;
 }
@@ -71,7 +70,7 @@ uint64_t map_records::get_size()
  * @param required_space Requested memory.
  * @return 1 if there are enough memory, 0 on other case.
  */
-int map_records::CheckForMemorySpace(uint64_t required_space)
+int map_records::CheckForMemorySpace(int64_t required_space)
 {
 	int ret = 1;
 	pthread_mutex_lock(&mutex_quantity_occupied);
@@ -89,17 +88,19 @@ int map_records::CheckForMemorySpace(uint64_t required_space)
  * @param required_space Space to be used by the new block.
  * @return 1 if there are enough memory, 0 on other case.
  */
-int map_records::IncreaseMemoryOccupied(uint64_t required_space)
+int map_records::IncreaseMemoryOccupied(int64_t required_space)
 {
 	int ret = 1;
 	pthread_mutex_lock(&mutex_quantity_occupied);
 	if (quantity_occupied + required_space > total_size)
 	{
+		slog_warn("memory occupied=%ld/%ld, required_space=%lu", quantity_occupied, total_size, required_space);
 		ret = 0;
 	}
 	else
 	{
 		quantity_occupied = quantity_occupied + required_space;
+		slog_debug("memory occupied=%ld/%ld, required_space=%lu", quantity_occupied, total_size, required_space);
 	}
 	pthread_mutex_unlock(&mutex_quantity_occupied);
 	return ret;
@@ -111,19 +112,20 @@ int map_records::IncreaseMemoryOccupied(uint64_t required_space)
  * @return 1 if the counter was correctly decreased, 0 in other case,
  * for example, if the counter is below of 0.
  */
-int map_records::DecreaseMemoryOccupied(uint64_t freed_space)
+int map_records::DecreaseMemoryOccupied(int64_t freed_space)
 {
 	int ret = 1;
 	pthread_mutex_lock(&mutex_quantity_occupied);
 	if (quantity_occupied - freed_space < 0)
 	{
 		perror("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_INCONSISTENCY");
-		slog_error("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_INCONSISTENCY: memory usage cannot be less than 0: %lu", quantity_occupied - freed_space);
-		// ret = 0;
+		slog_error("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_INCONSISTENCY: memory usage cannot be less than 0: %ld, memory occupied=%lu, freed_space=%lu", quantity_occupied - freed_space, quantity_occupied, freed_space);
+		ret = 0;
 	}
 	else
 	{
 		quantity_occupied = quantity_occupied - freed_space;
+		slog_debug("memory occupied=%lu, freed_space=%lu", quantity_occupied, freed_space);
 	}
 	pthread_mutex_unlock(&mutex_quantity_occupied);
 	return ret;
@@ -143,7 +145,7 @@ std::string map_records::get_head_element()
 {
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
-	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, BufferValue>::iterator it;
 	it = buffer.begin();
 	// string key = it->first();
 	string key = it->first;
@@ -151,7 +153,6 @@ std::string map_records::get_head_element()
 	// return key.c_str();
 	return key;
 }
-
 // Method deleting the address associated to a certain record.
 int32_t map_records::erase_head_element()
 {
@@ -240,26 +241,31 @@ void map_records::print_map()
 	slog_info("Datasets in this servers");
 	for (const auto &[key, value] : buffer)
 	{
-		slog_info("key = %s\n", key.c_str());
+		// slog_info("key = %s\n", key.c_str());
 		int pos = key.find('$');
 		string block = key.substr(pos, key.length() + 1);
 		string data_uri = key.substr(0, pos);
-		fprintf(stderr, "key=%s,\turi=%s,\tblock=%s\n", key.c_str(), data_uri.c_str(), block.c_str());
+		// fprintf(stderr, "key=%s,\turi=%s,\tblock=%s\n", key.c_str(), data_uri.c_str(), block.c_str());
+		slog_debug("key=%s,\turi=%s,\tblock=%s", key.c_str(), data_uri.c_str(), block.c_str());
 	}
 }
 
 // Method storing a new record.
-int32_t map_records::put(std::string key, void *address, uint64_t length, int reused_buffer)
+int32_t map_records::put(std::string key, void *address, uint64_t length, int reused_buffer, GNode *gnode)
 {
 	// Construct a pair object storing the couple of values associated to a key.
-	std::pair<void *, uint64_t> value(address, length);
+	// std::tuple<void *, uint64_t, GNode *> value = std::make_tuple(address, length, gnode);
+	BufferValue value;
+	value.data = address;
+	value.size = length;
+	value.gnode = gnode;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
 	// check if there are space to alloc this block.
 	double hercules_usage_percentage = get_storage_usage_percentage();
 	// fprintf(stderr, "Memory used: %.2f%%\n", hercules_usage_percentage);
-	slog_debug("Memory used: %.2f%%", hercules_usage_percentage);
+	slog_debug("Memory used: %.2f%%, reused_buffer=%d", hercules_usage_percentage, reused_buffer);
 	if (hercules_usage_percentage >= 80.0)
 	{
 		fprintf(stderr, "Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", hercules_usage_percentage);
@@ -279,7 +285,7 @@ int32_t map_records::put(std::string key, void *address, uint64_t length, int re
 	pthread_mutex_lock(&mutex_garbage);
 	while (!CheckForMemorySpace(length))
 	{ // out of space
-		fprintf(stderr, "Out of space  %ld/%ld GB.\n", (quantity_occupied + length)/GB, total_size/GB);
+		fprintf(stderr, "Out of space  %ld/%ld GB.\n", (quantity_occupied + length) / GB, total_size / GB);
 		slog_error("Out of space  %ld/%ld.\n", quantity_occupied + length, total_size);
 		fprintf(stderr, "Waiting for resources.\n");
 		slog_warn("Waiting for resources.");
@@ -347,12 +353,39 @@ int32_t map_records::put_broadcast(std::string key, void *address, uint64_t leng
 }
 
 // Method retrieving the address associated to a certain record.
+BufferValue* map_records::find(std::string key)
+{
+	// Block the access to the map structure.
+	std::unique_lock<std::mutex> lock(*mut);
+
+	if (buffer.empty())
+	{
+		slog_debug("map is empty");
+		return nullptr;
+	}
+
+	// Search for the address related to the key.
+	auto it = buffer.find(key);
+	// Check if the value did exist within the map.
+	if (it == buffer.end())
+	{
+		slog_debug("%s not found in the map", key.c_str());
+		return nullptr;
+	}
+	slog_debug("%s found in the map as %s", key.c_str(), it->first.c_str());
+
+	// Return the address associated to the record.
+	return &(it->second);
+}
+
+// Method retrieving the address associated to a certain record.
 int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 {
 
 	// fprintf(stderr, "GET KEY=%s\n",key.c_str());
 	// Map iterator that will be searching for the key.
-	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	// std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, BufferValue>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -371,20 +404,7 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	if (it == buffer.end())
 	{
 		slog_debug("%s not found in the map", key.c_str());
-		// if (!key.empty() && key.back() != '/')
-		// { // check if the key does not have the last slash (e.g., directory case).
-		// 	key += '/';
-		// 	it = buffer.find(key);
-		// 	if (it == buffer.end())
-		// 	{
-		// 		slog_debug("%s not found in the map", key.c_str());
-		// 		// fprintf(stderr,"Nodename-%s NO EXIST=%s\n",detect.nodename, key.c_str());
-		// 		// fprintf(stderr,"NO EXIST=%s\n", key.c_str());
-		// 		return 0;
-		// 	}
-		// } else {
 		return 0;
-		// }
 	}
 	slog_debug("%s found in the map as %s", key.c_str(), it->first.c_str());
 
@@ -393,8 +413,10 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 
 	// Assign the values obtained to the provided references.
 	// std::cout <<"Exist " << key << '\n';
-	*(add_) = it->second.first;
-	*(size_) = it->second.second;
+	// *(add_) = it->second.first;
+	// *(size_) = it->second.second;
+	*(add_) = it->second.data;
+	*(size_) = it->second.size;
 
 	// Return the address associated to the record.
 	return 1;
@@ -457,16 +479,66 @@ int32_t map_records::get_broadcast_size()
 	return buffer_broadcast.size();
 }
 
-int32_t map_records::get_buffer_size()
+size_t map_records::get_buffer_size()
 {
 	return buffer.size();
+}
+
+int32_t map_records::update_key(std::string old_key, std::string new_key)
+{
+
+	// print_map();
+	slog_debug("buffer size=%lu", buffer.size());
+	std::unique_lock<std::mutex> lock(*mut);
+	// Search for the exact 'old_key' in the buffer.
+	auto it = buffer.find(old_key);
+
+	// Check if the 'old_key' was found.
+	if (it == buffer.end())
+	{
+		slog_debug("Rename data srv worker: Old key '%s' not found.", old_key.c_str());
+		return -1; // Key not found
+	}
+
+	// If the new key is the same as the old key, no action is needed.
+	if (old_key == new_key)
+	{
+		slog_debug("Rename data srv worker: Old key '%s' and new key '%s' are identical. No rename performed.", old_key.c_str(), new_key.c_str());
+		return 0; // Already renamed or no change needed
+	}
+
+	// Check if the new_key already exists in the map.
+	// If it does, inserting the extracted node with the new key would fail or overwrite,
+	// depending on the map's behavior with duplicate keys (which it doesn't allow).
+	// It's generally better to prevent this explicitely if renaming would cause a collision.
+	if (buffer.count(new_key) > 0)
+	{
+		slog_debug("Rename data srv worker: New key '%s' already exists. Cannot rename '%s'.", new_key.c_str(), old_key.c_str());
+		return -1; // Collision detected, cannot rename
+	}
+
+	// Extract the node associated with 'old_key'.
+	// This removes the entry from the map and returns a node handle.
+	auto node = buffer.extract(it);
+
+	// Modify the key of the extracted node to 'new_key'.
+	node.key() = new_key;
+
+	// Insert the node back into the map with its new key.
+	// std::move is used for efficiency as the node is an rvalue.
+	buffer.insert(std::move(node));
+
+	slog_debug("Rename data srv worker: Successfully renamed '%s' to '%s'.", old_key.c_str(), new_key.c_str());
+
+	// Return 0 to indicate success.
+	return 0;
 }
 
 int32_t map_records::update(std::string key, void *add_, uint64_t length)
 {
 
 	// Map iterator that will be searching for the key.
-	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, BufferValue>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -482,8 +554,9 @@ int32_t map_records::update(std::string key, void *add_, uint64_t length)
 	}
 
 	// Assign the values obtained to the provided references.
-	it->second.first = add_;
-	it->second.second = length;
+	it->second.data = add_;
+	it->second.size = length;
+	// TODO: to update gnode entry.
 
 	// Return the address associated to the record.
 	return 1;
@@ -521,9 +594,9 @@ int32_t map_records::update_simple(std::string key, int value)
 int32_t map_records::delete_metadata_stat_worker(std::string key)
 {
 	// TO CHECK: is the memory being free?
-	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, BufferValue>::iterator it;
 
-	std::unique_lock<std::mutex> lock(*mut);
+	// std::unique_lock<std::mutex> lock(*mut);
 	// find the element.
 	it = buffer.find(key);
 	if (it == buffer.end())
@@ -534,7 +607,7 @@ int32_t map_records::delete_metadata_stat_worker(std::string key)
 	// push the memory pointer of this block inside the mem pool to be reused.
 	// StsQueue.push(mem_pool, item->second.first);
 	// free(item->second.first);
-	free(it->second.first);
+	free(it->second.data);
 
 	// erase the element from the map.
 	// int num_elements_erased =
@@ -560,7 +633,7 @@ int32_t map_records::delete_metadata_stat_worker(std::string key)
 int32_t map_records::garbage_collector_search(std::string key)
 {
 	int ret = 0;
-	std::unique_lock<std::mutex> lock(*mut);
+	// std::unique_lock<std::mutex> lock(*mut);
 
 	// deletes the block number if contains.
 	int found_symbol_pos = key.find('$');
@@ -622,7 +695,7 @@ int32_t map_records::garbage_collector_pop(std::string key)
 	}
 	else
 	{
-		slog_warn("Key %s was not found.", expected_key.c_str());
+		slog_warn("Key %s was not found in the garbage collector.", expected_key.c_str());
 		ret = 0;
 	}
 	return ret;
@@ -635,7 +708,7 @@ int32_t map_records::garbage_collector_pop(std::string key)
 int32_t map_records::rename_metadata_stat_worker(std::string old_key, std::string new_key)
 {
 	// Map iterator that will be searching for the key.
-	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, BufferValue>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -649,7 +722,7 @@ int32_t map_records::rename_metadata_stat_worker(std::string old_key, std::strin
 	}
 	else
 	{
-		imss_info_ *data = (imss_info_ *)it->second.first;
+		imss_info_ *data = (imss_info_ *)it->second.data;
 		strcpy(data->uri_, new_key.c_str());
 		// Unlinks the node that contains the element pointed to by position and returns a node handle that owns it.
 		auto node = buffer.extract(old_key);
@@ -667,7 +740,7 @@ int32_t map_records::rename_metadata_stat_worker(std::string old_key, std::strin
 int32_t map_records::rename_data_srv_worker(std::string old_key, std::string new_key)
 {
 	// Map iterator that will be searching for the key.
-	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, BufferValue>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
@@ -718,13 +791,15 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 {
 	// printf("rename data_dir_dir_srv_worker old_dir=%s dir_dest=%s\n",old_dir.c_str(), rdir_dest.c_str());
 	// Map iterator that will be searching for the key.
-	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, BufferValue>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
 
 	// struct utsname detect;
 	// uname(&detect);
+
+	slog_debug("Map size=%lu", buffer.size());
 
 	size_t len_old_dir = old_dir.length();
 	size_t len_curr_key = 0;
@@ -757,10 +832,11 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 	}
 
 	slog_debug("vec size=%d", vec.size());
-	// check if the vector is empty, meaning that the old_dir key is not valid.
+	// check if the vector is empty. With the herarchical maps this is not an error.
+	// it only means the directory is empty.
 	if (vec.size() == 0)
 	{
-		return -1;
+		return 0;
 	}
 
 	std::vector<string>::iterator i;
@@ -784,25 +860,30 @@ int32_t map_records::rename_data_dir_srv_worker(std::string old_dir, std::string
 }
 
 // Method renaming from stat_worker
-int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::string rdir_dest)
+int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::string rdir_dest, GNode **gnode)
 {
 	// printf("rename_metadata_dir_dir_stat_worker\n");
 	// Map iterator that will be searching for the key.
-	std::map<std::string, std::pair<void *, uint64_t>>::iterator it;
+	std::map<std::string, BufferValue>::iterator it;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
 
 	size_t len_old_dir = old_dir.length();
+	int found = 0;
+	string key, new_path;
+	size_t len_curr_key = 0;
+	dataset_info *data = NULL;
+	// GNode *aux_gnode = NULL;
 	for (const auto &it : buffer)
 	{
-		string key = it.first;
-		int found = key.find(old_dir);
+		key = it.first;
+		found = key.find(old_dir);
 		if (found != std::string::npos)
 		{
-			size_t len_curr_key = key.length();
-			slog_debug("len_old_dir=%lu, len_curr_key=%lu, old_dir %s found in %s", len_old_dir, len_curr_key, old_dir.c_str(), key.c_str());
-
+			len_curr_key = key.length();
+			// slog_debug("len_old_dir=%lu, len_curr_key=%lu, old_dir %s found in %s", len_old_dir, len_curr_key, old_dir.c_str(), key.c_str());
+			// Checks if the current key is a child of the old_dir.
 			if (len_old_dir < len_curr_key)
 			{
 				if (key[len_old_dir] != '/')
@@ -811,32 +892,37 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 					continue;
 				}
 			}
-			// if(found < len_curr_key ) {
-			//	if (key.c_str()[found] != '/')
-			//	{
-			//		continue;
-			//	}
-			// }
 
-			vec.insert(vec.begin(), key);
+			if (!old_dir.compare(key))
+			{ // checks if this is the exact match.
+				slog_debug("match found %s", key.c_str());
+				// saves the sub-tree pointer.
+				*gnode = it.second.gnode;
+			}
 
+			vec.push_back(key);
+			// get the basename.
 			key.erase(0, old_dir.length());
 			// slog_debug("Key aftr erase: %s", key.c_str());
-
-			string new_path = rdir_dest;
+			new_path = rdir_dest;
 			if (!key.empty())
 				new_path.append(key);
 
-			imss_info_ *data = (imss_info_ *)it.second.first;
+			// Updates the uri on the data.
+			data = (dataset_info *)it.second.data;
 			slog_debug("Renaming data uri from %s to %s", data->uri_, new_path.c_str());
 			strncpy(data->uri_, new_path.c_str(), URI_);
+
+			// aux_gnode = it.second.gnode;
+			// aux_gnode->data = g_strdup(data->uri_);
 		}
 	}
 
 	// check if the vector is empty, meaning that the old key is not valid.
 	if (vec.size() == 0)
 	{
-		return -1;
+		slog_debug("vector is empty");
+		return 0;
 	}
 
 	std::vector<string>::iterator i;
@@ -862,19 +948,36 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
  */
 int32_t map_records::cleaning(char server_type)
 {
-	std::vector<string> vec;
+
+	if (buffer_garbage_collector.size() == 0)
+	{
+		slog_debug("The size of the garbage collector is %d", buffer_garbage_collector.size());
+		return 0;
+	}
+
+	if (buffer_garbage_collector.size() < 1000)
+	{
+		slog_debug("The size of the garbage is less than 1000", buffer_garbage_collector.size());
+		return 0;
+	}
+
 	string partner_key;
 	string partner_path;
 	int pos_partner = 0, found_partner = 0;
 	auto expected_key = buffer_garbage_collector.begin();
+	std::unique_lock<std::mutex> lock(*mut);
 	// for (const auto &expected_key : buffer_garbage_collector)
 	while (expected_key != buffer_garbage_collector.end())
 	{
+		if ((*expected_key).c_str() == NULL)
+		{
+			break;
+		}
 		slog_debug("key to delete=%s", (*expected_key).c_str());
+
 		if (server_type == TYPE_DATA_SERVER)
 		{ // data server.
-		  // struct stat *st_p = (struct stat *)it.second.first;
-		  // std::cout << key << "stlink:" <<st_p->st_nlink<<'\n';
+			std::vector<string> vec;
 			// borrar todos los bloques con mismo path/key
 			for (const auto &it2 : buffer)
 			{
@@ -884,22 +987,23 @@ int32_t map_records::cleaning(char server_type)
 				found_partner = partner_path.compare(*expected_key);
 				if (found_partner == 0)
 				{
+					slog_debug("block found=%s", partner_key.c_str());
 					vec.insert(vec.begin(), partner_key);
 				}
 			}
 
 			// Block the access to the map structure.
-			std::unique_lock<std::mutex> lock(*mut);
 			std::vector<string>::iterator i;
-			uint64_t item_mem_size = 0;
 			for (i = vec.begin(); i < vec.end(); i++)
 			{
 				// find the element on all the datasets map.
 				auto item = buffer.find(*i);
 				FreeMemory(item);
 				// erase the dataset information from the map.
+				slog_debug("Element %s erased", item->first.c_str());
 				buffer.erase(*i);
 			}
+			slog_debug("All blocks of %s erased", (*expected_key).c_str());
 		}
 		else
 		{ // metadata server.
@@ -931,25 +1035,24 @@ int32_t map_records::cleaning(char server_type)
  * or if it will be actually freed.
  * @param item Element pointing to an Hercules block.
  */
-void map_records::FreeMemory(std::map<std::string, std::pair<void *, uint64_t>>::iterator item)
+void map_records::FreeMemory(std::map<std::string, BufferValue>::iterator item)
 {
 	// block size of the curren item.
-	uint64_t item_mem_size = item->second.second;
+	uint64_t item_mem_size = item->second.size;
 	int ret = 0;
 	// checks if the mem pool has a slot,
 	// or if the current item memory size fits the block size (block 0 can have different size).
 	if (StsQueue.size(mem_pool) + item_mem_size >= total_size || item_mem_size != BLOCK_SIZE)
 	{
-		slog_debug("Freeing memory of key %s", item->first.c_str());
-		// quantity_occupied = quantity_occupied - item_mem_size;
 		ret = DecreaseMemoryOccupied(item_mem_size);
-		free(item->second.first); // free the memory of this block.
+		slog_debug("Freeing memory of key %s with size %lu", item->first.c_str(), item_mem_size);
+		free(item->second.data); // free the memory of this block.
 	}
 	else
 	{
 		slog_debug("Pushing memory of key %s into mem_pool", item->first.c_str());
 		// push the memory pointer of this block inside the mem pool to be reused.
-		StsQueue.push(mem_pool, item->second.first);
+		StsQueue.push(mem_pool, item->second.data);
 	}
 }
 
@@ -1013,9 +1116,9 @@ int32_t map_records::freeAllMemory()
 	for (const auto &it : buffer)
 	{
 		// fprintf(stderr,"Deleting %s\n", it.first.c_str());
-		free(it.second.first);
-		quantity_occupied = quantity_occupied - it.second.second;
-		free_memory_count += it.second.second;
+		free(it.second.data);
+		quantity_occupied = quantity_occupied - it.second.size;
+		free_memory_count += it.second.size;
 	}
 	free_memory_count /= (1024 * 1024 * 1024); // Bytes to GiB.
 	printf("Hercules has release %lu GB of memory\n", free_memory_count);
@@ -1079,7 +1182,7 @@ char *map_records::GetDataOfFile(string file_name, uint64_t *file_size_occupied)
 		if (found_partner == 0)
 		{
 			vec.insert(vec.begin(), partner_key);
-			*file_size_occupied = *file_size_occupied + it2.second.second;
+			*file_size_occupied = *file_size_occupied + it2.second.size;
 			extra_size += sizeof(int);
 		}
 	}
@@ -1116,8 +1219,8 @@ char *map_records::GetDataOfFile(string file_name, uint64_t *file_size_occupied)
 		// strncpy(aux_buf, (const char *)item->second.first, item->second.second);
 		getBlockInformation(item->first, &block_number, &data_uri, &block_file_name);
 
-		block_size_rtvd = item->second.second;
-		address_ = (char *)item->second.first;
+		block_size_rtvd = item->second.size;
+		address_ = (char *)item->second.data;
 
 		memcpy((char *)aux_buf + total_written, &block_number, sizeof(int));
 		memcpy((char *)aux_buf + total_written + sizeof(int), address_, block_size_rtvd);

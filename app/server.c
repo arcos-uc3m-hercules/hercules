@@ -56,6 +56,8 @@ extern pthread_cond_t global_run_checkpoint_cond;
 extern pthread_cond_t global_run_garbage_collector_cond;
 extern pthread_mutex_t global_finish_mut;
 extern pthread_mutex_t mutex_garbage;
+extern char *IMSS_ROOT;
+extern size_t IMSS_ROOT_LEN;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
@@ -133,7 +135,7 @@ int32_t main(int32_t argc, char **argv)
 	uint64_t bind_port = 0;
 	char *stat_add = NULL;
 	char *deployfile = NULL;
-	// int64_t buffer_size = 0, 
+	// int64_t buffer_size = 0,
 	int64_t stat_port = 0, num_servers = 0;
 	ucp_ep_params_t ep_params;
 	ucp_address_t *peer_addr = NULL;
@@ -268,14 +270,13 @@ int32_t main(int32_t argc, char **argv)
 	// init memory pool
 	slog_info("[main] before sts queue create");
 	// fprintf(stderr, "max_storage_size=%lu\n", max_storage_size);
-	fprintf(stderr,"Free memory: %lu GB\n", max_storage_size/GB);
+	fprintf(stderr, "Free memory: %lu GB\n", max_storage_size / GB);
 	if (max_storage_size == 0)
 	{
-		fprintf(stderr,"Not enough memory.\n");
+		fprintf(stderr, "Not enough memory.\n");
 		slog_debug("Not enough memory.");
 		exit(1);
 	}
-	
 
 	mem_pool = StsQueue.create();
 	// figure out how many blocks we need and allocate them
@@ -554,9 +555,12 @@ int32_t main(int32_t argc, char **argv)
 	/***************************************************************/
 	/******************** INPROC COMMUNICATIONS ********************/
 	/***************************************************************/
+	IMSS_ROOT = args.imss_uri;
+	IMSS_ROOT_LEN = strlen(IMSS_ROOT);
 
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));
+	hierarchical_map = HierarchicalMapCreate(std::string(args.imss_uri));
 	// copy the reference to a global map.
 	g_map = map;
 
@@ -1147,12 +1151,12 @@ void handle_signal_server(int signal)
 
 				if (global_finish_garbage_collector != 1)
 				{ // Garbage collector still running.
-					fprintf(stderr,"Waiting for mutext garbage collector\n");
+					fprintf(stderr, "Waiting for mutext garbage collector\n");
 					global_finish_garbage_collector = 1;
 					pthread_mutex_lock(&mutex_garbage);
 					pthread_cond_signal(&global_run_garbage_collector_cond);
 					pthread_mutex_unlock(&mutex_garbage);
-					fprintf(stderr,"Send signal to mutext garbage\n");
+					fprintf(stderr, "Send signal to mutext garbage\n");
 				}
 			}
 			else
@@ -1160,12 +1164,12 @@ void handle_signal_server(int signal)
 
 				if (global_finish_garbage_collector != 1)
 				{ // Garbage collector still running.
-					fprintf(stderr,"Waiting for mutext garbage collector\n");
+					fprintf(stderr, "Waiting for mutext garbage collector\n");
 					global_finish_garbage_collector = 1;
 					pthread_mutex_lock(&mutex_garbage);
 					pthread_cond_signal(&global_run_garbage_collector_cond);
 					pthread_mutex_unlock(&mutex_garbage);
-					fprintf(stderr,"Send signal to mutext garbage\n");
+					fprintf(stderr, "Send signal to mutext garbage\n");
 				}
 
 				if (global_finish_snapshot != 1)

@@ -338,6 +338,7 @@ void print_entry(gpointer key, gpointer value, gpointer user_data)
 	slog_debug("  Key: %s -> Value: {URI: %s, Original name: %s}", uri_key, info->uri_, info->original_name);
 }
 
+// TODO: check this function.
 gboolean replace_uri_base_path_dir(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri)
 {
 
@@ -2522,75 +2523,22 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	// dataset_info *dataset_info_;
 
 	// Renames the children of the old directory.
-	GHashTable *parent_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, old_dir);
+	GHashTable *parent_subdir_children_table = TIMING((GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, old_dir),"g_hash_table_lookup in rename_dataset_metadata_dir_dir", GHashTable *, 0);
 	slog_debug("Replacing basepath of files in the directory %s", old_dir);
-	replace_uri_base_path_dir(parent_subdir_children_table, old_dir, rdir_dest);
+	TIMING_NO_RETURN(replace_uri_base_path_dir(parent_subdir_children_table, old_dir, rdir_dest);, "replace_uri_base_path_dir", 0);
 
 	// Find the parent hash table.
 	// char parent_dir[PATH_MAX] = {0};
 	// find_last_parent_dir(old_dir, parent_dir);
 
 	// Rename the parent directory.
-	parent_subdir_children_table = FindCorrespondingHashTable(old_dir);
+	TIMING_NO_RETURN(parent_subdir_children_table = FindCorrespondingHashTable(old_dir);, "FindCorrespondingHashTable", 0);
 	if (!parent_subdir_children_table)
 	{
 		return -1;
 	}
-	replace_uri_base_path_regular_file(parent_subdir_children_table, old_dir, rdir_dest);
+	TIMING_NO_RETURN(replace_uri_base_path_regular_file(parent_subdir_children_table, old_dir, rdir_dest);,"replace_uri_base_path_regular_file", 0);
 
-	// Iterate through all the datasetd to change each corresponding file path.
-	// replace_uri_base_path_dir(parent_subdir_children_table, old_dir, rdir_dest);
-
-	// int hash_table_len = g_hash_table_size(datasetd);
-	// for (int32_t i = 0; i < hash_table_len; i++)
-	// {
-	// 	// dataset_info_ = g_array_index(datasetd, dataset_info, i);
-	// 	// int ret =
-	// 	find_dataset_by_uri_hash(datasetd, old_dir, &dataset_info_);
-
-	// 	if (strstr(dataset_info_->uri_, old_dir) != NULL)
-	// 	{
-	// 		char *path = dataset_info_->uri_;
-
-	// 		size_t len = strlen(old_dir);
-	// 		if (len > 0)
-	// 		{
-	// 			char *p = path;
-	// 			while ((p = strstr(p, old_dir)) != NULL)
-	// 			{
-	// 				memmove(p, p + len, strlen(p + len) + 1);
-	// 			}
-	// 		}
-	// 		slog_debug("datset_info_.uri=%s, old_dir=%s, rdir_dest=%s, path=%s", dataset_info_->uri_, old_dir, rdir_dest, path);
-	// 		// char * new_path = (char *) malloc(strlen(rdir_dest) + 1);
-	// 		char *new_path = (char *)malloc(256);
-	// 		strcpy(new_path, rdir_dest);
-	// 		if (strlen(path) > 0)
-	// 		{
-	// 			strcat(new_path, "/");
-	// 			strcat(new_path, path);
-	// 		}
-
-	// 		strcpy(dataset_info_->uri_, new_path);
-
-	// 		// if (ret == 0)
-	// 		// { // if the old name is not in the local g_array we finish this function.
-	// 		// 	return -1;
-	// 		// }
-	// 		// replace the old name by the new one.
-	// 		add_dataset_entry(&datasetd, rdir_dest, dataset_info_);
-	// 		remove_dataset_entry(datasetd, old_dir);
-
-	// 		// g_array_remove_index(datasetd, i);
-	// 		slog_debug("inserted dataset=%s", dataset_info_->uri_);
-	// 		// g_array_insert_val(datasetd, i, dataset_info_);
-	// 		free(new_path);
-	// 	}
-	// 	else
-	// 	{
-	// 		// TODO: add error handling.
-	// 	}
-	// }
 	/*********RENAME METADATA*******/
 	// Formated dataset uri to be sent to the metadata server.
 	char formated_uri[REQUEST_SIZE] = {0};
@@ -2601,7 +2549,7 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	char first_parent_dir[URI_] = {0};
 	uint32_t m_srv = 0;
 	// int number_data_servers = 0;
-	int first_parent_offset = find_first_parent_dir((char *)old_dir, first_parent_dir);
+	int first_parent_offset = TIMING(find_first_parent_dir((char *)old_dir, first_parent_dir);,"find_first_parent_dir", int, 0);
 	slog_debug("old_dir=%s, first_parent_dir=%s, first_parent_offset=%d", old_dir, first_parent_dir, first_parent_offset);
 
 	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
@@ -2623,7 +2571,7 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	}
 
 	size_t msg_length = 0;
-	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
+	msg_length = TIMING(get_recv_data_length(ucp_worker_meta, local_meta_uid);, "get_recv_data_length", size_t, 0);
 	if (msg_length == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -3195,7 +3143,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 	for (int32_t i = 0; i < curr_imss.info.num_active_storages; i++)
 	{
 		ep = curr_imss.conns.eps[i];
-		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
+		msg_length = TIMING(get_recv_data_length(ucp_worker_data, local_data_uid);,"get_recv_data_length in rename_dataset_srv_worker_dir_dir", size_t, 0);
 		if (msg_length == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -3207,7 +3155,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 		// // char result[msg_length];
 		// char *result = (char *)malloc(msg_length * sizeof(char));
 		void *result = malloc(msg_length);
-		msg_length = recv_data(ucp_worker_data, ep, result, msg_length, local_data_uid, 0);
+		msg_length = TIMING(recv_data(ucp_worker_data, ep, result, msg_length, local_data_uid, 0);,"recv_data in rename_dataset_srv_worker_dir_dir", size_t, 0);
 		// msg_length = recv_data_opt(ucp_worker_data, ep, &result, msg_length, local_data_uid, 0);
 		if (msg_length == 0)
 		{

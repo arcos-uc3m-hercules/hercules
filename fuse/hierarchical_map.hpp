@@ -15,6 +15,7 @@ extern "C"
 
 	void *HierarchicalMapCreate(std::string root);
 	void HierarchicalMapDestroy(void *map);
+	size_t HierarchicalMapGetSize(void *hierarchical_map);
 	int HierarchicalMapPut(void *hierarchical_map, const char *k, int v, struct stat stat_info, char *aux);
 	Map *HierarchicalMapGetDir(void *hierarchical_map, const char *k);
 	Map *HierarchicalMapGetChild(void *hierarchical_map, const char *k);

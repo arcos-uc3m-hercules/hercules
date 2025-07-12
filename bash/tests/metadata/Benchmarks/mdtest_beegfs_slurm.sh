@@ -2,6 +2,7 @@
 #SBATCH --job-name=mdtest_g    # Job name
 #SBATCH --output=logs/beegfs/%j_mdtest.log   # Standard output and error log
 #SBATCH --time=06:00:00               # Time limit hrs:min:sec
+#SBATCH --cpus-per-task=32
 
 NUMBER_OF_FILES_PER_PROCESS=$1
 NUMBER_OF_PROCESS=$2

@@ -10,6 +10,8 @@
 GNode *tree_root;
 GNode *last_parent = NULL;
 pthread_mutex_t tree_mut = PTHREAD_MUTEX_INITIALIZER;
+extern pthread_mutex_t mutex_garbage;
+
 
 // Helper function to print the tree structure
 void print_tree_structure(GNode *root, int depth)
@@ -65,7 +67,7 @@ int32_t GTree_search_(GNode *parent_node,
 			if (!strcmp(child_data_str, desired_data))
 			{
 				*found_node = child;
-				slog_debug("data was found after %d iterations", i);
+				slog_debug("1. data was found after %d iterations", i);
 				// The desired data was found.
 				return 1;
 			}
@@ -83,7 +85,7 @@ int32_t GTree_search_(GNode *parent_node,
 			if (!strcmp(child_data_str, desired_data))
 			{
 				*found_node = child;
-				slog_debug("data was found after %d iterations", i);
+				slog_debug("2. data was found after %d iterations", i);
 				// fprintf(stdout,"found node %p, %s, desird data %s\n", child, (char *)child->data, desired_data);
 				//  The desired data was found.
 				return 1;
@@ -237,7 +239,7 @@ static void update_node_path(GNode *node, const char *old_prefix, const char *ne
 	char new_full_path[PATH_MAX];
 
 	// Check if current_path actually starts with old_prefix
-	if (strncmp(current_path, old_prefix, old_prefix_len) == 0)
+	// if (strncmp(current_path, old_prefix, old_prefix_len) == 0)
 	{
 		// Now, we must ensure it's a "directory prefix" match.
 		// If old_prefix is "/a/b/" and current_path is "/a/bc/", this is not a match.
@@ -245,35 +247,35 @@ static void update_node_path(GNode *node, const char *old_prefix, const char *ne
 		// It must be either '/' (if it's a subdirectory) or '\0' (if it's the directory itself).
 		// Since old_prefix is guaranteed to end with a '/', we just check if
 		// current_path's remainder is what follows it.
-		if (current_path[old_prefix_len - 1] == '/' || current_path[old_prefix_len] == '\0')
-		{
+		// if (current_path[old_prefix_len - 1] == '/' || current_path[old_prefix_len] == '\0')
+		// {
 			// Correctly calculate the suffix by skipping the old_prefix part
 			const char *suffix = current_path + old_prefix_len;
 
 			strcpy(new_full_path, new_prefix);
 			// Ensure new_prefix (rdir_dest) ends with a slash if it's a directory
-			ConcatLastSlashC(new_full_path); // Ensure new_prefix has trailing slash
+			// ConcatLastSlashC(new_full_path); // Ensure new_prefix has trailing slash
 			strcat(new_full_path, suffix);	 // Append the rest of the path (the suffix)
 
 			slog_debug("Changing path from '%s' to '%s'", current_path, new_full_path);
 
 			g_free(current_path);				  // Free the old g_strdup'd string
 			node->data = g_strdup(new_full_path); // Assign the new g_strdup'd string
-		}
-		else
-		{
-			// This case occurs for paths like "/home/user-temp/" when old_prefix is "/home/user/"
-			// This is not a direct child path of old_prefix, so skip.
-			slog_debug("Path '%s' does not represent a child or self of old prefix '%s'. Skipping update.", current_path, old_prefix);
-			return;
-		}
+		// }
+		// else
+		// {
+		// 	// This case occurs for paths like "/home/user-temp/" when old_prefix is "/home/user/"
+		// 	// This is not a direct child path of old_prefix, so skip.
+		// 	slog_debug("Path '%s' does not represent a child or self of old prefix '%s'. Skipping update.", current_path, old_prefix);
+		// 	return;
+		// }
 	}
-	else
-	{
-		// Path doesn't start with the old prefix at all.
-		slog_debug("Path '%s' does not start with old prefix '%s'. Skipping update.", current_path, old_prefix);
-		return;
-	}
+	// else
+	// {
+	// 	// Path doesn't start with the old prefix at all.
+	// 	slog_debug("Path '%s' does not start with old prefix '%s'. Skipping update.", current_path, old_prefix);
+	// 	return;
+	// }
 }
 
 // GNodeTraverseFunc for g_node_traverse for renaming
@@ -289,19 +291,25 @@ static gboolean rename_dir_traverse_func(GNode *node, gpointer data)
 }
 
 // Method renaming dir to dir.
-int32_t GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
+int32_t GTree_rename_dir_dir(char *old_dir, char *rdir_dest, GNode *dir_node)
 {
 	slog_debug("printing tree");
-	print_tree_recursive(tree_root, 0);
+	// print_tree_recursive(tree_root, 0);
+	if (dir_node == NULL)
+	{
+		slog_error("dir_name cannot be null");
+		return -1;
+	}
+	
 
 	// Node whose elements must be retrieved.
-	GNode *dir_node;
+	// GNode *dir_node;
 	// pthread_mutex_lock(&tree_mut);
-	slog_debug("Renaming dir %s to %s", old_dir, rdir_dest);
-	int32_t ret = GTree_search(tree_root, old_dir, &dir_node);
+	slog_debug("Renaming dir %s to %s, sub-tree=%s", old_dir, rdir_dest, dir_node->data);
+	// int32_t ret = GTree_search(tree_root, old_dir, &dir_node);
 	// pthread_mutex_unlock(&tree_mut);
 	// Check if the node has been already inserted.
-	if (ret == 1)
+	// if (ret == 1)
 	{ // node found.
 
 		char *prefixes[2];
@@ -371,12 +379,12 @@ int32_t GTree_rename_dir_dir(char *old_dir, char *rdir_dest)
 		// g_node_destroy(dir_node);
 		// pthread_mutex_unlock(&tree_mut);
 	}
-	else
-	{ //  error case.
-		slog_debug("Old dir %s does not exists.", old_dir);
-		return -1;
-	}
-	print_tree_recursive(tree_root, 0);
+	// else
+	// { //  error case.
+	// 	slog_debug("Old dir %s does not exists.", old_dir);
+	// 	return -1;
+	// }
+	// print_tree_recursive(tree_root, 0);
 
 	return 0;
 }
@@ -589,6 +597,8 @@ int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char
 	// Add the concerned uri into the buffer.
 	// memcpy(*buffer, (char *)visited_node->data, URI_);
 	// *buffer += URI_;
+	pthread_mutex_lock(&mutex_garbage);
+	
 
 	GNode *child = visited_node->children;
 	int found = 0;
@@ -624,6 +634,7 @@ int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char
 
 		child = child->next;
 	}
+	pthread_mutex_unlock(&mutex_garbage);
 
 	return num_dirty_child;
 }

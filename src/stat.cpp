@@ -94,7 +94,7 @@ metadata_read(char *metadata_file,
 			// Size of the current IMSS structure.
 			uint64_t struct_size = sizeof(imss_info) + (imss_struct->num_storages * LINE_LENGTH);
 
-			map->put(key, buffer, struct_size, 0);
+			map->put(key, buffer, struct_size, 0, nullptr);
 
 			buffer += struct_size;
 
@@ -102,7 +102,7 @@ metadata_read(char *metadata_file,
 		}
 		case 'D':
 		{
-			map->put(key, buffer, sizeof(dataset_info), 0);
+			map->put(key, buffer, sizeof(dataset_info), 0, nullptr);
 
 			buffer += sizeof(dataset_info);
 
@@ -115,7 +115,7 @@ metadata_read(char *metadata_file,
 			// Size of the current dataset structure.
 			uint64_t struct_size = sizeof(dataset_info) + (dataset_struct->num_data_elem * sizeof(uint16_t));
 
-			map->put(key, buffer, struct_size, 0);
+			map->put(key, buffer, struct_size, 0, nullptr);
 
 			buffer += struct_size;
 

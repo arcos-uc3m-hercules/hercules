@@ -531,7 +531,8 @@ extern "C"
 			{
 				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
 				printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
-				return;
+				// return;
+				exit(1);
 			}
 		}
 

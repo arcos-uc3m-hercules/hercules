@@ -33,10 +33,16 @@ extern "C"
 		}
 	}
 
+	size_t HierarchicalMapGetSize(void *hierarchical_map) 
+	{
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+		return hiermap->size();
+	}
+
 	int HierarchicalMapPut(void *hierarchical_map, const char *k, int v, struct stat stat_info, char *aux)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
-		std::pair<std::map<std::string, struct elements>::iterator, bool> ret;
+		// std::pair<std::map<std::string, struct elements>::iterator, bool> ret;
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 		slog_debug("Putting %s on the hierarchical map.", k);
 		char first_parent_dir[PATH_MAX] = {0};
@@ -55,6 +61,11 @@ extern "C"
 		{ // parent map exists locally, we get the pointer.
 			parent_map = it->second;
 		}
+
+		// check the size of the parent map.
+		// if(parent_map->size() > 100) {
+		// 	return -1;
+		// }
 
 		map_put(parent_map, k, v, stat_info, aux);
 		slog_debug("Element %s inserted on the directory map %s", k, first_parent_dir);
@@ -122,11 +133,11 @@ extern "C"
 
 			slog_debug("Parent %s map changed to %s", old_dir, new_dir);
 
-			parent_map = hiermap->find(std::string(new_dir));
-			if (parent_map != hiermap->end())
-			{
-				slog_debug("New dir %s is on the hierarchical map", new_dir);
-			}
+			// parent_map = hiermap->find(std::string(new_dir));
+			// if (parent_map != hiermap->end())
+			// {
+			// 	slog_debug("New dir %s is on the hierarchical map", new_dir);
+			// }
 
 			return 1;
 		}
@@ -241,7 +252,7 @@ extern "C"
 	 */
 	int HierarchicalMapRenameDirDir(void *hierarchical_map, const char *old_dir, const char *rdir_dest)
 	{
-		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		// std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 		int ret = -1;
 
@@ -253,34 +264,35 @@ extern "C"
 		if (old_map != NULL)
 		{
 			slog_debug("Renaming entries of %s to %s", old_dir, rdir_dest);
-			map_rename_dir_dir(old_map, old_dir, rdir_dest);
+			Map *new_map = new Map();
 
-			ret = HierarchicalMapRenameKey(hierarchical_map, old_dir, rdir_dest);
+			for (auto it = old_map->cbegin(); it != old_map->cend(); ++it)
+			{
+				std::string key = it->first;
+				// Find the first occurrence of oldSubstring
+				size_t pos = key.find(old_dir);
 
-			old_map = HierarchicalMapGetDir(hierarchical_map, old_dir);
-			if (old_map != NULL)
-			{
-				slog_warn("%s is still a valid path", old_dir);
-			}
-			else
-			{
-				slog_debug("%s not found in the map", old_dir);
-			}
-
-			Map *new_map = HierarchicalMapGetDir(hierarchical_map, rdir_dest);
-			if (new_map != NULL)
-			{
-				slog_debug("%s is a valid path", rdir_dest);
-			}
-			else
-			{
-				slog_warn("%s not found in the map", rdir_dest);
+				// If found, replace it
+				if (pos != std::string::npos)
+				{
+					key.replace(pos, strlen(old_dir), rdir_dest);
+				}
+				new_map->insert({key, it->second});
 			}
 
-			char first_parent_dir[PATH_MAX] = {0};
-			find_last_parent_dir(old_dir, first_parent_dir);
-			Map *old_map = HierarchicalMapGetDir(hierarchical_map, first_parent_dir);
-			map_rename_dir_dir(old_map, old_dir, rdir_dest);
+			HierarchicalMapErase(hierarchical_map, old_dir);
+			HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+
+			(*hiermap)[std::string(rdir_dest)] = new_map;
+
+			// map_rename_dir_dir(old_map, old_dir, rdir_dest);
+
+			// ret = HierarchicalMapRenameKey(hierarchical_map, old_dir, rdir_dest);
+
+			// char first_parent_dir[PATH_MAX] = {0};
+			// find_last_parent_dir(old_dir, first_parent_dir);
+			// Map *old_map = HierarchicalMapGetDir(hierarchical_map, first_parent_dir);
+			// map_rename_dir_dir(old_map, old_dir, rdir_dest);
 
 			return ret;
 		}
