@@ -2,7 +2,8 @@
 #define IMSS_DIRECTORY
 
 #include <glib.h>
-#include "records.hpp"
+// #include "records.hpp"
+#include "hierarchical_records.hpp"
 
 
 // Wrapper to the GTree_search_ function that compares if the parent node is requested.
@@ -10,7 +11,8 @@ int32_t GTree_search(GNode *parent_node, const char *desired_data, GNode **found
 
 // Method retrieving a buffer with all the files within a directory.
 // char *GTree_getdir(char *desired_dir, int32_t *numdir_elems);
-char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, std::shared_ptr<map_records> map);
+// char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, std::shared_ptr<map_records> map)
+char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, void *hierarchical_map);
 
 /**
  * @brief Method deleting an entry of the tree.
@@ -27,7 +29,8 @@ serialize_dir(GNode *visited_node, uint32_t num_nodes, char **buffer);
 
 // Method serializing the number of childrens within a directory into a buffer.
 // int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char **buffer);
-int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char **buffer, std::shared_ptr<map_records> map);
+// int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char **buffer, std::shared_ptr<map_records> map);
+int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char **buffer, void *hierarchical_map);
 
 // Method renaming dir to dir.
 int32_t

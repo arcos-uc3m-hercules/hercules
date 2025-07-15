@@ -179,7 +179,7 @@ void *imss_server(void *arg_)
 		strcpy(arguments[i].my_uri, att_imss_uri);
 
 		// Throw thread with the corresponding function and arguments.
-		if (pthread_create(&threads[i], NULL, srv_worker, (void *)&arguments[i]) == -1)
+		if (pthread_create(&threads[i], NULL, hercules_ucx_server, (void *)&arguments[i]) == -1)
 		{
 			perror("HERCULES_ERR_SRVWORKER_DEPLOY");
 			pthread_exit(NULL);
@@ -316,7 +316,7 @@ imss_metadata(void *arg_)
 			arguments[i].pt = 0;
 			// arguments[i].total_size = buffer_segment_;
 			// Throw thread with the corresponding function and arguments.
-			if (pthread_create(&threads[i], NULL, stat_worker, (void *)&arguments[i]) == -1)
+			if (pthread_create(&threads[i], NULL, hercules_ucx_server, (void *)&arguments[i]) == -1)
 			{
 				perror("HERCULES_ERR_METAWORKER_DEPLOY");
 				pthread_exit(NULL);

@@ -627,8 +627,8 @@ int32_t map_records::delete_metadata_stat_worker(std::string key)
 }
 
 /**
- * @brief Method deleting a record from the garbage collector vector.
- * @return Number of elements deleted.
+ * @brief Method searching a record in the garbage collector vector.
+ * @return 1 if the "key" was find, 0 on other case.
  * */
 int32_t map_records::garbage_collector_search(std::string key)
 {
@@ -665,9 +665,9 @@ int32_t map_records::garbage_collector_search(std::string key)
 
 /**
  * @brief Method deleting a record from the garbage collector vector.
- * @return Number of elements deleted.
+ * @return 1 if the "key" was find in the garbage collector vector, 0 on other case.
  * */
-int32_t map_records::garbage_collector_pop(std::string key)
+int32_t map_records::garbage_collector_pop(const std::string &key)
 {
 	int ret = 0;
 	std::unique_lock<std::mutex> lock(*mut);
@@ -737,7 +737,7 @@ int32_t map_records::rename_metadata_stat_worker(std::string old_key, std::strin
 }
 
 // Method renaming from srv_worker
-int32_t map_records::rename_data_srv_worker(std::string old_key, std::string new_key)
+int32_t map_records::rename_data_srv_worker(const std::string &old_key, const std::string &new_key)
 {
 	// Map iterator that will be searching for the key.
 	std::map<std::string, BufferValue>::iterator it;

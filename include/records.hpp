@@ -73,7 +73,7 @@ public:
 
 	// Gargabe collector functions.
 	int32_t put_garbage_collector(std::string key);
-	int32_t garbage_collector_pop(std::string key);
+	int32_t garbage_collector_pop(const std::string &key);
 	int32_t garbage_collector_search(std::string key);
 
 	// Method retrieving the address associated to a certain record.
@@ -94,7 +94,7 @@ public:
 	// Method renaming from stat_worker
 	int32_t rename_metadata_stat_worker(std::string old_key, std::string new_key);
 	// Method renaming from srv_worker
-	int32_t rename_data_srv_worker(std::string old_key, std::string new_key);
+	int32_t rename_data_srv_worker(const std::string &old_key, const std::string &new_key);
 	// Method renaming from srv_worker
 	int32_t rename_data_dir_srv_worker(std::string old_dir, std::string rdir_dest);
 	// Method renaming from stat_worker

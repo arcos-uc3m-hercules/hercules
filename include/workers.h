@@ -3,7 +3,7 @@
 
 // #include "imss.h"
 #include "comms.h"
-#include "records.hpp"
+// #include "records.hpp"
 #include "hierarchical_records.hpp"
 #include "shared_memory.h"
 // #include "hercules.hpp"
@@ -76,7 +76,6 @@ typedef struct {
 
 // Thread method attending client data requests.
 void *hercules_ucx_server(void *th_argv);
-void *srv_worker(void *th_argv);
 int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps);
 void *Checkpoint(void *th_argv);
 void *Snapshot(void *th_argv);
@@ -85,7 +84,6 @@ void *Snapshot(void *th_argv);
 void *GarbageCollector(void *th_argv);
 
 // Thread method attending client metadata requests.
-void *stat_worker(void *th_argv);
 int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps);
 
 // Dispatcher thread method distributing clients among the pool server threads.

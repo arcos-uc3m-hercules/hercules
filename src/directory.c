@@ -12,7 +12,6 @@ GNode *last_parent = NULL;
 pthread_mutex_t tree_mut = PTHREAD_MUTEX_INITIALIZER;
 extern pthread_mutex_t mutex_garbage;
 
-
 // Helper function to print the tree structure
 void print_tree_structure(GNode *root, int depth)
 {
@@ -249,26 +248,26 @@ static void update_node_path(GNode *node, const char *old_prefix, const char *ne
 		// current_path's remainder is what follows it.
 		// if (current_path[old_prefix_len - 1] == '/' || current_path[old_prefix_len] == '\0')
 		// {
-			// Correctly calculate the suffix by skipping the old_prefix part
-			const char *suffix = current_path + old_prefix_len;
+		// Correctly calculate the suffix by skipping the old_prefix part
+		const char *suffix = current_path + old_prefix_len;
 
-			strcpy(new_full_path, new_prefix);
-			// Ensure new_prefix (rdir_dest) ends with a slash if it's a directory
-			// ConcatLastSlashC(new_full_path); // Ensure new_prefix has trailing slash
-			strcat(new_full_path, suffix);	 // Append the rest of the path (the suffix)
+		strcpy(new_full_path, new_prefix);
+		// Ensure new_prefix (rdir_dest) ends with a slash if it's a directory
+		// ConcatLastSlashC(new_full_path); // Ensure new_prefix has trailing slash
+		strcat(new_full_path, suffix); // Append the rest of the path (the suffix)
 
-			slog_debug("Changing path from '%s' to '%s'", current_path, new_full_path);
+		slog_debug("Changing path from '%s' to '%s'", current_path, new_full_path);
 
-			g_free(current_path);				  // Free the old g_strdup'd string
-			node->data = g_strdup(new_full_path); // Assign the new g_strdup'd string
-		// }
-		// else
-		// {
-		// 	// This case occurs for paths like "/home/user-temp/" when old_prefix is "/home/user/"
-		// 	// This is not a direct child path of old_prefix, so skip.
-		// 	slog_debug("Path '%s' does not represent a child or self of old prefix '%s'. Skipping update.", current_path, old_prefix);
-		// 	return;
-		// }
+		g_free(current_path);				  // Free the old g_strdup'd string
+		node->data = g_strdup(new_full_path); // Assign the new g_strdup'd string
+											  // }
+											  // else
+											  // {
+											  // 	// This case occurs for paths like "/home/user-temp/" when old_prefix is "/home/user/"
+											  // 	// This is not a direct child path of old_prefix, so skip.
+											  // 	slog_debug("Path '%s' does not represent a child or self of old prefix '%s'. Skipping update.", current_path, old_prefix);
+											  // 	return;
+											  // }
 	}
 	// else
 	// {
@@ -300,7 +299,6 @@ int32_t GTree_rename_dir_dir(char *old_dir, char *rdir_dest, GNode *dir_node)
 		slog_error("dir_name cannot be null");
 		return -1;
 	}
-	
 
 	// Node whose elements must be retrieved.
 	// GNode *dir_node;
@@ -592,13 +590,13 @@ int32_t GTree_insert(char *desired_data, GNode **new_node)
 
 // Method serializing the number of childrens within a directory into a buffer.
 // int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char **buffer)
-int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char **buffer, std::shared_ptr<map_records> map)
+// int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char **buffer, std::shared_ptr<map_records> map)
+int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char **buffer, void *hierarchical_map)
 {
 	// Add the concerned uri into the buffer.
 	// memcpy(*buffer, (char *)visited_node->data, URI_);
 	// *buffer += URI_;
 	pthread_mutex_lock(&mutex_garbage);
-	
 
 	GNode *child = visited_node->children;
 	int found = 0;
@@ -621,7 +619,8 @@ int32_t serialize_dir_childrens(GNode *visited_node, uint32_t num_children, char
 		}
 
 		// Check if the child data is dirty.
-		found = map->garbage_collector_search(std::string((char *)(child->data)));
+		// found = map->garbage_collector_search(std::string((char *)(child->data)));
+		found = HierarchicalMapSearchInGarbageCollector(hierarchical_map, (char *)(child->data));
 		if (!found)
 		{
 			memcpy(*buffer, (char *)child->data, strlen((char *)child->data));
@@ -690,7 +689,8 @@ void print_child_node(GNode *node, gpointer data)
 
 // Method retrieving a buffer with all the files within a directory.
 // extern std::shared_ptr<map_records> g_map;
-char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, std::shared_ptr<map_records> map)
+// char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, std::shared_ptr<map_records> map)
+char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, void *hierarchical_map)
 {
 	// Node whose elements must be retrieved.
 	GNode *dir_node;
@@ -747,7 +747,7 @@ char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, std::shared_ptr<map
 	// TO CHECK!
 	//	slog_info("serialize_dir_childrens(dir_node=%s, num_children=%d, &aux_dir_elem)", dir_node->data, num_children);
 	pthread_mutex_lock(&tree_mut);
-	num_dirty_child = serialize_dir_childrens(dir_node, num_children, &aux_dir_elem, map);
+	num_dirty_child = serialize_dir_childrens(dir_node, num_children, &aux_dir_elem, hierarchical_map);
 	pthread_mutex_unlock(&tree_mut);
 	// slog_info("ending serialize_dir_childrens, aux_dir_elem=%s", *aux_dir_elem);
 	slog_debug("directory %s has %d elements but %d are dirty", desired_dir, *numdir_elems, num_dirty_child);
