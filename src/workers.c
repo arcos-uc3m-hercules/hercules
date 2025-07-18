@@ -930,6 +930,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			break;
 		}
 		default:
+			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_INVALID_MSG_TYPE");
+			slog_error("HERCULES_ERR_SRV_WORKER_INVALID_MSG_TYPE");
 			break;
 		}
 		break;
@@ -1319,8 +1321,6 @@ void *GarbageCollector(void *th_argv)
 	{
 		// Gnodetraverse_garbage_collector(map);//Future
 		sleep(GARBAGE_COLLECTOR_PERIOD);
-		// TODO: removes the next "continue".
-		continue;
 		pthread_mutex_lock(&mutex_garbage);
 		// pthread_cond_wait(&global_run_garbage_collector_cond, &mutex_garbage);
 
@@ -1330,6 +1330,8 @@ void *GarbageCollector(void *th_argv)
 			pthread_mutex_unlock(&mutex_garbage);
 			pthread_exit((void *)0);
 		}
+		// TODO: removes the next "continue".
+		continue;
 		map->cleaning(arguments->args.type);
 		// Unlock all threads waiting for resources.
 		// pthread_cond_broadcast(&global_free_space_cond);
@@ -2029,7 +2031,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{ // dataset is dirty. We will delete from the
 					slog_debug("Dirty dataset found %s, recovering from the garbage collector.", key.c_str());
 					// int ret = map->garbage_collector_pop(key);
-					int ret = HierarchicalMapPopFromGarbageCollector(hierarchical_map, key);
+					int ret = HierarchicalMapPopFromGarbageCollector(hierarchical_map, key_for_tree);
 					if (ret == 0)
 					{
 						slog_debug("%s has not been found on the garbage collector map, but it found as dirty.", key.c_str());
@@ -2163,7 +2165,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			{ // dataset is dirty. We will delete from the garbage collector.
 				slog_debug("Dirty dataset found %s, recovering from the garbage collector.", key.c_str());
 				// int ret = map->garbage_collector_pop(key);
-				int ret = HierarchicalMapPopFromGarbageCollector(hierarchical_map, key);
+				int ret = HierarchicalMapPopFromGarbageCollector(hierarchical_map, key_for_tree);
 				if (ret == 0)
 				{
 					slog_debug("%s has not been found on the garbage collector map, but it found as dirty.", key.c_str());

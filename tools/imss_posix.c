@@ -7,12 +7,6 @@
 #define __USE_FILE_OFFSET64
 
 #undef __USE_GNU
-// #include <poll.h>
-// #include <sys/ptrace.h>
-
-// #ifndef FCNTL_ADJUST_CMD
-// #define FCNTL_ADJUST_CMD(__cmd) __cmd
-// #endif
 
 #define KB 1024
 #define GB 1073741824
@@ -28,9 +22,9 @@ char *IMSS_HOSTFILE = NULL; // Not default
 extern char *IMSS_ROOT;
 extern size_t IMSS_ROOT_LEN;
 char *META_HOSTFILE = NULL;
-uint64_t STORAGE_SIZE = 16;			 // In GB
-uint64_t META_BUFFSIZE = 16;		 // In GB
-uint64_t IMSS_BLKSIZE = 1024;		 // In KB
+uint64_t STORAGE_SIZE = 16;	  // In GB
+uint64_t META_BUFFSIZE = 16;  // In GB
+uint64_t IMSS_BLKSIZE = 1024; // In KB
 // uint64_t IMSS_BUFFSIZE = 2;			 // In GB
 uint64_t IMSS_DATA_BSIZE = 512 * KB; // In Bytes.
 int32_t REPL_FACTOR = NONE;			 // Default none
@@ -414,15 +408,8 @@ extern "C"
 		return new_path;
 	}
 
-	__attribute__((constructor)) void imss_posix_init(void)
+	uint32_t GetRank()
 	{
-		struct timeval start, end;
-		gettimeofday(&start, NULL);
-
-		slog_time("Info,,Rank,Function,Time(msec),Comment");
-
-		map_fd = map_fd_create();
-		
 		// Getting a mostly unique id for the distributed deployment.
 		char hostname_[512] = {0}, hostname[1024] = {0};
 		int ret = gethostname(&hostname_[0], 512);
@@ -434,7 +421,20 @@ extern "C"
 		sprintf(hostname, "%s:%d", hostname_, getpid());
 		g_pid = getpid();
 
-		rank = MurmurOAAT32(hostname);
+		return MurmurOAAT32(hostname);
+	}
+
+	__attribute__((constructor)) void imss_posix_init(void)
+	{
+		struct timeval start, end;
+		int ret = 0;
+		gettimeofday(&start, NULL);
+
+		slog_time("Info,,Rank,Function,Time(msec),Comment");
+
+		map_fd = map_fd_create();
+
+		rank = GetRank();
 
 		// fill global variables with the enviroment variables value.
 		ret = getConfiguration(&args);
@@ -479,7 +479,8 @@ extern "C"
 			printf("Log path = %s\n", log_path);
 			fflush(stdout);
 		}
-		slog_info(",Time(msec), Comment, RetCode");
+		// slog_info(",Time(msec), Comment, RetCode");
+		slog_time("%d,TIMING,Time(s),Msg", rank);
 
 		slog_live(" -- HERCULES_MOUNT_POINT: %s", MOUNT_POINT);
 		slog_live(" -- HERCULES_ROOT: %s", IMSS_ROOT);
@@ -503,7 +504,7 @@ extern "C"
 		slog_live(" -- POLICY: %s", POLICY);
 
 		// Metadata server
-		if (TIMING(stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank),"stat init", int32_t, rank) == -1)
+		if (TIMING(stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank), "stat init", int32_t, rank) == -1)
 		{
 			// In case of error notify and exit
 			slog_error("Stat init failed, cannot connect to Metadata server.");
@@ -575,14 +576,14 @@ extern "C"
 
 		slog_live("IMSS EXIST=%d\n", is_alive(IMSS_ROOT));
 		// slog_live("[CLIENT %d] ready!\n", rank);
-		
+
 		gettimeofday(&end, NULL);
 		long seconds, useconds;
 		double elapsed;
 		seconds = end.tv_sec - start.tv_sec;
 		useconds = end.tv_usec - start.tv_usec;
 		elapsed = seconds + useconds / 1e6;
-		
+
 		init = 1;
 		slog_live("Client %d ready in %f sec.", rank, elapsed);
 		// fprintf(stdout, "Client %d ready in %f sec.\n", rank, elapsed);
@@ -615,7 +616,7 @@ extern "C"
 		map_fd_destroy(map_fd);
 
 		init = 0;
-		slog_close();
+		// slog_close();
 	}
 
 	void check_ld_preload(void)
@@ -886,7 +887,6 @@ extern "C"
 
 		if (pid == -1)
 		{
-
 			perror("Fork error");
 			slog_error("[POSIX] Error 'real fork', errno=%d:%s", errno, strerror(errno));
 			return pid;
@@ -901,28 +901,35 @@ extern "C"
 		break;
 		case 0: // child process.
 		{
-			init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
+			rank = GetRank();
+			// log init.
+			time_t t = time(NULL);
+			struct tm tm = *localtime(&t);
+			sprintf(log_path, "client-thread-%ld.%02d-%02d.%d", pthread_self(), tm.tm_hour, tm.tm_min, getpid());
+			slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
 			slog_live("[POSIX] Child process");
+			init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
 		}
 		break;
 		default: // parent process.
 		{
 			slog_live("[POSIX] Parent process, child pid=%d", pid);
-			if (stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank) == -1)
-			{
-				// In case of error notify and exit
-				slog_error("Stat init failed, cannot connect to Metadata server.");
-				// imss_comm_cleanup();
-				exit(1);
-			}
+			init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
+			// if (stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank) == -1)
+			// {
+			// 	// In case of error notify and exit
+			// 	slog_error("Stat init failed, cannot connect to Metadata server.");
+			// 	// imss_comm_cleanup();
+			// 	exit(1);
+			// }
 
-			int num_active_storages = open_imss(IMSS_ROOT);
-			if (num_active_storages < 0)
-			{
-				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-				printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
-				exit(1);
-			}
+			// int num_active_storages = open_imss(IMSS_ROOT);
+			// if (num_active_storages < 0)
+			// {
+			// 	slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+			// 	printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
+			// 	exit(1);
+			// }
 		}
 		break;
 		}
@@ -1120,7 +1127,7 @@ extern "C"
 			slog_live("[POSIX]. Calling Hercules 'statvfs', path=%s", new_path);
 			__buf->f_bsize = IMSS_BLKSIZE * KB;
 			__buf->f_namemax = URI_;
-			slog_live("[POSIX]. End Hercules 'statvfs', path=%s, ret=%d", new_path, ret);
+			slog_live("[POSIX]. End Hercules 'statvfs', path=%s, ret=%d\n", new_path, ret);
 			free(new_path);
 		}
 		else
@@ -2358,12 +2365,12 @@ extern "C"
 			if (create_flag == O_CREAT) // if the file does not exist, then we create it.
 			{
 				slog_live("[POSIX] New file %s, ret=%d", new_path, ret);
-				int err_create = imss_create(new_path, mode, &ret_ds, 1, TYPE_REGULAR_FILE);
+				int err_create = TIMING(imss_create(new_path, mode, &ret_ds, 1, TYPE_REGULAR_FILE), "generalOpen,imss_create", int, rank);
 				slog_live("[POSIX] imss_create(%s, %d, %ld), err_create: %d", new_path, mode, ret_ds, err_create);
 				if (err_create == -EEXIST)
 				{
 					slog_live("[POSIX] 1 - Dataset already exists, imss_open(%s, %ld)", new_path, ret_ds);
-					ret = imss_open(new_path, &ret_ds);
+					ret = TIMING(imss_open(new_path, &ret_ds);, "generalOpen,imss_open", int, rank);
 					// errno = EEXIST;
 					// errno = -ret;
 					slog_live("[POSIX] 1 - imss_open(%s, %ld), ret=%d", new_path, ret_ds, ret);
@@ -2378,7 +2385,7 @@ extern "C"
 			else // if O_CREAT flag was not set, the file must exists.
 			{
 				slog_live("[POSIX] File must exists - imss_open(%s, %ld), create_flag: %d", new_path, ret_ds, create_flag);
-				ret = imss_open(new_path, &ret_ds);
+				ret = TIMING(imss_open(new_path, &ret_ds);, "generalOpen,imss_open", int, rank);
 				slog_live("[POSIX] 2 - ret_ds=%d, ret=%d, new_path=%s", ret_ds, ret, new_path);
 
 				if (ret < 0)
@@ -2397,7 +2404,7 @@ extern "C"
 					else
 						ret = real_open(new_path, flags, mode);
 					// stores the file descriptor "ret" into the map "map_fd".
-					map_fd_put(map_fd, new_path, ret, p); // TO CHECK!
+					TIMING_NO_RETURN(map_fd_put(map_fd, new_path, ret, p);, "generalOpen,map_fd_put", rank); // TO CHECK!
 				}
 			}
 			// if (ret == 0)
@@ -2412,12 +2419,12 @@ extern "C"
 				ret = real_open("/dev/null", 0); // Get a file descriptor
 				// stores the file descriptor "ret" into the map "map_fd".
 				slog_live("[POSIX] Puting fd %d into map", ret);
-				map_fd_put(map_fd, new_path, ret, p);
+				TIMING_NO_RETURN(map_fd_put(map_fd, new_path, ret, p);, "generalOpen,map_fd_put", rank);
 			}
 			else if (ret > -1 && createFd >= 0)
 			{
 				slog_live("[POSIX] Puting fd %d into map, passed from arguments.", createFd);
-				map_fd_put(map_fd, new_path, createFd, p);
+				TIMING_NO_RETURN(map_fd_put(map_fd, new_path, createFd, p);, "generalOpen,map_fd_put", rank);
 				ret = createFd;
 			}
 		}
@@ -2426,21 +2433,20 @@ extern "C"
 			slog_live("[POSIX]. exist=%d, O_TRUNC=%d, fd=%d", exist, flags & O_TRUNC, ret);
 			if (flags & O_TRUNC)
 			{
-				map_fd_update_value(map_fd, new_path, ret, 0);
+				TIMING_NO_RETURN(map_fd_update_value(map_fd, new_path, ret, 0);, "generalOpen,map_fd_update_value", rank);
 				int ret_aux = 0;
 				struct stat stats;
-				ret_aux = imss_getattr(new_path, &stats);
+				ret_aux = TIMING(imss_getattr(new_path, &stats);, "generalOpen,imss_getattr", int, rank);
 				if (ret_aux < 0)
 				{
 					errno = -ret_aux;
 					ret = -1;
 					slog_error("[POSIX] Error Hercules 'open', errno=%d:%s", errno, strerror(errno));
-					// free(new_path);
 					// pthread_mutex_unlock(&system_lock);
 					return ret;
 				}
 				stats.st_size = 0;
-				HierarchicalMapUpdate(hierarchical_map, new_path, ret, stats);
+				TIMING_NO_RETURN(HierarchicalMapUpdate(hierarchical_map, new_path, ret, stats);, "generalOpen,map_fd_update_value", rank);
 			}
 		}
 		// pthread_mutex_unlock(&system_lock);
@@ -3196,7 +3202,7 @@ extern "C"
 			// slog_full("[POSIX]. Ending real 'read', size=%ld, fd=%ld, ret=%d, old_offset=%d, new_offset=%d, errno=%d:%s.", size, fd, ret, old_offset, new_offset, errno, strerror(errno));
 			// fprintf(stderr, "[POSIX]. Real 'read', size=%ld, fd=%d, ret=%lu, offset=%lu, errno=%d:%s\n", size, fd, ret, offset, errno, strerror(errno));
 
-			slog_full("[POSIX]. Ending real 'read', size=%ld, fd=%ld, ret=%d, errno=%d:%s.", size, fd, ret, errno, strerror(errno));
+			slog_full("[POSIX]. Ending real 'read', size=%ld, fd=%ld, ret=%d", size, fd, ret);
 		}
 		return ret;
 	}
@@ -3921,7 +3927,14 @@ extern "C"
 		{
 			slog_full("[POSIX]. Calling real 'opendir', pathname=%s", name);
 			dirp = real_opendir(name);
-			slog_full("[POSIX]. Ending real 'opendir', pathname=%s, fd=%d", name, dirfd(dirp));
+			if (dirp == NULL)
+			{ // on error, dirp is null.
+				slog_full("[POSIX]. Ending real 'opendir', pathname=%s, fd=NULL", name);
+			}
+			else
+			{
+				slog_full("[POSIX]. Ending real 'opendir', pathname=%s, fd=%d", name, dirfd(dirp));
+			}
 		}
 		return dirp;
 	}
@@ -4087,14 +4100,14 @@ extern "C"
 				// name of file
 				strncpy(entry.d_name, token, len);
 
-				if (pos % 1000 == 0) // TODO: comments this lines, only for debug.
-				{					 // print a message every 1000 files.
-					t = clock() - t;
-					double time_taken = 0.0;
-					time_taken = ((double)t) / (CLOCKS_PER_SEC);
-					printf("[%s][%f] Reading entry %s, %ld of  %" PRIu32 ", please wait.\n", pathname, time_taken, entry.d_name, pos, n_ent);
-					init_loop_timer = 1;
-				}
+				// if (pos % 1000 == 0) // TODO: comments this lines, only for debug.
+				// {					 // print a message every 1000 files.
+				// 	t = clock() - t;
+				// 	double time_taken = 0.0;
+				// 	time_taken = ((double)t) / (CLOCKS_PER_SEC);
+				// 	printf("[%s][%f] Reading entry %s, %ld of  %" PRIu32 ", please wait.\n", pathname, time_taken, entry.d_name, pos, n_ent);
+				// 	init_loop_timer = 1;
+				// }
 				// printf("[%s] Reading entry %s, %" PRIu32 " of %u, please wait\n", pathname, entry.d_name,  pos, n_ent);
 
 				char path_search[PATH_MAX] = {0};
@@ -5480,19 +5493,32 @@ extern "C"
 		if (!real_getcwd)
 			real_getcwd = (char *(*)(char *, size_t))dlsym(RTLD_NEXT, "getcwd");
 
-		if (!strncmp(getenv("PWD"), MOUNT_POINT, strlen(MOUNT_POINT)))
+		if (!init)
+		{
+			return real_getcwd(buf, size);
+		}
+
+		char *curr_dir = getenv("PWD");
+		if (curr_dir != NULL && !strncmp(curr_dir, MOUNT_POINT, strlen(MOUNT_POINT)))
 		{
 			slog_live("[POSIX] Calling Hercules 'getcwd'");
-			char *curr_dir = getenv("PWD");
 			size_t buf_length = strlen(buf);
 			strncpy(buf, curr_dir, buf_length);
 			slog_live("[POSIX] Ending Hercules 'getcwd', buf=%s", buf);
 		}
 		else
 		{
-			slog_full("[POSIX] Calling real 'getcwd'");
+			// TODO: check "segmentation fault" when HERCULES_DEBUG_LEVEL=SLOG_FULL is set.
+			// slog_full("[POSIX] Calling real 'getcwd'");
 			buf = real_getcwd(buf, size);
-			slog_full("[POSIX] Ending real 'getcwd', buf=%s", buf);
+			// if (buf == NULL)
+			// {
+			// 	slog_full("[POSIX] Ending real 'getcwd', buf=NULL");
+			// }
+			// else
+			// {
+			// 	slog_full("[POSIX] Ending real 'getcwd', buf=%s", buf);
+			// }
 		}
 		return buf;
 	}

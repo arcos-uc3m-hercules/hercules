@@ -144,7 +144,7 @@ private:
 	std::map<std::string, std::pair<int, __off_t>> buffer_fd;
 	// Mutex restricting access to structure.
 	int64_t total_size;
-	int64_t quantity_occupied = 0;
+	// int64_t quantity_occupied = 0;
 	std::mutex *mut;
 	// std::shared_mutex mut;
 };

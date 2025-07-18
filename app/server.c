@@ -34,6 +34,7 @@ extern StsHeader *mem_pool;
 
 struct arguments args;
 std::shared_ptr<map_records> g_map;
+// uint64_t max_storage_size = 0;
 
 /* UCP objects */
 ucp_worker_h ucp_worker = NULL;
@@ -153,7 +154,7 @@ int32_t main(int32_t argc, char **argv)
 	ucp_worker_address_attr_t attr;
 
 	uint64_t max_system_ram_allowed = 0;
-	uint64_t max_storage_size = 0; // memory pool size
+	//uint64_t max_storage_size = 0; // memory pool size
 	uint32_t num_blocks = 0;
 	u_int16_t hercules_thread_pool_size = 0;
 
@@ -256,6 +257,7 @@ int32_t main(int32_t argc, char **argv)
 
 	/* Set memory pool size */
 	max_storage_size = args.storage_size * GB;
+	quantity_occupied = 0;
 	// get max RAM we could use for storage
 	max_system_ram_allowed = (uint64_t)sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGESIZE) * RAM_STORAGE_USE_PCT;
 

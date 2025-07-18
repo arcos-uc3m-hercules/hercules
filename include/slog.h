@@ -297,7 +297,7 @@ extern "C"
      * This function is added to preven opening and closing the file
      * every time a message is appended.
      */
-    void slog_close();
+    // void slog_close();
 
     /*
      * FUNCTION: getLevel.

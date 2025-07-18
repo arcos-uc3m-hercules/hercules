@@ -265,7 +265,7 @@ extern "C"
 		}
 
 		// get block 0 from data server.
-		ret = TIMING(get_ndata(imss_path, ds, 0, aux, 0, 0);, "get_ndata 0", int32_t, 0);
+		ret = TIMING(get_ndata(imss_path, ds, 0, aux, 0, 0);, "get_ndata0,imss_refresh", int32_t, 0);
 		if (ret < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN];
@@ -527,9 +527,9 @@ extern "C"
 		int ret = -1;
 		// TODO -> Access control
 		// DEBUG
-		char *imss_path = (char *)calloc(MAX_PATH, sizeof(char));
+		const char *imss_path = path; // (char *)calloc(MAX_PATH, sizeof(char));
 		int32_t file_desc = -1;
-		get_iuri(path, imss_path);
+		// get_iuri(path, imss_path);
 
 		ior_operation_number = 0;
 
@@ -543,7 +543,7 @@ extern "C"
 		if (fd >= 0)
 		{
 			print_file_type(stats, imss_path);
-			ret = open_local_dataset(imss_path, 1);
+			ret = TIMING(open_local_dataset(imss_path, 1);, "imss_open,open_local_dataset", int32_t, 0);
 			file_desc = fd;
 			slog_debug("[FUSE]open_local_dataset, ret=%d, file_desc=%d, nlink=%lu", ret, file_desc, stats.st_nlink);
 		}
@@ -553,7 +553,7 @@ extern "C"
 		}
 		else
 		{
-			file_desc = open_dataset(imss_path, 1);
+			file_desc = TIMING(open_dataset((char *)imss_path, 1);,"imss_open,open_dataset", int32_t, 0);
 			switch (file_desc)
 			{
 			case -EEXIST: // file already exists case.
@@ -582,7 +582,7 @@ extern "C"
 
 			// aux = (char *)malloc(IMSS_DATA_BSIZE);
 			void *data = (void *)malloc(sizeof(struct stat) * sizeof(char) + 1);
-			ret = get_ndata(imss_path, file_desc, 0, data, 0, 0);
+			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0);,"imss_open,get_ndata", int, 0);
 			if (ret < 0)
 			{
 				free(data);
@@ -596,7 +596,7 @@ extern "C"
 			// pthread_mutex_lock(&lock_file);
 			// storing block 0 on the local map.
 			// map_put(map, imss_path, file_desc, stats, (char *)data);
-			HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data);
+			TIMING_NO_RETURN(HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data);,"imss_open,HierarchicalMapPut",0) ;
 			print_file_type(stats, imss_path);
 			// if (PREFETCH != 0)
 			// {
@@ -618,7 +618,7 @@ extern "C"
 		*fh = file_desc;
 		/*if ((fi->flags & 3) != O_RDONLY)
 		  return -EACCES;*/
-		free(imss_path);
+		// free(imss_path);
 		return 0;
 	}
 
@@ -3114,7 +3114,7 @@ extern "C"
 		int fd = 0;
 		char *buff = NULL;
 		int old_exists = 0;
-		TIMING_NO_RETURN(fd_lookup((char *)old_path, &fd, &old_file_stat, &buff),"fd_lookup old_path", 0);
+		TIMING_NO_RETURN(fd_lookup((char *)old_path, &fd, &old_file_stat, &buff), "fd_lookup old_path", 0);
 		if (fd >= 0)
 		{					// file found in the local map.
 			old_exists = 0; // 0 indicates the file exists.

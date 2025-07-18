@@ -91,8 +91,7 @@ char *strclr(const char *clr, char *str, ...)
 }
 
 // TODO: check this for multithreading.
-FILE *fp = NULL;
-int opened = 0;
+// int opened = 0;
 
 /*
  * Append log info to log file.
@@ -118,35 +117,41 @@ void slog_to_file(char *out, const char *fname, SlogDate *sdate)
     { /* Create log filename using regular name. (eg example.log) */
         snprintf(filename, sizeof(filename), "%s.log", fname);
     }
-
+    FILE *fp = NULL;
     // fprintf(stderr, "[SLOG] filename='%s'\n", filename);
     // if (fp == NULL)
-    // {
-    fp = fopen(filename, "a");
-    // }
+    {
+        fp = fopen(filename, "a");
+    }
 
     if (fp == NULL)
     {
         fprintf(stderr, "[SLOG] Error opening file='%s'\n", filename);
         return;
     }
-    opened = 1;
-}
 
-void AppendToFile(char *out)
-{
     /* Append log line to log file. */
     fprintf(fp, "%s", out);
-    fflush(fp);
+
+    fclose(fp);
+
+    // opened = 1;
 }
 
-void CloseFile()
-{
-    if (opened)
-    {
-        fclose(fp);
-    }
-}
+// void AppendToFile(char *out)
+// {
+//     /* Append log line to log file. */
+//     fprintf(fp, "%s", out);
+//     fflush(fp);
+// }
+
+// void CloseFile()
+// {
+//     if (opened)
+//     {
+//         fclose(fp);
+//     }
+// }
 
 /*
  * Read cfg file and parse configuration options.
@@ -256,10 +261,21 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
         return;
     }
 
-    char *ld_preload_path = getenv("LD_PRELOAD");
-    if (ld_preload_path != NULL)
+    char *ld_preload_path = NULL;
+    char *original_ld_preload = getenv("LD_PRELOAD");
+    if (original_ld_preload != NULL)
     {
+        // Make a copy of the string.
+        ld_preload_path = strdup(original_ld_preload);
+        if (ld_preload_path == NULL)
+        {
+            fprintf(stderr, "Error: strdup failed to allocate memory for LD_PRELOAD path.\n");
+            return;
+        }
+
         unsetenv("LD_PRELOAD");
+        // fprintf(stderr, "LD_PRELOAD=%s\n",ld_preload_path);
+        // fprintf(stderr, "LD_PRELOAD (copied, before unset): %s\n", ld_preload_path);
     }
 
     /* Lock thread for safe. */
@@ -391,9 +407,9 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
             output = slog_get(&mdate, (char *)"%s\n", prints);
 
             /* Add log line to file. */
-            if (!opened)
-                slog_to_file(output, slg.fname, &mdate);
-            AppendToFile(output);
+            // if (!opened)
+            slog_to_file(output, slg.fname, &mdate);
+            // AppendToFile(output);
         }
     }
 
@@ -408,6 +424,8 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
             if (ld_preload_path != NULL)
             {
                 setenv("LD_PRELOAD", ld_preload_path, 1);
+                free(ld_preload_path);
+                ld_preload_path = NULL;
             }
             exit(EXIT_FAILURE);
         }
@@ -416,16 +434,19 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
     if (ld_preload_path != NULL)
     {
         setenv("LD_PRELOAD", ld_preload_path, 1);
+        // Free the memory allocated by strdup.
+        free(ld_preload_path);
+        ld_preload_path = NULL;
     }
 
     // fprintf(stderr,"prev_errno=%d, actual_errno=%d\t", prev_errno, errno);
     errno = prev_errno;
 }
 
-void slog_close() 
-{
-    CloseFile();
-}
+// void slog_close()
+// {
+//     CloseFile();
+// }
 
 void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int debugColor, int filestamp, int t_safe, unsigned int rank)
 {

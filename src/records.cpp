@@ -38,8 +38,11 @@ extern pthread_mutex_t mutex_garbage;
 extern pthread_cond_t global_run_garbage_collector_cond;
 extern pthread_cond_t global_free_space_cond;
 
+// amount of free memory.
+extern uint64_t max_storage_size;
 // to protect the amount of memory used.
 pthread_mutex_t mutex_quantity_occupied = PTHREAD_MUTEX_INITIALIZER;
+
 
 map_records::map_records(const int64_t nsize)
 {
@@ -125,7 +128,7 @@ int map_records::DecreaseMemoryOccupied(int64_t freed_space)
 	else
 	{
 		quantity_occupied = quantity_occupied - freed_space;
-		slog_debug("memory occupied=%lu, freed_space=%lu", quantity_occupied, freed_space);
+		slog_debug("memory occupied=%lu GB, freed_space=%lu", quantity_occupied/GB, freed_space);
 	}
 	pthread_mutex_unlock(&mutex_quantity_occupied);
 	return ret;
@@ -282,19 +285,19 @@ int32_t map_records::put(std::string key, void *address, uint64_t length, int re
 	// fprintf(stderr, "total_size=%ld bytes, quantity_occupied=%ld bytes\n",total_size, quantity_occupied);
 	// TODO: lock until garbage collector finish.
 	// check for space and finish on error.
-	pthread_mutex_lock(&mutex_garbage);
-	while (!CheckForMemorySpace(length))
-	{ // out of space
-		fprintf(stderr, "Out of space  %ld/%ld GB.\n", (quantity_occupied + length) / GB, total_size / GB);
-		slog_error("Out of space  %ld/%ld.\n", quantity_occupied + length, total_size);
-		fprintf(stderr, "Waiting for resources.\n");
-		slog_warn("Waiting for resources.");
-		// Unlock the garbage collector.
-		pthread_cond_signal(&global_run_garbage_collector_cond);
-		// wait for resources.
-		pthread_cond_wait(&global_free_space_cond, &mutex_garbage);
-	}
-	pthread_mutex_unlock(&mutex_garbage);
+	// pthread_mutex_lock(&mutex_garbage);
+	// while (!CheckForMemorySpace(length))
+	// { // out of space
+	// 	fprintf(stderr, "Out of space  %ld/%ld GB.\n", (quantity_occupied + length) / GB, total_size / GB);
+	// 	slog_error("Out of space  %ld/%ld.\n", quantity_occupied + length, total_size);
+	// 	fprintf(stderr, "Waiting for resources.\n");
+	// 	slog_warn("Waiting for resources.");
+	// 	// Unlock the garbage collector.
+	// 	pthread_cond_signal(&global_run_garbage_collector_cond);
+	// 	// wait for resources.
+	// 	pthread_cond_wait(&global_free_space_cond, &mutex_garbage);
+	// }
+	// pthread_mutex_unlock(&mutex_garbage);
 
 	// struct utsname detect;
 	// uname(&detect);

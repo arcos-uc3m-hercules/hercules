@@ -2080,7 +2080,7 @@ int32_t open_dataset(char *dataset_uri, int opened)
 
 	dataset_info new_dataset;
 	// Dataset metadata request.
-	int32_t stat_dataset_res = TIMING(stat_dataset(dataset_uri, &new_dataset, opened), "stat_dataset", int32_t, 0);
+	int32_t stat_dataset_res = TIMING(stat_dataset(dataset_uri, &new_dataset, opened), "open_dataset,stat_dataset", int32_t, 0);
 	if (stat_dataset_res == -2)
 	{
 		slog_warn("HERCULES_ERR_OPEN_DATASET_NOT_EXIST_1: %s, dataset does not exist", dataset_uri);
@@ -2727,12 +2727,12 @@ int32_t open_local_dataset(const char *dataset_uri, int opened)
 
 	slog_live("[IMSS][open_local_dataset] opened=%d", opened);
 	// Formated dataset uri to be sent to the metadata server.
-	char formated_uri[REQUEST_SIZE];
+	char formated_uri[REQUEST_SIZE] = {0};
 
 	// Discover the metadata server that handles the dataset.
 	// uint32_t m_srv = discover_stat_srv((char *)dataset_uri);
 	// uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-	char first_parent_dir[URI_];
+	char first_parent_dir[URI_] = {0};
 	uint32_t m_srv = 0;
 	// int number_data_servers = 0;
 	int first_parent_offset = find_first_parent_dir((char *)dataset_uri, first_parent_dir);
@@ -3143,7 +3143,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 	for (int32_t i = 0; i < curr_imss.info.num_active_storages; i++)
 	{
 		ep = curr_imss.conns.eps[i];
-		msg_length = TIMING(get_recv_data_length(ucp_worker_data, local_data_uid);,"get_recv_data_length in rename_dataset_srv_worker_dir_dir", size_t, 0);
+		msg_length = TIMING(get_recv_data_length(ucp_worker_data, local_data_uid);,"rename_dataset_srv_worker_dir_dir,get_recv_data_length", size_t, 0);
 		if (msg_length == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -3779,10 +3779,10 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			return -2;
 		}
 
-		// msg_length = TIMING( get_recv_data_length(ucp_worker_data, local_data_uid), "get_recv_data_length", size_t);
-		ucp_tag_recv_info_t info_tag;
-		ucp_tag_message_h msg_tag;
-		msg_length = TIMING(get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t, process_rank);
+		msg_length = TIMING( get_recv_data_length(ucp_worker_data, local_data_uid), "get_recv_data_length", size_t, process_rank);
+		// ucp_tag_recv_info_t info_tag;
+		// ucp_tag_message_h msg_tag;
+		// msg_length = TIMING(get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t, process_rank);
 		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
 		{
@@ -3802,8 +3802,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			return -2;
 		}
 
-		// msg_length = TIMING( recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0), "recv_data", size_t);
-		msg_length = TIMING(recv_data_2(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0, info_tag, msg_tag), "recv_data_2", size_t, process_rank);
+		msg_length = TIMING( recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0), "recv_data", size_t, process_rank);
+		// msg_length = TIMING(recv_data_2(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0, info_tag, msg_tag), "recv_data_2", size_t, process_rank);
 
 		slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
