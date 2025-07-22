@@ -1031,6 +1031,7 @@ extern "C"
 		}
 		else
 		{
+			slog_full("Calling 'lstat64', pathname=%s", pathname);
 			ret = real_lstat64(pathname, buf);
 		}
 		return ret;
@@ -1065,9 +1066,9 @@ extern "C"
 		}
 		else
 		{
-			slog_live("[POSIX] Calling real 'lstat', pathname=%s", pathname);
+			slog_full("[POSIX] Calling real 'lstat', pathname=%s", pathname);
 			ret = real_lstat(pathname, buf);
-			slog_live("[POSIX] End real 'lstat', pathname=%s, ret=%d", pathname, ret);
+			slog_full("[POSIX] End real 'lstat', pathname=%s, ret=%d", pathname, ret);
 		}
 
 		return ret;
@@ -1101,7 +1102,7 @@ extern "C"
 		}
 		else
 		{
-			slog_live("[POSIX]. Calling Real 'stat', pathname=%s", pathname);
+			slog_full("[POSIX]. Calling Real 'stat', pathname=%s", pathname);
 			ret = real_stat(pathname, buf);
 			// slog_live("[POSIX]. Ending Real 'stat', pathname=%s", pathname);
 		}
@@ -1287,6 +1288,7 @@ extern "C"
 		}
 		else
 		{
+			slog_full("[POSIX]. Calling real 'fstatfs', fd=%d", fd);
 			ret = real_fstatfs(fd, buf);
 		}
 		return ret;
@@ -1348,15 +1350,17 @@ extern "C"
 		char *new_path = checkHerculesPath(pathname);
 		if (new_path != NULL)
 		{
-			slog_live("[POSIX]. Calling Hercules 'realpath', pathname=%s, new_path=%s", pathname, new_path);
-			p = real_realpath(pathname, resolved_path);
-			slog_live("[POSIX]. Ending Hercules 'realpath', pathname=%s, resolved_path=%s, ret=%d, errno=%d:%s\n", pathname, resolved_path, ret, errno, strerror(errno));
+			slog_live("[POSIX]. Calling Hercules '__realpath_chk', pathname=%s, new_path=%s", pathname, new_path);
+			// p = real_realpath(pathname, resolved_path);
+			strcpy(resolved_path,pathname);
+			p = resolved_path;
+			slog_live("[POSIX]. Ending Hercules '__realpath_chk', pathname=%s, resolved_path=%s, ret=%d, errno=%d:%s\n", pathname, resolved_path, ret, errno, strerror(errno));
 			// TO CHECK!
 			//  If there is no error, realpath() returns a pointer to the resolved_path.
 			//    Otherwise, it returns NULL, the contents of the array
 			//    resolved_path are undefined, and errno is set to indicate the
 			//    error.
-			p = resolved_path;
+			// p = resolved_path;
 		}
 		else
 		{
@@ -1381,14 +1385,15 @@ extern "C"
 		errno = 0;
 		int ret = 0;
 		char *p = NULL;
-		// char *new_path = checkHerculesPath(pathname);
-		// if (new_path != NULL)
-		// {
-		// 	slog_live("[POSIX]. Calling Hercules 'realpath', pathname=%s, new_path=%s", pathname, new_path);
-		// 	p = real_realpath(pathname, resolved_path);
-		// 	slog_live("[POSIX]. Ending Hercules 'realpath', pathname=%s, resolved_path=%s, ret=%d, errno=%d:%s\n", pathname, resolved_path, ret, errno, strerror(errno));
-		// }
-		// else
+		char *new_path = checkHerculesPath(pathname);
+		if (new_path != NULL)
+		{
+			slog_live("[POSIX]. Calling Hercules 'realpath', pathname=%s, new_path=%s", pathname, new_path);
+			strcpy(resolved_path,pathname);
+			p = resolved_path;
+			slog_live("[POSIX]. Ending Hercules 'realpath', pathname=%s, resolved_path=%s, ret=%d, errno=%d:%s\n", pathname, resolved_path, ret, errno, strerror(errno));
+		}
+		else
 		{
 			slog_full("[POSIX]. Calling real 'realpath', pathname=%s", pathname);
 			p = real_realpath(pathname, resolved_path);
@@ -3889,10 +3894,10 @@ extern "C"
 			slog_live("[POSIX]. Calling Hercules 'opendir', pathname=%s, new_path=%s", name, new_path);
 			int a = 1;
 			int ret = 0;
-			int fd = 0;
+			// int fd = 0;
 			unsigned long p = 0;
 
-			fd = open(new_path, O_CREAT);
+			// fd = open(new_path, O_CREAT);
 
 			dirp = real_opendir("/tmp");
 			// dirp = (DIR *)malloc(sizeof(DIR));
@@ -4356,24 +4361,24 @@ extern "C"
 		if (!pathname_ob.empty())
 		{
 			const char *pathname = pathname_ob.c_str();
-			slog_live("[POSIX] Calling Hercules 'fstat', pathname=%s, fd=%d.", pathname, fd);
+			slog_live("[POSIX] Calling Hercules 'fstat64', pathname=%s, fd=%d.", pathname, fd);
 			imss_refresh(pathname);
 			ret = imss_getattr(pathname, (struct stat *)buf);
 			if (ret < 0)
 			{
 				errno = -ret;
 				ret = -1;
-				slog_error("[POSIX] Error Hercules 'fstat', errno=%d:%s", errno, strerror(errno));
+				slog_error("[POSIX] Error Hercules 'fstat64', errno=%d:%s", errno, strerror(errno));
 			}
 
-			slog_live("[POSIX] End Hercules 'fstat', pathname=%s, fd=%d, errno=%d:%s, ret=%d, st_size=%ld, st_blocks=%ld, st_blksize=%ld\n", pathname, fd, errno, strerror(errno), ret, buf->st_size, buf->st_blocks, buf->st_blksize);
+			slog_live("[POSIX] End Hercules 'fstat64', pathname=%s, fd=%d, errno=%d:%s, ret=%d, st_size=%ld, st_blocks=%ld, st_blksize=%ld\n", pathname, fd, errno, strerror(errno), ret, buf->st_size, buf->st_blocks, buf->st_blksize);
 		}
 		else
 		{
-			slog_live("[POSIX] Calling Real 'fstat', fd=%d", fd);
+			slog_live("[POSIX] Calling Real 'fstat64', fd=%d", fd);
 			// fprintf(stderr, "[POSIX] Calling Real 'fstat', fd=%d", fd);
 			ret = real_fstat64(fd, buf);
-			slog_live("[POSIX] End Real 'fstat', fd=%d, errno=%d:%s, ret=%d, st_size=%ld, st_blocks=%ld, st_blksize=%ld", fd, errno, strerror(errno), ret, buf->st_size, buf->st_blocks, buf->st_blksize);
+			slog_live("[POSIX] End Real 'fstat64', fd=%d, errno=%d:%s, ret=%d, st_size=%ld, st_blocks=%ld, st_blksize=%ld", fd, errno, strerror(errno), ret, buf->st_size, buf->st_blocks, buf->st_blksize);
 		}
 		return ret;
 	}
@@ -5006,6 +5011,7 @@ extern "C"
 		}
 		else
 		{
+			slog_full("[POSIX] Calling real 'fstatat', pathname=%s", __file);
 			ret = real_fstatat(__fd, __file, __buf, __flag);
 		}
 
@@ -5037,6 +5043,7 @@ extern "C"
 		// Uncomment the following line.
 		// else
 		{
+			slog_full("[POSIX] Calling real 'fstatat64', pathname=%s", __file);
 			ret = real_fstatat64(__fd, __file, __buf, __flag);
 		}
 

@@ -1,23 +1,20 @@
 #!/bin/bash
 
-SCRIPT_NAME="io500_hercules_slurm.sh"
-#TOTAL_NUMBER_OF_FILES=10000
+SCRIPT_NAME="c3_io500_hercules_slurm.sh"
+IO500_CONFFILE="/home/tester004/gesanche/io500/config-hercules-minimal.ini"
 
 ATTACHED=0
 
-#TEST_TYPE="weak"
-#TEST_TYPE="strong"
-TEMPLATE_CONFIG_PATH="/beegfs/home/javier.garciablas/hercules/conf/hercules-template.conf"
-HERCULES_PATH="/beegfs/home/javier.garciablas/hercules"
+TEMPLATE_CONFIG_PATH="/home/tester004/gesanche/hercules/conf/hercules-template.conf"
+HERCULES_PATH="/home/tester004/gesanche/hercules"
 HERCULES_CHECKPOINT_PATH=""
-#HERCULES_SNAPSHOT_PATH="/beegfs/home/javier.garciablas/hercules/bash/tests/disk/HerculesSnapshot"
-DATA_HOSTFILE="/beegfs/home/javier.garciablas/hercules/tmp/data_hostfile"
-METADATA_HOSTFILE="/beegfs/home/javier.garciablas/hercules/tmp/meta_hostfile"
+DATA_HOSTFILE="${HERCULES_PATH}/tmp/data_hostfile"
+METADATA_HOSTFILE="${HERCULES_PATH}/tmp/meta_hostfile"
 DEBUG_LEVEL="none"
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="RR"
 
-NUM_DATA_SERVERS_RANGE=(16)
+NUM_DATA_SERVERS_RANGE=(1)
 #NUM_DATA_SERVERS_RANGE=( 1 2 4 8 16 )
 NUM_METADATA_SERVERS_RANGE=(1)
 #NUM_METADATA_SERVERS_RANGE=( 4 8 16 32 )
@@ -109,14 +106,8 @@ for test_number in $(seq 1 $MAX_ITERATIONS); do
 						set -x
 
 						## The first job does not have dependencie (do not wait for another job to end).
-						# if [ "$jid" -eq 1 ]; then
-						# 	jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
-						# ## The following jobs wait for the previous job to finish.
-						# else
-							jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$TOTAL_NUMBER_OF_CLIENTS" | cut -d ' ' -f4)
-						# fi
+						jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$TOTAL_NUMBER_OF_CLIENTS" "${IO500_CONFFILE}" | cut -d ' ' -f4)
 						echo $jid
-						### exit 0
 						set +x
 
 					done

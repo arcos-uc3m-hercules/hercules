@@ -723,7 +723,7 @@ end=`date +%s.%N`
 runtime=$( echo "$end - $start" | bc -l )
 echo "[-] Data servers started in $runtime seconds"
 
-
+whereis mpiexec
 ## Search for the mpi distribution installed.
 for MPI_DS in {"open-mpi","mpich","Intel"}
 do
