@@ -1,7 +1,11 @@
 #!/bin/bash
 
 SCRIPT_NAME="c3_io500_hercules_slurm.sh"
-IO500_CONFFILE="/home/tester004/gesanche/io500/config-hercules-minimal.ini"
+# Minimal test.
+#IO500_CONFFILE="/home/tester004/gesanche/io500/config-hercules-minimal.ini"
+# Full test.
+IO500_CONFFILE="/home/tester004/gesanche/io500/config-hercules-full.ini"
+#IO500_CONFFILE="/home/tester004/gesanche/io500/config-hercules-find.ini"
 
 ATTACHED=0
 
@@ -14,11 +18,11 @@ DEBUG_LEVEL="none"
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="RR"
 
-NUM_DATA_SERVERS_RANGE=(1)
+NUM_DATA_SERVERS_RANGE=(16)
 #NUM_DATA_SERVERS_RANGE=( 1 2 4 8 16 )
 NUM_METADATA_SERVERS_RANGE=(1)
 #NUM_METADATA_SERVERS_RANGE=( 4 8 16 32 )
-NODES_FOR_CLIENTS_RANGE=(1)
+NODES_FOR_CLIENTS_RANGE=(10)
 # NODES_FOR_CLIENTS_RANGE=(1 2 4 8 16)
 #CLIENTS_PER_NODE_RANGE=( 1 2 4 8 16 32 )
 CLIENTS_PER_NODE_RANGE=(1)

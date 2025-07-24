@@ -32,6 +32,7 @@ extern "C"
 	int32_t HierarchicalMapPutInGarbageCollector(void *hierarchical_map, const std::string &key);
 	int32_t HierarchicalMapPopFromGarbageCollector(void *hierarchical_map, const std::string &key);
 	int32_t HierarchicalMapSearchInGarbageCollector(void *hierarchical_map, const std::string &key);
+	int32_t HierarchicalMapCleanGarbageCollector(void *hierarchical_map, const std::string &key);
 
 #ifdef __cplusplus
 }

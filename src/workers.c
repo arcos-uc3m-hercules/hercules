@@ -1313,6 +1313,7 @@ void *GarbageCollector(void *th_argv)
 	// Obtain the current map class element from the set of arguments.
 	p_argv *arguments = (p_argv *)th_argv;
 	std::shared_ptr<map_records> map = arguments->map;
+	void *hierarchical_map = arguments->hierarchical_map;
 
 	pthread_cond_init(&global_run_garbage_collector_cond, NULL);
 	pthread_cond_init(&global_free_space_cond, NULL);

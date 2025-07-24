@@ -375,7 +375,7 @@ extern "C"
 	// 	}
 	// }
 
-	// Garbage collector methods.
+	// ********** Garbage collector methods. **********
 	/**
 	 * @brief Adds an entry to the corresponding garbage collector vector.
 	 * @return 0 on success, on error -1 is returned.
@@ -452,6 +452,19 @@ extern "C"
 			slog_debug("%s not found in the map", key.c_str());
 			return -1;
 		}
+	}
+
+	int32_t HierarchicalMapCleanGarbageCollector(void *hierarchical_map, const std::string &key)
+	{
+		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+		for (const auto& pair : *hiermap) {
+			const std::string& key = pair.first;
+			const std::shared_ptr<map_records>& map = pair.second;
+			// std::cout << "Key: " << key << ", Value Data: " << record_ptr->data << std::endl;
+			map->cleaning(SERVER_TYPE);
+    	}
+		return 0;
 	}
 
 } // extern "C"

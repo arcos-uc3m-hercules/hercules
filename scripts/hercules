@@ -630,6 +630,10 @@ do
         ## If slurm is being used, the service is deploy using srun.
         echo "[+] Starting metadata server $i on $node..."
         #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
+        # NOTE: --cpus-per-task=X must to be less than the specified on the script used for Slurm.
+        # For example, if the header on the deployment script is "#SBATCH --cpus-per-task=36",
+        # a valid entry here is "--cpus-per-task =18". This allows the execution of the next step 
+        # "WaitForServers", which is being executed on the same node as the server task.
         srun  -N 1 -n 1 --cpus-per-task=18 -w $node -- $COMMAND &
         set +x
     fi
@@ -723,7 +727,8 @@ end=`date +%s.%N`
 runtime=$( echo "$end - $start" | bc -l )
 echo "[-] Data servers started in $runtime seconds"
 
-whereis mpiexec
+#module avail
+#whereis mpiexec
 ## Search for the mpi distribution installed.
 for MPI_DS in {"open-mpi","mpich","Intel"}
 do
@@ -742,7 +747,7 @@ case $MPI_DS in
         # export HERCULES_MPI_PPN="--npernode"
         export HERCULES_MPI_ENV_DEF="-x "
         export HERCULES_MPI_HOSTFILE_DEF="-hostfile "
-        export HERCULES_MPI_PPN="-N "
+        export HERCULES_MPI_PPN="-npernode "
         export HERCULES_MPI_NP="-np "
 
     ;;
@@ -813,9 +818,10 @@ hercules stop -f $CURR_HERCULES_CONF_FILE
     ${NC}
     #############################################################################"
 
-    echo -e "#############################################################################
-    [!] Warning: due to UCX bug (Shared memory error) it is sometimes necesary to run:
-    ${YELLOW}
-export UCX_POSIX_USE_PROC_LINK=n
-    ${NC}
-    #############################################################################"
+# Fixed.
+#     echo -e "#############################################################################
+#     [!] Warning: due to UCX bug (Shared memory error) it is sometimes necesary to run:
+#     ${YELLOW}
+# export UCX_POSIX_USE_PROC_LINK=n
+#     ${NC}
+#     #############################################################################"

@@ -447,6 +447,7 @@ extern "C"
 		if (status != UCS_OK)
 		{
 			slog_error("[COMM] HERCULES_RECV_DATA_ERR, msg_length=%lu", msg_length);
+			fprintf(stderr,  "HERCULES_ERR_RECV_DATA\n");
 			return 0;
 		}
 

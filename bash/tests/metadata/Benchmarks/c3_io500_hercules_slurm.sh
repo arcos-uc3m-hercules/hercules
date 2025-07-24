@@ -1,8 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=hercules    # Job name
-#SBATCH --time=01:00:00               # Time limit hrs:min:sec
 #SBATCH --output=logs/hercules/%j.log   # Standard output and error log
-#SBATCH --cpus-per-task=32
+#SBATCH --time=24:00:00               # Time limit hrs:min:sec
+#SBATCH --cpus-per-task=36
+#SBATCH --partition=large
+
 
 ##SBATCH --overcommit
 ##SBATCH --hint=compute_bound
@@ -44,7 +46,8 @@ IOR_PATH=/home/tester004/gesanche/io500/
 #spack load glib@2.78.3/4c7p6mc
 #spack load cmake@3.31.5/bbzu7or
 source "/home/tester004/load-local-spack.sh"
-source "/home/tester004/gesanche/hercules/c3-spack-modules.sh"
+source "/home/tester004/gesanche/hercules/Stuff/c3-spack-modules.sh"
+module load hpcx
 #whereis mpiexec
 # spack load \
 #    cmake@3.24.3%gcc@9.4.0 arch=linux-ubuntu20.04-broadwell \
@@ -106,7 +109,7 @@ echo "Hercules started in $runtime seconds, start=$start_, end=$end_"
 echo "DATASERVERS $HERCULES_NUM_DATA"
 echo "THREADS $THREAD_POOL"
 
-exit 0
+# exit 0
 echo "Running clients"
 
 # Binary.
@@ -119,7 +122,7 @@ set -x
 #sleep 10
 #time 
 #HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD ${COMMAND}
-mpiexec $HERCULES_MPI_NP$NUMBER_OF_PROCESS $HERCULES_MPI_PPN$HERCULES_NCPN  $HERCULES_MPI_HOSTFILE_DEF$HERCULES_MPI_HOSTFILE_NAME \
+mpiexec $HERCULES_MPI_NP$HERCULES_NNFC $HERCULES_MPI_PPN$HERCULES_NCPN  $HERCULES_MPI_HOSTFILE_DEF$HERCULES_MPI_HOSTFILE_NAME \
    $HERCULES_MPI_ENV_DEF HERCULES_CONF=$HERCULES_CONF \
    $HERCULES_MPI_ENV_DEF LD_PRELOAD=$HERCULES_POSIX_PRELOAD \
    $COMMAND

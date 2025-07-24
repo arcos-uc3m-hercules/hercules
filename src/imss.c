@@ -2986,7 +2986,7 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 		if (ret == 0)
 		{
 			slog_error("Uri not found:%s", dataset_uri);
-			fprintf(stderr, "Uri not found:%s\n", dataset_uri);
+			// fprintf(stderr, "Uri not found:%s\n", dataset_uri);
 			return -1;
 		}
 		if (dataset_info_aux == NULL)

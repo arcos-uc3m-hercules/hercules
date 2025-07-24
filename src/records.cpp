@@ -958,11 +958,11 @@ int32_t map_records::cleaning(char server_type)
 		return 0;
 	}
 
-	if (buffer_garbage_collector.size() < 1000)
-	{
-		slog_debug("The size of the garbage is less than 1000", buffer_garbage_collector.size());
-		return 0;
-	}
+	// if (buffer_garbage_collector.size() < 1000)
+	// {
+	// 	slog_debug("The size of the garbage is less than 1000", buffer_garbage_collector.size());
+	// 	return 0;
+	// }
 
 	string partner_key;
 	string partner_path;

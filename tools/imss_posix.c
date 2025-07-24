@@ -2693,9 +2693,17 @@ extern "C"
 		if (!real_symlink)
 			real_symlink = (int (*)(const char *, const char *))dlsym(RTLD_NEXT, __func__);
 
-		// fprintf(stderr, "Calling symlink \n ******");
-		// slog_warn("[TODO] Calling symlink");
-		WarnOperationNotSupported(__func__, name1);
+		errno = 0;
+		int ret;
+		char *new_path_1 = checkHerculesPath(name1);
+		char *new_path_2 = checkHerculesPath(name2);
+		if (new_path_1 != NULL || new_path_2 != NULL){
+			WarnOperationNotSupported(__func__, name1);
+		}
+		else
+		{
+			// move real symlink here after add the implementation for Hercules.
+		}
 
 		return real_symlink(name1, name2);
 	}
