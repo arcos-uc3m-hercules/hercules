@@ -9,16 +9,16 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/time.h>
+#include <sys/utsname.h>
+#include <time.h>
+#include <inttypes.h>
 #include "crc.h"
 #include "imss.h"
 #include "map_ep.hpp"
 #include "workers.h"
 #include "policies.h"
 #include "shared_memory.h"
-#include <sys/time.h>
-#include <sys/utsname.h>
-#include <time.h>
-#include <inttypes.h>
 
 #include <ucp/api/ucp.h>
 

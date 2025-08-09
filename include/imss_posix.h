@@ -4,6 +4,7 @@
 // #include "map.hpp"
 #include "hierarchical_map.hpp"
 #include "mapfd.hpp"
+#include "mapprefetch.hpp"
 #include "cfg_parse.h"
 #include "flags.h"
 #include "resolvepath.h"
@@ -21,9 +22,10 @@
 #include <netinet/in.h>
 #include <sys/statvfs.h>
 #include <sys/vfs.h> // statfs
-#include <imss_posix_api.h>
+extern "C" {
+    #include <imss_posix_api.h>
+}
 #include <stdarg.h>
-#include "mapprefetch.hpp"
 #include <math.h>
 #include <sys/utsname.h>
 #include <sys/epoll.h>
@@ -45,22 +47,26 @@ extern "C"
 #define _Nullable
 #define _Nonnull
 
+    // Auxiliar functions.
     char *checkHerculesPath(const char *pathname);
     char *convert_path(const char *name);
     int generalOpen(const char *new_path, int flags, mode_t mode, int createFd);
     ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, size_t offset);
     int GeneralFAccessAt(int dirfd, const char *pathname, int mode, int flags, char *pathname_dir);
     void SetErrno(int value);
-
     int IsAbsolutePath(const char *pathname);
     int ResolvePath(const char *path_, char *resolved);
     void WarnOperationNotSupported(const char *call_name, const char *pathname);
     void checkOpenFlags(const char *pathname, int flags);
     uint32_t MurmurOAAT32(const char *key);
     void *prefetch_function(void *th_argv);
+	void copy_stat_to_statx(const struct stat *src, struct statx *dest);
+	void ResolvePathsAndFD(const int fd_dir, const char *path_to_check, std::string &directory_path, char **file_path);
+	uint32_t GetRank();
+
 
     int __fxstat(int ver, int fd, struct stat *buf);
-
+    
     static off_t (*real_lseek)(int fd, off_t offset, int whence) = NULL;
     static off64_t (*real_lseek64)(int fd, off64_t offset, int whence) = NULL;
     static int (*real_fseek)(FILE *stream, long int offset, int whence) = NULL;
@@ -201,4 +207,4 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
-#endif
+#endif // IMSS_POSIX_H

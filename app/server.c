@@ -13,6 +13,7 @@
 #include "directory.h"
 #include "policies.h"
 
+extern int SERVER_ID;
 // Pointer to the tree's root node.
 extern GNode *tree_root;
 extern pthread_mutex_t tree_mut;
@@ -559,6 +560,7 @@ int32_t main(int32_t argc, char **argv)
 	/***************************************************************/
 	IMSS_ROOT = args.imss_uri;
 	IMSS_ROOT_LEN = strlen(IMSS_ROOT);
+	SERVER_ID = args.id;
 
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));

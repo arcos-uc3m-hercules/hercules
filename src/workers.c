@@ -83,7 +83,7 @@ std::mutex mtx;
 std::condition_variable cv;
 int data_ready = 0;
 
-#define GARBAGE_COLLECTOR_PERIOD 1200
+#define GARBAGE_COLLECTOR_PERIOD 10
 #define CKECKPOINT_PERIOD 10
 
 // extern char SERVER_TYPE;
@@ -1312,8 +1312,8 @@ void *GarbageCollector(void *th_argv)
 	slog_debug("Init garbage collector");
 	// Obtain the current map class element from the set of arguments.
 	p_argv *arguments = (p_argv *)th_argv;
-	std::shared_ptr<map_records> map = arguments->map;
-	void *hierarchical_map = arguments->hierarchical_map;
+	// std::shared_ptr<map_records> map = arguments->map;
+	// void *hierarchical_map = arguments->hierarchical_map;
 
 	pthread_cond_init(&global_run_garbage_collector_cond, NULL);
 	pthread_cond_init(&global_free_space_cond, NULL);
@@ -1332,8 +1332,10 @@ void *GarbageCollector(void *th_argv)
 			pthread_exit((void *)0);
 		}
 		// TODO: removes the next "continue".
+		pthread_mutex_unlock(&mutex_garbage);
 		continue;
-		map->cleaning(arguments->args.type);
+		// map->cleaning(arguments->args.type);
+		HierarchicalMapCleanGarbageCollector(hierarchical_map);
 		// Unlock all threads waiting for resources.
 		// pthread_cond_broadcast(&global_free_space_cond);
 		pthread_mutex_unlock(&mutex_garbage);

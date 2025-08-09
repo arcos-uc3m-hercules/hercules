@@ -22,6 +22,7 @@ using std::map;
 using std::pair;
 using std::string;
 
+int SERVER_ID;
 extern StsHeader *mem_pool;
 
 // __thread
@@ -271,8 +272,8 @@ int32_t map_records::put(std::string key, void *address, uint64_t length, int re
 	slog_debug("Memory used: %.2f%%, reused_buffer=%d", hercules_usage_percentage, reused_buffer);
 	if (hercules_usage_percentage >= 80.0)
 	{
-		fprintf(stderr, "Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", hercules_usage_percentage);
-		slog_debug("Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.", hercules_usage_percentage);
+		fprintf(stderr, "[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
+		slog_debug("[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
 		// unlock garbage collector.
 		pthread_mutex_lock(&mutex_garbage);
 		slog_debug("garbage collector mutex adquire");

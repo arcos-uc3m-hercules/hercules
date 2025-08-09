@@ -158,7 +158,9 @@ int32_t GTree_search(GNode *parent_node,
 	}
 	// slog_debug("Init searching of %s", desired_data);
 	pthread_mutex_lock(&tree_mut);
+	slog_debug("Locking tree_mut for GTree_search_");
 	int32_t ret = TIMING(GTree_search_(parent_node, desired_data, found_node), "Rercursive search", int32_t, 0);
+	slog_debug("Releasing tree_mut for GTree_search_");
 	pthread_mutex_unlock(&tree_mut);
 	return ret;
 }
@@ -715,7 +717,9 @@ char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, void *hierarchical_
 
 	// Number of children of the directory node.
 	pthread_mutex_lock(&tree_mut);
+	slog_debug("Locking tree_mut for g_node_n_children");
 	uint32_t num_children = g_node_n_children(dir_node);
+	slog_debug("Releasing tree_mut for g_node_n_children");
 	pthread_mutex_unlock(&tree_mut);
 	// fprintf(stdout,"Number of files in node %p, %s: %d\n", dir_node, (char * )dir_node->data, num_children);
 	// g_node_children_foreach(dir_node, G_TRAVERSE_ALL, print_child_node, NULL);
@@ -747,7 +751,9 @@ char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, void *hierarchical_
 	// TO CHECK!
 	//	slog_info("serialize_dir_childrens(dir_node=%s, num_children=%d, &aux_dir_elem)", dir_node->data, num_children);
 	pthread_mutex_lock(&tree_mut);
+	slog_debug("Locking tree_mut for serialize_dir_childrens");
 	num_dirty_child = serialize_dir_childrens(dir_node, num_children, &aux_dir_elem, hierarchical_map);
+	slog_debug("Releasing tree_mut for serialize_dir_childrens");
 	pthread_mutex_unlock(&tree_mut);
 	// slog_info("ending serialize_dir_childrens, aux_dir_elem=%s", *aux_dir_elem);
 	slog_debug("directory %s has %d elements but %d are dirty", desired_dir, *numdir_elems, num_dirty_child);

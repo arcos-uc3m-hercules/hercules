@@ -359,7 +359,6 @@ extern "C"
 			// slog_error("Connection error\n");
 			ep_timeout = 0;
 			free(msg);
-			//     // goto err_ep;
 			// 	ep_close(ucp_worker, ep, UCP_EP_CLOSE_FLAG_FORCE);
 			slog_fatal("[COMM][send_req] Connection error, request=%s", req);
 			fprintf(stderr, "[COMM][send_req] Connection error, request=%s\n", req);

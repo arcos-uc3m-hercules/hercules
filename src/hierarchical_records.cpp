@@ -208,7 +208,7 @@ extern "C"
 	int32_t HierarchicalMapGet(void *hierarchical_map, std::string k, void **add_, uint64_t *size_)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
-		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+		// HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 		// Look up the parent directory's children map in 'hierarchical_map'.
 		std::shared_ptr<map_records> parent_children_map = HierarchicalMapGetChild(hierarchical_map, k.c_str());
 		if (parent_children_map != NULL)
@@ -454,15 +454,19 @@ extern "C"
 		}
 	}
 
-	int32_t HierarchicalMapCleanGarbageCollector(void *hierarchical_map, const std::string &key)
+	int32_t HierarchicalMapCleanGarbageCollector(void *hierarchical_map)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+		
+		slog_debug("Running HierarchicalMapCleanGarbageCollector");
 		for (const auto& pair : *hiermap) {
 			const std::string& key = pair.first;
+			slog_debug("Running garbage collector for %s", key.c_str());
 			const std::shared_ptr<map_records>& map = pair.second;
 			// std::cout << "Key: " << key << ", Value Data: " << record_ptr->data << std::endl;
 			map->cleaning(SERVER_TYPE);
+			slog_debug("---\n");
     	}
 		return 0;
 	}

@@ -78,10 +78,10 @@ pid_t g_pid = -1;
 // prefech.
 char *buf_pref = NULL;
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
+// #ifdef __cplusplus
+// extern "C"
+// {
+// #endif
 
 	void SetErrno(int value)
 	{
@@ -6009,6 +6009,6 @@ extern "C"
 		pthread_exit(NULL);
 	}
 
-#ifdef __cplusplus
-}
-#endif
+// #ifdef __cplusplus
+// }
+// #endif

@@ -1,5 +1,5 @@
-#ifndef H_H_MAP
-#define H_H_MAP
+#ifndef H_H_MAP_RECORDS
+#define H_H_MAP_RECORDS
 
 #include <map>
 #include "records.hpp"
@@ -32,10 +32,10 @@ extern "C"
 	int32_t HierarchicalMapPutInGarbageCollector(void *hierarchical_map, const std::string &key);
 	int32_t HierarchicalMapPopFromGarbageCollector(void *hierarchical_map, const std::string &key);
 	int32_t HierarchicalMapSearchInGarbageCollector(void *hierarchical_map, const std::string &key);
-	int32_t HierarchicalMapCleanGarbageCollector(void *hierarchical_map, const std::string &key);
+	int32_t HierarchicalMapCleanGarbageCollector(void *hierarchical_map);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // H_MAP
+#endif // H_H_MAP_RECORDS
