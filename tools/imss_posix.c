@@ -915,43 +915,10 @@ char *buf_pref = NULL;
 		{
 			slog_live("[POSIX] Parent process, child pid=%d", pid);
 			init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
-			// if (stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank) == -1)
-			// {
-			// 	// In case of error notify and exit
-			// 	slog_error("Stat init failed, cannot connect to Metadata server.");
-			// 	// imss_comm_cleanup();
-			// 	exit(1);
-			// }
-
-			// int num_active_storages = open_imss(IMSS_ROOT);
-			// if (num_active_storages < 0)
-			// {
-			// 	slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-			// 	printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
-			// 	exit(1);
-			// }
 		}
 		break;
 		}
-		// if (pid == 0) // child process.
-		// {
-		// 	// pid = getpid();
-		// 	// g_pid = pid;
-		// 	// release is set to 0 to prevent clossing the communication twice (only the parent process must do it).
-		// 	release = 0;
-		// 	slog_live("[POSIX] Child process");
-
-		// 	// Clean UCX.
-		// 	// imss_comm_cleanup();
-		// }
-		// else // parent process.
-		// {
-		// 	slog_live("[POSIX] Parent process, child pid=%d", pid);
-
-		// 	// while ((wpid = wait(&status)) > 0)
-		// 	// 	;
-		// 	release += 1;
-		// }
+		
 
 		return pid;
 	}

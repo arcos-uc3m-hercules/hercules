@@ -10,7 +10,7 @@
 #include "directory.h"
 #include "records.hpp"
 #include "comms.h"
-// #include "hercules.hpp"
+#include "utils.h"
 
 /***************************************************************************
 *******************************  STRUCTURES  *******************************
@@ -757,14 +757,15 @@ int getConfiguration(struct arguments *args)
 
 	cfg_free(cfg);
 
-	// char hostname_[512];
-	// int ret = gethostname(&hostname_[0], 512);
-	ret = gethostname(&args->data_hostname[0], PATH_MAX);
-	if (ret == -1)
-	{
-		perror("HERCULES_ERR_GETHOSTNAME");
-		args->data_hostname[0] = '\0';
-	}
+	// ret = gethostname(&args->data_hostname[0], HOST_NAME_MAX);
+	// if (ret == -1)
+	// {
+	// 	perror("HERCULES_ERR_GETHOSTNAME");
+	// 	args->data_hostname[0] = '\0';
+	// } else {
+	// 	args->data_hostname[HOST_NAME_MAX-1] = '\0';
+	// }
+	get_hostname(args->data_hostname, HOST_NAME_MAX);
 
 	return 1;
 }

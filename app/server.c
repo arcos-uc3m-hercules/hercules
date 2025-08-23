@@ -12,6 +12,7 @@
 #include "metadata_stat.h"
 #include "directory.h"
 #include "policies.h"
+#include "utils.h"
 
 extern int SERVER_ID;
 // Pointer to the tree's root node.
@@ -77,37 +78,14 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
  * @return 0 on success, on error -1 is returned.
  */
 int stop_server();
+
 /**
  * @brief Comunicates data servers to metadata servers to
  * update the number of active servers and to update the
  * status of this data server (active).
  * @return 0 on success, on error -1 is returned.
  */
-int wakeup_server()
-{
-	// Get the current number of active nodes.
-	number_active_storage_servers = get_number_of_active_nodes(args.hercules_path);
-
-	if (number_active_storage_servers < 0)
-	{
-		return -1;
-	}
-
-	// Tell metadata server to update (increase) the number of servers.
-	char key_plus_size[REQUEST_SIZE];
-	// Send the created structure to the metadata server.
-	// last "1" is the server status to be set.
-	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, args.imss_uri, 1);
-	// fprintf(stderr, "Request - %s\n", key_plus_size);
-	slog_debug("[main] Request - %s", key_plus_size);
-	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
-	{
-		perror("ERR_HERCULES_RLS_SERVER_SEND_REQ");
-		return -1;
-	}
-
-	return 0;
-}
+int wakeup_server();
 
 /**
  * @brief Defines the actions to be doing when the
@@ -890,7 +868,7 @@ int32_t main(int32_t argc, char **argv)
 	// }
 
 	ret = ready(tmp_file_path, "OK");
-	fprintf(stderr, "%c-server %d is ready = %d\n", args.type, args.id, ret);
+	fprintf(stderr, "[%s] %c-server %d is ready = %d\n", args.data_hostname, args.type, args.id, ret);
 	// Wait for threads to finish.
 	for (int32_t i = 0; i < total_threads; i++)
 	{
@@ -1260,6 +1238,32 @@ void handle_signal_server(int signal)
 			ready(tmp_file_path, "OK");
 		}
 	}
+}
+
+int wakeup_server()
+{
+	// Get the current number of active nodes.
+	number_active_storage_servers = get_number_of_active_nodes(args.hercules_path);
+
+	if (number_active_storage_servers < 0)
+	{
+		return -1;
+	}
+
+	// Tell metadata server to update (increase) the number of servers.
+	char key_plus_size[REQUEST_SIZE];
+	// Send the created structure to the metadata server.
+	// last "1" is the server status to be set.
+	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, args.imss_uri, 1);
+	// fprintf(stderr, "Request - %s\n", key_plus_size);
+	slog_debug("[main] Request - %s", key_plus_size);
+	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
+	{
+		perror("ERR_HERCULES_RLS_SERVER_SEND_REQ");
+		return -1;
+	}
+
+	return 0;
 }
 
 void print_usage(const char *msg)
