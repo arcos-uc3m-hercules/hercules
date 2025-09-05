@@ -656,7 +656,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// RENAME MAP
 				slog_debug("rename_data_dir_srv_worker, old_dir=%s, dest_dir=%s", old_dir.c_str(), rdir_dest.c_str());
 				// ret = TIMING(map->rename_data_dir_srv_worker(old_dir, rdir_dest);,"rename_data_dir_srv_worker,RENAME_DIR_DIR_OP", int32_t, arguments->thread_id);
-				ret = TIMING(HierarchicalMapRenameDirDir(hierarchical_map, old_dir, rdir_dest, NULL);, "HierarchicalMapRenameDirDir,RENAME_DIR_DIR_OP", int32_t, arguments->thread_id);
+				ret = TIMING(BackEndHierarchicalMapRenameDirDir(hierarchical_map, old_dir, rdir_dest, NULL);, "BackEndHierarchicalMapRenameDirDir,RENAME_DIR_DIR_OP", int32_t, arguments->thread_id);
 				// Rename the old directory on the hierarchical map.
 				slog_debug("Renaming %s to %s on the directory map", old_dir.c_str(), rdir_dest.c_str());
 				ret = HierarchicalMapRenameKey(hierarchical_map, old_dir.c_str(), rdir_dest.c_str());
@@ -1875,7 +1875,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				GNode *gnode = NULL;
 				// RENAME MAP
 				// ret = TIMING(map->rename_metadata_dir_stat_worker(old_key, new_key, &gnode), msg, int, arguments->args.id);
-				ret = TIMING(HierarchicalMapRenameDirDir(hierarchical_map, old_key, new_key, &gnode);, "RENAME_DIR_DIR_OP,HierarchicalMapRenameDirDir", int32_t, arguments->thread_id);
+				ret = TIMING(BackEndHierarchicalMapRenameDirDir(hierarchical_map, old_key, new_key, &gnode);, "RENAME_DIR_DIR_OP,BackEndHierarchicalMapRenameDirDir", int32_t, arguments->thread_id);
 
 				// Rename the old directory on the hierarchical map.
 				slog_debug("Renaming %s to %s on the directory map", old_key.c_str(), new_key.c_str());
@@ -2031,7 +2031,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			{
 				dataset = (dataset_info *)address_;
 				if (!strncmp(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY)))
-				{ // dataset is dirty. We will delete from the
+				{ // dataset is dirty. We will delete from the garbage collector vector.
 					slog_debug("Dirty dataset found %s, recovering from the garbage collector.", key.c_str());
 					// int ret = map->garbage_collector_pop(key);
 					int ret = HierarchicalMapPopFromGarbageCollector(hierarchical_map, key_for_tree);

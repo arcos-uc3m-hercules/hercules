@@ -207,7 +207,10 @@ extern "C"
 		}
 	}
 
-	// // Removes the element with key "k" from the map "map".
+	/** 
+	 * @brief Removes the element with key "k" from the local front-end hierarchical map.
+	 * @return void
+	 */ 
 	void HierarchicalMapErase(void *hierarchical_map, const char *k)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);

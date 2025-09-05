@@ -2893,19 +2893,12 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int o
 	// int number_data_servers = 0;
 	int first_parent_offset = find_first_parent_dir((char *)dataset_uri, first_parent_dir);
 	slog_debug("dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", dataset_uri, first_parent_dir, first_parent_offset);
-	// if (first_parent_offset > 0)
-	// {
+	
 	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-	// number_data_servers = 1;
-	// }
-	// else
-	// {
-	// number_data_servers = n_stat_servers;
-	// }
 
 	ep = stat_eps[m_srv];
 
-	pthread_mutex_lock(&lock_network);
+	pthread_mutex_lock(&lock_network); 
 
 	// sprintf(formated_uri, "%" PRIu32 " GET 0 %s", stat_ids[m_srv], dataset_uri);
 	sprintf(formated_uri, "%" PRIu32 " GET 0 %s", opened, dataset_uri);

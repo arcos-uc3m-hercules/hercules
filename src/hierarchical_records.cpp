@@ -240,23 +240,6 @@ extern "C"
 	// 	}
 	// }
 
-	// Removes the element with key "k" from the map "map".
-	// void HierarchicalMapErase(void *hierarchical_map, const char	 *k)
-	// {
-	// 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
-
-	// 	// Look up the parent directory's children map in 'hierarchical_map'.
-	// 	std::shared_ptr<map_records> parent_children_map = HierarchicalMapGetChild(hierarchical_map, k);
-	// 	if (parent_children_map != NULL)
-	// 	{
-	// 		// map_erase(parent_children_map, k);
-	// 		parent_children_map->
-	// 	}
-	// 	else
-	// 	{
-	// 		slog_debug("%s not found in the map", k);
-	// 	}
-	// }
 
 	/**
 	 * @brief Rename the name of a regular file on the local hierarchical_map.
@@ -281,17 +264,17 @@ extern "C"
 		}
 	}
 
-	// /**
-	//  * @brief Rename the name of a directory (and all its entries) on the local hierarchical_map.
-	//  * @return On success, 1 is returned. -1 if there are no elements to rename.
-	//  */
-	int32_t HierarchicalMapRenameDirDir(void *hierarchical_map, std::string old_dir, std::string rdir_dest, GNode **gnode)
+	/**
+	 * @brief Rename a directory (and all its entries) on the local front-end hierarchical_map.
+	 * @return On success, 1 is returned. -1 if there are no elements to rename.
+	 */
+	int32_t BackEndHierarchicalMapRenameDirDir(void *hierarchical_map, std::string old_dir, std::string rdir_dest, GNode **gnode)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 		// HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		// Find the hash map of this dir.
-		std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, old_dir.c_str()), "HierarchicalMapRenameDirDir,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
+		std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, old_dir.c_str()), "BackEndHierarchicalMapRenameDirDir,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
 
 		// Look up the parent directory's children map in 'hierarchical_map'.
 		// Map *parent_children_map = HierarchicalMapGetChild(hierarchical_map, old_dir);
@@ -315,8 +298,8 @@ extern "C"
 				aux_old_dir = old_dir.append("$0");
 				aux_rdir_dest = rdir_dest.append("$0");
 				// lck.unlock();
-				sprintf(msg, "HierarchicalMapRenameDirDir,rename_metadata_dir_stat_worker %ld", map->get_buffer_size());
-				ret = TIMING(map->rename_data_dir_srv_worker(old_dir, rdir_dest);, "HierarchicalMapRenameDirDir,rename_data_dir_srv_worker", int32_t, 0);
+				sprintf(msg, "BackEndHierarchicalMapRenameDirDir,rename_metadata_dir_stat_worker %ld", map->get_buffer_size());
+				ret = TIMING(map->rename_data_dir_srv_worker(old_dir, rdir_dest);, "BackEndHierarchicalMapRenameDirDir,rename_data_dir_srv_worker", int32_t, 0);
 			}
 			break;
 			case TYPE_METADATA_SERVER:
@@ -324,7 +307,7 @@ extern "C"
 				// Metadata server function.
 				aux_old_dir = old_dir;
 				aux_rdir_dest = rdir_dest;
-				sprintf(msg, "HierarchicalMapRenameDirDir,rename_metadata_dir_stat_worker %ld", map->get_buffer_size());
+				sprintf(msg, "BackEndHierarchicalMapRenameDirDir,rename_metadata_dir_stat_worker %ld", map->get_buffer_size());
 				ret = TIMING(map->rename_metadata_dir_stat_worker(old_dir, rdir_dest, gnode), msg, int, 0);
 				// (*gnode) = map->find(old_dir).second.gnode;
 				// BufferValue *entry = map->find(first_parent_dir);

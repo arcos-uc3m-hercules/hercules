@@ -24,9 +24,8 @@ extern "C"
 	std::shared_ptr<map_records> HierarchicalMapGetChild(void *hierarchical_map, const char *k);
 	int32_t HierarchicalMapGet(void *hierarchical_map, std::string k, void **add_, uint64_t *size_);
 	// void HierarchicalMapUpdate(void *hierarchical_map, const char *k, int v, struct stat stat_info);
-	// void HierarchicalMapErase(void *hierarchical_map, const char *k);
 	int32_t HierarchicalMapRenameRegularFile(void *hierarchical_map, const std::string &oldname, const std::string &newname);
-	int32_t HierarchicalMapRenameDirDir(void *hierarchical_map, std::string old_dir, std::string rdir_dest, GNode **gnode);
+	int32_t BackEndHierarchicalMapRenameDirDir(void *hierarchical_map, std::string old_dir, std::string rdir_dest, GNode **gnode);
 	// void HierarchicalMapFree(void *hierarchical_map);
 	// **  Garbage collector methods. **
 	int32_t HierarchicalMapPutInGarbageCollector(void *hierarchical_map, const std::string &key);
