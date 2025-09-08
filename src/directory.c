@@ -495,31 +495,6 @@ int32_t GTree_insert(char *desired_data, GNode **new_node)
 			closest_node = last_parent;
 			// slog_debug("re-using last parent as closest node=%s", closest_node->data);
 		}
-
-		// // // slog_debug("last_parent->data=%s, desired_data=%s", last_parent->data, desired_data);
-		// char *data_search = (char *)calloc(URI_, sizeof(char));
-		// if (desired_data[strlen(desired_data) - 1] == '/')
-		// { // skip last slash.
-		// 	memcpy(data_search, desired_data, strlen(desired_data) - 1);
-		// }
-		// else
-		// {
-		// 	memcpy(data_search, desired_data, strlen(desired_data));
-		// }
-		// char *father = (char *)calloc(URI_, sizeof(char));
-		// // Devuelve un puntero a la última aparición de '/' en serie. Si no se encuentra el carácter especificado, se devuelve un puntero NULL.
-		// char *lastson = strrchr(data_search, '/');
-		// int copy = (strlen(data_search) - strlen(lastson));
-
-		// memcpy(father, &data_search[0], copy + 1);
-		//		slog_live("desired_data=%s, data_search=%s, lastson=%s, father=%s", desired_data, data_search, lastson, father);
-		// Compares the data on the current node (last_parent) against the Hercules instance (e.g., imss://Makefile and imss://).
-		// if (strncmp((char *)last_parent->data, father, strlen((char *)father)) == 0 && strlen((char *)last_parent->data) == strlen(father))
-		// {
-		// 	closest_node = last_parent;
-		// }
-		// free(father);
-		// free(data_search);
 	}
 
 	// Check if the node has been already inserted.
@@ -538,38 +513,7 @@ int32_t GTree_insert(char *desired_data, GNode **new_node)
 		}
 	}
 
-	// Length of the found uri. An additional unit is added in order to avoid the first '/' encountered.
-	// int32_t closest_data_length = strlen((char *)closest_node->data);
-	// // int32_t closest_data_length = strlen((char *)closest_node->data) + 1;
-
-	// // Number of characters that the desired string has more than the found one.
-	// int32_t more_chars = strlen(desired_data) - closest_data_length;
-
-	// // slog_debug("closest_data_length=%d, more_chars=%d", closest_data_length, more_chars);
-
-	// // Special case: insertion of a one character length file in the root directory.
-	// if (!more_chars && (closest_data_length == 2))
-	// {
-	// 	more_chars = 1;
-	// 	closest_data_length--;
-	// }
-
-	// Search for the '/' characters within the additional ones.
-	//	// slog_debug("path=%s, more_chars=%d, closest_data_length=%d", desired_data, more_chars, closest_data_length);
-	// for (int32_t i = 0; i < more_chars; i++)
-	// {
-	// 	int32_t new_position = closest_data_length + i;
-	// 	// slog_debug("[Gtree] path=%s, new_position=%d, i=%d, %c", desired_data, new_position, i, desired_data[new_position]);
-
-	// 	if ((desired_data[new_position] == '/') || (i == (more_chars - 1)))
-	// 	{
-	// 		if (i == (more_chars - 1))
-	// 			new_position++;
-
-	// 		// if (i == 0 && desired_data[new_position+1] == '/')
-
-	// 		// String that will be introduced as a new node.
-	// 		// char *new_data = (char *)malloc(new_position + 1);
+	
 	char *new_data = (char *)calloc(len_desired_data + 1, sizeof(char)); // (char *)malloc(len_desired_data + 1);
 	strncpy(new_data, desired_data, len_desired_data);
 	// 		// New node to be introduced.

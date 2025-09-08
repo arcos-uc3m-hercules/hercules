@@ -73,7 +73,6 @@ pthread_mutex_t mutex_garbage = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t global_run_garbage_collector_cond;
 pthread_cond_t global_free_space_cond;
 
-
 void *hierarchical_map;
 
 size_t global_offset = 0;
@@ -451,7 +450,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			if (ret == 0)
 			{
 				// pthread_mutex_lock(&lock_network);
-				//  Send the error code block.
+				//   Send the error code block.
 				ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
 				if (ret < 0)
 				{
@@ -487,7 +486,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// 		{
 				// 			perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_DIRTY_BLOCK");
 				// 			slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_DIRTY_BLOCK");
-				// 			// pthread_mutex_unlock(&lock_network);
+				// 			//pthread_mutex_unlock(&lock_network);
 				// 			return -1;
 				// 		}
 				// 	}
@@ -1263,7 +1262,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, msg_length, arguments->worker_uid, 1);
 					pthread_mutex_unlock(&memory_protect);
 					// pthread_mutex_unlock(&lock_network);
-					//  msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
+					//   msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
 					if (msg_length == 0)
 					{
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
@@ -1688,6 +1687,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						msg_t m;
 						m.data = address_;
 						m.size = block_size_rtvd;
+						// pthread_mutex_lock(&lock_network);
 						err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
 						if (err < 0)
 						{
@@ -1696,6 +1696,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 							// pthread_mutex_unlock(&lock_network);
 							return -1;
 						}
+						// pthread_mutex_unlock(&lock_network);
 					}
 				}
 			}
@@ -1903,12 +1904,14 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{
 					response_msg = MSG_RENAME_OP;
 				}
+
+				// pthread_mutex_lock(&lock_network);
 				ret = SendConfirmationMessage(arguments, MSG_RENAME_OP);
+				// pthread_mutex_unlock(&lock_network);
 				if (ret == 0)
 				{
 					perror("HERCULES_ERR_SEND_CONFIRMATION_RENAME_DIR_DIR_OP");
 					slog_error("HERCULES_ERR_SEND_CONFIRMATION_RENAME_DIR_DIR_OP");
-					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
 				// slog_debug("old_dir=%s, dir_dest=%s, ret=%d", old_key_tree.c_str(), new_key_tree.c_str(), ret);
@@ -1921,27 +1924,13 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// fprintf(stderr, "No extra characters found.\n");
 			}
 
-			// return 0;
-
 			if (ret == -1)
 			{
 				response_msg = MSG_ERROR_OP;
+				// pthread_mutex_lock(&lock_network);
 				SendConfirmationMessage(arguments, response_msg);
+				// pthread_mutex_unlock(&lock_network);
 			}
-			// else
-			// {
-			// 	response_msg = MSG_RENAME_OP;
-			// }
-			// // pthread_mutex_lock(&lock_network);
-			// ret = SendConfirmationMessage(arguments, response_msg);
-			// if (ret == 0)
-			// {
-			// 	perror("HERCULES_ERR_PUBLISH_RENAMEMSG");
-			// 	slog_error("HERCULES_ERR_PUBLISH_RENAMEMSG");
-			// 	// pthread_mutex_unlock(&lock_network);
-			// 	return -1;
-			// }
-			// pthread_mutex_unlock(&lock_network);
 		}
 		break;
 		case CLOSE_OP:
@@ -1996,14 +1985,13 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 				// pthread_mutex_lock(&lock_network);
 				ret = SendConfirmationMessage(arguments, response_msg);
+				// pthread_mutex_unlock(&lock_network);
 				if (ret == 0)
 				{
 					perror("HERCULES_ERR_PUBLISH_DELETEMSG");
 					slog_error("HERCULES_ERR_PUBLISH_DELETEMSG");
-					// pthread_mutex_unlock(&lock_network);
 					return -1;
 				}
-				// pthread_mutex_unlock(&lock_network);
 			}
 		}
 		break;
@@ -2067,10 +2055,10 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	case SET_OP:
 	{
 		slog_debug("[SET_OP] Creating dataset %s", key.c_str());
-		// If the record was not already stored, add the block.
+
 		// if (!TIMING(map->get(key, &address_, &block_size_rtvd), "map->get", int32_t, arguments->thread_id))
 		if (!TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id))
-		{
+		{ // If the record was not already stored, add the block.
 			slog_debug("Recv dynamic buffer size %ld", block_size_recv);
 			// Get the length of the message to be received.
 			size_t length = 0;
@@ -2361,8 +2349,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					}
 
 					// pthread_mutex_unlock(&lock_network);
-					// free(buffer);
-					// slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
+					//  free(buffer);
+					//  slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 				}
 
 				slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());

@@ -1813,40 +1813,55 @@ int32_t create_dataset(char *dataset_uri,
 	char parent_dir[PATH_MAX] = {0};
 	offset = find_last_parent_dir(dataset_uri, parent_dir);
 
+	/*
+	TO CHECK: for some reason, on the MDTEST benchmark, checking if the parent directory exist is not working 
+	property when launching 32 processes and 32 threads on the back-end. This only happens on C3 cluster, 
+	but it worked fine on Unito.
+	The stepts to reproduce are:
+	1. Run a single metdata server with 32 threads.
+	2. Run a single data server with 32 threads.
+	3. Run mdtest with at least 32 processes, and the following parameters: mdtest -n 1 -i 1 -u -d /mnt/hercules/
+	Expected behaviour:
+	1. The process X tries to make the directory "/mnt/hercules/test-dir.0-0"
+	2. The process Y tries to make the directory "/mnt/hercules/test-dir.0-0/mdtest_tree.5.0/"
+	3. "SET imss://test-dir.0-0" request from the process X is delayed, and process Y request first 
+	"GET imss://test-dir.0-0" which actually does not exists at this moment. 
+	4. Process Y thinks the parent directory "/mnt/hercules/test-dir.0-0" does not exist,  and returns -1 to the calling process.
+	 */ 
 	// "offset" can be 0 when the dataset is on the HERCULES root,
 	// for example, imss://myfile.txt = /mnt/hercules/myfile.txt.
-	if (offset > 0)
-	{ // "dataset_uri" is not on the HERCULES root.
-		// strncpy(parent_dir, dataset_uri, offset);
-		slog_live("dataset_uri=%s, parent directory = %s", dataset_uri, parent_dir);
-		dataset_info parent_dataset; // TODO: change to dynamic memory.
-		slog_debug("Checking if parent dir of %s exists", dataset_uri);
-		ret = stat_dataset(parent_dir, &parent_dataset, 0);
-		if (ret < 0 && ret != -3)
-		{ // case where parent directory does not exists.
-			/********** TO CHECK */
-			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			sprintf(err_msg, "Parent directory %s does not exists", parent_dir);
-			slog_error("%s", err_msg);
-			perror(err_msg);
-			return -ENOENT;
-		}
-		if (ret == -3)
-		{ // if parent dir exists on the remote server, we added to the local pool of hash table.
-			slog_debug("Inserting %s on the pool of hash maps.", parent_dir);
-			// GHashTable *new_directory_children_table = g_hash_table_new(g_str_hash, g_str_equal);
-			// if (!new_directory_children_table)
-			// {
-			// 	perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
-			// 	slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
-			// 	exit(-1);
-			// }
-			// // Insert the new directory's children hash table into 'pool_hash_tables_datasetd'.
-			// // The key is a copy of the new directory's dataset_uri.
-			// g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(parent_dir), new_directory_children_table);
-			AddDirectoryToPool(parent_dir);
-		}
-	}
+	// if (offset > 0)
+	// { // "dataset_uri" is not on the HERCULES root.
+	// 	// strncpy(parent_dir, dataset_uri, offset);
+	// 	slog_live("dataset_uri=%s, parent directory = %s", dataset_uri, parent_dir);
+	// 	dataset_info parent_dataset; // TODO: change to dynamic memory.
+	// 	slog_debug("Checking if parent dir of %s exists", dataset_uri);
+	// 	ret = stat_dataset(parent_dir, &parent_dataset, 0);
+	// 	if (ret < 0 && ret != -3)
+	// 	{ // case where parent directory does not exists.
+	// 		/********** TO CHECK */
+	// 		char err_msg[MAX_ERR_MSG_LEN] = {0};
+	// 		sprintf(err_msg, "Parent directory %s does not exists", parent_dir);
+	// 		slog_error("%s", err_msg);
+	// 		perror(err_msg);
+	// 		return -ENOENT;
+	// 	}
+	// 	if (ret == -3)
+	// 	{ // if parent dir exists on the remote server, we added to the local pool of hash table.
+	// 		slog_debug("Inserting %s on the pool of hash maps.", parent_dir);
+	// 		// GHashTable *new_directory_children_table = g_hash_table_new(g_str_hash, g_str_equal);
+	// 		// if (!new_directory_children_table)
+	// 		// {
+	// 		// 	perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+	// 		// 	slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+	// 		// 	exit(-1);
+	// 		// }
+	// 		// // Insert the new directory's children hash table into 'pool_hash_tables_datasetd'.
+	// 		// // The key is a copy of the new directory's dataset_uri.
+	// 		// g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(parent_dir), new_directory_children_table);
+	// 		AddDirectoryToPool(parent_dir);
+	// 	}
+	// }
 
 	// Dataset metadata request. To know if the dataset already exists.
 	ret = stat_dataset(dataset_uri, &new_dataset, opened);

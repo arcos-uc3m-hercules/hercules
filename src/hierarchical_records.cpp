@@ -9,6 +9,8 @@
 
 // for sincronization in the map.
 std::mutex hierarchical_map_lock;
+std::mutex hierarchical_map_lock_aux;
+
 
 extern "C"
 {
@@ -126,6 +128,7 @@ extern "C"
 
 	std::shared_ptr<map_records> HierarchicalMapGetDir(void *hierarchical_map, const char *k)
 	{
+		std::unique_lock<std::mutex> lck(hierarchical_map_lock_aux);
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		// Look up the parent directory's children map in 'HierarchicalMap'.
@@ -148,6 +151,7 @@ extern "C"
 
 	int HierarchicalMapRenameKey(void *hierarchical_map, const char *old_dir, const char *new_dir)
 	{
+		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		// Look up the parent directory's children map in 'HierarchicalMap'.
@@ -184,6 +188,7 @@ extern "C"
 
 	std::shared_ptr<map_records> HierarchicalMapGetChild(void *hierarchical_map, const char *k)
 	{
+		std::unique_lock<std::mutex> lck(hierarchical_map_lock_aux);
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		char first_parent_dir[PATH_MAX] = {0};
