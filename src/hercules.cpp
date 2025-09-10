@@ -10,7 +10,7 @@
 #include "directory.h"
 #include "records.hpp"
 #include "comms.h"
-// #include "hercules.hpp"
+#include "utils.h"
 
 /***************************************************************************
 *******************************  STRUCTURES  *******************************
@@ -49,7 +49,7 @@ pthread_t metadata_th;
 // ZeroMQ context entity conforming all sockets.
 
 // Initial buffer address.
-extern char *buffer_address;
+// extern char *buffer_address;
 // Set of locks dealing with the memory buffer access.
 extern pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
@@ -179,14 +179,14 @@ void *imss_server(void *arg_)
 		strcpy(arguments[i].my_uri, att_imss_uri);
 
 		// Throw thread with the corresponding function and arguments.
-		if (pthread_create(&threads[i], NULL, srv_worker, (void *)&arguments[i]) == -1)
+		if (pthread_create(&threads[i], NULL, hercules_ucx_server, (void *)&arguments[i]) == -1)
 		{
 			perror("HERCULES_ERR_SRVWORKER_DEPLOY");
 			pthread_exit(NULL);
 		}
 	}
 
-	if (pthread_create(&thread_garbage_collector, NULL, garbage_collector, (void *)buffer_map.get()) == -1)
+	if (pthread_create(&thread_garbage_collector, NULL, GarbageCollector, (void *)buffer_map.get()) == -1)
 	{
 		perror("HERCULES_ERR_GARBAGECOLLECTOR_DEPLOY");
 		pthread_exit(NULL);
@@ -224,7 +224,7 @@ void *imss_server(void *arg_)
 
 	free(region_locks);
 	// Free the memory buffer.
-	free(buffer_address);
+	// free(buffer_address);
 
 	pthread_exit(NULL);
 }
@@ -302,7 +302,7 @@ imss_metadata(void *arg_)
 		if (!i)
 		{
 			// Deploy a thread distributing incomming clients among all ports.
-			if (pthread_create(&threads[i], NULL, dispatcher, (void *)&arguments[i]) == -1)
+			if (pthread_create(&threads[i], NULL, Dispatcher, (void *)&arguments[i]) == -1)
 			{
 				perror("HERCULES_ERR_METADISPATCHER_DEPLOY");
 				pthread_exit(NULL);
@@ -316,7 +316,7 @@ imss_metadata(void *arg_)
 			arguments[i].pt = 0;
 			// arguments[i].total_size = buffer_segment_;
 			// Throw thread with the corresponding function and arguments.
-			if (pthread_create(&threads[i], NULL, stat_worker, (void *)&arguments[i]) == -1)
+			if (pthread_create(&threads[i], NULL, hercules_ucx_server, (void *)&arguments[i]) == -1)
 			{
 				perror("HERCULES_ERR_METAWORKER_DEPLOY");
 				pthread_exit(NULL);
@@ -757,14 +757,15 @@ int getConfiguration(struct arguments *args)
 
 	cfg_free(cfg);
 
-	// char hostname_[512];
-	// int ret = gethostname(&hostname_[0], 512);
-	ret = gethostname(&args->data_hostname[0], PATH_MAX);
-	if (ret == -1)
-	{
-		perror("HERCULES_ERR_GETHOSTNAME");
-		args->data_hostname[0] = '\0';
-	}
+	// ret = gethostname(&args->data_hostname[0], HOST_NAME_MAX);
+	// if (ret == -1)
+	// {
+	// 	perror("HERCULES_ERR_GETHOSTNAME");
+	// 	args->data_hostname[0] = '\0';
+	// } else {
+	// 	args->data_hostname[HOST_NAME_MAX-1] = '\0';
+	// }
+	get_hostname(args->data_hostname, HOST_NAME_MAX);
 
 	return 1;
 }

@@ -90,29 +90,39 @@ char *strclr(const char *clr, char *str, ...)
     return output;
 }
 
+// TODO: check this for multithreading.
+// int opened = 0;
+
 /*
  * Append log info to log file.
  */
 void slog_to_file(char *out, const char *fname, SlogDate *sdate)
 {
-    char filename[PATH_MAX];
+    char filename[PATH_MAX] = {0};
+
+    // Getting current directory.
+    char cwd[512] = {0};
+    if (getcwd(cwd, sizeof(cwd)) == NULL)
+    {
+        perror("[SLOG] Error getting the current working directory.");
+        return;
+    }
 
     if (slg.filestamp)
     { /* Create log filename with date. (eg example-2017-01-21.log) */
-        snprintf(filename, sizeof(filename), "%s-%02d-%02d-%02d.log",
-                 fname, sdate->year, sdate->mon, sdate->day);
+        snprintf(filename, sizeof(filename), "%s/%s-%02d-%02d-%02d.log",
+                 cwd, fname, sdate->year, sdate->mon, sdate->day);
     }
     else
     { /* Create log filename using regular name. (eg example.log) */
         snprintf(filename, sizeof(filename), "%s.log", fname);
     }
-
     FILE *fp = NULL;
     // fprintf(stderr, "[SLOG] filename='%s'\n", filename);
     // if (fp == NULL)
-    // {
-    fp = fopen(filename, "a");
-    // }
+    {
+        fp = fopen(filename, "a");
+    }
 
     if (fp == NULL)
     {
@@ -124,7 +134,24 @@ void slog_to_file(char *out, const char *fname, SlogDate *sdate)
     fprintf(fp, "%s", out);
 
     fclose(fp);
+
+    // opened = 1;
 }
+
+// void AppendToFile(char *out)
+// {
+//     /* Append log line to log file. */
+//     fprintf(fp, "%s", out);
+//     fflush(fp);
+// }
+
+// void CloseFile()
+// {
+//     if (opened)
+//     {
+//         fclose(fp);
+//     }
+// }
 
 /*
  * Read cfg file and parse configuration options.
@@ -233,14 +260,23 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
     {
         return;
     }
-    
 
-    char *ld_preload_path = getenv("LD_PRELOAD");
-    if (ld_preload_path != NULL)
+    char *ld_preload_path = NULL;
+    char *original_ld_preload = getenv("LD_PRELOAD");
+    if (original_ld_preload != NULL)
     {
+        // Make a copy of the string.
+        ld_preload_path = strdup(original_ld_preload);
+        if (ld_preload_path == NULL)
+        {
+            fprintf(stderr, "Error: strdup failed to allocate memory for LD_PRELOAD path.\n");
+            return;
+        }
+
         unsetenv("LD_PRELOAD");
+        // fprintf(stderr, "LD_PRELOAD=%s\n",ld_preload_path);
+        // fprintf(stderr, "LD_PRELOAD (copied, before unset): %s\n", ld_preload_path);
     }
-    
 
     /* Lock thread for safe. */
     if (slg.td_safe)
@@ -371,7 +407,9 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
             output = slog_get(&mdate, (char *)"%s\n", prints);
 
             /* Add log line to file. */
+            // if (!opened)
             slog_to_file(output, slg.fname, &mdate);
+            // AppendToFile(output);
         }
     }
 
@@ -383,7 +421,12 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
         {
             fprintf(stderr, "[ERROR][%s] <%s:%d> inside %s(): Can not deinitialize mutex: %s\n",
                     slg.fname, __FILE__, __LINE__, __func__, strerror(rc));
-            setenv("LD_PRELOAD", ld_preload_path, 1);
+            if (ld_preload_path != NULL)
+            {
+                setenv("LD_PRELOAD", ld_preload_path, 1);
+                free(ld_preload_path);
+                ld_preload_path = NULL;
+            }
             exit(EXIT_FAILURE);
         }
     }
@@ -391,11 +434,19 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
     if (ld_preload_path != NULL)
     {
         setenv("LD_PRELOAD", ld_preload_path, 1);
+        // Free the memory allocated by strdup.
+        free(ld_preload_path);
+        ld_preload_path = NULL;
     }
 
     // fprintf(stderr,"prev_errno=%d, actual_errno=%d\t", prev_errno, errno);
     errno = prev_errno;
 }
+
+// void slog_close()
+// {
+//     CloseFile();
+// }
 
 void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int debugColor, int filestamp, int t_safe, unsigned int rank)
 {

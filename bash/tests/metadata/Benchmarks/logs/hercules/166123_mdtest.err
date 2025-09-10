@@ -1,0 +1,778 @@
+[1;93m==>[0m Warning: config:terminal_title has been replaced by install_status and is ignored
+[1;31m==>[0m Error: Spec 'mpich' matches no installed packages.
+[1;93m==>[0m Warning: config:terminal_title has been replaced by install_status and is ignored
++ set +x
+temporal dir /tmp
+Starting Hercules with RR policy
+Configuration file pass ./HerculesConfigurations/Detach//1m+16s-16nfc-16cpd_512blocksize.conf
+/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/IOR/HerculesConfigurations/Detach/1m+16s-16nfc-16cpd_512blocksize.conf
+[+] Slurm is active.
+/beegfs/home/javier.garciablas/hercules/tmp/meta_hostfile exists
+HERCULES_MOUNT_POINT - /mnt/hercules/ - HERCULES_BLOCK_SIZE - 512
+[+] Hercules: Starting metadata servers on broadwell-021
+++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-021 rm /beegfs/home/javier.garciablas/hercules/tmp/m-hercules-0
+++ echo '[+] Starting metadata server 0 on broadwell-021...'
+[+] Starting metadata server 0 on broadwell-021...
+++ set +x
+++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=0G -w broadwell-021 /beegfs/home/javier.garciablas/hercules/build/hercules_server m 0
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-021 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh m 0 start /beegfs/home/javier.garciablas/hercules
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=1
+++ set +x
+/beegfs/home/javier.garciablas/hercules/tmp/m-hercules-0-start
+m-server 0 is ready = 0
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-022 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 0 start /beegfs/home/javier.garciablas/hercules
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+Snapshot path has not been provided.	HERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-0-start
+d-server 0 is ready = 0
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-1-start
+d-server 1 is ready = 0
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-2-start
+d-server 2 is ready = 0
+++ ret='/beegfs/home/javier.garciablas/hercules
+[+][broadwell-021] Waiting for server 0'
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=1
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-023 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 1 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-3-start
+d-server 3 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=2
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-024 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 2 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-4-start
+d-server 4 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=3
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-025 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 3 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-5-start
+d-server 5 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=4
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-026 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 4 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-6-start
+d-server 6 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=5
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-027 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 5 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-7-start
+d-server 7 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=6
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-028 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 6 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-8-start
+d-server 8 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=7
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-029 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 7 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-9-start
+d-server 9 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=8
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-030 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 8 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-10-start
+d-server 10 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=9
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-031 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 9 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-11-start
+d-server 11 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=10
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-032 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 10 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-12-start
+d-server 12 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=11
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-033 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 11 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-13-start
+d-server 13 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=12
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-034 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 12 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-14-start
+d-server 14 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=13
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-035 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 13 start /beegfs/home/javier.garciablas/hercules
+/beegfs/home/javier.garciablas/hercules/tmp/d-hercules-15-start
+d-server 15 is ready = 0
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=14
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-036 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 14 start /beegfs/home/javier.garciablas/hercules
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=15
+++ set +x
++++ srun -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w broadwell-037 -- /beegfs/home/javier.garciablas/hercules/scripts/check-servers.sh d 15 start /beegfs/home/javier.garciablas/hercules
+++ ret=/beegfs/home/javier.garciablas/hercules
+++ ret=0
+++ '[' 0 -gt 0 ']'
+++ [[ 0 -eq 1 ]]
+++ SERVER_ID=16
+++ set +x
+[-] Data servers started in 15.889725898 seconds
+[+] MPI distribution found; mpich
+#############################################################################
+    [!] 1. To export the path of the configuration file, run the following command:
+    [0;32m
+export HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/IOR/HerculesConfigurations/Detach/1m+16s-16nfc-16cpd_512blocksize.conf_166123
+    [0m
+    #############################################################################
+#############################################################################
+    [!] 2. To load the client library:
+    [0;32m
+export LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so
+    [0m
+    #############################################################################
+#############################################################################
+    [!] 2. To unload the client library:
+    [0;31m
+unset LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so
+    [0m
+    #############################################################################
+#############################################################################
+    [!] To stop the services:
+    [0;31m
+hercules stop -f /beegfs/home/javier.garciablas/hercules/bash/tests/metadata/IOR/HerculesConfigurations/Detach/1m+16s-16nfc-16cpd_512blocksize.conf_166123
+    [0m
+    #############################################################################
+#############################################################################
+    [!] Warning: due to UCX bug (Shared memory error) it is sometimes necesary to run:
+    [33m
+export UCX_POSIX_USE_PROC_LINK=n
+    [0m
+    #############################################################################
+Hercules started in 16.752003050 seconds, start=1742669535.657659580, end=1742669552.409662630
+DATA SERVERS 16
+Running clients
++ mpiexec -np=256 --map-by node -ppn=16 -f=client_hostfile_166123 -env HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/metadata/IOR/HerculesConfigurations/Detach/1m+16s-16nfc-16cpd_512blocksize.conf_166123 -env LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so /beegfs/home/javier.garciablas/gsanchez/ior/bin/mdtest -n 390 -d /mnt/hercules/
+-- started at 03/22/2025 19:53:19 --
+
+mdtest-4.1.0+dev was launched with 256 total task(s) on 16 node(s)
+Command line used: /beegfs/home/javier.garciablas/gsanchez/ior/bin/mdtest '-n' '390' '-d' '/mnt/hercules/'
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+WARNING: Read bytes is 0, thus, a read test will actually just open/close
+Nodemap: 1111111111111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+Path                : /mnt/hercules/
+FS                  : 0.0 GiB   Used FS: -inf%   Inodes: 90285420.8 Mi   Used Inodes: 100.0%
+256 tasks, 99840 files/directories
+[broadwell-021:1090810:0:1090848] Caught signal 11 (Segmentation fault: address not mapped to object at address 0x7fdab8000000)
+==== backtrace (tid:1090848) ====
+ 0  /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-broadwell/gcc-9.4.0/ucx-1.15.0-3yh2rw43n7ycb7c6bevl3gm63ngqkhtc/lib/libucs.so.0(ucs_handle_error+0x2dc) [0x7fdabebfd6dc]
+ 1  /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-broadwell/gcc-9.4.0/ucx-1.15.0-3yh2rw43n7ycb7c6bevl3gm63ngqkhtc/lib/libucs.so.0(+0x318c7) [0x7fdabebfd8c7]
+ 2  /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-broadwell/gcc-9.4.0/ucx-1.15.0-3yh2rw43n7ycb7c6bevl3gm63ngqkhtc/lib/libucs.so.0(+0x31bf4) [0x7fdabebfdbf4]
+ 3  /lib/x86_64-linux-gnu/libpthread.so.0(+0x14420) [0x7fdabee8b420]
+ 4  /beegfs/home/javier.garciablas/hercules/build/hercules_server(+0x1cebf) [0x55a13262cebf]
+ 5  /beegfs/home/javier.garciablas/hercules/build/hercules_server(+0x1d134) [0x55a13262d134]
+ 6  /beegfs/home/javier.garciablas/hercules/build/hercules_server(+0x183bd) [0x55a1326283bd]
+ 7  /beegfs/home/javier.garciablas/hercules/build/hercules_server(+0x1b970) [0x55a13262b970]
+ 8  /lib/x86_64-linux-gnu/libpthread.so.0(+0x8609) [0x7fdabee7f609]
+ 9  /lib/x86_64-linux-gnu/libc.so.6(clone+0x43) [0x7fdabe8fc133]
+=================================
+srun: error: broadwell-021: task 0: Segmentation fault (core dumped)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+failure handler called with status -80 (Endpoint timeout)
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+slurmstepd: error: *** STEP 166123.51 ON broadwell-038 CANCELLED AT 2025-03-22T20:51:40 ***
+slurmstepd: error: *** JOB 166123 ON broadwell-021 CANCELLED AT 2025-03-22T20:51:40 ***
+slurmstepd: error: *** STEP 166123.10 ON broadwell-025 CANCELLED AT 2025-03-22T20:51:40 ***
+slurmstepd: error: *** STEP 166123.16 ON broadwell-028 CANCELLED AT 2025-03-22T20:51:44 ***
+slurmstepd: error: *** STEP 166123.23 ON broadwell-031 CANCELLED AT 2025-03-22T20:51:38 ***

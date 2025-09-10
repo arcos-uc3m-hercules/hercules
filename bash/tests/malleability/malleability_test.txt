@@ -1,0 +1,40 @@
+One or more hostfiles missing for the servers, please specify them with: -m <metadata_hostfile> -d <data_hostfile>
+[HS] Start servers 0:00.00 sec.
+Failed to open client socket
+ERR_HERCULES_CONNECT-broadwell-046:7500: Connection refused
+Failed to open client socket
+ERR_HERCULES_CONNECT-broadwell-046:7500: Connection refused
+Failed to open client socket
+ERR_HERCULES_CONNECT-broadwell-046:7500: Connection refused
+SLURM - 0
+STATUS - stop
+/beegfs/home/javier.garciablas/hercules/bash/tests/malleability/configurations_files/dettach/hercules_torino_2server_16client_in_1nodes.conf
+Reading configuration from /beegfs/home/javier.garciablas/hercules/bash/tests/malleability/configurations_files/dettach/hercules_torino_2server_16client_in_1nodes.conf
+Hercules path - /beegfs/home/javier.garciablas/hercules
+data hosts=broadwell-047
+# Hercules: Stopping data servers in broadwell-047
+ssh broadwell-047 pkill hercules_server
+ssh broadwell-048 pkill hercules_server
+meta hosts=broadwell-046
+# Hercules: Stopping metadata servers in broadwell-046
+ssh broadwell-046 pkill hercules_server
+[HS] Hercules stop 0:00.80 sec.
+One or more hostfiles missing for the servers, please specify them with: -m <metadata_hostfile> -d <data_hostfile>
+[HS] Restart servers 0:00.00 sec.
+Failed to open client socket
+ERR_HERCULES_CONNECT-broadwell-046:7500: Connection refused
+Failed to open client socket
+ERR_HERCULES_CONNECT-broadwell-046:7500: Connection refused
+SLURM - 0
+STATUS - stop
+/beegfs/home/javier.garciablas/hercules/bash/tests/malleability/configurations_files/dettach/hercules_torino_2server_16client_in_1nodes.conf
+Reading configuration from /beegfs/home/javier.garciablas/hercules/bash/tests/malleability/configurations_files/dettach/hercules_torino_2server_16client_in_1nodes.conf
+Hercules path - /beegfs/home/javier.garciablas/hercules
+data hosts=broadwell-047
+# Hercules: Stopping data servers in broadwell-047
+ssh broadwell-047 pkill hercules_server
+ssh broadwell-048 pkill hercules_server
+meta hosts=broadwell-046
+# Hercules: Stopping metadata servers in broadwell-046
+ssh broadwell-046 pkill hercules_server
+[HS] Hercules stop 0:00.74 sec.

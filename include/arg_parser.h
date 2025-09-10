@@ -5,6 +5,7 @@
 #include <argp.h>
 #include <limits.h>
 #include "comms.h"
+#include "imss.h"
 
 /********** argp options **********/
 /* common options */
@@ -37,10 +38,10 @@ struct logging_opts
 
 struct arguments
 {
-    char type;                      /* type arg */
+    char type;                      /* type of server (TYPE_DATA_SERVER or TYPE_METADATA_SERVER) */
     char data_hostfile[PATH_MAX]; /* deploy hostfile arg to '-d' */
     char stat_logfile[PATH_MAX];    /* metadata logfile arg to '-l' */
-    char imss_uri[32];        /* IMSS URI arg to '-i' */
+    char imss_uri[URI_];        /* IMSS URI arg to '-i' */
     char hercules_path[PATH_MAX-100];   /* hercules path */
     char policy[MAX_POLICY_LEN];
     char meta_hostfile[PATH_MAX];
@@ -50,7 +51,7 @@ struct arguments
     char hercules_snapshot_path[PATH_MAX];
     char snapshot_paths_list[PATH_MAX];
     char ignore_paths_list[PATH_MAX];
-    char data_hostname[PATH_MAX];
+    char data_hostname[HOST_NAME_MAX];
     char *stat_host;                /* Metadata server hostname arg to '-H' */
     void *pool_memory;
     uint64_t data_port;                  /* port arg to '-p' */

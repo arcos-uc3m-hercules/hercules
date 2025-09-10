@@ -1,0 +1,500 @@
+  139  sbatch jobs_comp/unito_ior_xpn_8n_8p_512k_L1_T1_S0_comp_repl0_0
+  140  sbatch ../../jobs/job_ior_xpn.unito 
+  141  scancel 36893
+  142  sbatch ../../jobs/job_ior_xpn.unito 
+  143  scancel 36894
+  144  sbatch ../../jobs/job_ior_xpn.unito 
+  145  ls -las ~/dariomnz/bin/xpn/bin/xpn_mpi_server
+  146  ls -las ~/dariomnz/bin/xpn/bin/
+  147  ls -las ~/dariomnz/bin/xpn/bin
+  148  ls ~/dariomnz/bin/xpn/bin/
+  149  ls -las  ~/dariomnz/bin/xpn/bin/
+  150  sbatch ../../jobs/job_ior_xpn.unito 
+  151  sbatch ../../jobs/job_ior_xpn.unito 
+  152  sbatch ../../jobs/job_ior_xpn.unito 
+  153  sbatch ../../jobs/job_ior_xpn.unito 
+  154  sbatch ../../jobs/job_ior_xpn.unito 
+  155  rm jobs_comp/*
+  156  ./mk_jobs_comp.sh 
+  157  sbatch jobs_comp/unito_ior_xpn_32n_1p_64k_L0_T1_S0_comp_repl1_0
+  158  sbatch jobs_comp/unito_ior_xpn_32n_1p_64k_L0_T1_S0_comp_repl1_0
+  159  sbatch jobs_comp/unito_ior_xpn_32n_1p_64k_L0_T1_S0_comp_repl1_0
+  160  rm jobs_comp/*
+  161  sbatch jobs_comp/unito_ior_xpn_32n_1p_64k_L0_T1_S0_comp_repl1_0
+  162  sbatch jobs_comp/unito_ior_xpn_32n_1p_64k_L1_T0_S0_comp_repl1_0
+  163  ./mk_jobs_comp.sh 
+  164  sbatch jobs_comp/unito_ior_xpn_32n_1p_64k_L1_T0_S0_comp_repl1_0
+  165  ./mk_jobs_comp.sh 
+  166  sbatch jobs_comp/unito_ior_xpn_32n_1p_64k_L1_T0_S0_comp_repl1_0
+  167  sbatch jobs_comp/unito_ior_xpn_32n_1p_64k_L1_T0_S0_comp_repl1_0
+  168  sbatch jobs_comp/unito_ior_xpn_4n_1p_64k_L1_T0_S0_comp_repl1_0
+  169  sbatch jobs_comp/unito_ior_xpn_4n_1p864k_L1_T0_S0_comp_repl1_0
+  170  sbatch jobs_comp/unito_ior_xpn_4n_8p64k_L1_T0_S0_comp_repl1_0
+  171  sbatch jobs_comp/unito_ior_xpn_4n_8p_64k_L1_T0_S0_comp_repl1_0
+  172  sbatch jobs_comp/unito_ior_xpn_32n_1p_64k_L1_T0_S0_comp_repl0_0
+  173  sbatch jobs_comp/unito_ior_xpn_32n_1p_64k_L1_T0_S0_comp_repl2_0
+  174  ./run_jobs_comp.sh 
+  175  ./run_jobs_comp.sh 
+  176  rm 
+  177  ./mk_jobs_comp.sh 
+  178  ./run_jobs_comp.sh 
+  179  ./mk_jobs_comp.sh 
+  180  rm jobs_comp/*
+  181  ./mk_jobs_comp.sh 
+  182  ./run_jobs_comp.sh 
+  183  ./run_jobs_comp.sh 
+  184  rm jobs_comp/*
+  185  ./run_jobs_comp.sh 
+  186  ./mk_jobs_comp.sh 
+  187  ./run_jobs_comp.sh 
+  188  rm jobs_comp/*
+  189  ./mk_jobs_comp.sh 
+  190  ./run_jobs_comp.sh 
+  191  scancel 36993
+  192  ./run_jobs_comp.sh 
+  193  ./run_jobs_comp.sh 
+  194  ./mk_jobs_comp.sh 
+  195  ./run_jobs_comp.sh 
+  196  ./mk_jobs_comp.sh 
+  197  ./run_jobs_comp.sh 
+  198  ./run_jobs_comp.sh 
+  199  salloc
+  200  cd /beegfs/home/javier.garciablas/dcamarma/src/
+  201  cd /beegfs/home/javier.garciablas/dcamarma/src/xpn/
+  202  make cle
+  203  make clean
+  204  make -j
+  205  squeue
+  206  ssh broadwell-001
+  207  cd ~/dariomnz/src/xpn
+  208  ./scripts/compile/build-me-platform.sh  unito-dario
+  209  exit
+  210  ssh broadwell-065
+  211  exit
+  212  squeue --format="%.18i %.9P %.50j %.8u %.8T %.10M %.9l %.6D %R"
+  213  cd test/xpn_mpiserver_disk/
+  214  ./mk_jobs_comp.sh 
+  215  ./run_jobs_comp.sh 
+  216  rm jobs_comp/*
+  217  ./mk_jobs_comp.sh 
+  218  ./run_jobs_comp.sh 
+  219  rm jobs_comp/*
+  220  ./mk_jobs_comp.sh 
+  221  ./run_jobs_comp.sh 
+  222  rm jobs_comp/*
+  223  ./mk_jobs_comp.sh 
+  224  ./run_jobs_comp.sh 
+  225  salloc
+  226  exit
+  227  cd /beegfs/home/javier.garciablas/dcamarma/RES/
+  228  tail -f mpi_36832.out 
+  229  tail -f mpi_36837.out 
+  230  tail -f mpi_36841.out 
+  231  tail -f mpi_36842.out 
+  232  clear
+  233  tail -f mpi_36855.out 
+  234  tail -f mpi_36873.out 
+  235  tail -f mpi_36879.out 
+  236  watch squeue
+  237  clear
+  238  tail -f mpi_36898.out 
+  239  tail -f mpi_36905.out 
+  240  tail -f mpi_36908.out 
+  241  tail -f mpi_36910.out 
+  242  tail -f mpi_36912.out 
+  243  tail -f mpi_37030.out 
+  244  tail -f mpi_37038.out 
+  245  tail -f mpi_37040.out 
+  246  tail -f mpi_37043.out 
+  247  tail -f mpi_37046.out 
+  248  tail -f mpi_37048.out 
+  249  tail -f mpi_37048.out 
+  250  clear
+  251  tail -f mpi_37049.out 
+  252  squeue
+  253  ssh broadwell-00
+  254  ssh broadwell-001
+  255  salloc
+  256  ssh broadwell-048ç
+  257  ssh broadwell-048
+  258  tmux attach -t hercules
+  259  cd /beegfs/home/javier.garciablas/dcamarma/jobs/XPN/mpi_server/
+  260  sbatch job_life_sciences.unito 
+  261  scancel 36832
+  262  sbatch job_life_sciences.unito 
+  263  scancel 36837
+  264  sbatch job_life_sciences.unito 
+  265  scancel 36841
+  266  sbatch job_life_sciences.unito 
+  267  scancel 36842
+  268  sbatch job_life_sciences.unito 
+  269  squeue
+  270  sbatch job_life_sciences.unito 
+  271  squeue
+  272  ssh broadwell-016
+  273  squeue
+  274  scancel 36873
+  275  sbatch job_life_sciences.unito 
+  276  sbatch job_darshan.unito 
+  277  sbatch job_dlio_xpn.unito 
+  278  sbatch job_io500_small_xpn.unito 
+  279  sbatch job_ior_xpn.unito 
+  280  sbatch job_mdtest_xpn.unito 
+  281  sbatch job_life_sciences.unito 
+  282  sbatch job_nek5000_mpi.unito 
+  283  sbatch job_nek5000_posix.unito 
+  284  sbatch job_quantum_expresso.unito 
+  285  sbatch job_wacomm.unito 
+  286  watch squeue
+  287  sbatch job_life_sciences.unito 
+  288  watch squeue
+  289  scancel 36886
+  290  watch squeue
+  291  sbatch job_ior_xpn.unito 
+  292  scancel 36904
+  293  sbatch job_ior_xpn.unito 
+  294  scancel 36905
+  295  sbatch job_darshan.unito 
+  296  squeue
+  297  ssh broa
+  298  sbatch job_life_sciences.unito 
+  299  squue
+  300  squeue
+  301  scancel 36879
+  302  scancel 36910
+  303  sbatch job_life_sciences.unito
+  304  squeue
+  305  sbatch job_darshan.unito 
+  306  squeue
+  307  ss broadwell-018
+  308  ssh broadwell-018
+  309  squeue
+  310  ssh broadwell-014
+  311  squeue
+  312  scancel 36916
+  313  sbatch job_darshan.unito 
+  314  squeue
+  315  ssh broadwell-022
+  316  squeue
+  317  squeue
+  318  squeue
+  319  clear
+  320  clear
+  321  clear
+  322  sbatch job_darshan.unito 
+  323  sbatch job_dlio_xpn.unito 
+  324  sbatch job_io500_small_xpn.unito 
+  325  sbatch job_ior_xpn.unito 
+  326  sbatch job_mdtest_xpn.unito 
+  327  sbatch job_nek5000_posix.unito 
+  328  sbatch job_nek5000_mpi.unito 
+  329  sbatch job_wacomm.unito 
+  330  sbatch job_quantum_expresso.unito 
+  331  sbatch job_life_sciences.unito 
+  332  watch squeue
+  333  squeue
+  334  scancel 36977
+  335  sbatch job_ior_xpn.unito 
+  336  sbatch job_life_sciences.unito 
+  337  scancel 37038
+  338  sbatch job_life_sciences.unito 
+  339  scancel 37040
+  340  sbatch job_life_sciences.unito 
+  341  scancel 37043
+  342  sbatch job_life_sciences.unito 
+  343  scancel 37046
+  344  sbatch job_life_sciences.unito 
+  345  scancel 37048
+  346  sbatch job_life_sciences.unito 
+  347  scancel 37049
+  348  squeue
+  349  rm -rf hydra_log/
+  350  cd ~/dariomnz/src/xpn
+  351  ./scripts/compile/build-me-platform.sh  unito-dario
+  352  exit
+  353  ssh broadwell-000
+  354  exit
+  355  ls
+  356  cd test/xpn_mpiserver_disk/
+  357  ls
+  358  rm jobs_comp/*
+  359  ./mk_jobs_comp.sh 
+  360  ./run_jobs_comp.sh 
+  361  rm jobs_comp/*
+  362  ./mk_jobs_comp.sh 
+  363  rm jobs_comp/*
+  364  ./mk_jobs_comp.sh 
+  365  ./run_jobs_comp.sh 
+  366  ./run_jobs_comp.sh 
+  367  rm jobs_comp/*
+  368  ./mk_jobs_comp.sh 
+  369  rm jobs_comp/*
+  370  ./mk_jobs_comp.sh 
+  371  ./run_jobs_comp.sh 
+  372  rm jobs_comp/*
+  373  ./mk_jobs_comp.sh 
+  374  ./run_jobs_comp.sh 
+  375  nohup ./run_jobs_comp.sh &
+  376  squeue --format="%.18i %.9P %.50j %.8u %.8T %.10M %.9l %.6D %R"
+  377  squeue --format="%.18i %.9P %.50j %.8u %.8T %.10M %.9l %.6D %R"
+  378  squeue --format="%.18i %.9P %.50j %.8u %.8T %.10M %.9l %.6D %R"
+  379  squeue --format="%.18i %.9P %.50j %.8u %.8T %.10M %.9l %.6D %R"
+  380  squeue --format="%.18i %.9P %.50j %.8u %.8T %.10M %.9l %.6D %R"
+  381  salloc
+  382  make write-mpi
+  383  clear
+  384  exit
+  385  clear
+  386  cd dcamarma/xpn_ep/src/xpn/test/integrity/xpn
+  387  make clean
+  388  srun --pty bash
+  389  cd 
+  390  cd dcamarma/xpn_ep/scratch/
+  391  cd work/
+  392  ls -las
+  393  cd ..
+  394  ls -las
+  395  cd outputs/
+  396  ls -las
+  397  rm -rf 4s-8c-40ss-10kits-512k-128b-tcp-out/
+  398  cd ..
+  399  ls -las
+  400  cd ..
+  401  ls -las
+  402  cd jobs-mpi/
+  403  ls -las
+  404  rm *.err *.out
+  405  clear
+  406  ls -las
+  407  sbatch xpn-4s-8c-40ss-10kits-tcp-128b-script.sh
+  408  cd ../scratch/work/4s-8c-40ss-10kits-128b-tcp0/
+  409  watch -n 1 ls -las
+  410  watch -n 1 ls -las ../4s-8c-40ss-10kits-128b-tcp1/
+  411  watch -n 1 ls -las ../4s-8c-40ss-10kits-128b-tcp2/
+  412  squeue
+  413  ls -las ../4s-8c-40ss-10kits-128b-tcp2/
+  414  cd ..
+  415  ls -ls
+  416  cd ..
+  417  ls -las
+  418  mkdir stats-4s-8s-40ss-tcp
+  419  mv stats-broadwell-00* stats-4s-8s-40ss-tcp/
+  420  cd ..
+  421  cd jobs-mpi/
+  422  ls -las
+  423  sbatch xpn-4s-8c-50ss-10kits-tcp-128b-script.sh
+  424  nano xpn-4s-8c-100ss-10kits-tcp-128b-script.sh
+  425  sbatch xpn-4s-8c-100ss-10kits-tcp-128b-script.sh
+  426  nano xpn-4s-8c-200ss-10kits-tcp-128b-script.sh
+  427  squeue
+  428  scancel 37368
+  429  squeue
+  430  cd ../scratch/work/
+  431  ls -las
+  432  cd 4s-8c-50ss-10kits-128b-tcp0
+  433  ls -las
+  434  ls -las ../4s-8c-50ss-10kits-128b-tcp2/
+  435  ls -las
+  436  ls -las ../4s-8c-50ss-10kits-128b-tcp2/
+  437  cd ..
+  438  cd ..
+  439  ls -las
+  440  mkdir stats-4s-8s-50ss-tcp
+  441  mv stats-broadwell-00* stats-4s-8s-50ss-tcp/
+  442  cd ../jobs-mpi/
+  443  ls -las
+  444  sbatch xpn-4s-8c-100ss-10kits-tcp-128b-script.sh
+  445  squeue
+  446  squeue
+  447  squeue
+  448  squeue
+  449  squeue
+  450  squeue
+  451  cd ../scratch/work/4s-8c-100ss-10kits-128b-tcp2/
+  452  ls -las
+  453  cd ../4s-8c-100ss-10kits-128b-tcp1/
+  454  ls -las
+  455  ls -las
+  456  cd ..
+  457  cd 4s-8c-100ss-10kits-128b-tcp2/
+  458  watch -n 1 ls -las
+  459  squeue
+  460  cd ,,
+  461  cd ,,
+  462  cd ..
+  463  cd ..
+  464  ls -las
+  465  mkdir stats-4s-8s-100ss-tcp
+  466  mv stats-broadwell-00* stats-4s-8s-100ss-tcp
+  467  cd ..
+  468  cd jobs-mpi/
+  469  ls -las
+  470  sbatch xpn-4s-8c-200ss-10kits-tcp-128b-script.sh
+  471  squeue
+  472  clear
+  473  cd ../scratch/
+  474  ls -las
+  475  mkdir stats-4s-2c-200ss-tcp
+  476  mv stats-broadwell-00* stats-4s-2c-200ss-tcp
+  477  ls -las
+  478  cd ..
+  479  cd jobs-mpi/
+  480  ls -las
+  481  sbatch xpn-4s-8c-500ss-10kits-tcp-128b-script.sh
+  482  ls -las
+  483  squeue
+  484  squeue
+  485  clear
+  486  ls -las
+  487  squeue
+  488  cd ../scratch/work/
+  489  ls -las
+  490  ls -las 4s-8c-500ss-10kits-128b-tcp0
+  491  squeue
+  492  squeue
+  493  ls -las 4s-8c-500ss-10kits-128b-tcp2/
+  494  ls -las 4s-8c-500ss-10kits-128b-tcp1/
+  495  squeue
+  496  squeue
+  497  scancel 37371
+  498  ls -las 4s-8c-500ss-10kits-128b-tcp0/
+  499  ls -las 4s-8c-500ss-10kits-128b-tcp1/
+  500  exit
+  501  spack install ucx thread_multiple=true
+  502  cd .spack/
+  503  ls
+  504  vim config.yaml 
+  505  vim /tmp/javier.garciablas/spack-stage/spack-stage-numactl-2.0.14-xl2muew7hz6qu73peiqz4swolpuqaeoe/spack-build-out.txt
+  506  spack load gcc
+  507  spack spec gc
+  508  spack spec gcc
+  509  spack spec ucx
+  510  ls
+  511  grep admire *
+  512  rm modules.yaml 
+  513  spack install ucx thread_multiple=true
+  514  spack info ucx
+  515  spack searh ucx
+  516  spack search ucx
+  517  spack spec ucx
+  518  spack find ucx
+  519  spack find -lf ucx
+  520  spack load /hq7nwna
+  521  spack info ucx
+  522  spack info /hq7nwna
+  523  spack load ucx-1.14.0-hq7nwnahn4u4lkci4bqrom5qatzr5whh
+  524  ls /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-broadwell/gcc-9.4.0/ucx-1.14.0-hq7nwnahn4u4lkci4bqrom5qatzr5whh
+  525  ls /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-broadwell/gcc-9.4.0/ucx-1.14.0-hq7nwnahn4u4lkci4bqrom5qatzr5whh/bin/
+  526  /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-broadwell/gcc-9.4.0/ucx-1.14.0-hq7nwnahn4u4lkci4bqrom5qatzr5whh/bin/ucx_info 
+  527  /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-broadwell/gcc-9.4.0/ucx-1.14.0-hq7nwnahn4u4lkci4bqrom5qatzr5whh/bin/ucx_info  -b
+  528  spack versions ucx
+  529  /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-broadwell/gcc-9.4.0/ucx-1.14.0-hq7nwnahn4u4lkci4bqrom5qatzr5whh/bin/ucx_info -b | grep thread
+  530  /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-broadwell/gcc-9.4.0/ucx-1.14.0-hq7nwnahn4u4lkci4bqrom5qatzr5whh/bin/ucx_info -b | grep THREAD
+  531  spack info ucx
+  532  spack install ucx +thread_multiple
+  533  spack install ucx~thread_multiple
+  534  spack find ucx
+  535* spack find ucx 
+  536  spack find ucx~thread_multiple
+  537  spack load ucx~thread_multiple
+  538  spack info ucx
+  539  spack info ucx~thread_multiple
+  540  spack install ucx +thread_multiple
+  541  spack info ucx +thread_multiple
+  542  spack info ucx+thread_multiple
+  543  spack find --loaded
+  544  spack unload ucx
+  545  spack unload ucx /ci7mt3t /hq7nwna /gcc@13.1.0
+  546  spack unload ucx /ci7mt3t /hq7nwna gcc@13.1.0
+  547  spack find ucx
+  548  spack find -lf ucx
+  549  spack info /hq7nwna
+  550  spack info /ci7mt3t
+  551  spack info
+  552  spack info ucx
+  553  spack load ucx
+  554  spack load /ci7mt3t
+  555  spack info ucx | grep multi_thread
+  556  spack info ucx
+  557  spack unload ucx
+  558  spack load ucx
+  559  spack load /hq7nwna
+  560  spack info ucx
+  561  spack unload ucx
+  562  spack load ucx
+  563  spack load /7kagn7o
+  564  spack info ucx
+  565  spack unload ucx
+  566  spack load ucx
+  567  spack load /smnf7ht
+  568  spack info ucx
+  569  spack unload ucx
+  570  spack install ucx@1.14.0%gcc@9.4.0 thread_multiple=true
+  571  spack load ucx
+  572  spack install ucx@1.14.0%gcc@9.4.0 thread_multiple=true --verbose
+  573  spack install --verbose ucx@1.14.0%gcc@9.4.0 thread_multiple=true
+  574  spack uninstall --verbose ucx@1.14.0%gcc@9.4.0 thread_multiple=true
+  575  spack info ucx
+  576  spack load ucx
+  577  spack load /ci7mt3t
+  578  ucx_info -d
+  579  ucx_info 
+  580  ucx_info -b
+  581  ucx_info -b | grep multi
+  582  ucx_info -b | grep thread
+  583  spack info ucx
+  584  whereis ucx
+  585  whereis ucx_info
+  586  whereis ucx.tml
+  587  whereis spack
+  588  find /beegfs/home/javier.garciablas/ -name ucx.yaml
+  589  cd
+  590  cd spack
+  591  ls
+  592  find ./ -name ucx.*
+  593  spack install --verbose ucx@1.14.0%gcc@9.4.0++thread_multiple
+  594  spack install --verbose ucx@1.14.0%gcc@9.4.0++thread_multiple +debug
+  595  spack find ucx
+  596  /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-broadwell/gcc-9.4.0/ucx-1.14.0-5ruz2qjj2npmwe3gsk3eeb3xrpimh3ui/bin/ucx_info -b
+  597  spack find
+  598  spack find ucx
+  599  spack uninstall ucx
+  600  spack uninstall ucx --all
+  601  spack uninstall --all ucx 
+  602  spack uninstall --dependents--all ucx 
+  603  spack uninstall --dependents --all ucx 
+  604  ucx_info
+  605  spack find --loaded
+  606  spack install --verbose ucx@1.14.0%gcc@9.4.0+thread_multiple
+  607  spack load ucx
+  608  spack find --loaded
+  609  ucx_info -b
+  610  spack info ucx
+  611  lsmod
+  612  lsmod | more
+  613  lsmod | grep xp
+  614  spack info ucx
+  615  spack uninstall --dependents --all ucx 
+  616  spack info ucx
+  617  ls /dev/k*
+  618  spack install --verbose ucx@1.14.0%gcc@9.4.0 +thread_multiple +cma +verbs
+  619  spack load ucx
+  620  ucx_info -b
+  621  ucx_info -b | grep mt
+  622  cd ~/hercules/build/
+  623  rm -rf ./*
+  624  spack load mpich
+  625  spack load mpich@4.1.1%gcc@9.4.0 arch=linux-ubuntu20.04-zen
+  626  spack load mpich@3.2.1%gcc@9.4.0 arch=linux-ubuntu20.04-zen
+  627  spack load cmake
+  628  spack load cmake@3.26.3%gcc@9.4.0 arch=linux-ubuntu20.04-broadwell
+  629  cmake ..
+  630  spack load glib
+  631  spack load glib@2.78.0%gcc@9.4.0 arch=linux-ubuntu20.04-broadwell
+  632  spack load pcre
+  633  rm -rf ./*
+  634  cmake ..
+  635  make -j8
+  636  history
+  637  cd ..
+  638  history > history_ucx_install_with_multi-thread.txt 
