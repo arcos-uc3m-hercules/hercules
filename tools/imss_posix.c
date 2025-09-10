@@ -93,40 +93,43 @@ char *buf_pref = NULL;
 		errno = -value;
 	}
 
-	void copy_stat_to_statx(const struct stat *src, struct statx *dest)
-	{
-		if (!src || !dest)
-		{
-			return; // Handle null pointers
-		}
 
-		memset(dest, 0, sizeof(struct statx)); // Initialize to zero
+void copy_stat_to_statx(const struct stat *src, struct statx *dest) {
+    if (!src || !dest) {
+        return; // Handle null pointers
+    }
 
-		dest->stx_mask = STATX_BASIC_STATS; // Indicates which fields are valid
-		dest->stx_blksize = src->st_blksize;
-		dest->stx_attributes = 0; // stat does not provide equivalent attributes
+    memset(dest, 0, sizeof(struct statx)); // Initialize to zero
 
-		dest->stx_dev_major = major(src->st_dev);
-		dest->stx_dev_minor = minor(src->st_dev);
-		dest->stx_rdev_major = major(src->st_rdev);
-		dest->stx_rdev_minor = minor(src->st_rdev);
+    dest->stx_mask = STATX_BASIC_STATS; // Indicates which fields are valid
+    dest->stx_blksize = src->st_blksize;
+    dest->stx_attributes = 0; // stat does not provide equivalent attributes
 
-		dest->stx_mode = src->st_mode;
-		dest->stx_uid = src->st_uid;
-		dest->stx_gid = src->st_gid;
-		dest->stx_ino = src->st_ino;
-		dest->stx_size = src->st_size;
-		dest->stx_blocks = src->st_blocks;
-		dest->stx_nlink = src->st_nlink;
+    dest->stx_dev_major = major(src->st_dev);
+    dest->stx_dev_minor = minor(src->st_dev);
+    dest->stx_rdev_major = major(src->st_rdev);
+    dest->stx_rdev_minor = minor(src->st_rdev);
 
-		// Convert timestamps
-		dest->stx_atime.tv_sec = src->st_atime;
-		dest->stx_mtime.tv_sec = src->st_mtime;
-		dest->stx_ctime.tv_sec = src->st_ctime;
+    dest->stx_mode = src->st_mode;
+    dest->stx_uid = src->st_uid;
+    dest->stx_gid = src->st_gid;
+    dest->stx_ino = src->st_ino;
+    dest->stx_size = src->st_size;
+    dest->stx_blocks = src->st_blocks;
+    dest->stx_nlink = src->st_nlink;
+
+    // Convert timestamps
+    dest->stx_atime.tv_sec = src->st_atime;
+    dest->stx_mtime.tv_sec = src->st_mtime;
+    dest->stx_ctime.tv_sec = src->st_ctime;
 #ifdef _STATX_BTIME
-		dest->stx_btime.tv_sec = src->st_ctime;
+    dest->stx_btime.tv_sec = 0;
 #endif
-	}
+
+}
+
+
+int __fxstat(int ver, int fd, struct stat *buf);
 
 	void WarnOperationNotSupported(const char *call_name, const char *pathname)
 	{
@@ -134,9 +137,10 @@ char *buf_pref = NULL;
 		fprintf(stderr, "[POSIX][WARNING] '%s' not currently supported, using real '%s' for pathname=%s\n", call_name, call_name, pathname);
 	}
 
-	void checkOpenFlags(const char *pathname, int flags)
-	{
-		slog_live("Checking flags");
+void checkOpenFlags(const char *pathname, int flags)
+{
+	slog_live("Checking flags");
+	if (flags & O_CREAT)
 		if (flags & O_CREAT)
 		{
 			slog_live("[POSIX]. O_CREAT flag, pathname=%s, flags=%x, O_CREAT=%x", pathname, flags, O_CREAT);
