@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <mutex>
+#include <memory>
 
 extern uint64_t IMSS_BLKSIZE;
 #define KB 1024
@@ -15,7 +16,8 @@ struct PrefetchItem
 {
   int32_t first_block;
   int32_t last_block;
-  char *buf;
+  // char *buf;
+  std::shared_ptr<std::string> buf;
 };
 
 using std::string;
@@ -41,7 +43,7 @@ extern "C"
     {
       *(first_block) = search->second.first_block;
       *(last_block) = search->second.last_block;
-      return search->second.buf;
+      return (char *)search->second.buf->c_str();
     }
     return NULL;
   }
@@ -69,13 +71,15 @@ extern "C"
 
     if (search != m->end())
     {
-      free(search->second.buf);
+      // free(search->second.buf);
+      search->second.buf.reset();
     }
 
     m->erase(path);
   }
 
-  void map_init_prefetch(void *map, const char *path, char *buff)
+  // void map_init_prefetch(void *map, const char *path, char *buff)
+  void map_init_prefetch(void *map, const char *path, long int buf_size)
   {
     // critical section (exclusive access to std::cout signaled by lifetime of lck):
     std::unique_lock<std::mutex> lck(mtx);
@@ -84,7 +88,9 @@ extern "C"
     struct PrefetchItem pitem;
     pitem.first_block = 0;
     pitem.last_block = 0;
-    pitem.buf = buff;
+    pitem.buf = std::make_shared<std::string>(buf_size, '\0');
+    // pitem.buf->reserve(buf_size);
+    // pitem.buf = buff;
 
     m->insert(std::pair<std::string, struct PrefetchItem>(std::string(path), pitem));
   }
@@ -133,6 +139,43 @@ extern "C"
     }
 
     return 1;
+  }
+
+  int free_prefetch(void *map)
+  {
+    // Block the access to the map structure.
+    std::unique_lock<std::mutex> lock(mtx);
+
+    MapPrefetch *m = reinterpret_cast<MapPrefetch *>(map);
+    // ssize_t free_memory_count = 0;
+
+    // for (auto it = m->cbegin(); it != m->cend(); ++it)
+    // {
+    //   it->second.buf.reset();
+    // }
+
+    
+    // free_memory_count /= (1024 * 1024 * 1024); // Bytes to GiB.
+    // printf("Hercules has release %lu GB of memory\n", free_memory_count);
+
+    m->clear();
+
+    // std::vector<string>::iterator i;
+    // for (i = vec.begin(); i < vec.end(); i++)
+    // {
+    // 	// find the element on all the datasets map.
+    // 	auto item = buffer.find(*i);
+    // 	// push the memory pointer of this block inside the mem pool to be reused.
+    // 	StsQueue.push(mem_pool, item->second.first);
+    // 	// erase the dataset information from the map.
+    // 	buffer.erase(*i);
+    // }
+
+    /*for(const auto & it : buffer){
+      string key = it.first;
+      std::cout <<"Garbage Collector: Exist " << key << '\n';
+      }*/
+    return 0;
   }
 
 } // extern "C"

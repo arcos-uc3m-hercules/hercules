@@ -45,6 +45,72 @@ extern "C"
 // #include <sys/types.h>
 #include <unistd.h>
 
+/**
+ * Macro to measure the time spend by function_to_call.
+ * char*::print_comment: comment to be concatenated to the elapsed time.
+ */
+#define __TIMING__
+#define __TIMING_NO_RETURN__
+#define __NETWORK_TIMING__
+
+#ifdef __TIMING__
+#define TIMING(function_to_call, print_comment, type, thread_id)            \
+    ({                                                                      \
+        clock_t t;                                                          \
+        double time_taken;                                                  \
+        type ret;                                                           \
+        t = clock();                                                        \
+        ret = function_to_call;                                             \
+        t = clock() - t;                                                    \
+        time_taken = ((double)t) / (CLOCKS_PER_SEC);                        \
+        slog_time("%d,TIMING,%f,%s", thread_id, time_taken, print_comment); \
+        ret;                                                                \
+    })
+#else
+#define TIMING(function_to_call, print_comment, type) \
+    ({                                                \
+        function_to_call;                             \
+    })
+#endif
+
+#ifdef __TIMING_NO_RETURN__
+#define TIMING_NO_RETURN(function_to_call, print_comment, thread_id)        \
+    ({                                                                      \
+        clock_t t;                                                          \
+        double time_taken;                                                  \
+        t = clock();                                                        \
+        function_to_call;                                                   \
+        t = clock() - t;                                                    \
+        time_taken = ((double)t) / (CLOCKS_PER_SEC);                        \
+        slog_time("%d,TIMING,%f,%s", thread_id, time_taken, print_comment); \
+    })
+#else
+#define TIMING_NO_RETURN(function_to_call, print_comment) \
+    ({                                                    \
+        function_to_call;                                 \
+    })
+#endif
+
+#ifdef __NETWORK_TIMING__
+#define NETWORK_TIMING(function_to_call, print_comment, type)  \
+    ({                                                         \
+        clock_t t;                                             \
+        double time_taken;                                     \
+        type ret;                                              \
+        t = clock();                                           \
+        ret = function_to_call;                                \
+        t = clock() - t;                                       \
+        time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
+        slog_time(",TIMING,%f,%s", time_taken, print_comment); \
+        ret;                                                   \
+    })
+#else
+#define NETWORK_TIMING(function_to_call, print_comment, type) \
+    ({                                                        \
+        function_to_call;                                     \
+    })
+#endif
+
 /*
  * SOURCE_THROW_LOCATION macro returns string which
  * points to the file, as well as, the corresponding line
@@ -73,6 +139,7 @@ extern "C"
 #define SLOG_FULL 9
 #define SLOG_READ 10
 
+// Comment the following line to remove logs calls on compilation time.
 #define USESLOG
 #ifdef USESLOG
 #define slog_none(...) \
@@ -224,6 +291,13 @@ extern "C"
      * RETURN: (void)
      */
     void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int debugColor, int filestamp, int t_safe, unsigned int rank);
+
+    /**
+     * @brief Close the file descriptor of the log file.
+     * This function is added to preven opening and closing the file
+     * every time a message is appended.
+     */
+    // void slog_close();
 
     /*
      * FUNCTION: getLevel.

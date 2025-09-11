@@ -1,6 +1,7 @@
 #ifndef IMSS_WRAP_
 #define IMSS_WRAP_
 
+#include <glib.h>
 #include <stdint.h>
 #include <ucp/api/ucp.h>
 #include "comms.h"
@@ -58,69 +59,10 @@ static uint64_t BLOCK_SIZE;
 #define DPRINT(...)
 #endif
 
-/**
- * Macro to measure the time spend by function_to_call.
- * char*::print_comment: comment to be concatenated to the elapsed time.
- */
-#define __TIMING__
-
-#ifdef __TIMING__
-#define TIMING(function_to_call, print_comment, type)          \
-	({                                                         \
-		clock_t t;                                             \
-		double time_taken;                                     \
-		type ret;                                              \
-		t = clock();                                           \
-		ret = function_to_call;                                \
-		t = clock() - t;                                       \
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
-		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
-		ret;                                                   \
-	})
-#else
-#define TIMING(function_to_call, print_comment, type) \
-	({                                                \
-		function_to_call;                             \
-	})
-#endif
-
-#ifdef TIMING_NO_RETURN
-#define TIMING_NO_RETURN(function_to_call, print_comment)      \
-	({                                                         \
-		clock_t t;                                             \
-		double time_taken;                                     \
-		t = clock();                                           \
-		function_to_call;                                      \
-		t = clock() - t;                                       \
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
-		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
-	})
-#else
-#define TIMING_NO_RETURN(function_to_call, print_comment) \
-	({                                                    \
-		function_to_call;                                 \
-	})
-#endif
-
-#ifdef NETWORK_TIMING
-#define NETWORK_TIMING(function_to_call, print_comment, type)  \
-	({                                                         \
-		clock_t t;                                             \
-		double time_taken;                                     \
-		type ret;                                              \
-		t = clock();                                           \
-		ret = function_to_call;                                \
-		t = clock() - t;                                       \
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);           \
-		slog_time(",TIMING,%f,%s", time_taken, print_comment); \
-		ret;                                                   \
-	})
-#else
-#define NETWORK_TIMING(function_to_call, print_comment, type) \
-	({                                                        \
-		function_to_call;                                     \
-	})
-#endif
+// GHashMap functions.
+// int replace_dataset_entry_key(const char *old_uri, const char *new_uri);
+gboolean replace_uri_base_path_dir(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
+gboolean replace_uri_base_path_regular_file(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
 
 int32_t get_data_location(int32_t, int32_t, int32_t);
 
@@ -182,8 +124,8 @@ typedef struct
 	// URI identifying a certain dataset.
 	char uri_[URI_];
 	// Byte specifying the type of structure.
-	// L = Local, D = Distributed.
-	char type; // = 'D';
+	// R = Regular file, D = Directory, I = Hercules instance.
+	char type; 
 	// Policy that was followed in order to write the dataset.
 	char policy[MAX_POLICY_LEN];
 	// Original name when the data was created for the first time, need it for policy CRC16_ in distributed operation rename
@@ -205,7 +147,7 @@ typedef struct
 	int32_t local_conn;
 	// Actual size
 	int64_t size;
-	
+
 	// N_servers
 	int32_t n_servers;
 	/*************** USED EXCLUSIVELY BY LOCAL DATASETS ***************/
@@ -279,7 +221,7 @@ RETURNS:	> 0 - Number of items contained by the specified URI.
 WARNING:	The get_dir function allocates memory (performs malloc operations). Therefore, the provided pointers (*buffer & *items) MUST BE FREED once done.
 	 */
 	// FIXME: fix implementation for multiple servers.
-	uint32_t get_dir(char *requested_uri, char **buffer, char ***items);
+	uint32_t get_dir(std::string requested_uri_obj, char ***items);
 
 	/****************************************************************************************************************************/
 	/************************************** IN-MEMORY STORAGE SYSTEM MANAGEMENT FUNCTIONS ***************************************/
@@ -388,7 +330,7 @@ link           - It is a link.
 RETURNS:	> 0 - Number identifying the created dataset among the client's session.
 -1 - In case of error.
 	 */
-	int32_t create_dataset(char *dataset_uri, char *policy, int32_t num_data_elem, int32_t data_elem_size, int32_t repl_factor, int32_t repl_type, int32_t n_servers, char *link, int opened);
+	int32_t create_dataset(char *dataset_uri, char *policy, int32_t num_data_elem, int32_t data_elem_size, int32_t repl_factor, int32_t repl_type, int32_t n_servers, char *link, int opened, char file_type);
 
 	/* Method creating the required resources in order to READ and WRITE an existing dataset.
 
@@ -405,7 +347,7 @@ RETURNS:	> 0 - Number identifying the retrieved dataset among the client's sessi
 
 RETURNS:	 0 - Release operation took place successfully.
 -1 - In case of error.*/
-	int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id);
+	int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id, int is_dir);
 
 	int32_t close_dataset(const char *dataset_uri, int fd);
 
@@ -456,7 +398,8 @@ provided by the create_dataset or open_dataset method.
 RETURNS:	 0 - Release operation took place successfully.
 -1 - In case of error.
 	 */
-	int32_t release_dataset(int32_t dataset_id);
+	// int32_t release_dataset(int32_t dataset_id);
+	int32_t release_dataset(const char *dataset_uri);
 
 	/* Method retrieving information related to a certain dataset.
 
@@ -483,7 +426,8 @@ The current function does not allocate memory.
 
 	// Method retrieving a multiple datasets
 	int32_t
-	readv_multiple(int32_t dataset_id,
+	readv_multiple(char *dataset_uri,
+				   int32_t dataset_id,
 				   int32_t curr_block,
 				   int32_t prefetch,
 				   char *buffer,
@@ -501,11 +445,11 @@ The current function does not allocate memory.
 	 * @param buffer     - Memory address where the requested block will be
 	 * received. WARNING: memory must have been allocated.
 	 * @param offset	 - Offset of the requested block.
-	 * @returns 0 if the requested block was successfully retrieved, 0 if the
-	 * requested block was not find in the remote server, or -1 in case of
+	 * @returns "msg_length" if the requested block was successfully retrieved, -1 if the
+	 * requested block was not find in the remote server, or -2 in case of
 	 * error.
 	 */
-	ssize_t get_ndata(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
+	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
 
 	/**
 	 * @brief Method used during malleability to retrieving a data element
@@ -534,13 +478,13 @@ offset     - Offset within the block.
 RETURNS:	 0 - The requested block was successfully stored.
 -1 - In case of error.
 	 */
-	int32_t set_data(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset);
+	int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset);
 
-	int32_t set_data_mall(int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
+	int32_t set_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
 
 	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server);
 
-	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char* key);
+	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char *key);
 
 	int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const char *request);
 
@@ -570,7 +514,8 @@ char ** locations = get_dataloc(datasetd, data_id, &num_storages);
 	 */
 
 	int32_t
-	set_ndata(int32_t dataset_id,
+	set_ndata(char *dataset_uri,
+			  int32_t dataset_id,
 			  int32_t data_id,
 			  char *buffer,
 			  uint32_t size);
@@ -593,11 +538,10 @@ RETURNS:	0 - No entity associated to the URI provided exists.
 2 - The URI provided corresponds to a dataset.
 -1 - In case of error.
 	 */
-	int32_t get_type(const char *uri);
+	char get_type(const char *uri);
 
 	// Method retriving list of servers to read.
-	int32_t
-	split_location_servers(int **list_servers, int32_t dataset_id, int32_t curr_blk, int32_t end_blk);
+	int32_t split_location_servers(char *dataset_uri, int **list_servers, int32_t dataset_id, int32_t curr_blk, int32_t end_blk);
 
 	// Method writing multiple data to a specific server
 
@@ -640,9 +584,16 @@ RETURNS:	0 - Resources were released successfully.
 
 	int32_t imss_comm_cleanup();
 
-	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
+	int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root);
+	int32_t release_network_resources(const char *imss_uri, int is_parent, int process_rank);
 
 	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
+	int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir);
+	int ConcatLastSlash(std::string &pathname);
+	int ConcatLastSlashC(char *pathname);
+	int RemoveLastSlash(std::string &pathname);
+	int RemoveLastSlashC(char *pathname);
+
 
 	/**
 	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.

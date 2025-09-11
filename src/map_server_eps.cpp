@@ -18,14 +18,22 @@ void *map_server_eps_create()
 	return reinterpret_cast<void *>(new map_server_eps_t);
 }
 
+void map_server_eps_destroy(void *map)
+	{
+		if (map)
+		{
+			delete reinterpret_cast<map_server_eps_t *>(map);
+		}
+	}
+
 void map_server_eps_put(void *map, uint64_t uuid, ucp_ep_h ep)
 {
 	map_server_eps_t *m = reinterpret_cast<map_server_eps_t *>(map);
-	// std::unique_lock<std::mutex> lock(mut_eps);
+	std::unique_lock<std::mutex> lock(mut_eps);
 
 	m->insert(std::pair<uint64_t, ucp_ep_h>(uuid, ep));
 
-	slog_debug("\t[map_server_eps]['%" PRIu64 "'] Adding new connection, #%ld", uuid, m->size());
+	slog_debug("\t['%" PRIu64 "'] Adding new connection, #%ld", uuid, m->size());
 	// fprintf(stderr, "\t[%c]['%" PRIu64 "'] Adding new connection, #%ld\n", server_type, uuid, m->size());
 }
 
@@ -34,13 +42,13 @@ void map_server_eps_erase(void *map, uint64_t uuid, ucp_worker_h ucp_worker)
 	map_server_eps_t *m = reinterpret_cast<map_server_eps_t *>(map);
 	// Count the number of elements in the map
 	// size_t prev_elements = m->size();
-	// std::unique_lock<std::mutex> lock(mut_eps);
+	std::unique_lock<std::mutex> lock(mut_eps);
 
 	auto search = m->find(uuid);
 
 	// TODO
 	//  close ep if found
-	// if (search != m->end())
+	if (search != m->end())
 	{
 		// ucp_ep_flush(search->second);
 		// ucp_ep_close_nb(search->second, UCP_EP_CLOSE_MODE_FLUSH);
@@ -49,7 +57,9 @@ void map_server_eps_erase(void *map, uint64_t uuid, ucp_worker_h ucp_worker)
 		// * ep = search->second;
 		// * ucp_worker_progress(ucp_worker);
 		// * ep_close(ucp_worker, ep, UCP_EP_CLOSE_MODE_FLUSH);
-		// ucp_ep_destroy(search->second);
+		// * ucp_ep_destroy(search->second);
+		// fprintf(stdout,"Deleting ep %p\n", search->second);
+		close_ucx_endpoint(ucp_worker, search->second);
 	}
 	m->erase(uuid);
 	// size_t after_elements = m->size();

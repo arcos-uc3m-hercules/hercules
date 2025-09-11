@@ -1,0 +1,2 @@
+
+{ ./exportHerculesIORSummary.sh 10 && ./exportDiskTimes.sh 160; } > LOCAL_FPP.txt

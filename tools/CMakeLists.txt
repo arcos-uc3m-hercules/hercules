@@ -22,9 +22,9 @@ set(CMAKE_CXX_FLAGS "-fPIC")
 # set(CMAKE_BUILD_TYPE Debug)
 # set(CMAKE_BUILD_TYPE RelWithDebInfo)
 
-add_library(hercules_posix_api STATIC ../fuse/imss_posix_api.c ../fuse/map.cpp ../fuse/mapprefetch.cpp ../src/slog.c)
+add_library(hercules_posix_api STATIC ../fuse/imss_posix_api.c ../fuse/map.cpp ../fuse/hierarchical_map.cpp ../fuse/mapprefetch.cpp ../src/slog.c ../src/utils.c)
 
-add_library (hercules_posix SHARED imss_posix.c mapfd.cpp flags.c resolvepath.c ../fuse/map.cpp ../src/slog.c ../src/cfg_parse.c )
+add_library (hercules_posix SHARED imss_posix.c mapfd.cpp flags.c resolvepath.c ../fuse/map.cpp ../fuse/hierarchical_map.cpp ../src/slog.c ../src/cfg_parse.c ../src/utils.c)
 
 target_include_directories(hercules_posix PRIVATE ../fuse  .)
 
@@ -34,7 +34,7 @@ target_link_directories(hercules_posix PUBLIC ${UCX_LIBRARIES})
 
 # target_link_libraries(mount.hercules  ${CMAKE_THREAD_LIBS_INIT} ${GLIB_LIBRARIES} imss_static)
 # target_link_libraries(umount.hercules ${CMAKE_THREAD_LIBS_INIT} ${GLIB_LIBRARIES} imss_static)
-target_link_libraries(hercules_posix ${CMAKE_THREAD_LIBS_INIT} ${GLIB_LIBRARIES} hercules_posix_api imss_shared dl -g -fbounds-check -Wl,--no-undefined)
+target_link_libraries(hercules_posix ${CMAKE_THREAD_LIBS_INIT} ${GLIB_LIBRARIES} hercules_posix_api imss_shared dl -fbounds-check -Wl,--no-undefined)
 
 
 install(TARGETS hercules_posix DESTINATION lib)

@@ -79,6 +79,8 @@ uint32_t get_policy_number(const char *policy_string)
 		return -1;
 	}
 
+	slog_debug("policy_string=%s, session_policy=%d", policy_string, session_policy);
+
 	return session_policy;
 }
 
@@ -111,7 +113,7 @@ int32_t set_policy_dataset(dataset_info *dataset)
 // 	return session_plcy;
 // }
 
-int32_t RoundRobin(int32_t n_servers, int32_t n_msg, char *fname)
+int32_t RoundRobin(int32_t n_servers, int32_t n_msg, const char *fname)
 {
 	int32_t next_server = -1;
 	uint16_t crc_ = 0;
@@ -165,7 +167,7 @@ int32_t RoundRobin(int32_t n_servers, int32_t n_msg, char *fname)
 // 	return next_server;
 // }
 
-int32_t Hashed(int32_t n_servers, int32_t n_msg, char *fname)
+int32_t Hashed(int32_t n_servers, int32_t n_msg, const char *fname)
 {
 	int32_t next_server = 0;
 	// Key identifying the current to-be-sent file block.
@@ -190,7 +192,7 @@ int32_t Hashed(int32_t n_servers, int32_t n_msg, char *fname)
 	return next_server;
 }
 
-int32_t CRC(int32_t n_servers, char *fname, int32_t bytes_)
+int32_t CRC(int32_t n_servers, const char *fname, int32_t bytes_)
 {
 	int32_t next_server = -1;
 	char key[strlen(fname) + 64];
@@ -206,22 +208,25 @@ int32_t CRC(int32_t n_servers, char *fname, int32_t bytes_)
 	return next_server;
 }
 
+/** 
+ * @deprecated
+ */
 void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
 {
 	// Dataset metadata request.
 	dataset_info new_dataset;
-	int32_t stat_dataset_res = 0;
+	int32_t stat_dataset_res = -2;
 	if (server_type == TYPE_DATA_SERVER)
 	{
 		stat_dataset_res = stat_dataset(fname, &new_dataset, 0);
 	}
 	char *tmp = NULL;
-	if (stat_dataset_res == 0)
-	{
+	if (stat_dataset_res == -2)
+	{ // dataset does not exists, we will use the provided fname.
 		tmp = (char *)fname;
 	}
 	else
-	{
+	{ // original name is used in case the file was renamed.
 		tmp = new_dataset.original_name;
 	}
 	snprintf(passed_name, PATH_MAX, "%s", tmp);
@@ -230,7 +235,12 @@ void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
 	if (passed_name == NULL)
 	{
 		perror("HERCULES_ERR_FIND_SERVER_GETTING_FILE_NAME");
+		slog_error("HERCULES_ERR_FIND_SERVER_GETTING_FILE_NAME");
 	}
+	// if (!strcmp(fname, "imss://test-dir.0-0/mdtest_tree.0.0/file.mdtest.0.0"))
+	// {
+	// 	fprintf(stderr, "passed name = %s, stat_dataset_res=%d\n", passed_name, stat_dataset_res);
+	// }
 }
 
 /**
@@ -246,17 +256,24 @@ int32_t find_server(
 	int32_t session_plcy)
 {
 	int32_t next_server = -1;
-	char passed_name[PATH_MAX];
+	// TODO: delete passed_name from all functions.
+	// char passed_name[PATH_MAX] = {0};
+
+	// if (!strcmp(fname, "imss://test-dir.0-0/mdtest_tree.0.0/file.mdtest.0.0"))
+	// {
+	// 	fprintf(stderr, "fname = %s, session_plcy=%d\n", passed_name, session_plcy);
+	// }
 
 	switch (session_plcy)
 	{
 	// Follow a round robin policy.
 	case ROUND_ROBIN_:
 	{
-		FindNameForPolicy(fname, passed_name, server_type);
-		if (passed_name != NULL)
+		// FindNameForPolicy(fname, passed_name, server_type);
+		// if (passed_name != NULL)
 		{
-			next_server = RoundRobin(n_servers, n_msg, passed_name);
+			// next_server = RoundRobin(n_servers, n_msg, passed_name);
+			next_server = RoundRobin(n_servers, n_msg, fname);
 		}
 	}
 	break;
@@ -275,33 +292,36 @@ int32_t find_server(
 	// Follow a hashed distribution.
 	case HASHED_:
 	{
-		FindNameForPolicy(fname, passed_name, server_type);
-		if (passed_name != NULL)
-		{
-			next_server = Hashed(n_servers, n_msg, passed_name);
-		}
+		// FindNameForPolicy(fname, passed_name, server_type);
+		// if (passed_name != NULL)
+		// {
+		// next_server = Hashed(n_servers, n_msg, passed_name);
+		next_server = Hashed(n_servers, n_msg, fname);
+		// }
 	}
 	break;
 
 	// Following another hashed distribution using Redis's CRC16.
 	case CRC16_:
 	{
-		FindNameForPolicy(fname, passed_name, server_type);
-		if (passed_name != NULL)
-		{
-			next_server = CRC(n_servers, passed_name, 16);
-		}
+		// FindNameForPolicy(fname, passed_name, server_type);
+		// if (passed_name != NULL)
+		// {
+		// 	next_server = CRC(n_servers, passed_name, 16);
+		next_server = CRC(n_servers, fname, 16);
+		// }
 	}
 	break;
 
 	// Following another hashed distribution using Redis's CRC64.
 	case CRC64_:
 	{
-		FindNameForPolicy(fname, passed_name, server_type);
-		if (passed_name != NULL)
-		{
-			next_server = CRC(n_servers, passed_name, 64);
-		}
+		// FindNameForPolicy(fname, passed_name, server_type);
+		// if (passed_name != NULL)
+		// {
+		// 	next_server = CRC(n_servers, passed_name, 64);
+		next_server = CRC(n_servers, fname, 64);
+		// }
 	}
 	break;
 
@@ -363,7 +383,8 @@ int32_t find_server(
 	default:
 		break;
 	}
-	slog_debug("session_plcy=%ld, fname=%s, next_server=%d, n_servers=%d, passed_name=%s", session_plcy, fname, next_server, n_servers, passed_name);
+	// slog_debug("session_plcy=%ld, fname=%s, next_server=%d, n_servers=%d, passed_name=%s", session_plcy, fname, next_server, n_servers, passed_name);
+	slog_debug("session_plcy=%ld, fname=%s, next_server=%d, n_servers=%d", session_plcy, fname, next_server, n_servers);
 	// slog_debug("fnameadd=%p, passed_nameadd=%p", fname, passed_name);
 
 	// "next_server" must be a value between 0 and n_servers-1.
