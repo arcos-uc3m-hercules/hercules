@@ -9,6 +9,7 @@
 // #include "hercules.hpp"
 #include <memory>
 
+// Backend operations.
 #define READ_OP 0
 #define GETDIR 1
 #define RELEASE 2
@@ -19,8 +20,9 @@
 #define CLOSE_OP 7
 #define OPEN_OP 8
 // #define STATFS			  7
-#define DATASET_OP 8
+// #define DATASET_OP 8
 #define INSTANCE_OP 9
+#define PERFORMANCE_OP 10
 
 #define WRITE_OP 1
 #define WRITEV 7
@@ -34,9 +36,10 @@
 #define LOCAL_DATASET_UPDATE 0
 
 #define KB 1024
+#define MB 1048576
 #define GB 1073741824
 
-//#define MAX_THREAD_POOL_SIZE 16
+// #define MAX_THREAD_POOL_SIZE 16
 extern void *hierarchical_map;
 
 // Set of arguments passed to each server thread.
@@ -67,11 +70,12 @@ typedef struct
 } p_argv;
 
 // Structure to pass arguments to the client handling thread (Dispatcher).
-typedef struct {
-    int client_socket;
-    uint32_t client_id_counter; // To maintain the client_id_ for modulo operation
-    u_int16_t hercules_thread_pool_size;
-    // Add other necessary arguments here (e.g., local_addr, local_addr_len, slog functions if not global)
+typedef struct
+{
+	int client_socket;
+	uint32_t client_id_counter; // To maintain the client_id_ for modulo operation
+	u_int16_t hercules_thread_pool_size;
+	// Add other necessary arguments here (e.g., local_addr, local_addr_len, slog functions if not global)
 } client_handler_args;
 
 // Thread method attending client data requests.
@@ -95,7 +99,7 @@ void *HandleClient(void *args);
 
 /**
  * @brief Function to write on disk the status of an Hercules process.
- * 
+ *
  * @param tmp_file_path pathname where the file will be written.
  * @param msg string message to be written in the file.
  * @return int, 0 if the file was correctly write, -1 on error.

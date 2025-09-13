@@ -294,7 +294,6 @@ extern "C"
 	 */
 	size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len, char *req)
 	{
-
 		ucs_status_t status = UCS_OK;
 		struct ucx_context *request;
 		size_t msg_len = 0;

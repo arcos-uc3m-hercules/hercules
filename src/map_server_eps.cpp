@@ -19,12 +19,12 @@ void *map_server_eps_create()
 }
 
 void map_server_eps_destroy(void *map)
+{
+	if (map)
 	{
-		if (map)
-		{
-			delete reinterpret_cast<map_server_eps_t *>(map);
-		}
+		delete reinterpret_cast<map_server_eps_t *>(map);
 	}
+}
 
 void map_server_eps_put(void *map, uint64_t uuid, ucp_ep_h ep)
 {
@@ -86,4 +86,9 @@ int map_server_eps_search(void *map, uint64_t uuid, ucp_ep_h *ep)
 	{
 		return -1;
 	}
+}
+
+size_t map_server_eps_get_size(void *map)
+{
+	return reinterpret_cast<map_server_eps_t *>(map)->size();
 }

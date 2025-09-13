@@ -7,6 +7,7 @@
 #include "comms.h"
 // to manage logs.
 #include "slog.h"
+#include "performance_records.hpp"
 
 // Maximum number of bytes assigned to a dataset or IMSS URI.
 #define URI_ 256
@@ -44,6 +45,24 @@
 
 extern int32_t IMSS_DEBUG;
 static uint64_t BLOCK_SIZE;
+
+/* UCP objects */
+extern ucp_context_h ucp_context_client; // = (ucp_context_h)NULL;
+extern ucp_worker_h ucp_worker_meta;	  // = (ucp_worker_h)NULL;
+extern ucp_worker_h ucp_worker_data;	  // = (ucp_worker_h)NULL;
+extern ucp_address_t **stat_addr;
+extern ucp_ep_h *stat_eps;
+
+/* TCP variables. */
+extern char client_node[512];	 // Node name where the client is running.
+extern int32_t len_client_node; // Length of the previous node name.
+extern char client_ip[16];		 // IP number of the node where the client is taking execution.
+
+// /* Hercules objects */
+// extern imss curr_imss;
+
+
+
 
 #ifndef MAX
 #define MAX(x, y) ((x > y) ? x : y)
@@ -240,14 +259,6 @@ RETURNS:	 0 - Initialization procedure was successfully performed.
 	 */
 	// int32_t init_imss(char *imss_uri, char *hostfile, char *meta_hostfile, int32_t n_servers, uint16_t conn_port, uint64_t buff_size, uint32_t deployment, const char *binary_path, uint16_t meta_port);
 
-	/* Method initializing the required resources to make use of an existing IMSS.
-
-RECEIVES:	imss_uri - URI assigned to the IMSS instance that the client desires to connect.
-
-RETURNS:	 0 - Resources successfully initialized. Communication channels created.
--1 - In case of error.
--2 - The imss instance has been already opened or created.
-	 */
 	int32_t open_imss(char *imss_uri);
 
 	/* Method releasing client-side and/or server-side resources related to a certain IMSS instance.

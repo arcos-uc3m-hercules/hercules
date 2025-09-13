@@ -663,7 +663,7 @@ char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, void *hierarchical_
 	pthread_mutex_lock(&tree_mut);
 	slog_debug("Locking tree_mut for g_node_n_children");
 	uint32_t num_children = g_node_n_children(dir_node);
-	slog_debug("Releasing tree_mut for g_node_n_children");
+	slog_debug("Releasing tree_mut for g_node_n_children, num_children=%d", num_children);
 	pthread_mutex_unlock(&tree_mut);
 	// fprintf(stdout,"Number of files in node %p, %s: %d\n", dir_node, (char * )dir_node->data, num_children);
 	// g_node_children_foreach(dir_node, G_TRAVERSE_ALL, print_child_node, NULL);

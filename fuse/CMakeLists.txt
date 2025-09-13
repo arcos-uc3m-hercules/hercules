@@ -1,6 +1,6 @@
-# set_source_files_properties( ../src/imss.c ../src/hercules.cpp ../src/shared_memory.c PROPERTIES LANGUAGE CXX)
-# set_source_files_properties(../tools/imss_posix.c imss_posix_api.c ../src/imss.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX)
 set_source_files_properties(../tools/imss_posix.c imss_posix_api.c ../src/imss.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX)
+set_source_files_properties(../tools/monitor.c imss_posix_api.c ../src/imss.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX)
+
 
 add_executable(imssfs
     map.cpp

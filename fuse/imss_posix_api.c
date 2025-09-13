@@ -2048,14 +2048,20 @@ extern "C"
 		// slog_debug("Calling imss_flush_data");
 		// imss_flush_data();
 		// slog_debug("Ending imss_flush_data");
+
+		// Updates block 0 on the data server.
 		ds = imss_release(path);
 		slog_debug("Ending imss_release, ret=%d", ds);
+		// Closes the dataset on the metadata servers.
 		ret = close_dataset(path, fd);
 		slog_debug("Ending close_dataset, ret=%d", ret);
 		if (ret)
 		{ // if the file was not deleted by the close we update the stat.
 			// imss_refresh is too slow.
 			// When we remove it pass from 3.45 sec to 0.008505 sec.
+			// TO CHECK: imss_refresh do same actions as like_release 
+			// but it adds HierarchicalMapUpdate. Maybe imss_refresh  
+			// could be removed if imss_release has HierarchicalMapUpdate.
 			imss_refresh(path);
 			slog_debug("Ending imss_refresh");
 		}
@@ -2066,10 +2072,15 @@ extern "C"
 			HierarchicalMapErase(hierarchical_map, path);
 		}
 
+		// Sends the performance metrics to the metadata server.
+		
+
 		// TODO: Tell data server the file is ready to be copied to disk.
 
 		return ret;
 	}
+
+
 
 	int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened, char file_type)
 	{

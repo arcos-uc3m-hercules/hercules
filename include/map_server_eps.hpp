@@ -15,5 +15,6 @@ void map_server_eps_destroy(void *map);
 void    map_server_eps_put(void * map, uint64_t uuid, ucp_ep_h ep);
 void    map_server_eps_erase(void * map, uint64_t uuid, ucp_worker_h ucp_worker);
 int     map_server_eps_search(void * map, uint64_t uuid, ucp_ep_h *ep);
+size_t map_server_eps_get_size(void *map);
 
 #endif
