@@ -597,6 +597,7 @@ RETURNS:	0 - Resources were released successfully.
 
 	int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root);
 	int32_t release_network_resources(const char *imss_uri, int is_parent, int process_rank);
+	int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_parent, int server_id_to_remove, int current_number_of_servers);
 
 	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
 	int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir);

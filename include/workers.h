@@ -52,8 +52,10 @@ typedef struct
 	char *pt;
 	// Integer specifying the port that a certain thread will listen to.
 	uint64_t port;
-	// URI assigned to the current IMSS instance.
+	// URI assigned to the current HERCULES instance.
 	char my_uri[URI_];
+	// Pointer to the struct related to the current HERCULES istance.
+	imss_info *hercules_info_struct = NULL;
 	int64_t total_size;
 	ucp_context_h ucp_context;
 	ucp_worker_h ucp_worker;

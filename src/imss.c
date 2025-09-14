@@ -977,12 +977,11 @@ uint32_t get_dir(std::string requested_uri_obj, char ***items)
 	// ConcatLastSlash(requested_uri_obj);
 
 	const char *requested_uri = NULL;
-	requested_uri = requested_urifind_server_obj.c_str();
+	requested_uri = requested_uri_obj.c_str();
 
 	int ret = 0;
 	// Discover the metadata server that shall deal with the former URI.
 	// uint32_t m_srv = discover_stat_srv(requested_uri);
-	// m_srv = find_server(n_stat_servers, 0, requested_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
 	char first_parent_dir[URI_] = {0};
 	uint32_t m_srv = 0;
 	int number_metadata_servers = 0;
@@ -1266,13 +1265,6 @@ int32_t open_imss(char *imss_uri)
 
 	for (int32_t i = 0; i < new_imss.info.num_storages; i++)
 	{
-		// fprintf(stderr, "node=%s, status=%d\n", new_imss.info.ips[i], new_imss.info.status[i]);
-		// if (new_imss.info.status[i] == 0)
-		// {
-		// 	// fprintf(stderr, "Skipping - i=%d - %s:%d, status=%d, num active storages=%d, total storages=%d\n", i, new_imss.info.ips[i], new_imss.info.conn_port, new_imss.info.status[i], new_imss.info.num_active_storages, new_imss.info.num_storages);
-		// 	// num_down_storages++;
-		// 	continue;
-		// }
 
 		int oob_sock = -1;
 		size_t addr_len = 0;
@@ -1428,6 +1420,81 @@ int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t 
 		exit(1);
 	}
 
+	return 0;
+}
+
+int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_parent, int server_id_to_remove, int current_number_of_servers)
+{
+	imss local_imss_;
+	imss *imss_;
+	int32_t imss_position = -1;
+	char release_msg_data[] = "GET 2 0 RELEASE\0";
+	char release_msg_metadata[REQUEST_SIZE] = {0};
+
+	if ((imss_position = find_imss(imss_uri, &local_imss_)) == -1)
+	{
+		perror("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_FIND_IMSS");
+		slog_error("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_FIND_IMSS");
+		return -1;
+	}
+	// get the pointer to modify it.
+	imss_ = &g_array_index(imssd, imss, imss_position);
+
+	// Release the set of connections to the corresponding IMSS.
+	slog_live("imss_position=%d, num_active_storages=%d", imss_position, imss_->info.num_active_storages);
+	ucp_ep_h ep;
+	// for (int32_t i = 0; i < imss_.info.num_active_storages; i++)
+	int i = server_id_to_remove;
+	ep = imss_->conns.eps[i];
+	if (is_parent)
+	{
+		flush_ep(ucp_worker_data, ep);
+		slog_live("release_msg=%s to server %d", release_msg_data, i);
+		// close the endpoint in the server side.
+		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, release_msg_data) == 0)
+		{
+			perror("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_SEND_REQ");
+			slog_error("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_SEND_REQ");
+			return -1;
+		}
+	}
+	close_ucx_endpoint(ucp_worker_data, ep);
+	free(imss_->info.ips[i]);
+	free(imss_->conns.peer_addr[i]);
+	// free(imss_->conns.eps[server_id_to_remove]);
+
+	size_t num_elements_to_shift = imss_->info.num_storages - server_id_to_remove - 1;
+	// sort the ips array.
+	memmove(&imss_->info.ips[server_id_to_remove],
+			&imss_->info.ips[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(char *));
+
+	// sort the peer addresses array.
+	memmove(&imss_->conns.peer_addr[server_id_to_remove],
+			&imss_->conns.peer_addr[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(ucp_address_t *));
+
+	// sort the endpoints array.
+	memmove(&imss_->conns.eps[server_id_to_remove],
+			&imss_->conns.eps[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(ucp_ep_h));
+
+	imss_->info.ips[imss_->info.num_storages - 1] = NULL;
+	imss_->conns.peer_addr[imss_->info.num_storages - 1] = NULL;
+	imss_->conns.eps[imss_->info.num_storages - 1] = NULL;
+
+	// slog_debug("imss_ add=%p", &imss_->info.num_active_storages);
+	slog_debug("imss_->info.num_storages=%d", imss_->info.num_storages);
+	imss_->info.num_storages = current_number_of_servers; // imss_->info.num_storages - 1;
+	imss_->info.num_active_storages = imss_->info.num_storages;
+	// imss_->info.num_active_storages = imss_->info.num_active_storages - 1;
+	curr_imss = *imss_;
+	for (size_t j = 0; j < current_number_of_servers; j++)
+	{
+		slog_debug("eps[%d] address=%p", j, imss_->conns.eps[j]);
+	}
+
+	slog_debug("curr_imss.info.num_active_storages=%d, curr_imss.info.num_storages=%d", curr_imss.info.num_active_storages, curr_imss.info.num_storages);
 	return 0;
 }
 
@@ -2387,6 +2454,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 		ret = 1;
 	}
 	free(result);
+	result = NULL;
 
 	// Send performance metrics.
 	if (backend_performance_metrics.empty())
@@ -2396,7 +2464,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 
 	sprintf(formated_uri, "%" PRIu32 " SETPERFORMANCE %d %s", stat_ids[m_srv], PERFORMANCE_OP, dataset_uri);
 
-	pthread_mutex_lock(&lock_network);
+	// pthread_mutex_lock(&lock_network);
 
 	slog_debug("[IMSS] formated_uri='%s'", formated_uri);
 	msg_length = send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri);
@@ -2461,12 +2529,51 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	}
 
 	// size_t num_performance_entries = backend_performance_metrics.size();
+	// Send the struct of the performance metrics in a serializate way.
 	if (send_data(ucp_worker_meta, ep, buffer_metrics_ser.data(), total_size, local_meta_uid) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
 		perror("ERR_HERCULES_SPLIT_READV_SEND_DATA");
 		slog_error("ERR_HERCULES_SPLIT_READV_SEND_DATA");
 		pthread_exit(NULL);
+	}
+
+	// Wait for the metadata server to get the current number of data servers.
+	// This value can change due malleability operations.
+	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
+	slog_debug("[IMSS] get_recv_data_length, msg_length=%lu", msg_length);
+	if (msg_length == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		perror("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
+		slog_error("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
+		return -1;
+	}
+
+	result = malloc(msg_length);
+	msg_length = recv_data(ucp_worker_meta, ep, result, msg_length, local_meta_uid, 0);
+	slog_debug(" after recv_data, msg_length=%lu", msg_length);
+	if (msg_length == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		perror("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
+		slog_error("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
+		free(result);
+		return -1;
+	}
+	slog_debug(" result=%s, msg_length=%d", result, msg_length);
+	char message[PATH_MAX] = {'\0'};
+	int32_t current_number_of_data_servers = 0;
+	int32_t id_server_to_remove = 0;
+	// get the server id to remove.
+	sscanf((const char *)result, "%s %" PRId32 "%" PRId32 "", message, &current_number_of_data_servers, &id_server_to_remove);
+	slog_debug("message=%s, current_number_of_data_servers=%" PRId32 ", id_server_to_remove=%" PRId32 "", message, current_number_of_data_servers, id_server_to_remove);
+	// sort the array of ips and endpoints according to the new data servers number.
+	if (id_server_to_remove != -1)
+	{
+		// when the metadata server response with an ID != -1 it means
+		// that server will be shutting down.
+		ReleaseSpecificDataServerNetworkResources("imss://", 1, id_server_to_remove, current_number_of_data_servers);
 	}
 
 	pthread_mutex_unlock(&lock_network);
@@ -3106,22 +3213,23 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 	}
 
 	// char *curr_num_data_nodes = getenv("HERCULES_CURR_ACTIVE_DATA_NODES");
-	int curr_num_data_nodes_env = atoi(getenv("HERCULES_CURR_ACTIVE_DATA_NODES"));
-	// fprintf(stderr, "[++ HERCULES] curr_num_data_nodes_env=%d\n", curr_num_data_nodes_env);
-	int32_t old_num_storages = curr_imss.info.num_active_storages;
-	if (curr_num_data_nodes_env != curr_imss.info.num_active_storages)
-	{
-		stat_imss_info(curr_imss.info.uri_, &curr_imss.info);
-		fprintf(stderr, "HERCULES_CURR_ACTIVE_DATA_NODES=%d, old_num_storages=%d, num_active_storages=%d, uri=%s\n", curr_num_data_nodes_env, old_num_storages, curr_imss.info.num_active_storages, curr_imss.info.uri_);
-		// unsetenv("HERCULES_CURR_ACTIVE_DATA_NODES");
+	// int curr_num_data_nodes_env = atoi(getenv("HERCULES_CURR_ACTIVE_DATA_NODES"));
+	// // fprintf(stderr, "[++ HERCULES] curr_num_data_nodes_env=%d\n", curr_num_data_nodes_env);
+	// int32_t old_num_storages = curr_imss.info.num_active_storages;
+	// if (curr_num_data_nodes_env != curr_imss.info.num_active_storages)
+	// {
+	// 	stat_imss_info(curr_imss.info.uri_, &curr_imss.info);
+	// 	fprintf(stderr, "HERCULES_CURR_ACTIVE_DATA_NODES=%d, old_num_storages=%d, num_active_storages=%d, uri=%s\n", curr_num_data_nodes_env, old_num_storages, curr_imss.info.num_active_storages, curr_imss.info.uri_);
+	// 	// unsetenv("HERCULES_CURR_ACTIVE_DATA_NODES");
 
-		// for (int i = 0; i < curr_imss.info.num_storages; i++)
-		// {
-		// 	fprintf(stderr, "server %d status = %d\n", i, curr_imss.info.status[i]);
-		// }
-	}
+	// 	// for (int i = 0; i < curr_imss.info.num_storages; i++)
+	// 	// {
+	// 	// 	fprintf(stderr, "server %d status = %d\n", i, curr_imss.info.status[i]);
+	// 	// }
+	// }
 
 	int32_t server = -1;
+	slog_debug("curr_imss add=%p", &curr_imss.info.num_active_storages);
 	slog_live("curr_dataset.uri=%s,  curr_dataset.original_name=%s, curr_imss.info.num_storages=%d, curr_dataset.n_servers=%d, curr_imss.info.num_active_storages=%d, curr_dataset.n_servers_when_created=%d", curr_dataset.uri_, curr_dataset.original_name, curr_imss.info.num_storages, curr_dataset.n_servers, curr_imss.info.num_active_storages, curr_dataset.n_servers_when_created);
 	// Search for the server that is supposed to have the specified data element.
 	// slog_debug("curr_dataset.uri_=%s", curr_dataset.uri_);
@@ -3848,6 +3956,11 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	size_t msg_length = 0;
 	char mode[10] = {0};
 	pthread_mutex_lock(&lock_network);
+
+	for (size_t j = 0; j < curr_imss.info.num_active_storages; j++)
+	{
+		slog_debug("eps[%d] address=%p", j, curr_imss.conns.eps[j]);
+	}
 
 	// Request the concerned block to the involved servers.
 	for (int32_t i = 0; i < replication_factor; i++)

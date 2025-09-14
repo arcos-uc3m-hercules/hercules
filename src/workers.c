@@ -2404,48 +2404,70 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 			}
 
+			int32_t new_number_data_servers = arguments->hercules_info_struct->num_storages;
+			int32_t id_server_to_remove = -1;
 			// TODO: change this condition without hardcoding.
 			if (number_of_history_records == 1)
 			{
 				// Turn off the slowest server at this time.
 				fprintf(stderr, "At this time, the slowest server is %d\n", slowest_server_id);
 
-				if (HierarchicalMapGet(hierarchical_map, arguments->args.imss_uri, &address_, &block_size_rtvd))
+				if (arguments->hercules_info_struct == NULL)
 				{
-					slog_live("Hercules instance found: %s", key.c_str());
-					imss_info *imss_info_struct = (imss_info *)address_;
-					char *element_to_delete = imss_info_struct->ips[slowest_server_id];
-					free(element_to_delete);
-					size_t num_elements_to_shift = imss_info_struct->num_storages - slowest_server_id - 1;
-
-					// move the pointers.
-					memmove(&imss_info_struct->ips[slowest_server_id],
-							&imss_info_struct->ips[slowest_server_id + 1],
-							num_elements_to_shift * sizeof(char *));
-					// TODO: after removing memory protect from all the this block, we have to protect next pointer.
-					imss_info_struct->num_storages--;
-					int32_t new_number_data_servers = imss_info_struct->num_storages;
-					imss_info_struct->num_active_storages = new_number_data_servers;
-
-					char request[REQUEST_SIZE] = {0};
-					sprintf(request, "STOPSERVER %" PRIu32 "\0", new_number_data_servers);
-					fprintf(stderr,"Sending %s to server ID %d\n", request, new_number_data_servers);
-					if (send_req(arguments->ucp_worker, data_endpoints[slowest_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request) == 0)
-					// if (send_req(arguments->ucp_worker, new_imss.conns.eps[slowest_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request) == 0)
+					if (HierarchicalMapGet(hierarchical_map, arguments->args.imss_uri, &address_, &block_size_rtvd))
 					{
-						perror("HERCULES_ERR_SEND_REQ_SETSERVER");
-						slog_fatal("HERCULES_ERR_SEND_REQ_SETSERVER");
+						arguments->hercules_info_struct = (imss_info *)address_;
+					}
+					else
+					{
+						fprintf(stderr, "Hercules instance information has not been found.\n");
+						slog_error("Hercules instance information has not been found.");
 						return -1;
 					}
 				}
-				else
-				{
-					slog_live("Hercules instance NOT found (NOT POSIBLE!): %s", key.c_str());
-					fprintf(stderr, "** Hercules instance NOT found (NOT POSIBLE!): %s\n", key.c_str());
-				}
 
-				// sleep(5);
+				slog_live("Hercules instance found: %s", key.c_str());
+				imss_info *imss_info_struct = arguments->hercules_info_struct;
+				char *element_to_delete = imss_info_struct->ips[slowest_server_id];
+				free(element_to_delete);
+				size_t num_elements_to_shift = imss_info_struct->num_storages - slowest_server_id - 1;
+
+				// move the pointers.
+				memmove(&imss_info_struct->ips[slowest_server_id],
+						&imss_info_struct->ips[slowest_server_id + 1],
+						num_elements_to_shift * sizeof(char *));
+
+				imss_info_struct->ips[imss_info_struct->num_storages - 1] = NULL;
+
+				// TODO: after removing memory protect from all the this block, we have to protect next pointer.
+				imss_info_struct->num_storages--;
+				new_number_data_servers = imss_info_struct->num_storages;
+				imss_info_struct->num_active_storages = new_number_data_servers;
+
+				char request[REQUEST_SIZE] = {0};
+				sprintf(request, "STOPSERVER %" PRId32 "\0", new_number_data_servers);
+				fprintf(stderr, "Sending %s to server ID %d\n", request, new_number_data_servers);
+				if (send_req(arguments->ucp_worker, data_endpoints[slowest_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request) == 0)
+				// if (send_req(arguments->ucp_worker, new_imss.conns.eps[slowest_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request) == 0)
+				{
+					perror("HERCULES_ERR_SEND_REQ_SETSERVER");
+					slog_fatal("HERCULES_ERR_SEND_REQ_SETSERVER");
+					return -1;
+				}
+				id_server_to_remove = slowest_server_id;
 			}
+
+			char response[PATH_MAX] = {'\0'};
+			sprintf(response, "DATASERVERS %" PRId32 " %" PRId32 "", new_number_data_servers, id_server_to_remove);
+			int ret = -1;
+			ret = SendConfirmationMessage(arguments, response);
+			if (ret == 0)
+			{
+				perror("HERCULES_ERR_PUBLISH_DELETEMSG");
+				slog_error("HERCULES_ERR_PUBLISH_DELETEMSG");
+				return -1;
+			}
+
 			pthread_mutex_unlock(&memory_protect);
 
 			// To access to all records for server 0:
@@ -2504,6 +2526,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				if (operation == IMSS_INFO)
 				{ // Hercules instance case.
 					ret = TIMING(recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, IMSS_INFO, arguments->worker_uid, length), "recv_dynamic_stream IMSS_INFO", int32_t, arguments->thread_id);
+					arguments->hercules_info_struct = (imss_info *)buffer;
 					// curr_imss.conns = (imss_info *)buffer
 					// imss_info *imss_info_str = (imss_info *)buffer;
 					// for (size_t i = 0; i < imss_info_str->num_storages; i++)
