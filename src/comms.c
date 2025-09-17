@@ -24,6 +24,7 @@ pthread_mutex_t lock_ucx_comm = PTHREAD_MUTEX_INITIALIZER;
 // void *recv_buffer;
 
 int ep_timeout = 0;
+// int ep_err_detected = 0;
 
 #ifdef __cplusplus
 extern "C"
@@ -87,8 +88,8 @@ extern "C"
 		memset(&worker_params, 0, sizeof(worker_params));
 
 		worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
-		// worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
-		worker_params.thread_mode = UCS_THREAD_MODE_SERIALIZED;
+		worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
+		// worker_params.thread_mode = UCS_THREAD_MODE_SERIALIZED;
 		// worker_params.thread_mode = UCS_THREAD_MODE_SINGLE;
 
 		status = ucp_worker_create(ucp_context, &worker_params, ucp_worker);
@@ -137,7 +138,8 @@ extern "C"
 		ucp_params.request_size = sizeof(struct ucx_context);
 		ucp_params.request_init = request_init;
 		ucp_params.name = "hercules";
-		ucp_params.mt_workers_shared = UCS_THREAD_MODE_SERIALIZED;
+		ucp_params.mt_workers_shared = UCS_THREAD_MODE_MULTI;
+		// ucp_params.mt_workers_shared = UCS_THREAD_MODE_SERIALIZED;
 		// ucp_params.mt_workers_shared = UCS_THREAD_MODE_SINGLE;
 		// slog_info("Before ucp_init");
 		// status = ucp_init(&ucp_params, config, ucp_context);
@@ -279,9 +281,9 @@ extern "C"
 		if (UCS_PTR_IS_ERR(request))
 		{
 			// slog_fatal("[COMM] Error sending to endpoint.");
-			slog_fatal("HERCULES_ERR_SEND_DATA");
-			fprintf(stderr, "HERCULES_ERR_SEND_DATA\n");
-			perror("HERCULES_ERR_SEND_DATA");
+			slog_fatal("HERCULES_ERR_ISEND_DATA");
+			fprintf(stderr, "HERCULES_ERR_ISEND_DATA\n");
+			perror("HERCULES_ERR_ISEND_DATA");
 			return 0;
 		}
 
@@ -445,7 +447,7 @@ extern "C"
 		if (status != UCS_OK)
 		{
 			slog_error("[COMM] HERCULES_RECV_DATA_ERR, msg_length=%lu", msg_length);
-			fprintf(stderr,  "HERCULES_ERR_RECV_DATA\n");
+			fprintf(stderr, "HERCULES_ERR_RECV_DATA\n");
 			return 0;
 		}
 
@@ -692,9 +694,10 @@ extern "C"
 		// slog_error("[COMM] Client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
 		// fprintf(stderr, "client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
 		slog_error("failure handler called with status %d (%s)\n", status, ucs_status_string(status));
-		fprintf(stderr, "failure handler called with status %d (%s)\n", status, ucs_status_string(status));
+		//		fprintf(stderr, "failure handler called with status %d (%s)\n", status, ucs_status_string(status));
 		// if(status == UCS_ERR_ENDPOINT_TIMEOUT) {
 		ep_timeout = 1;
+		// ep_err_detected = 1;
 		// }
 		// *arg_status = status;
 	}
@@ -974,16 +977,17 @@ extern "C"
 
 		// if (send_data(ucp_worker, ep, info_buffer, msg_size, from) < 0)
 		msg_size = send_data(ucp_worker, ep, info_buffer, msg_size, from);
+
+		if (to_free)
+		{
+			free(info_buffer);
+		}
+
 		if (msg_size <= 0)
 		{
 			slog_error("HERCULES_ERR_SENDDYNAMSTRUCT");
 			perror("HERCULES_ERR_SENDDYNAMSTRUCT");
 			return -1;
-		}
-
-		if (to_free)
-		{
-			free(info_buffer);
 		}
 
 		slog_debug("[COMM] send_dynamic end %lu ", msg_size);
@@ -1090,6 +1094,7 @@ extern "C"
 			memcpy(struct_->data_locations, msg_data, (struct_->num_data_elem * sizeof(uint16_t)));
 			}*/
 			break;
+
 		}
 		case STRING:
 		case BUFFER:
@@ -1532,6 +1537,7 @@ extern "C"
 				ucp_worker_progress(ucp_worker);
 			}
 			request->completed = 0;
+			// ep_err_detected = 0;
 			status = ucp_request_check_status(request);
 			ucp_request_free(request);
 		}
@@ -1541,8 +1547,11 @@ extern "C"
 		}
 		if (status != UCS_OK)
 		{
-			fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str, ucs_status_string(status));
+			// fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str, ucs_status_string(status));
+			slog_warn("unable to %s %s (%s)\n", op_str, data_str, ucs_status_string(status));
 		}
+		// ep_err_detected = 0;
+
 		// else
 		// {
 		// 	printf("finish to %s %s\n", op_str, data_str);
@@ -1569,6 +1578,32 @@ extern "C"
 
 		ep_close(ucp_worker, ucp_ep, ep_close_flags);
 	}
+
+	// ucs_status_t worker_flush(ucp_worker_h worker)
+	// {
+	// 	void *request = ucp_worker_flush_nb(worker, 0, flush_cb);
+	// 	// void *request = ucp_worker_flush_nbx(worker, NULL);
+	// 	// void *request = ucp_worker_flush(worker);
+	// 	if (request == NULL)
+	// 	{
+	// 		return UCS_OK;
+	// 	}
+	// 	else if (UCS_PTR_IS_ERR(request))
+	// 	{
+	// 		return UCS_PTR_STATUS(request);
+	// 	}
+	// 	else
+	// 	{
+	// 		ucs_status_t status;
+	// 		do
+	// 		{
+	// 			ucp_worker_progress(worker);
+	// 			status = ucp_request_check_status(request);
+	// 		} while (status == UCS_INPROGRESS);
+	// 		ucp_request_release(request);
+	// 		return status;
+	// 	}
+	// }
 
 #ifdef __cplusplus
 }

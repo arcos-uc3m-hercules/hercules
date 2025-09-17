@@ -1,15 +1,5 @@
-/*
-FUSE: Filesystem in Userspace
-Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
-
-This program can be distributed under the terms of the GNU GPL.
-See the file COPYING.
-
-gcc -Wall imss.c `pkg-config fuse --cflags --libs` -o imss
- */
-
-#define FUSE_USE_VERSION 26
-// #include "map.hpp"
+// #define FUSE_USE_VERSION 26
+//  #include "map.hpp"
 #include "hierarchical_map.hpp"
 #include "mapprefetch.hpp"
 #include "hercules.hpp"
@@ -84,6 +74,11 @@ int32_t MALLEABILITY;
 int32_t MALLEABILITY_TYPE;
 int32_t UPPER_BOUND_SERVERS;
 int32_t LOWER_BOUND_SERVERS;
+
+extern char *META_HOSTFILE;
+extern uint64_t METADATA_PORT; // Not default, 1 will fail
+extern int32_t N_META_SERVERS;
+extern uint32_t rank;
 
 #ifdef __cplusplus
 extern "C"
@@ -553,7 +548,7 @@ extern "C"
 		}
 		else
 		{
-			file_desc = TIMING(open_dataset((char *)imss_path, 1);,"imss_open,open_dataset", int32_t, 0);
+			file_desc = TIMING(open_dataset((char *)imss_path, 1);, "imss_open,open_dataset", int32_t, 0);
 			switch (file_desc)
 			{
 			case -EEXIST: // file already exists case.
@@ -582,7 +577,7 @@ extern "C"
 
 			// aux = (char *)malloc(IMSS_DATA_BSIZE);
 			void *data = (void *)malloc(sizeof(struct stat) * sizeof(char) + 1);
-			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0);,"imss_open,get_ndata", int, 0);
+			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0);, "imss_open,get_ndata", int, 0);
 			if (ret < 0)
 			{
 				free(data);
@@ -596,7 +591,7 @@ extern "C"
 			// pthread_mutex_lock(&lock_file);
 			// storing block 0 on the local map.
 			// map_put(map, imss_path, file_desc, stats, (char *)data);
-			TIMING_NO_RETURN(HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data);,"imss_open,HierarchicalMapPut",0) ;
+			TIMING_NO_RETURN(HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data);, "imss_open,HierarchicalMapPut", 0);
 			print_file_type(stats, imss_path);
 			// if (PREFETCH != 0)
 			// {
@@ -643,6 +638,7 @@ extern "C"
 
 		// Needed variables
 		ssize_t to_read = 0;
+		ssize_t been_read = 0;
 		ssize_t byte_count = 0;
 		int64_t rbytes;
 
@@ -761,14 +757,32 @@ extern "C"
 			// 	i_blk++;
 			// }
 			// else
-			{
-				to_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset), "get_ndata", ssize_t, -1);
-			}
+			// {
+			been_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset), "get_ndata", ssize_t, -1);
+			// }
 			// Error handling when get_ndata does not found the request data.
 			// if (to_read == -1)
-			if (to_read < 0)
+
+			// if (been_read == -2)
+			// {
+			// 	// release_network_resources(IMSS_ROOT, 1, rank);
+			// 	// imss_comm_cleanup();
+			// 	// init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
+			// 	stat_imss_info();
+			// 	slog_debug("Trying again...");
+			// 	fprintf(stderr, "Hercules info has changed. Trying again...\n");
+			// 	sleep(5);
+			// 	been_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset), "get_ndata", ssize_t, -1);
+			// }
+
+			if (been_read < 0)
 			{
-				return to_read;
+				return been_read;
+			}
+
+			if (been_read != to_read)
+			{
+				slog_warn("Expecting to read %ld but %ld has been read.", to_read, been_read);
 			}
 
 			block_offset = 0;
@@ -2059,8 +2073,8 @@ extern "C"
 		{ // if the file was not deleted by the close we update the stat.
 			// imss_refresh is too slow.
 			// When we remove it pass from 3.45 sec to 0.008505 sec.
-			// TO CHECK: imss_refresh do same actions as like_release 
-			// but it adds HierarchicalMapUpdate. Maybe imss_refresh  
+			// TO CHECK: imss_refresh do same actions as like_release
+			// but it adds HierarchicalMapUpdate. Maybe imss_refresh
 			// could be removed if imss_release has HierarchicalMapUpdate.
 			imss_refresh(path);
 			slog_debug("Ending imss_refresh");
@@ -2073,14 +2087,11 @@ extern "C"
 		}
 
 		// Sends the performance metrics to the metadata server.
-		
 
 		// TODO: Tell data server the file is ready to be copied to disk.
 
 		return ret;
 	}
-
-
 
 	int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened, char file_type)
 	{
@@ -2463,7 +2474,6 @@ extern "C"
 
 		if (res < 0)
 		{
-			// fprintf(stderr, "[imss_create]	Cannot create new dataset.\n");
 			slog_error("Cannot create new dataset.\n");
 			free(rpath1);
 			free(rpath2);

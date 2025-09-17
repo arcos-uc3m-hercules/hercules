@@ -39,6 +39,7 @@
 #define MB 1048576
 #define GB 1073741824
 
+
 // #define MAX_THREAD_POOL_SIZE 16
 extern void *hierarchical_map;
 
@@ -69,6 +70,7 @@ typedef struct
 	u_int16_t hercules_thread_pool_size;
 	int thread_id;
 	struct arguments args;
+	char curr_req[PATH_MAX];
 } p_argv;
 
 // Structure to pass arguments to the client handling thread (Dispatcher).

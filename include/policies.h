@@ -16,7 +16,7 @@
 
 //Method specifying the policy.
 uint32_t get_policy_number(const char *policy_string);
-int32_t set_policy_dataset  (dataset_info * dataset);
+int32_t set_policy_dataset  (dataset_info ** dataset);
 
 /**
  * @brief Method retriving the policy number setted by the "set_policy" method.

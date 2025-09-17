@@ -48,21 +48,18 @@ static uint64_t BLOCK_SIZE;
 
 /* UCP objects */
 extern ucp_context_h ucp_context_client; // = (ucp_context_h)NULL;
-extern ucp_worker_h ucp_worker_meta;	  // = (ucp_worker_h)NULL;
-extern ucp_worker_h ucp_worker_data;	  // = (ucp_worker_h)NULL;
+extern ucp_worker_h ucp_worker_meta;	 // = (ucp_worker_h)NULL;
+extern ucp_worker_h ucp_worker_data;	 // = (ucp_worker_h)NULL;
 extern ucp_address_t **stat_addr;
 extern ucp_ep_h *stat_eps;
 
 /* TCP variables. */
-extern char client_node[512];	 // Node name where the client is running.
+extern char client_node[512];	// Node name where the client is running.
 extern int32_t len_client_node; // Length of the previous node name.
-extern char client_ip[16];		 // IP number of the node where the client is taking execution.
+extern char client_ip[16];		// IP number of the node where the client is taking execution.
 
 // /* Hercules objects */
 // extern imss curr_imss;
-
-
-
 
 #ifndef MAX
 #define MAX(x, y) ((x > y) ? x : y)
@@ -97,7 +94,6 @@ int32_t get_data_location(int32_t, int32_t, int32_t);
 // recalculate the msg_size in case you add a list of pointers.
 typedef struct
 {
-
 	// IMSS URI.
 	char uri_[URI_];
 	// Byte specifying the type of structure.
@@ -136,15 +132,22 @@ typedef struct
 	imss_conn conns;
 } imss;
 
+// Key-value struct to store "interval" entries on dataset_info.
+typedef struct
+{
+	int value;
+	int left_interval;
+	int right_interval;
+} IntervalEntry;
+
 // Structure storing all information related to a certain dataset.
 typedef struct
 {
-
 	// URI identifying a certain dataset.
 	char uri_[URI_];
 	// Byte specifying the type of structure.
 	// R = Regular file, D = Directory, I = Hercules instance.
-	char type; 
+	char type;
 	// Policy that was followed in order to write the dataset.
 	char policy[MAX_POLICY_LEN];
 	// Original name when the data was created for the first time, need it for policy CRC16_ in distributed operation rename
@@ -172,11 +175,11 @@ typedef struct
 	/*************** USED EXCLUSIVELY BY LOCAL DATASETS ***************/
 
 	// Vector of characters specifying the position of each data element.
-	uint16_t *data_locations;
+	// uint16_t *data_locations;
 	// Number of blocks written by the client in the current session.
-	uint64_t *num_blocks_written;
+	// uint64_t *num_blocks_written;
 	// Actual blocks written by the client.
-	uint32_t *blocks_written;
+	// uint32_t *blocks_written;
 
 	char link[256];
 	int is_link;
@@ -184,12 +187,15 @@ typedef struct
 	int n_open;						// how many process has the file open.
 	char status[128];				// delete the dataset when "dest" is set.
 	int32_t n_servers_when_created; // Number of active servers when this dataset is created.
+	// GHashTable *intervals = NULL;
+	int num_intervals = 0;
+	int capacity = 0;
+	IntervalEntry *intervals;
 } dataset_info;
 
 //[SPLIT READV] Set of arguments passed to each server thread.
 typedef struct
 {
-
 	int32_t n_server;
 	const char *path;
 	char *msg;
@@ -205,6 +211,8 @@ typedef struct
 extern "C"
 {
 #endif
+
+	int GetValueFromInterval(int data_id);
 
 	/****************************************************************************************************************************/
 	/****************************************** METADATA SERVICE MANAGEMENT FUNCTIONS  ******************************************/
@@ -292,6 +300,7 @@ The following function must be called over the provided imss_info structure once
 free_imss(imss_info_);
 	 */
 	int32_t stat_imss(char *imss_uri, imss_info *imss_info_);
+	int32_t stat_imss_info();
 
 	/* Method providing the URI of the attached IMSS instance.
 
@@ -424,7 +433,7 @@ RETURNS:	 0 - No dataset was found with the provided URI.
 
 The current function does not allocate memory.
 	 */
-	int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int opened);
+	int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int opened);
 
 	////Method retrieving a whole dataset parallelizing the procedure.
 	// unsigned char * get_dataset(char * dataset_uri, uint64_t * buff_length);
@@ -605,7 +614,6 @@ RETURNS:	0 - Resources were released successfully.
 	int ConcatLastSlashC(char *pathname);
 	int RemoveLastSlash(std::string &pathname);
 	int RemoveLastSlashC(char *pathname);
-
 
 	/**
 	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.

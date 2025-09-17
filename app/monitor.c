@@ -45,7 +45,7 @@ ucp_ep_h *metadata_endpoints = NULL;
 // ucp_ep_h data_endpoints[100];
 size_t req_addr_len = 0;
 
-unsigned long number_active_storage_servers = 0; // stores the current number of active storage servers.
+unsigned long number_active_storage_serversX = 0; // stores the current number of active storage servers.
 pthread_t *threads;
 
 // global variables usted to finish threads.
@@ -285,7 +285,7 @@ int32_t main(int32_t argc, char **argv)
 		// number of servers conforming the HERCULES deployment.
 		num_servers = args.num_data_servers;
 		// Dynamic number of servers conforming the HERCULES deployment used by malleability.
-		number_active_storage_servers = num_servers;
+		number_active_storage_serversX = num_servers;
 		// HERCULES' MPI deployment file.
 		deployfile = args.data_hostfile;
 		// data block size
@@ -996,9 +996,9 @@ int32_t main(int32_t argc, char **argv)
 int stop_server()
 {
 	// Get the current number of active nodes.
-	number_active_storage_servers = get_number_of_active_nodes(args.hercules_path);
+	number_active_storage_serversX = get_number_of_active_nodes(args.hercules_path);
 
-	if (number_active_storage_servers < 0)
+	if (number_active_storage_serversX < 0)
 	{
 		return -1;
 	}
@@ -1007,7 +1007,7 @@ int stop_server()
 	char key_plus_size[REQUEST_SIZE] = {0};
 	// Send the created structure to the metadata server.
 	// last "0" is the server status to be set.
-	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, args.imss_uri, 0);
+	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_serversX, args.imss_uri, 0);
 	slog_debug("[main] Request - %s", key_plus_size);
 	// TODO: locate the metadata server.
 	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
@@ -1025,7 +1025,7 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 	// malleability to move blocks between data servers.
 	slog_debug("Connecting to data servers\n");
 	open_imss(imss_uri);
-	if (number_active_storage_servers < 0)
+	if (number_active_storage_serversX < 0)
 	{
 		slog_fatal("Error creating HERCULES's resources, the process cannot be started");
 		return -1;
@@ -1044,8 +1044,8 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 	// Get the number of blocks stored by this data server.
 	int number_of_blocks_2_move = map->size();
 
-	slog_info("Server %d, has %d blocks, active storage servers=%lu", args.id, map->size(), number_active_storage_servers);
-	while ((curr_map_size = map->size()) > 0 && number_active_storage_servers > 0)
+	slog_info("Server %d, has %d blocks, active storage servers=%lu", args.id, map->size(), number_active_storage_serversX);
+	while ((curr_map_size = map->size()) > 0 && number_active_storage_serversX > 0)
 	{
 		std::string key;
 		// get next key (block identifier) with the format <block_name>$<block_number>
@@ -1063,9 +1063,9 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 		pos -= 1;											   // -1 to skip '$' on the data uri.
 		std::string data_uri = key.substr(0, pos);			   // substract the data uri from the key.
 		slog_debug("key='%s',\turi='%s',\tblock='%s'\n", key.c_str(), data_uri.c_str(), block.c_str());
-		int next_server = find_server(number_active_storage_servers, block_number, data_uri.c_str(), 0, args.type, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
+		int next_server = find_server(number_active_storage_serversX, block_number, data_uri.c_str(), 0, args.type, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
 
-		slog_info("key='%s',\turi='%s%s',\tfrom server %d to server %d,\tactive servers=%lu\n", key.c_str(), data_uri.c_str(), block.c_str(), server_id, next_server, number_active_storage_servers);
+		slog_info("key='%s',\turi='%s%s',\tfrom server %d to server %d,\tactive servers=%lu\n", key.c_str(), data_uri.c_str(), block.c_str(), server_id, next_server, number_active_storage_serversX);
 		slog_debug("new server=%d, curr_server=%d\n", next_server, server_id);
 
 		// here we can send key.c_str() directly to reduce the number of operations.
@@ -1087,10 +1087,10 @@ int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri,
 	t = clock() - t;
 	time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
-	if (number_active_storage_servers > 0)
+	if (number_active_storage_serversX > 0)
 	{
-		// fprintf(stderr, "[HS] Data movement %d blocks %lu %f sec.\n", number_of_blocks_2_move, number_active_storage_servers, time_taken);
-		fprintf(stderr, "\033[0;34m [HS] Server %d has moved %d blocks to %lu servers in %f sec. \033[0m\n", args.id, number_of_blocks_2_move, number_active_storage_servers, time_taken);
+		// fprintf(stderr, "[HS] Data movement %d blocks %lu %f sec.\n", number_of_blocks_2_move, number_active_storage_serversX, time_taken);
+		fprintf(stderr, "\033[0;34m [HS] Server %d has moved %d blocks to %lu servers in %f sec. \033[0m\n", args.id, number_of_blocks_2_move, number_active_storage_serversX, time_taken);
 	}
 
 	return 0;
@@ -1264,9 +1264,9 @@ void handle_signal_server(int signal)
 int wakeup_server()
 {
 	// Get the current number of active nodes.
-	number_active_storage_servers = get_number_of_active_nodes(args.hercules_path);
+	number_active_storage_serversX = get_number_of_active_nodes(args.hercules_path);
 
-	if (number_active_storage_servers < 0)
+	if (number_active_storage_serversX < 0)
 	{
 		return -1;
 	}
@@ -1275,7 +1275,7 @@ int wakeup_server()
 	char key_plus_size[REQUEST_SIZE] = {0};
 	// Send the created structure to the metadata server.
 	// last "1" is the server status to be set.
-	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_servers, args.imss_uri, 1);
+	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_serversX, args.imss_uri, 1);
 	// fprintf(stderr, "Request - %s\n", key_plus_size);
 	slog_debug("[main] Request - %s", key_plus_size);
 	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
