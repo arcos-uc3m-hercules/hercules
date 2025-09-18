@@ -31,8 +31,9 @@ pthread_mutex_t memory_protect = PTHREAD_MUTEX_INITIALIZER;
 // respond with a "malleability" string.
 int malleability_on = 0;
 uint32_t number_active_storage_servers = 0;
+int32_t id_server_to_remove = -1;
 #define MALLEABILITY_MESSAGE = "MALLEABILITY";
-#define XYZ 100
+#define XYZ 1
 // To synchronize network operations.
 // pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
@@ -119,27 +120,79 @@ int SendConfirmationMessage(const p_argv *arguments, const char *msg)
 	return ret;
 }
 
+void AttendPendingRequests()
+{
+	if (id_server_to_remove < 0)
+	{
+		fprintf(stderr, "Invalid server ID %d to remove\n", id_server_to_remove);
+		slog_error("Invalid server ID %d to remove\n", id_server_to_remove);
+		return;
+	}
+
+	char response[PATH_MAX] = {'\0'};
+	// int32_t id_server_to_remove = arguments->args.id;
+	sprintf(response, "%s %" PRId32 " %" PRId32 "", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_remove);
+	int ret = -1;
+	// fprintf(stderr, "There are %d pending requests\n", pending_requests.size());
+	while (pending_requests.size() != 0)
+	{
+		pthread_mutex_lock(&mutex_malleability);
+		// get the last element and remove it from the vector.
+		p_argv pending_argument = pending_requests.back();
+		fprintf(stderr, "Replying to pending request %s, pool size=%d\n", pending_argument.curr_req, pending_requests.size());
+		ret = SendConfirmationMessage(&pending_argument, response);
+		pending_requests.pop_back();
+		// pthread_cond_signal(&global_run_malleability_cond);
+		pthread_mutex_unlock(&mutex_malleability);
+		if (ret == 0)
+		{
+			perror("HERCULES_ERR_CHECK_FOR_MALLEABITY_SEND_DATASERVERS");
+			slog_error("HERCULES_ERR_CHECK_FOR_MALLEABITY_SEND_DATASERVERS");
+			continue;
+		}
+		// Release the connection.
+		// map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
+	}
+	// fprintf(stderr, "No more pending requests.\n");
+}
+
 int ShutdownServer()
 {
 
 	sleep(3);
 	// do
-	pthread_mutex_lock(&mutex_malleability);
-	while (pending_requests.size() > 0)
+	// while (pending_requests.size() > 0)
+	while (1)
 	{
 		// pthread_cond_signal(&global_run_malleability_cond);
 		// fprintf(stderr, "ShutdownServer is lock..., waiting connections=%ld\n", map_server_eps_get_size(map_server_eps));
 		// pthread_cond_broadcast(&global_run_malleability_cond);
 		// pthread_cond_wait(&global_run_shutdown_cond, &mutex_malleability);
-		fprintf(stderr,"[Shutdown] There are %d pending requests\n", pending_requests.size());
-		pthread_cond_wait(&global_run_malleability_cond, &mutex_malleability);
-		// fprintf(stderr, "ShutdownServer is unlock..., waiting connections=%ld\n", map_server_eps_get_size(map_server_eps));
-		// sleep(1);
-	} 
-	pthread_mutex_unlock(&mutex_malleability);
-	// } while (map_server_eps_get_size(map_server_eps) > 0);
+		fprintf(stderr, "[Shutdown] There are %d pending requests\n", pending_requests.size());
+		if (malleability_on == 2)
+		{
+			pthread_mutex_lock(&mutex_malleability);
 
-	// pthread_cond_broadcast(&global_run_malleability_cond);
+			if (pending_requests.size() == 0)
+			{
+				// no more request are pending.
+				// future requests will be regeted.
+				// we have to control this case.
+				break;
+			}
+
+			pthread_mutex_unlock(&mutex_malleability);
+			AttendPendingRequests();
+		}
+		else
+		{
+			pthread_mutex_lock(&mutex_malleability);
+			pthread_cond_wait(&global_run_malleability_cond, &mutex_malleability);
+			pthread_mutex_unlock(&mutex_malleability);
+		}
+	}
+	// pthread_mutex_unlock(&mutex_malleability);
+	// } while (map_server_eps_get_size(map_server_eps) > 0);
 
 	global_finish_threads = 1;
 	// finish the garbage collector.
@@ -155,14 +208,7 @@ void *move_blocks_2_server(void *th_argv)
 {
 	const p_argv *arguments = (p_argv *)th_argv;
 	malleability_on = 1;
-
-	// flush pending requests.
-	// fprintf(stderr, "++ Flushing pending rquests.\n");
-	// worker_flush(arguments->ucp_worker);
-	// ucp_worker_flush(arguments->ucp_worker);
-
-	// const p_argv *arguments = (p_argv *) args;
-	pthread_mutex_lock(&mutex_malleability);
+	id_server_to_remove = arguments->args.id;
 
 	uint64_t stat_port = arguments->args.stat_port;
 	uint32_t server_id = arguments->args.id;
@@ -192,8 +238,6 @@ void *move_blocks_2_server(void *th_argv)
 	// Map to use.
 	// hierarchical_map
 	HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
-
-	// sleep(10);
 
 	fprintf(stderr, "--- Root Map ---\n");
 	slog_debug("--- Root Map ---");
@@ -241,38 +285,19 @@ void *move_blocks_2_server(void *th_argv)
 		}
 	}
 	fprintf(stderr, "++ number_of_blocks_sent=%d\n", number_of_blocks_sent);
-
-	pthread_cond_signal(&global_run_malleability_cond);
-	// pthread_cond_signal(&global_run_malleability_cond);
-	pthread_mutex_unlock(&mutex_malleability);
-	// Check for pending requests.
-	char response[PATH_MAX] = {'\0'};
-	int32_t id_server_to_remove = arguments->args.id;
-	sprintf(response, "%s %" PRId32 " %" PRId32 "", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_remove);
-	int ret = -1;
-	while (pending_requests.size() != 0)
-	{
-		pthread_mutex_lock(&mutex_malleability);
-		// get the last element and remove it from the vector.
-		p_argv pending_argument = pending_requests.back();
-		fprintf(stderr, "Replying to pending request %s, pool size=%d\n", pending_argument.curr_req, pending_requests.size());
-		ret = SendConfirmationMessage(&pending_argument, response);
-		pending_requests.pop_back();
-		pthread_cond_signal(&global_run_malleability_cond);
-		pthread_mutex_unlock(&mutex_malleability);
-		if (ret == 0)
-		{
-			perror("HERCULES_ERR_CHECK_FOR_MALLEABITY_SEND_DATASERVERS");
-			slog_error("HERCULES_ERR_CHECK_FOR_MALLEABITY_SEND_DATASERVERS");
-			continue;
-		}
-		// Release the connection.
-		// map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
-	}
-
 	// pthread_mutex_lock(&mutex_malleability);
+	// pthread_cond_signal(&global_run_malleability_cond);
+	// pthread_cond_signal(&global_run_malleability_cond);
+	// pthread_mutex_unlock(&mutex_malleability);
+	// Check for pending requests.
 
-	// sem_post(&mutex_malleability);
+	AttendPendingRequests();
+
+	pthread_mutex_lock(&mutex_malleability);
+	malleability_on = 2;
+	pthread_cond_signal(&global_run_malleability_cond);
+	pthread_mutex_unlock(&mutex_malleability);
+
 	pthread_exit(NULL);
 }
 
@@ -475,45 +500,17 @@ void *hercules_ucx_server(void *th_argv)
 
 int CheckForMalleability(const p_argv *arguments, void *map_server_eps, const char *req)
 {
-	// pthread_mutex_lock(&mutex_malleability);
 	if (malleability_on)
 	{
 		waiting_clients++;
 		slog_debug("+ Clients waiting %d\n", waiting_clients);
 		fprintf(stderr, "+ Clients waiting %d, req=%s\n", waiting_clients, req);
-
+		pthread_mutex_lock(&mutex_malleability);
 		pending_requests.push_back(*arguments);
+		pthread_cond_signal(&global_run_malleability_cond);
+		pthread_mutex_unlock(&mutex_malleability);
 		return 1;
-
-		// // pthread_cond_wait(&global_run_malleability_cond, &mutex_malleability);
-
-		// waiting_clients--;
-		// slog_debug("+ Processes has received a broadcast\n");
-		// fprintf(stderr, "+ Processes has received a broadcast, req=%s\n", req);
-
-		// // sem_wait(&mutex_malleability);
-		// // this server is under a malleability operation (remove).
-		// char response[PATH_MAX] = {'\0'};
-		// int32_t id_server_to_remove = arguments->args.id;
-		// sprintf(response, "%s %" PRId32 " %" PRId32 "", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_remove);
-		// int ret = -1;
-		// ret = SendConfirmationMessage(arguments, response);
-		// if (ret == 0)
-		// {
-		// 	perror("HERCULES_ERR_CHECK_FOR_MALLEABITY_SEND_DATASERVERS");
-		// 	slog_error("HERCULES_ERR_CHECK_FOR_MALLEABITY_SEND_DATASERVERS");
-		// 	return -1;
-		// }
-		// // Release the connection.
-		// pthread_cond_signal(&global_run_shutdown_cond);
-		// map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
-		// pthread_mutex_unlock(&mutex_malleability);
-		// return 1;
 	}
-	// else
-	// {
-	// 	pthread_mutex_unlock(&mutex_malleability);
-	// }
 	return 0;
 }
 
@@ -2708,8 +2705,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 
 				default:
-				{
-					slog_debug("num_input_read=%d, operation=%d", num_input_read, operation) int new_server_status = 0;
+				{ // always executed.
+					slog_debug("num_input_read=%d, operation=%d", num_input_read, operation);
+					int new_server_status = 0;
 					int flag = 0;
 					switch (num_input_read)
 					{
@@ -2791,9 +2789,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 							return -1;
 						}
 
-						void *buffer = NULL;
-						// = (void *)malloc(block_size_recv);
-						buffer = address_;
+						void *buffer = (void *)malloc(block_size_recv);
+						// buffer = address_;
 						if (buffer == NULL)
 						{
 							perror("HERCULES_ERR_STAT_MEMORY_ALLOC");
@@ -2803,7 +2800,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 							return -1;
 						}
 						// Receive the block into the buffer.
-						ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, BUFFER, arguments->worker_uid, length);
+						ret = recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, DATASET_INFO, arguments->worker_uid, length);
 						if (ret < 0)
 						{
 							perror("HERCULES_ERR_STAT_SET_OP_RECV_STREAM");
@@ -2813,10 +2810,19 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 							return -1;
 						}
 
-						// pthread_mutex_unlock(&lock_network);
-						//  free(buffer);
+						fprintf(stderr, "Updating dataset,\n printing intervals of prev. dataset.\n");
+						PrintIntervals((dataset_info*)address_);
+
+						fprintf(stderr, "Printing intervals of new dataset.\n");
+						PrintIntervals((dataset_info *)buffer);
+
+						// memcpy((char *)address_, buffer, msg_length);
+						address_ = buffer;
+
 						//  slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 					}
+
+					
 
 					slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 					break;

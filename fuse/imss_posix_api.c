@@ -747,34 +747,9 @@ extern "C"
 			}
 
 			// get data from the data server.
-			// if (MALLEABILITY)
-			// {
-			// 	int32_t num_storages = 0;
-			// 	num_storages = get_number_of_data_servers(i_blk, num_of_blk);
-			// 	slog_debug("[imss_read] i_blk=%ld, num_storages=%ld, N_SERVERS=%ld", i_blk, num_storages, N_SERVERS);
-
-			// 	to_read = get_data_mall(ds, curr_blk, buf + byte_count, to_read, block_offset, num_storages);
-			// 	i_blk++;
-			// }
-			// else
-			// {
 			been_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset), "get_ndata", ssize_t, -1);
-			// }
 			// Error handling when get_ndata does not found the request data.
-			// if (to_read == -1)
-
-			// if (been_read == -2)
-			// {
-			// 	// release_network_resources(IMSS_ROOT, 1, rank);
-			// 	// imss_comm_cleanup();
-			// 	// init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
-			// 	stat_imss_info();
-			// 	slog_debug("Trying again...");
-			// 	fprintf(stderr, "Hercules info has changed. Trying again...\n");
-			// 	sleep(5);
-			// 	been_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset), "get_ndata", ssize_t, -1);
-			// }
-
+			
 			if (been_read < 0)
 			{
 				return been_read;
@@ -796,6 +771,8 @@ extern "C"
 				break;
 			}
 		}
+
+		update_dataset((char *)path, ds);
 
 		total_amount_read += byte_count;
 		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B, total_amount_read=%d", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, byte_count, total_amount_read);
@@ -1556,6 +1533,9 @@ extern "C"
 			++curr_blk;
 		}
 
+		// updates intervals on the back-end.
+		update_dataset((char *)path, ds);
+
 		// Update header count if the file has become bigger.
 		if (size + off > stats.st_size)
 		{
@@ -2067,7 +2047,7 @@ extern "C"
 		ds = imss_release(path);
 		slog_debug("Ending imss_release, ret=%d", ds);
 		// Closes the dataset on the metadata servers.
-		ret = close_dataset(path, fd);
+		ret = close_dataset(path, ds);
 		slog_debug("Ending close_dataset, ret=%d", ret);
 		if (ret)
 		{ // if the file was not deleted by the close we update the stat.

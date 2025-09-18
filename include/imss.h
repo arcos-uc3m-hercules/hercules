@@ -189,8 +189,9 @@ typedef struct
 	int32_t n_servers_when_created; // Number of active servers when this dataset is created.
 	// GHashTable *intervals = NULL;
 	int num_intervals = 0;
-	int capacity = 0;
-	IntervalEntry *intervals;
+	int capacity = 100;
+	uint64_t last_block_id = 0;
+	IntervalEntry **intervals;
 } dataset_info;
 
 //[SPLIT READV] Set of arguments passed to each server thread.
@@ -213,6 +214,9 @@ extern "C"
 #endif
 
 	int GetValueFromInterval(int data_id);
+	void PrintIntervals(dataset_info *curr_dataset);
+	IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int right_interval);
+	void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int right_interval);
 
 	/****************************************************************************************************************************/
 	/****************************************** METADATA SERVICE MANAGEMENT FUNCTIONS  ******************************************/
@@ -372,6 +376,8 @@ RETURNS:	 0 - Release operation took place successfully.
 	int32_t close_dataset(const char *dataset_uri, int fd);
 
 	int32_t clear_dataset(const char *dataset_uri);
+
+	int32_t update_dataset(char *dataset_uri, int32_t dataset_id);
 
 	/*Method writev various datasets.
 

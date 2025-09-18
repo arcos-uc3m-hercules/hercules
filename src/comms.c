@@ -917,7 +917,6 @@ extern "C"
 			memcpy(offset_pt, struct_->arr_num_active_storages, sizeof(int) * struct_->num_storages);
 
 			// slog_debug("pointer address = %p", &offset_pt);
-
 			break;
 		}
 
@@ -927,6 +926,8 @@ extern "C"
 
 			// Calculate the total size of the buffer storing the structure.
 			msg_size = sizeof(dataset_info);
+			// Sum the size of the struct IntervalEntry.
+			msg_size += sizeof(IntervalEntry) * struct_->num_intervals;
 
 			// If the dataset is a LOCAL one, the list of position characters must be added.
 			// if (!strcmp(struct_->policy, "LOCAL"))
@@ -946,9 +947,29 @@ extern "C"
 
 			// Serialize the provided message into the buffer.
 			char *offset_pt = info_buffer;
+			int memsize = 0;
 
 			// Copy the actual structure to the buffer.
-			memcpy(info_buffer, struct_, msg_size);
+			memsize = sizeof(dataset_info);
+			memcpy(offset_pt, struct_, memsize);
+			offset_pt += memsize;
+
+			// Copy the intervals.
+			for (size_t i = 0; i < struct_->num_intervals; i++)
+			{
+				// Copy the left interval.
+				memsize = sizeof(struct_->intervals[i]->left_interval);
+				memcpy(offset_pt, &struct_->intervals[i]->left_interval, memsize);
+				offset_pt += memsize;
+				// Copy the right interval.
+				memsize = sizeof(struct_->intervals[i]->right_interval);
+				memcpy(offset_pt, &struct_->intervals[i]->right_interval, memsize);
+				offset_pt += memsize;
+				// Copy the value.
+				memsize = sizeof(struct_->intervals[i]->value);
+				memcpy(offset_pt, &struct_->intervals[i]->value, memsize);
+				// offset_pt += memsize;
+			}
 
 			// Copy the remaining 'data_locations' field if the dataset is a LOCAL one.
 			// if (!strcmp(struct_->policy,"LOCAL"))
@@ -1079,22 +1100,31 @@ extern "C"
 			dataset_info *struct_ = (dataset_info *)data_struct;
 
 			// Copy the actual structure into the one provided through reference.
-			// memcpy(struct_, msg_data, sizeof(dataset_info));
-			memcpy(struct_, msg_data, length);
+			memcpy(struct_, msg_data, sizeof(dataset_info));
+			// memcpy(struct_, msg_data, length);
 			slog_info(" \t\t DATASET_INFO %lu", length);
+			msg_data += sizeof(dataset_info);
 
-			// If the size of the message received was bigger than sizeof(dataset_info), something more came with it.
-
-			/*if (zmq_msg_size(&msg_struct) > sizeof(dataset_info)) MIRAR
-			  {
-			  msg_data += sizeof(dataset_info);
-
-			//Copy the remaining 'data_locations' field into the structure.
-			struct_->data_locations = (uint16_t *) malloc(struct_->num_data_elem * sizeof(uint16_t));
-			memcpy(struct_->data_locations, msg_data, (struct_->num_data_elem * sizeof(uint16_t)));
-			}*/
+			// Copy the intervals.
+			int memsize = 0;
+			struct_->intervals = (IntervalEntry **)malloc(sizeof(IntervalEntry*));
+			for (size_t i = 0; i < struct_->num_intervals; i++)
+			{
+				struct_->intervals[i] = (IntervalEntry *)malloc(sizeof(IntervalEntry*));
+				// Copy the left interval.
+				memsize = sizeof(struct_->intervals[i]->left_interval);
+				memcpy(&struct_->intervals[i]->left_interval, msg_data, memsize);
+				msg_data += memsize;
+				// Copy the right interval.
+				memsize = sizeof(struct_->intervals[i]->right_interval);
+				memcpy(&struct_->intervals[i]->right_interval, msg_data, memsize);
+				msg_data += memsize;
+				// Copy the value.
+				memsize = sizeof(struct_->intervals[i]->value);
+				memcpy(&struct_->intervals[i]->value, msg_data, memsize);
+				// msg_data += memsize;
+			}
 			break;
-
 		}
 		case STRING:
 		case BUFFER:

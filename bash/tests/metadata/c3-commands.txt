@@ -1,5 +1,5 @@
-UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=16 HERCULES_NUM_DATA_SERVERS=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server m 0
-UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=16 HERCULES_NUM_DATA_SERVERS=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server d 0 1
+UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=2 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server m 0
+UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=2 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server d 0 2
 
 ## IMPORTANT
 # add the following line in case of memory errors.
@@ -34,7 +34,7 @@ HERCULES_DEBUG_LEVEL=none UCX_IB_GID_INDEX=0 /beegfs/home/javier.garciablas/spac
 spack load mpich
 HERCULES_THREAD_POOL=1  mpiexec --oversubscribe -np=8 -ppn=8 -x HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf -env HERCULES_DEBUG_LEVEL=none -env LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so ~/gesanche/io500/bin/ior -w -r -k -W -R -t 100M -b 100M -s 1 -i 100 -o /mnt/hercules/data.out
 ## Openmpi (hpcx)
-mpiexec --oversubscribe -np 36 -x UCX_NET_DEVICES=ib0 -x HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf -x HERCULES_DEBUG_LEVEL=none -x HERCULES_THREAD_POOL=1 -x LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so ~/gesanche/io500/bin/ior -w -r -k -W -R -t 100M -b 100M -s 1 -i 100 -o /mnt/hercules/data.out
+mpiexec --oversubscribe -np 36 -x HERCULES_NUM_DATA_SERVERS=2 -x UCX_NET_DEVICES=ib0 -x HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf -x HERCULES_DEBUG_LEVEL=none -x HERCULES_THREAD_POOL=1 -x LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so ~/gesanche/io500/bin/ior -w -r -k -W -R -t 100M -b 100M -s 1 -i 100 -o /mnt/hercules/data.out
 
 
 # IOR 100 MB

@@ -8,7 +8,6 @@
 #include <map>
 #include <vector>
 
-
 // Structure to hold performance metrics
 typedef struct
 {
@@ -41,5 +40,10 @@ static std::map<int32_t, IOServerMetrics> backend_performance_metrics;
 static std::map<int32_t, std::vector<ElasticityMetric>> elasticity_records_history;
 static int best_number_of_servers = 0;
 static int number_of_history_records = 0;
+
+static void PerformanceRecordsRemoveKey(int32_t server_id)
+{
+    backend_performance_metrics.erase(server_id);
+}
 
 #endif // H_PERFORMANCE_RECORDS

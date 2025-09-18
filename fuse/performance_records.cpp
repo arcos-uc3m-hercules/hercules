@@ -3,5 +3,9 @@
 #include "comms.h"
 #include <inttypes.h>
 
-// Noting to do for the moment.
+// void PerformanceRecordsRemoveKey(int32_t server_id)
+// {
+//     backend_performance_metrics.erase(server_id);
+// }
+
 
