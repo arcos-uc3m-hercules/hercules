@@ -66,7 +66,7 @@ size_t MOUNT_POINT_LEN = 0;
 
 char *HERCULES_PATH;
 void *map_fd = NULL;
-struct arguments args;
+extern struct arguments args;
 
 uint32_t rank = -1;
 static int init = 0;
@@ -230,7 +230,7 @@ char *checkHerculesPath(const char *pathname)
 	int ret = 0;
 
 	// To check if pathname or MOUNT_POINT are not NULL.
-	if (!pathname && !MOUNT_POINT)
+	if (!pathname || !MOUNT_POINT)
 	{
 		perror("HERCULES_ERR_NULL_PATH");
 		slog_fatal("HERCULES_ERR_NULL_PATH, pathname=%s, MOUNT_POINT=%s", pathname, MOUNT_POINT);

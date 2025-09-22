@@ -31,7 +31,7 @@ pthread_mutex_t memory_protect = PTHREAD_MUTEX_INITIALIZER;
 // respond with a "malleability" string.
 int malleability_on = 0;
 uint32_t number_active_storage_servers = 0;
-int32_t id_server_to_remove = -1;
+int32_t id_server_to_modify = -1;
 #define MALLEABILITY_MESSAGE = "MALLEABILITY";
 #define XYZ 1
 // To synchronize network operations.
@@ -103,7 +103,94 @@ int data_ready = 0;
 #define GARBAGE_COLLECTOR_PERIOD 10
 #define CKECKPOINT_PERIOD 10
 
-// extern char SERVER_TYPE;
+int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
+{
+	int count = my_imss->num_storages;
+	fprintf(stderr, "[AddIPS] Adding %s (%d), count=%d\n", line, n_chars, count);
+	char **new_ips = (char **)realloc(my_imss->ips, (count + 1) * sizeof(char *));
+
+	if (!new_ips)
+	{
+		perror("HERCULES_ERR_WORKER_ADD_IPS_MEM_ERR");
+		slog_fatal("HERCULES_ERR_WORKER_ADD_IPS_MEM_ERR");
+		// fclose(svr_nodes);
+		free(line);
+		return -1;
+	}
+	my_imss->ips = new_ips;
+
+	my_imss->ips[count] = (char *)calloc(LINE_LENGTH, sizeof(char));
+	if (!my_imss->ips[count])
+	{
+		perror("HERCULES_ERR_WORKER_ADD_IPS_CALLOC_ERR");
+		slog_fatal("HERCULES_ERR_WORKER_ADD_IPS_CALLOC_ERR");
+		free(line);
+		// fclose(svr_nodes);
+		return -1;
+	}
+	// Copy the line.
+	strncpy(my_imss->ips[count], line, n_chars);
+
+	// Erase the new line character ('') from the string.
+	if (((my_imss->ips)[count])[n_chars - 1] == '\n')
+	{
+		((my_imss->ips)[count])[n_chars - 1] = '\0';
+	}
+	my_imss->num_storages++;
+	return 0;
+}
+
+int ReadHostfile(char *deployfile, imss_info *my_imss)
+{
+	fprintf(stderr, "Reading hostfile %s\n", deployfile);
+	// FILE entity managing the HERCULES deployfile.
+	FILE *svr_nodes;
+	if ((svr_nodes = fopen(deployfile, "r+")) == NULL)
+	{
+		char err_msg[MAX_ERR_MSG_LEN];
+		sprintf(err_msg, "HERCULES_ERR_DEPLOYFILE_OPEN:%s", deployfile);
+		perror(err_msg);
+		slog_fatal("%s", err_msg);
+		return -1;
+	}
+
+	// Number of characters successfully read from the line.
+	int32_t n_chars = 0;
+	int init_server_status = 1;
+	char *line = NULL;
+	// int32_t i = 0; // index of server
+	size_t l_size = 0;
+	int32_t count = 0;
+	int ret = 0;
+	// int num_active_data_servers = 0;
+	// for (int32_t i = 0; i < num_servers; i++)
+	while ((n_chars = getline(&line, &l_size, svr_nodes)) != -1)
+	{
+		// Allocate resources in the metadata structure so as to store the current HERCULES's IP.
+		ret = AddIPS(my_imss, line, n_chars);
+		if (ret == -1)
+		{
+			fprintf(stderr, "HERCULES_ERR_WORKER_READ_HOSTFILE_ADD_IPS");
+			slog_error("HERCULES_ERR_WORKER_READ_HOSTFILE_ADD_IPS");
+			fclose(svr_nodes);
+			free(line);
+			return ret;
+		}
+		count++;
+	}
+
+	if (line)
+		free(line);
+
+	// Close the file.
+	if (fclose(svr_nodes) != 0)
+	{
+		perror("HERCULES_ERR_WORKER_DEPLOYFILE_CLOSE");
+		slog_fatal("HERCULES_ERR_WORKER_DEPLOYFILE_CLOSE");
+		return -1;
+	}
+	return count;
+}
 
 int ready(char *tmp_file_path, const char *msg);
 
@@ -122,16 +209,22 @@ int SendConfirmationMessage(const p_argv *arguments, const char *msg)
 
 void AttendPendingRequests()
 {
-	if (id_server_to_remove < 0)
+	if (malleability_on <= 0)
 	{
-		fprintf(stderr, "Invalid server ID %d to remove\n", id_server_to_remove);
-		slog_error("Invalid server ID %d to remove\n", id_server_to_remove);
+		return;
+	}
+	
+
+	if (id_server_to_modify < 0)
+	{
+		fprintf(stderr, "Invalid server ID %d to attend request\n", id_server_to_modify);
+		slog_error("Invalid server ID %d to attend request\n", id_server_to_modify);
 		return;
 	}
 
 	char response[PATH_MAX] = {'\0'};
-	// int32_t id_server_to_remove = arguments->args.id;
-	sprintf(response, "%s %" PRId32 " %" PRId32 "", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_remove);
+	// int32_t id_server_to_modify = arguments->args.id;
+	sprintf(response, "%s %" PRId32 " %" PRId32 "", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify);
 	int ret = -1;
 	// fprintf(stderr, "There are %d pending requests\n", pending_requests.size());
 	while (pending_requests.size() != 0)
@@ -208,7 +301,7 @@ void *move_blocks_2_server(void *th_argv)
 {
 	const p_argv *arguments = (p_argv *)th_argv;
 	malleability_on = 1;
-	id_server_to_remove = arguments->args.id;
+	id_server_to_modify = arguments->args.id;
 
 	uint64_t stat_port = arguments->args.stat_port;
 	uint32_t server_id = arguments->args.id;
@@ -294,11 +387,282 @@ void *move_blocks_2_server(void *th_argv)
 	AttendPendingRequests();
 
 	pthread_mutex_lock(&mutex_malleability);
+	fprintf(stderr, "Sending ACK to metadata server\n");
+	// ep = stat_eps[m_srv];
+	// pthread_mutex_lock(&lock_network);
+	// Send the request.
+	StatACK(MSG_DECOM_DATASERVERS, 0);
+
+	fprintf(stderr, "ACK to metadata server sent.\n");
 	malleability_on = 2;
 	pthread_cond_signal(&global_run_malleability_cond);
 	pthread_mutex_unlock(&mutex_malleability);
 
 	pthread_exit(NULL);
+}
+
+void *Malleability(void *th_argv)
+{
+	p_argv *arguments = (p_argv *)th_argv;
+
+	size_t msg_length = 0;
+	void *data_ref = NULL;
+	void *address_ = NULL;
+	uint64_t block_size_rtvd = 0;
+	std::string key;
+
+	// Here the metadata server get the data server's performance measure by each client.
+	msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+	if (msg_length == 0)
+	{
+		perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP_PERFORMAMCE_OP");
+		slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP_PERFORMAMCE_OP");
+		// pthread_mutex_unlock(&lock_network);
+		return NULL;
+	}
+	// data_ref = malloc(msg_length);
+	std::vector<char> buffer_metrics_ser(msg_length);
+	msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buffer_metrics_ser.data(), msg_length, arguments->worker_uid, 0);
+	if (msg_length == 0)
+	{
+		perror("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP_PERFORMANCE_OP");
+		slog_error("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP_PERFORMANCE_OP");
+		free(data_ref);
+		// pthread_mutex_unlock(&lock_network);
+		return NULL;
+	}
+	char *current_ptr = buffer_metrics_ser.data();
+	// Get the number of entries.
+	size_t num_entries = 0;
+	memcpy(&num_entries, current_ptr, sizeof(num_entries));
+	current_ptr += sizeof(num_entries);
+
+	pthread_mutex_lock(&memory_protect);
+	int32_t slowest_server_id = -1;
+	double min_overall_performance = -1.0;
+	number_of_history_records++;
+	for (size_t i = 0; i < num_entries; ++i)
+	{
+		// int32_t server_id = 0;
+		ElasticityMetric received_metrics;
+
+		// Deserialize the server ID
+		memcpy(&received_metrics.server_id, current_ptr, sizeof(received_metrics.server_id));
+		current_ptr += sizeof(received_metrics.server_id);
+
+		// Deserialize write performance.
+		memcpy(&received_metrics.write_performance, current_ptr, sizeof(received_metrics.write_performance));
+		current_ptr += sizeof(received_metrics.write_performance);
+		// fprintf(stderr, "Write Performance for server %d: %f\n", server_id, write_performance/MB);
+
+		// Deserialize read performance.
+		memcpy(&received_metrics.read_performance, current_ptr, sizeof(received_metrics.read_performance));
+		current_ptr += sizeof(received_metrics.read_performance);
+		// fprintf(stderr, "Read Performance for server %d: %f\n", server_id, read_performance/MB);
+
+		// Calculates overall performance.
+		received_metrics.overall_performance = (received_metrics.read_performance + received_metrics.write_performance) / 2;
+
+		// TODO: use a different lock here to prevent delays on other operations.
+		// if (i == 0)
+		// {
+		// 	fprintf(stderr, "Server id\t Write (MB/s)\t Read (MB/s)\t Overall (MB/s)\n");
+		// }
+		fprintf(stderr, "%d\t %f\t %f\t %f\t %d\n", received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, number_of_history_records);
+		// Add the new record to the history for the specific server ID.
+		elasticity_records_history[received_metrics.server_id].push_back(received_metrics);
+		if (min_overall_performance == -1.0 || received_metrics.overall_performance < min_overall_performance)
+		{
+			min_overall_performance = received_metrics.overall_performance;
+			slowest_server_id = received_metrics.server_id;
+		}
+	}
+
+	if (arguments->hercules_info_struct == NULL)
+	{
+		if (HierarchicalMapGet(hierarchical_map, arguments->args.imss_uri, &address_, &block_size_rtvd))
+		{
+			arguments->hercules_info_struct = (imss_info *)address_;
+		}
+		else
+		{
+			fprintf(stderr, "Hercules instance information has not been found.\n");
+			slog_error("Hercules instance information has not been found.");
+			return NULL;
+		}
+		slog_live("Hercules instance found: %s", key.c_str());
+	}
+
+	// fprintf(stderrs, "arguments->args.num_data_servers=%d\n", arguments->args.num_data_servers);
+	int32_t new_number_data_servers = arguments->args.num_data_servers; // arguments->hercules_info_struct->num_storages;
+	// int32_t id_server_to_modify = -1;
+	// TODO: change this condition without hardcoding.
+	if (number_of_history_records == XYZ)
+	{
+		// Turn off the slowest server at this time.
+		fprintf(stderr, "At this time, the slowest server is %d\n", slowest_server_id);
+
+		imss_info *imss_info_struct = arguments->hercules_info_struct;
+		char *element_to_delete = imss_info_struct->ips[slowest_server_id];
+		free(element_to_delete);
+		size_t num_elements_to_shift = imss_info_struct->num_storages - slowest_server_id - 1;
+
+		// move the pointers.
+		memmove(&imss_info_struct->ips[slowest_server_id],
+				&imss_info_struct->ips[slowest_server_id + 1],
+				num_elements_to_shift * sizeof(char *));
+
+		imss_info_struct->ips[imss_info_struct->num_storages - 1] = NULL;
+
+		// TODO: after removing memory protect from all the this block, we have to protect next pointer.
+		imss_info_struct->num_storages--;
+		new_number_data_servers = imss_info_struct->num_storages;
+		imss_info_struct->num_active_storages = new_number_data_servers;
+		arguments->args.num_data_servers = new_number_data_servers;
+
+		// This helps to avoid requests until malleability is done.
+		malleability_on = 1;
+		number_active_storage_servers = imss_info_struct->num_storages;
+
+		char request[REQUEST_SIZE] = {0};
+		sprintf(request, "STOPSERVER %" PRId32 "\0", new_number_data_servers);
+		fprintf(stderr, "Sending %s to server ID %d\n", request, slowest_server_id);
+		if (send_req(arguments->ucp_worker, data_endpoints[slowest_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request) == 0)
+		{
+			perror("HERCULES_ERR_SEND_REQ_SETSERVER");
+			slog_fatal("HERCULES_ERR_SEND_REQ_SETSERVER");
+			return NULL;
+		}
+		// se me ocurre cambiar todos los dataset que utilicen el número de servidores actual
+		// al que se reduce. Al final no enviarán datos a los nuevos servidores si estos crecen
+		// pero para nuevos datasets debería funcionar.
+
+		// WAIT FOR THE SERVER CONFIRMATION.
+		// msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+		// slog_debug("get_recv_data_length, msg_length=%lu", msg_length);
+		// if (msg_length == 0)
+		// {
+		// 	pthread_mutex_unlock(&lock_network);
+		// 	perror("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
+		// 	slog_error("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
+		// 	return NULL;
+		// }
+
+		// void *result = malloc(msg_length);
+		// msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, result, msg_length, arguments->worker_uid, 0);
+		// slog_debug(" after recv_data, msg_length=%lu", msg_length);
+		// if (msg_length == 0)
+		// {
+		// 	pthread_mutex_unlock(&lock_network);
+		// 	perror("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
+		// 	slog_error("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
+		// 	free(result);
+		// 	return NULL;
+		// }
+		// slog_debug(" result=%s, msg_length=%d", result, msg_length);
+		// fprintf(stderr, " result=%s, msg_length=%d\n", result, msg_length);
+
+		// free(result);
+
+		id_server_to_modify = slowest_server_id;
+	}
+	if (number_of_history_records == XYZ * 2)
+	{
+		// new_number_data_servers++;
+		imss_info *imss_info_struct = arguments->hercules_info_struct;
+		int num_server_to_increase = 1;
+		int id_server_to_add = new_number_data_servers;
+		// ****************************
+		int sum_stopped_nodes = 0;
+		int sum_started_nodes = 0;
+		int original_num_servers = 0;
+		int curr_active_data_nodes = 0;
+		int prev_active_data_nodes = 0;
+		char command_to_exec_1[PATH_MAX] = {0};
+		char command_to_exec_2[PATH_MAX] = {0};
+		// char command_to_exec_copy[500];
+		// fprintf(stderr, "Increase the number of servers from %d to %d, the ID of the new server will be %d\n", imss_info_struct->num_storages, new_number_data_servers, id_server_to_add);
+
+		// fprintf(stderr, "data hostfile path=%s\n", arguments->args.data_hostfile);
+
+		// Get a copy of all endpoints addess.
+		imss_info imss_copy = {0};
+		int number_of_hosts = ReadHostfile(arguments->args.data_hostfile, &imss_copy);
+
+		// fprintf(stderr, "command_to_exec_1=%s\n", command_to_exec_1);
+		// ****************************
+		fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
+		char *node_to_use = NULL;
+		int found = 0;
+		for (size_t j = 0; j < number_of_hosts; j++)
+		{
+			found = 0;
+			slog_debug("eps[%d] hostname=%s\n", j, imss_copy.ips[j]);
+			fprintf(stderr, "eps[%d] hostname=%s\n", j, imss_copy.ips[j]);
+			for (size_t i = 0; i < imss_info_struct->num_storages; i++)
+			{
+				if (!strcmp(imss_info_struct->ips[i], imss_copy.ips[j]))
+				{
+					found = 1;
+					break;
+				}
+			}
+			if (!found)
+			{
+				node_to_use = imss_copy.ips[j];
+				break;
+			}
+		}
+
+		// sprintf(command_to_exec_1, "head -n %d %s | tail -n %d > ./data2start_hostfile", new_number_data_servers, arguments->args.data_hostfile, num_server_to_increase);
+		// sprintf(command_to_exec_1, "echo %s > ./data2start_hostfile", node_to_use);
+
+		// sprintf(command_to_exec_2, "%s/scripts/hercules addV2 -f %s -d ./data2start_hostfile", arguments->args.hercules_path, arguments->args.hercules_path);
+		// TODO: set the path of the binary dinamically.
+		sprintf(command_to_exec_2, "( ssh %s UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s ~/gesanche/hercules/build/hercules_server d %d %d > /dev/null 2>&1 ) &", node_to_use, arguments->args.configuration_file_path, id_server_to_add, imss_info_struct->num_active_storages);
+
+		// system(command_to_exec_1);
+		fprintf(stderr, "Running command: %s\n", command_to_exec_2);
+		// Deploy the new hercules instance on the avaiable node.
+		system(command_to_exec_2);
+
+		// Update the variables.
+		AddIPS(imss_info_struct, node_to_use, strlen(node_to_use));
+
+		// print the current IPS.
+		fprintf(stderr, "Printing EPS on the global structure.\n imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
+		for (size_t i = 0; i < imss_info_struct->num_storages; i++)
+		{
+			fprintf(stderr, "eps[%d] hostname=%s\n", i, imss_info_struct->ips[i]);
+		}
+
+		new_number_data_servers = imss_info_struct->num_storages;
+		imss_info_struct->num_active_storages = new_number_data_servers;
+		arguments->args.num_data_servers = new_number_data_servers;
+
+		malleability_on = 1;
+		number_active_storage_servers = imss_info_struct->num_storages;
+		id_server_to_modify = id_server_to_add;
+	}
+	CheckForMalleability(arguments, map_server_eps, arguments->curr_req);
+
+	// char response[PATH_MAX] = {'\0'};
+	// sprintf(response, "%s %" PRId32 " %" PRId32 "", MSG_MALLEABILITY_DATASERVERS, new_number_data_servers, id_server_to_modify);
+	// int ret = -1;
+	// ret = SendConfirmationMessage(arguments, response);
+	// if (ret == 0)
+	// {
+	// 	perror("HERCULES_ERR_STAT_WORKER_SEND_DATASERVERS");
+	// 	slog_error("HERCULES_ERR_STAT_WORKER_SEND_DATASERVERS");
+	// 	return -1;
+	// }
+
+	pthread_mutex_unlock(&memory_protect);
+
+	return NULL;
+
+	// To access to all records for server 0:
+	// std::vector<ElasticityMetric>& server_zero_records = elasticity_records_history[0];
 }
 
 void *hercules_ucx_server(void *th_argv)
@@ -473,7 +837,28 @@ void *hercules_ucx_server(void *th_argv)
 			TIMING_NO_RETURN(srv_worker_helper(arguments, req, map_server_eps), ("srv_worker_helper %s", req), arguments->thread_id);
 			break;
 		case TYPE_METADATA_SERVER:
-			TIMING_NO_RETURN(stat_worker_helper(arguments, req, map_server_eps), ("stat_worker_helper %s", req), arguments->thread_id);
+			ret = TIMING(stat_worker_helper(arguments, req, map_server_eps), ("stat_worker_helper %s", req), int, arguments->thread_id);
+			// if (ret == 2)
+			// {
+			// 	fprintf(stderr,"Atending peding requests, pending_requests=%d\n", pending_requests.size())
+			// 	// while (pending_requests.size() != 0)
+			// 	// {
+			// 	// 	pthread_mutex_lock(&mutex_malleability);
+			// 	// 	// get the last element and remove it from the vector.
+			// 	// 	p_argv pending_argument = pending_requests.back();
+			// 	// 	fprintf(stderr, "Replying to pending request %s, pool size=%d\n", pending_argument.curr_req, pending_requests.size());
+			// 	// 	stat_worker_helper(&pending_argument, pending_argument.curr_req, map_server_eps);
+			// 	// 	pending_requests.pop_back();
+			// 	// 	pthread_mutex_unlock(&mutex_malleability);
+			// 	// 	if (ret == 0)
+			// 	// 	{
+			// 	// 		perror("HERCULES_ERR_HERCULES_UCX_SERVER_SEND_DATASERVERS");
+			// 	// 		slog_error("HERCULES_ERR_HERCULES_UCX_SERVER_SEND_DATASERVERS");
+			// 	// 		continue;
+			// 	// 	}
+			// 	// }
+			// }
+
 			break;
 		default:
 			fprintf(stderr, "HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args.type);
@@ -1742,6 +2127,13 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	// Save the request to be served.
 	slog_info("Request - '%s'", req);
+	fprintf(stderr, "Request=%s\n", req);
+	if (!strcmp(req, MSG_DECOM_DATASERVERS))
+	{
+		fprintf(stderr, "ACK received: %s\n", req);
+		AttendPendingRequests();
+		return 0;
+	}
 	// TODO: GET and SET request does not have a consistent format. Try to change it.
 	num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
 
@@ -1830,6 +2222,10 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		client_create_ep_data(arguments->ucp_worker, &data_endpoints[server_id_request], new_imss.conns.peer_addr[server_id_request], &new_imss.info.status[server_id_request]);
 
 		fprintf(stderr, "Server %d connected.\n", server_id_request);
+
+		// finish malleability UP process.
+		AttendPendingRequests();
+		malleability_on = 0;
 
 		return 0;
 	}
@@ -2370,146 +2766,22 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 		case PERFORMANCE_OP:
 		{
-			// Here the metadata server get the data server's performance measure by each client.
-			msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-			if (msg_length == 0)
-			{
-				perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP_PERFORMAMCE_OP");
-				slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP_PERFORMAMCE_OP");
-				// pthread_mutex_unlock(&lock_network);
-				return -1;
-			}
-			// data_ref = malloc(msg_length);
-			std::vector<char> buffer_metrics_ser(msg_length);
-			msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buffer_metrics_ser.data(), msg_length, arguments->worker_uid, 0);
-			if (msg_length == 0)
-			{
-				perror("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP_PERFORMANCE_OP");
-				slog_error("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP_PERFORMANCE_OP");
-				free(data_ref);
-				// pthread_mutex_unlock(&lock_network);
-				return -1;
-			}
-			char *current_ptr = buffer_metrics_ser.data();
-			// Get the number of entries.
-			size_t num_entries = 0;
-			memcpy(&num_entries, current_ptr, sizeof(num_entries));
-			current_ptr += sizeof(num_entries);
+			Malleability((void *)arguments);
+			// pthread_t thread;
+			// p_argv arguments_aux = *arguments;
+			// if (pthread_create(&thread, NULL, Malleability, (void *)&arguments_aux) != 0)
+			// {
+			// 	perror("HERCULES_ERR_SRV_WORKER_THREAD_MALLEABILITY");
+			// 	slog_error("HERCULES_ERR_SRV_WORKER_THREAD_MALLEABILITY");
+			// 	return -1;
+			// }
 
-			pthread_mutex_lock(&memory_protect);
-			int32_t slowest_server_id = -1;
-			double min_overall_performance = -1.0;
-			number_of_history_records++;
-			for (size_t i = 0; i < num_entries; ++i)
-			{
-				// int32_t server_id = 0;
-				ElasticityMetric received_metrics;
-
-				// Deserialize the server ID
-				memcpy(&received_metrics.server_id, current_ptr, sizeof(received_metrics.server_id));
-				current_ptr += sizeof(received_metrics.server_id);
-
-				// Deserialize write performance.
-				memcpy(&received_metrics.write_performance, current_ptr, sizeof(received_metrics.write_performance));
-				current_ptr += sizeof(received_metrics.write_performance);
-				// fprintf(stderr, "Write Performance for server %d: %f\n", server_id, write_performance/MB);
-
-				// Deserialize read performance.
-				memcpy(&received_metrics.read_performance, current_ptr, sizeof(received_metrics.read_performance));
-				current_ptr += sizeof(received_metrics.read_performance);
-				// fprintf(stderr, "Read Performance for server %d: %f\n", server_id, read_performance/MB);
-
-				// Calculates overall performance.
-				received_metrics.overall_performance = (received_metrics.read_performance + received_metrics.write_performance) / 2;
-
-				// TODO: use a different lock here to prevent delays on other operations.
-				// if (i == 0)
-				// {
-				// 	fprintf(stderr, "Server id\t Write (MB/s)\t Read (MB/s)\t Overall (MB/s)\n");
-				// }
-				fprintf(stderr, "%d\t %f\t %f\t %f\t %d\n", received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, number_of_history_records);
-				// Add the new record to the history for the specific server ID.
-				elasticity_records_history[received_metrics.server_id].push_back(received_metrics);
-				if (min_overall_performance == -1.0 || received_metrics.overall_performance < min_overall_performance)
-				{
-					min_overall_performance = received_metrics.overall_performance;
-					slowest_server_id = received_metrics.server_id;
-				}
-			}
-
-			// fprintf(stderrs, "arguments->args.num_data_servers=%d\n", arguments->args.num_data_servers);
-			int32_t new_number_data_servers = arguments->args.num_data_servers; // arguments->hercules_info_struct->num_storages;
-			int32_t id_server_to_remove = -1;
-			// TODO: change this condition without hardcoding.
-			if (number_of_history_records == XYZ)
-			{
-				// Turn off the slowest server at this time.
-				fprintf(stderr, "At this time, the slowest server is %d\n", slowest_server_id);
-
-				if (arguments->hercules_info_struct == NULL)
-				{
-					if (HierarchicalMapGet(hierarchical_map, arguments->args.imss_uri, &address_, &block_size_rtvd))
-					{
-						arguments->hercules_info_struct = (imss_info *)address_;
-					}
-					else
-					{
-						fprintf(stderr, "Hercules instance information has not been found.\n");
-						slog_error("Hercules instance information has not been found.");
-						return -1;
-					}
-				}
-
-				slog_live("Hercules instance found: %s", key.c_str());
-				imss_info *imss_info_struct = arguments->hercules_info_struct;
-				char *element_to_delete = imss_info_struct->ips[slowest_server_id];
-				free(element_to_delete);
-				size_t num_elements_to_shift = imss_info_struct->num_storages - slowest_server_id - 1;
-
-				// move the pointers.
-				memmove(&imss_info_struct->ips[slowest_server_id],
-						&imss_info_struct->ips[slowest_server_id + 1],
-						num_elements_to_shift * sizeof(char *));
-
-				imss_info_struct->ips[imss_info_struct->num_storages - 1] = NULL;
-
-				// TODO: after removing memory protect from all the this block, we have to protect next pointer.
-				imss_info_struct->num_storages--;
-				new_number_data_servers = imss_info_struct->num_storages;
-				imss_info_struct->num_active_storages = new_number_data_servers;
-
-				char request[REQUEST_SIZE] = {0};
-				sprintf(request, "STOPSERVER %" PRId32 "\0", new_number_data_servers);
-				fprintf(stderr, "Sending %s to server ID %d\n", request, slowest_server_id);
-				if (send_req(arguments->ucp_worker, data_endpoints[slowest_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request) == 0)
-				// if (send_req(arguments->ucp_worker, new_imss.conns.eps[slowest_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request) == 0)
-				{
-					perror("HERCULES_ERR_SEND_REQ_SETSERVER");
-					slog_fatal("HERCULES_ERR_SEND_REQ_SETSERVER");
-					return -1;
-				}
-				// se me ocurre cambiar todos los dataset que utilicen el número de servidores actual
-				// al que se reduce. Al final no enviarán datos a los nuevos servidores si estos crecen
-				// pero para nuevos datasets debería funcionar.
-
-				id_server_to_remove = slowest_server_id;
-			}
-
-			char response[PATH_MAX] = {'\0'};
-			sprintf(response, "%s %" PRId32 " %" PRId32 "", MSG_MALLEABILITY_DATASERVERS, new_number_data_servers, id_server_to_remove);
-			int ret = -1;
-			ret = SendConfirmationMessage(arguments, response);
-			if (ret == 0)
-			{
-				perror("HERCULES_ERR_STAT_WORKER_SEND_DATASERVERS");
-				slog_error("HERCULES_ERR_STAT_WORKER_SEND_DATASERVERS");
-				return -1;
-			}
-
-			pthread_mutex_unlock(&memory_protect);
-
-			// To access to all records for server 0:
-			// std::vector<ElasticityMetric>& server_zero_records = elasticity_records_history[0];
+			// if (pthread_detach(thread) != 0)
+			// {
+			// 	perror("HERCULES_ERR_SRV_WORKER_THREAD_MALLEABILITY");
+			// 	slog_error("HERCULES_ERR_SRV_WORKER_THREAD_MALLEABILITY");
+			// 	return 1;
+			// }
 		}
 		break;
 		default:
@@ -2544,16 +2816,19 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				else
 				{
 					// try to reutilizate memory from the memory pool.
-					if (TIMING(StsQueue.size(mem_pool), "mem_pool size", int, arguments->thread_id) > 0)
-					{
-						buffer = (void *)TIMING(StsQueue.pop(mem_pool), "mem_pool pop", void *, arguments->thread_id);
-					}
-					if (buffer == NULL)
-					{
-						// if there are not free block on the memory pool, then perform dynamic alloc.
-						buffer = (void *)TIMING(malloc(length * sizeof(char)), "malloc buffer", void *, arguments->thread_id);
-						reused_memory = 0;
-					}
+					// if (TIMING(StsQueue.size(mem_pool), "mem_pool size", int, arguments->thread_id) > 0)
+					// {
+					// 	buffer = (void *)TIMING(StsQueue.pop(mem_pool), "mem_pool pop", void *, arguments->thread_id);
+					// }
+					// if (buffer == NULL)
+					// {
+					// 	// if there are not free block on the memory pool, then perform dynamic alloc.
+					// 	buffer = (void *)TIMING(malloc(length * sizeof(char)), "malloc buffer", void *, arguments->thread_id);
+					// 	reused_memory = 0;
+					// }
+					// buffer = calloc(1, sizeof(dataset_info));
+					buffer = calloc(1, length);
+
 					if (buffer == NULL)
 					{
 						perror("HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC");
@@ -2809,20 +3084,49 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 							// pthread_mutex_unlock(&lock_network);
 							return -1;
 						}
-
 						fprintf(stderr, "Updating dataset,\n printing intervals of prev. dataset.\n");
-						PrintIntervals((dataset_info*)address_);
+						PrintIntervals(dataset);
+
+						dataset_info *received_struct = (dataset_info *)buffer;
+
+						// Check if intervals is not NULL before freeing.
+						if (dataset->intervals != NULL)
+						{
+							for (size_t i = 0; i < dataset->num_intervals; i++)
+							{
+								free(dataset->intervals[i]);
+							}
+							free(dataset->intervals);
+						}
+
+						memcpy(dataset, received_struct, sizeof(dataset_info));
+						dataset->intervals = (IntervalEntry **)malloc(sizeof(IntervalEntry *) * received_struct->num_intervals);
+
+						for (size_t i = 0; i < received_struct->num_intervals; i++)
+						{
+							// Allocate memory for each individual IntervalEntry and copy the data.
+							dataset->intervals[i] = (IntervalEntry *)malloc(sizeof(IntervalEntry));
+							memcpy(dataset->intervals[i], received_struct->intervals[i], sizeof(IntervalEntry));
+						}
 
 						fprintf(stderr, "Printing intervals of new dataset.\n");
 						PrintIntervals((dataset_info *)buffer);
 
-						// memcpy((char *)address_, buffer, msg_length);
-						address_ = buffer;
+						// memcpy((dataset_info *)address_, (dataset_info *)buffer, sizeof(dataset_info));
+						// memcpy(dataset->intervals, ((dataset_info *)buffer)->intervals, sizeof(dataset->intervals) * dataset->num_intervals);
+						// Free the received buffer.
+						if (received_struct->intervals != NULL)
+						{
+							for (size_t i = 0; i < received_struct->num_intervals; i++)
+							{
+								free(received_struct->intervals[i]);
+							}
+							free(received_struct->intervals);
+						}
+						free(received_struct);
 
 						//  slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 					}
-
-					
 
 					slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 					break;

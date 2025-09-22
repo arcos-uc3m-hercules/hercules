@@ -524,6 +524,10 @@ int getConfiguration(struct arguments *args)
 		{
 			fprintf(stderr, "%s has not been loaded\n", conf_path);
 		}
+		else
+		{
+			strcpy(args->configuration_file_path, conf_path);
+		}
 	}
 	else
 	{
@@ -563,9 +567,10 @@ int getConfiguration(struct arguments *args)
 		if (ret)
 		{
 			fprintf(stderr, "[HERCULES CLIENT] Configuration file '%s' not found\n", conf_path);
-			perror("ERRIMSS_CONF_NOT_FOUND");
+			perror("HERCULES_ERR_CONF_NOT_FOUND");
 			return -1;
 		}
+		strcpy(args->configuration_file_path, conf_path);
 		free(conf_path);
 	}
 
@@ -790,8 +795,8 @@ void getBlockInformation(std::string key, int *block_number, std::string *data_u
 		fprintf(stderr, "Block number is missing in %s\n", key.c_str());
 		return;
 	}
-	*block_number = std::stoi(block, 0, 10);		  //  string to number.
-	pos -= 1;										  // -1 to skip '$' on the data uri.
+	*block_number = std::stoi(block, 0, 10); //  string to number.
+	pos -= 1;								 // -1 to skip '$' on the data uri.
 	// data_uri = (char *)key.substr(0, pos).c_str(); // substract the data uri from the key.
 	*data_uri = key.substr(0, pos);
 	// strcpy(data_uri, key.substr(0, pos).c_str());

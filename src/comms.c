@@ -955,20 +955,24 @@ extern "C"
 			offset_pt += memsize;
 
 			// Copy the intervals.
+			// memsize = sizeof(IntervalEntry) * struct_->num_intervals;
+			// memcpy(offset_pt, *struct_->intervals, memsize);
+			memsize = sizeof(IntervalEntry);
 			for (size_t i = 0; i < struct_->num_intervals; i++)
 			{
-				// Copy the left interval.
-				memsize = sizeof(struct_->intervals[i]->left_interval);
-				memcpy(offset_pt, &struct_->intervals[i]->left_interval, memsize);
+				memcpy(offset_pt, struct_->intervals[i], memsize);
+				// 	// Copy the left interval.
+				// 	memsize = sizeof(struct_->intervals[i]->left_interval);
+				// 	memcpy(offset_pt, &struct_->intervals[i]->left_interval, memsize);
+				// 	offset_pt += memsize;
+				// 	// Copy the right interval.
+				// 	memsize = sizeof(struct_->intervals[i]->right_interval);
+				// 	memcpy(offset_pt, &struct_->intervals[i]->right_interval, memsize);
+				// 	offset_pt += memsize;
+				// 	// Copy the value.
+				// 	memsize = sizeof(struct_->intervals[i]->value);
+				// 	memcpy(offset_pt, &struct_->intervals[i]->value, memsize);
 				offset_pt += memsize;
-				// Copy the right interval.
-				memsize = sizeof(struct_->intervals[i]->right_interval);
-				memcpy(offset_pt, &struct_->intervals[i]->right_interval, memsize);
-				offset_pt += memsize;
-				// Copy the value.
-				memsize = sizeof(struct_->intervals[i]->value);
-				memcpy(offset_pt, &struct_->intervals[i]->value, memsize);
-				// offset_pt += memsize;
 			}
 
 			// Copy the remaining 'data_locations' field if the dataset is a LOCAL one.
@@ -1107,22 +1111,13 @@ extern "C"
 
 			// Copy the intervals.
 			int memsize = 0;
-			struct_->intervals = (IntervalEntry **)malloc(sizeof(IntervalEntry*));
+			struct_->intervals = (IntervalEntry **)malloc(sizeof(IntervalEntry *));
+			memsize = sizeof(IntervalEntry);
 			for (size_t i = 0; i < struct_->num_intervals; i++)
 			{
-				struct_->intervals[i] = (IntervalEntry *)malloc(sizeof(IntervalEntry*));
-				// Copy the left interval.
-				memsize = sizeof(struct_->intervals[i]->left_interval);
-				memcpy(&struct_->intervals[i]->left_interval, msg_data, memsize);
+				struct_->intervals[i] = (IntervalEntry *)malloc(memsize);
+				memcpy(struct_->intervals[i], msg_data, memsize);
 				msg_data += memsize;
-				// Copy the right interval.
-				memsize = sizeof(struct_->intervals[i]->right_interval);
-				memcpy(&struct_->intervals[i]->right_interval, msg_data, memsize);
-				msg_data += memsize;
-				// Copy the value.
-				memsize = sizeof(struct_->intervals[i]->value);
-				memcpy(&struct_->intervals[i]->value, msg_data, memsize);
-				// msg_data += memsize;
 			}
 			break;
 		}

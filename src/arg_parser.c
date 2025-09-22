@@ -65,7 +65,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         strcpy(args->imss_uri, arg);
         break;
     case STAT_HOST_OPT:
-        args->stat_host = arg;
+        strncpy(args->meta_hostfile, arg, PATH_MAX);
         break;
     case STAT_PORT_OPT:
         args->stat_port = atoi(arg);
@@ -74,7 +74,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         args->num_data_servers = atoi(arg);
         break;
     case DEPLOY_HOSTFILE_OPT:
-        strcpy(args->data_hostfile, arg);
+        strncpy(args->data_hostfile, arg, PATH_MAX);
         break;
     case BLOCK_SIZE_OPT:
         args->block_size = atoi(arg);
@@ -110,7 +110,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
             argp_failure(state, 1, 0, "Required options: -p. \nSee --help for more detail");
         }
         if (args->type == TYPE_DATA_SERVER &&
-            (!args->stat_host || !args->stat_port || !args->num_data_servers ||
+            (!args->meta_hostfile || !args->stat_port || !args->num_data_servers ||
              !args->data_hostfile || !args->block_size))
         {
             argp_failure(state, 1, 0, "Required options for data server type: -H, -P, -n, -d, -B, -s. \nSee --help for more detail");

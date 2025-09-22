@@ -190,7 +190,8 @@ typedef struct
 	// GHashTable *intervals = NULL;
 	int num_intervals = 0;
 	int capacity = 100;
-	uint64_t last_block_id = 0;
+	int64_t first_block_id = -1;
+	int64_t last_block_id = -1;
 	IntervalEntry **intervals;
 } dataset_info;
 
@@ -239,6 +240,7 @@ RETURNS:	 0 - Release operations were successfully performed.
 -1 - In case of error.
 	 */
 	int32_t stat_release();
+	int32_t StatACK(char *message, int server_id);
 
 	/* Method retrieving the whole set of elements contained by a specific URI.
 

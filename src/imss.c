@@ -100,6 +100,8 @@ pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
 SharedMemory *shared_memory;
 key_t shared_memory_key;
 
+struct arguments args;
+
 // Define a custom hash function for integer pointers
 guint int_pointer_hash(gconstpointer key)
 {
@@ -919,6 +921,19 @@ int32_t stat_init(char *stat_hostfile,
 	return 0;
 }
 
+int32_t StatACK(char *message, int server_id)
+{
+	ucp_ep_h ep;
+	ep = stat_eps[server_id];
+	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, message) == 0)
+	{
+		slog_error("HERCULES_ERR_STATACK_SEND_REQ");
+		perror("HERCULES_ERR_STATACK_SEND_REQ");
+		return -1;
+	}
+	return 0;
+}
+
 // Method disabling the communication chucp_address_t *peer_addrannel with the metadata server. Besides, the current method releases session-related elements previously initialized.
 int32_t stat_release()
 {
@@ -1367,7 +1382,7 @@ int32_t open_imss(char *imss_uri)
 
 		client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], &new_imss.info.status[i]);
 		slog_debug("[IMSS] Created endpoint with %s", (new_imss.info.ips)[i]);
-		// fprintf(stderr, "[IMSS] Created endpoint with %s\n", (new_imss.info.ips)[i]);
+		fprintf(stderr, "[IMSS] Created endpoint with %s\n", (new_imss.info.ips)[i]);
 	}
 
 	// new_imss.info.num_storages -= num_down_storages;
@@ -1449,6 +1464,7 @@ int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t 
 	{
 		// In case of error notify and exit
 		slog_error("Stat init failed, cannot connect to Metadata server.");
+		fprintf(stderr, "Stat init failed, cannot connect to Metadata server.");
 		// imss_comm_cleanup();
 		exit(1);
 	}
@@ -1466,18 +1482,9 @@ int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t 
 
 int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_parent, int server_id_to_remove, int current_number_of_servers)
 {
-	// slog_debug("Removing server with ID %d, new number of servers is %d, previous number was %d\n", server_id_to_remove, current_number_of_servers, curr_imss.info.num_active_storages);
-	// if (server_id_to_remove+1 > current_number_of_servers)
-	// {
-	// 	fprintf(stderr, "Invalid ID, it was already removed.\n");
-	// 	return 0;
-	// }
-
 	imss local_imss_;
 	imss *imss_;
 	int32_t imss_position = -1;
-	// char release_msg_data[] = "GET 2 0 RELEASE\0";
-	// char release_msg_metadata[REQUEST_SIZE] = {0};
 
 	if ((imss_position = find_imss(imss_uri, &local_imss_)) == -1)
 	{
@@ -2593,7 +2600,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	// size_t value_size = sizeof(first_pair.second);
 	size_t entry_size = key_size + sizeof(write_performance) + sizeof(read_performance); // key_size + value_size;
 
-	fprintf(stderr,"Sending metrics of %d server(s).\n",  backend_performance_metrics.size());
+	fprintf(stderr, "Sending metrics of %d server(s).\n", backend_performance_metrics.size());
 	size_t num_entries = backend_performance_metrics.size();
 	// memory for the buffer to store serializated data.
 	size_t total_size = sizeof(num_entries) + (num_entries * entry_size);
@@ -2672,19 +2679,35 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 		return -1;
 	}
 	slog_debug(" result=%s, msg_length=%d", result, msg_length);
+	fprintf(stderr, " result=%s, msg_length=%d\n", result, msg_length);
 	char message[PATH_MAX] = {'\0'};
-	int32_t current_number_of_data_servers = 0;
-	int32_t id_server_to_remove = 0;
+	int32_t new_number_of_data_servers = 0;
+	int32_t id_modified_server = 0;
 	// get the server id to remove.
-	sscanf((const char *)result, "%s %" PRId32 "%" PRId32 "", message, &current_number_of_data_servers, &id_server_to_remove);
-	slog_debug("message=%s, current_number_of_data_servers=%" PRId32 ", id_server_to_remove=%" PRId32 "", message, current_number_of_data_servers, id_server_to_remove);
+	sscanf((const char *)result, "%s %" PRId32 "%" PRId32 "", message, &new_number_of_data_servers, &id_modified_server);
+	slog_debug("message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 "", message, new_number_of_data_servers, id_modified_server);
 	// sort the array of ips and endpoints according to the new data servers number.
-	// if (id_server_to_remove != -1)
-	// {
-	// 	// when the metadata server response with an ID != -1 it means
-	// 	// that server will be shutting down.
-	// 	ReleaseSpecificDataServerNetworkResources("imss://", 1, id_server_to_remove, current_number_of_data_servers);
-	// }
+	if (id_modified_server != -1)
+	{
+		// when the metadata server response with an ID != -1 it means
+		// that server will be shutting down or a new one will be added.
+		if (new_number_of_data_servers < curr_imss.info.num_active_storages)
+		{ // Decomissioning.
+			fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from close_dataset.\n");
+			slog_debug("Calling ReleaseSpecificDataServerNetworkResources from close_dataset.");
+			ReleaseSpecificDataServerNetworkResources("imss://", 1, id_modified_server, new_number_of_data_servers);
+			SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+		}
+		else if (new_number_of_data_servers > curr_imss.info.num_active_storages)
+		{
+			fprintf(stderr, "New server has been added to the deployment. ID=%d, new_number_of_data_servers=%d\n", id_modified_server, new_number_of_data_servers);
+			release_network_resources(args.imss_uri, 1, process_rank);
+			imss_comm_cleanup();
+			// init = 0;
+			init_network_resources(args.meta_hostfile, args.stat_port, args.num_metadata_servers, process_rank, args.imss_uri);
+			// init = 1;
+		}
+	}
 	free(result);
 	result = NULL;
 
@@ -3980,22 +4003,22 @@ int32_t imss_flush_data()
 	return 1;
 }
 
-// int GetValueFromInterval(int data_id)
-// {
-// 	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
-// 	{
-// 		IntervalEntry *curr_interval = curr_dataset->intervals;
-// 		if (data_id >= curr_interval->left_interval && data_id <= curr_interval->right_interval)
-// 		{
-// 			return curr_interval->value;
-// 		}
-// 	}
-// 	return -1;
-// }
+int GetValueFromInterval(dataset_info *curr_dataset, int data_id)
+{
+	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
+	{
+		IntervalEntry *curr_interval = curr_dataset->intervals[i];
+		if (data_id >= curr_interval->left_interval && data_id <= curr_interval->right_interval)
+		{
+			return curr_interval->value;
+		}
+	}
+	return -1;
+}
 
 void PrintIntervals(dataset_info *curr_dataset)
 {
-	fprintf(stderr, "Printing %d intervals\n", curr_dataset->num_intervals);
+	fprintf(stderr, "Printing %d intervals, address=%p\n", curr_dataset->num_intervals, curr_dataset);
 	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
 	{
 		IntervalEntry *curr_interval = curr_dataset->intervals[i];
@@ -4087,7 +4110,18 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		return -2;
 	}
 	replication_factor = curr_dataset->repl_factor;
-	curr_imss_storages = curr_imss.info.num_active_storages;
+
+	IntervalEntry *entry = GetIntervalPointer(curr_dataset, data_id);
+	if (entry == NULL)
+	{
+		slog_warn("Entry from intervals is NULL, setting curr_imss_storages=%d", curr_imss_storages);
+		curr_imss_storages = curr_imss.info.num_active_storages;
+	}
+	else
+	{
+		curr_imss_storages = entry->value;
+	}
+	slog_debug("curr_imss_storages=%d", curr_imss_storages);
 
 	// if (curr_imss_storages < 0)
 	// {
@@ -4231,11 +4265,11 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		{ // remote server is on decommissioning stage.
 			slog_debug(" result=%s, msg_length=%d", response_buffer, msg_length);
 			char message[PATH_MAX] = {'\0'};
-			int32_t current_number_of_data_servers = 0;
+			int32_t new_number_of_data_servers = 0;
 			int32_t id_server_to_remove = 0;
 			// get the server id to remove.
-			sscanf((const char *)response_buffer, "%s %" PRId32 "%" PRId32 "", message, &current_number_of_data_servers, &id_server_to_remove);
-			slog_debug("message=%s, current_number_of_data_servers=%" PRId32 ", id_server_to_remove=%" PRId32 "", message, current_number_of_data_servers, id_server_to_remove);
+			sscanf((const char *)response_buffer, "%s %" PRId32 "%" PRId32 "", message, &new_number_of_data_servers, &id_server_to_remove);
+			slog_debug("message=%s, new_number_of_data_servers=%" PRId32 ", id_server_to_remove=%" PRId32 "", message, new_number_of_data_servers, id_server_to_remove);
 			pthread_mutex_unlock(&lock_network);
 			// sort the array of ips and endpoints according to the new data servers number.
 			if (id_server_to_remove != -1)
@@ -4244,8 +4278,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 				// that server will be shutting down.
 				fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from get_ndata.\n Pending request=%s to server %d\n", key_, repl_servers[i]);
 				slog_debug("Calling ReleaseSpecificDataServerNetworkResources from get_ndata. Pending request=%s to server %d", key_, repl_servers[i]);
-				ReleaseSpecificDataServerNetworkResources("imss://", 1, id_server_to_remove, current_number_of_data_servers);
-				SetInterval(curr_dataset, current_number_of_data_servers, 0, curr_dataset->last_block_id);
+				ReleaseSpecificDataServerNetworkResources("imss://", 1, id_server_to_remove, new_number_of_data_servers);
+				SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
 
 				// sleep(10);
 				// to try the same operation.
@@ -4457,7 +4491,7 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 	{
 		fprintf(stderr, "[update_dataset] num_intervals=%d\n", curr_dataset->num_intervals);
 		slog_debug("num_intervals=%d", curr_dataset->num_intervals);
-		SetInterval(curr_dataset,curr_imss.info.num_active_storages, 0, curr_dataset->last_block_id);
+		SetInterval(curr_dataset, curr_imss.info.num_active_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
 	}
 	// print current intervals.
 	PrintIntervals(curr_dataset);
@@ -4503,7 +4537,7 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 	// serializate the intervals.
 	// for (int i = 0; i < curr_dataset->num_intervals; i++)
 	// {
-		
+
 	// }
 
 	// ep = stat_eps[m_srv];
@@ -4577,12 +4611,19 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE] = {0};
 	int32_t curr_imss_storages = curr_imss.info.num_active_storages;
+	slog_debug("curr_imss_storages=%d", curr_imss_storages);
 
 	// keep the last block id.
 	if (data_id > curr_dataset->last_block_id)
 	{
 		curr_dataset->last_block_id = data_id;
 	}
+
+	if (curr_dataset->first_block_id == -1)
+	{
+		curr_dataset->first_block_id = data_id;
+	}
+	
 
 	// Send the data block to every server implementing redundancy.
 	for (int32_t i = 0; i < curr_dataset->repl_factor; i++)
@@ -5230,7 +5271,6 @@ int32_t split_location_servers(char *dataset_uri, int **list_servers, int32_t da
 
 	return 0;
 }
-
 
 int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server)
 {

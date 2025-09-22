@@ -82,6 +82,7 @@ typedef struct
 	// Add other necessary arguments here (e.g., local_addr, local_addr_len, slog functions if not global)
 } client_handler_args;
 
+
 // Thread method attending client data requests.
 void *hercules_ucx_server(void *th_argv);
 int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps);
@@ -109,5 +110,18 @@ void *HandleClient(void *args);
  * @return int, 0 if the file was correctly write, -1 on error.
  */
 int ready(char *tmp_file_path, const char *msg);
+
+/**
+ * @brief Reads "deployfile" line by line and fill "my_imss.ips".
+ * 
+ * @param deployfile path to the hostfile.
+ * @param my_imss structure to fill "my_imss.ips".
+ * @return int, number of lineas read, -1 on error.
+ */
+int ReadHostfile(char *deployfile, imss_info *my_imss);
+int AddIPS(imss_info *my_imss, char *line, int32_t n_chars);
+int CheckForMalleability(const p_argv *arguments, void *map_server_eps, const char *req);
+
+
 
 #endif
