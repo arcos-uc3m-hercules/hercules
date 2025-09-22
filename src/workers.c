@@ -296,7 +296,6 @@ int ShutdownServer()
 	return 0;
 }
 
-// int move_blocks_2_server(const p_argv *arguments, uint32_t number_active_storage_servers)
 void *move_blocks_2_server(void *th_argv)
 {
 	const p_argv *arguments = (p_argv *)th_argv;
@@ -537,33 +536,6 @@ void *Malleability(void *th_argv)
 		// al que se reduce. Al final no enviarán datos a los nuevos servidores si estos crecen
 		// pero para nuevos datasets debería funcionar.
 
-		// WAIT FOR THE SERVER CONFIRMATION.
-		// msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-		// slog_debug("get_recv_data_length, msg_length=%lu", msg_length);
-		// if (msg_length == 0)
-		// {
-		// 	pthread_mutex_unlock(&lock_network);
-		// 	perror("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
-		// 	slog_error("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
-		// 	return NULL;
-		// }
-
-		// void *result = malloc(msg_length);
-		// msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, result, msg_length, arguments->worker_uid, 0);
-		// slog_debug(" after recv_data, msg_length=%lu", msg_length);
-		// if (msg_length == 0)
-		// {
-		// 	pthread_mutex_unlock(&lock_network);
-		// 	perror("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
-		// 	slog_error("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
-		// 	free(result);
-		// 	return NULL;
-		// }
-		// slog_debug(" result=%s, msg_length=%d", result, msg_length);
-		// fprintf(stderr, " result=%s, msg_length=%d\n", result, msg_length);
-
-		// free(result);
-
 		id_server_to_modify = slowest_server_id;
 	}
 	if (number_of_history_records == XYZ * 2)
@@ -644,18 +616,23 @@ void *Malleability(void *th_argv)
 		number_active_storage_servers = imss_info_struct->num_storages;
 		id_server_to_modify = id_server_to_add;
 	}
-	CheckForMalleability(arguments, map_server_eps, arguments->curr_req);
 
-	// char response[PATH_MAX] = {'\0'};
-	// sprintf(response, "%s %" PRId32 " %" PRId32 "", MSG_MALLEABILITY_DATASERVERS, new_number_data_servers, id_server_to_modify);
-	// int ret = -1;
-	// ret = SendConfirmationMessage(arguments, response);
-	// if (ret == 0)
-	// {
-	// 	perror("HERCULES_ERR_STAT_WORKER_SEND_DATASERVERS");
-	// 	slog_error("HERCULES_ERR_STAT_WORKER_SEND_DATASERVERS");
-	// 	return -1;
-	// }
+	if(malleability_on)
+		CheckForMalleability(arguments, map_server_eps, arguments->curr_req);
+	else 
+	{
+		// No extra operations, just sending an ACK to the client to continue.
+		char response[PATH_MAX] = {'\0'};
+		sprintf(response, "%s %" PRId32 " -1", MSG_MALLEABILITY_DATASERVERS, new_number_data_servers);
+		int ret = -1;
+		ret = SendConfirmationMessage(arguments, response);
+		if (ret == 0)
+		{
+			perror("HERCULES_ERR_STAT_WORKER_SEND_DATASERVERS");
+			slog_error("HERCULES_ERR_STAT_WORKER_SEND_DATASERVERS");
+			return NULL;
+		}
+	}
 
 	pthread_mutex_unlock(&memory_protect);
 
@@ -994,8 +971,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			return 1;
 		}
 
-		// ret = move_blocks_2_server(arguments);
-
 		// After moving all data, delete this server.
 		// Shutdown or close the socket used by the dispatcher pointed
 		// by the file descriptor "global_server_fd_thread".
@@ -1139,14 +1114,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		{
 			slog_debug("[READ_OP][RELEASE]");
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
-
-			// if (malleability_on)
-			// {
-			// 	waiting_clients--;
-			// 	fprintf(stderr, "Release OP, pending clients %d\n", waiting_clients);
-			// 	pthread_mutex_unlock(&mutex_malleability);
-			// 	// sem_post(&mutex_malleability);
-			// }
 
 			/*
 			response_msg = MSG_RELEASE_OP;

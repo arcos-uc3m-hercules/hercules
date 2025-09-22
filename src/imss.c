@@ -1303,15 +1303,16 @@ int32_t open_imss(char *imss_uri)
 	ucp_worker_address_query(local_addr_data, &attr);
 	local_data_uid = attr.worker_uid;
 
+	fprintf(stderr, "Connecting to %d servers\n", new_imss.info.num_storages);
 	for (int32_t i = 0; i < new_imss.info.num_storages; i++)
 	{
 		// fprintf(stderr, "node=%s, status=%d, new_imss.info.num_storages=%d\n", new_imss.info.ips[i], new_imss.info.status[i], new_imss.info.num_storages);
-		if (new_imss.info.status[i] == 0)
-		{
-			fprintf(stderr, "Skipping - i=%d - %s:%d, status=%d, num active storages=%d, total storages=%d\n", i, new_imss.info.ips[i], new_imss.info.conn_port, new_imss.info.status[i], new_imss.info.num_active_storages, new_imss.info.num_storages);
-			// num_down_storages++;
-			continue;
-		}
+		// if (new_imss.info.status[i] == 0)
+		// {
+		// 	fprintf(stderr, "Skipping - i=%d - %s:%d, status=%d, num active storages=%d, total storages=%d\n", i, new_imss.info.ips[i], new_imss.info.conn_port, new_imss.info.status[i], new_imss.info.num_active_storages, new_imss.info.num_storages);
+		// 	// num_down_storages++;
+		// 	continue;
+		// }
 
 		// skip current server.
 		int oob_sock = -1;
@@ -4111,15 +4112,17 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	}
 	replication_factor = curr_dataset->repl_factor;
 
-	IntervalEntry *entry = GetIntervalPointer(curr_dataset, data_id);
-	if (entry == NULL)
+	// IntervalEntry *entry = GetIntervalPointer(curr_dataset, data_id);
+	// if (entry == NULL)
+	int entry_value = GetValueFromInterval(curr_dataset, data_id);
+	if(entry_value == -1)
 	{
 		slog_warn("Entry from intervals is NULL, setting curr_imss_storages=%d", curr_imss_storages);
 		curr_imss_storages = curr_imss.info.num_active_storages;
 	}
 	else
 	{
-		curr_imss_storages = entry->value;
+		curr_imss_storages = entry_value;//entry->value;
 	}
 	slog_debug("curr_imss_storages=%d", curr_imss_storages);
 
