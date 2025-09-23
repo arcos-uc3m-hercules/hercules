@@ -214,10 +214,11 @@ extern "C"
 {
 #endif
 
-	int GetValueFromInterval(int data_id);
+	int GetValueFromInterval(dataset_info *curr_dataset, int data_id);
 	void PrintIntervals(dataset_info *curr_dataset);
 	IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int right_interval);
 	void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int right_interval);
+	void ClearIntervalsStructure(dataset_info *curr_dataset);
 
 	/****************************************************************************************************************************/
 	/****************************************** METADATA SERVICE MANAGEMENT FUNCTIONS  ******************************************/

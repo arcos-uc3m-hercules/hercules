@@ -32,8 +32,9 @@ pthread_mutex_t memory_protect = PTHREAD_MUTEX_INITIALIZER;
 int malleability_on = 0;
 uint32_t number_active_storage_servers = 0;
 int32_t id_server_to_modify = -1;
+int32_t acks_received = 0;
 #define MALLEABILITY_MESSAGE = "MALLEABILITY";
-#define XYZ 1
+#define XYZ 10
 // To synchronize network operations.
 // pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
@@ -106,7 +107,8 @@ int data_ready = 0;
 int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
 {
 	int count = my_imss->num_storages;
-	fprintf(stderr, "[AddIPS] Adding %s (%d), count=%d\n", line, n_chars, count);
+	// fprintf(stderr, "[AddIPS] Adding %s (%d), count=%d\n", line, n_chars, count);
+	slog_debug("[AddIPS] Adding %s (%d), count=%d", line, n_chars, count);
 	char **new_ips = (char **)realloc(my_imss->ips, (count + 1) * sizeof(char *));
 
 	if (!new_ips)
@@ -213,7 +215,6 @@ void AttendPendingRequests()
 	{
 		return;
 	}
-	
 
 	if (id_server_to_modify < 0)
 	{
@@ -223,10 +224,10 @@ void AttendPendingRequests()
 	}
 
 	char response[PATH_MAX] = {'\0'};
-	// int32_t id_server_to_modify = arguments->args.id;
 	sprintf(response, "%s %" PRId32 " %" PRId32 "", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify);
 	int ret = -1;
-	// fprintf(stderr, "There are %d pending requests\n", pending_requests.size());
+	// fprintf(stderr, "[AttendingPendingRequests] There are %d pending requests\n", pending_requests.size());
+	slog_debug("[AttendingPendingRequests] There are %d pending requests", pending_requests.size());
 	while (pending_requests.size() != 0)
 	{
 		pthread_mutex_lock(&mutex_malleability);
@@ -299,8 +300,7 @@ int ShutdownServer()
 void *move_blocks_2_server(void *th_argv)
 {
 	const p_argv *arguments = (p_argv *)th_argv;
-	malleability_on = 1;
-	id_server_to_modify = arguments->args.id;
+	// malleability_on = 1;
 
 	uint64_t stat_port = arguments->args.stat_port;
 	uint32_t server_id = arguments->args.id;
@@ -347,19 +347,31 @@ void *move_blocks_2_server(void *th_argv)
 			const auto &inner_map = *value;
 
 			// Iterate through the inner map
+			int next_server = 0;
 			for (const auto &inner_pair : inner_map)
 			{
 				number_of_blocks_sent++;
 				const std::string &inner_key = inner_pair.first;
 				const BufferValue &inner_value = inner_pair.second;
 				// fprintf(stderr, "Sub Key %s\n", inner_key.c_str());
-				int pos = inner_key.find('$') + 1;																												  // +1 to skip '$' on the block number.
-				std::string block = inner_key.substr(pos, inner_key.length() + 1);																				  // substract the block number from the key.
-				int block_number = stoi(block, 0, 10);																											  //  string to number.
-				pos -= 1;																																		  // -1 to skip '$' on the data uri.
-				std::string data_uri = inner_key.substr(0, pos);																								  // substract the data uri from the key.
-				int next_server = find_server(number_active_storage_servers, block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
+				int pos = inner_key.find('$') + 1;																											  // +1 to skip '$' on the block number.
+				std::string block = inner_key.substr(pos, inner_key.length() + 1);																			  // substract the block number from the key.
+				int block_number = stoi(block, 0, 10);																										  //  string to number.
+				pos -= 1;																																	  // -1 to skip '$' on the data uri.
+				std::string data_uri = inner_key.substr(0, pos);																							  // substract the data uri from the key.
+				next_server = find_server(number_active_storage_servers, block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
+
+				// next_server = (next_server + 0 * (number_active_storage_servers / 1)) % number_active_storage_servers;
+				// TODO: check replication factor.
+
 				slog_live("key='%s',\turi='%s',\tblock='%s',\tnext server=%d", inner_key.c_str(), data_uri.c_str(), block.c_str(), next_server);
+
+				if (id_server_to_modify == -1 && next_server == server_id)
+				{
+					fprintf(stderr, "[SKIP] BLOCK %d TO %d SERVER\n", block_number, next_server);
+					continue;
+				}
+
 				// 	slog_info("key='%s',\turi='%s%s',\tfrom server %d to server %d,\tactive servers=%lu\n", key.c_str(), data_uri.c_str(), block.c_str(), server_id, next_server, number_active_storage_servers);
 				// 	slog_debug("new server=%d, curr_server=%d\n", next_server, server_id);
 
@@ -373,16 +385,14 @@ void *move_blocks_2_server(void *th_argv)
 					// sem_post(&mutex_malleability);
 					return NULL;
 				}
+
+				HierarchicalMapPutInGarbageCollector(hierarchical_map, inner_key.c_str());
 			}
 		}
 	}
 	fprintf(stderr, "++ number_of_blocks_sent=%d\n", number_of_blocks_sent);
-	// pthread_mutex_lock(&mutex_malleability);
-	// pthread_cond_signal(&global_run_malleability_cond);
-	// pthread_cond_signal(&global_run_malleability_cond);
-	// pthread_mutex_unlock(&mutex_malleability);
+	imss_flush_data();
 	// Check for pending requests.
-
 	AttendPendingRequests();
 
 	pthread_mutex_lock(&mutex_malleability);
@@ -393,12 +403,21 @@ void *move_blocks_2_server(void *th_argv)
 	StatACK(MSG_DECOM_DATASERVERS, 0);
 
 	fprintf(stderr, "ACK to metadata server sent.\n");
-	malleability_on = 2;
+	if (id_server_to_modify != -1)
+	{
+		malleability_on = 2;
+		// id_server_to_modify = -1;
+	}
 	pthread_cond_signal(&global_run_malleability_cond);
 	pthread_mutex_unlock(&mutex_malleability);
 
 	pthread_exit(NULL);
 }
+
+// void *CommissioningStage(void *th_argv)
+// {
+
+// }
 
 void *Malleability(void *th_argv)
 {
@@ -440,10 +459,22 @@ void *Malleability(void *th_argv)
 	int32_t slowest_server_id = -1;
 	double min_overall_performance = -1.0;
 	number_of_history_records++;
+	fprintf(stderr,"*\t");
+	size_t key_length = 0;
 	for (size_t i = 0; i < num_entries; ++i)
 	{
 		// int32_t server_id = 0;
 		ElasticityMetric received_metrics;
+
+
+		// Get the key Size.
+		memcpy(&key_length, current_ptr, sizeof(key_length));
+        current_ptr += sizeof(key_length);
+
+		// get the key (hostname).
+		std::string key(current_ptr, key_length);
+		received_metrics.server_hostname = key;
+        current_ptr += key_length;
 
 		// Deserialize the server ID
 		memcpy(&received_metrics.server_id, current_ptr, sizeof(received_metrics.server_id));
@@ -467,9 +498,10 @@ void *Malleability(void *th_argv)
 		// {
 		// 	fprintf(stderr, "Server id\t Write (MB/s)\t Read (MB/s)\t Overall (MB/s)\n");
 		// }
-		fprintf(stderr, "%d\t %f\t %f\t %f\t %d\n", received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, number_of_history_records);
+		// fprintf(stderr, "%s\t %d\t %f\t %f\t %f\t %d\n",received_metrics.server_hostname.c_str(), received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, number_of_history_records);
 		// Add the new record to the history for the specific server ID.
-		elasticity_records_history[received_metrics.server_id].push_back(received_metrics);
+		// elasticity_records_history[received_metrics.server_id].push_back(received_metrics);
+		elasticity_records_history[received_metrics.server_hostname].push_back(received_metrics);
 		if (min_overall_performance == -1.0 || received_metrics.overall_performance < min_overall_performance)
 		{
 			min_overall_performance = received_metrics.overall_performance;
@@ -494,18 +526,37 @@ void *Malleability(void *th_argv)
 
 	// fprintf(stderrs, "arguments->args.num_data_servers=%d\n", arguments->args.num_data_servers);
 	int32_t new_number_data_servers = arguments->args.num_data_servers; // arguments->hercules_info_struct->num_storages;
-	// int32_t id_server_to_modify = -1;
 	// TODO: change this condition without hardcoding.
 	if (number_of_history_records == XYZ)
 	{
-		// Turn off the slowest server at this time.
-		fprintf(stderr, "At this time, the slowest server is %d\n", slowest_server_id);
+		// print all records.
+		int index = 0;
+		fprintf(stderr, "Printing recorded metrics.\n");
+		fprintf(stderr, "Hostname\t Server id\t Write (MB/s)\t Read (MB/s)\t Overall (MB/s)\n");
+		for (const auto &pair : elasticity_records_history)
+		{
+			std::string hostname = pair.first;
+			const std::vector<ElasticityMetric>& metrics_vector = pair.second;
+			fprintf(stderr, "%s\n", hostname.c_str());
+			for (const ElasticityMetric& metric : metrics_vector) {
+        		fprintf(stderr, "%s\t %d\t %f\t %f\t %f\t %d\n",
+                	hostname.c_str(),
+                	metric.server_id,
+                	metric.write_performance / MB,
+                	metric.read_performance / MB,
+                	metric.overall_performance / MB,
+                	index++
+				);
+    		}
+		}
 
+		// Turn off the slowest server at this time.
 		imss_info *imss_info_struct = arguments->hercules_info_struct;
 		char *element_to_delete = imss_info_struct->ips[slowest_server_id];
+		fprintf(stderr, "At this time, the slowest server is %d:%s\n", slowest_server_id, element_to_delete);
 		free(element_to_delete);
 		size_t num_elements_to_shift = imss_info_struct->num_storages - slowest_server_id - 1;
-
+		
 		// move the pointers.
 		memmove(&imss_info_struct->ips[slowest_server_id],
 				&imss_info_struct->ips[slowest_server_id + 1],
@@ -524,19 +575,36 @@ void *Malleability(void *th_argv)
 		number_active_storage_servers = imss_info_struct->num_storages;
 
 		char request[REQUEST_SIZE] = {0};
-		sprintf(request, "STOPSERVER %" PRId32 "\0", new_number_data_servers);
+		int ret = 0;
+		int32_t new_id = 0;
 		fprintf(stderr, "Sending %s to server ID %d\n", request, slowest_server_id);
-		if (send_req(arguments->ucp_worker, data_endpoints[slowest_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request) == 0)
+		for (size_t i = 0; i < new_number_data_servers + 1; i++)
 		{
-			perror("HERCULES_ERR_SEND_REQ_SETSERVER");
-			slog_fatal("HERCULES_ERR_SEND_REQ_SETSERVER");
-			return NULL;
+			// Send the request to all servers.
+			if (i == slowest_server_id)
+			{
+				sprintf(request, "STOPSERVER %" PRId32 "\0", new_number_data_servers);
+			}
+			else
+			{
+				sprintf(request, "REORDERSERVER %" PRId32 " %" PRId32 "\0", new_number_data_servers, new_id);
+				new_id++;
+			}
+			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
+			if (ret == 0)
+			{
+				perror("HERCULES_ERR_SEND_REQ_SETSERVER");
+				slog_fatal("HERCULES_ERR_SEND_REQ_SETSERVER");
+				return NULL;
+			}
 		}
 		// se me ocurre cambiar todos los dataset que utilicen el número de servidores actual
 		// al que se reduce. Al final no enviarán datos a los nuevos servidores si estos crecen
 		// pero para nuevos datasets debería funcionar.
 
 		id_server_to_modify = slowest_server_id;
+		// remove the records for this server.
+		elasticity_records_history.erase(element_to_delete);
 	}
 	if (number_of_history_records == XYZ * 2)
 	{
@@ -545,17 +613,7 @@ void *Malleability(void *th_argv)
 		int num_server_to_increase = 1;
 		int id_server_to_add = new_number_data_servers;
 		// ****************************
-		int sum_stopped_nodes = 0;
-		int sum_started_nodes = 0;
-		int original_num_servers = 0;
-		int curr_active_data_nodes = 0;
-		int prev_active_data_nodes = 0;
-		char command_to_exec_1[PATH_MAX] = {0};
 		char command_to_exec_2[PATH_MAX] = {0};
-		// char command_to_exec_copy[500];
-		// fprintf(stderr, "Increase the number of servers from %d to %d, the ID of the new server will be %d\n", imss_info_struct->num_storages, new_number_data_servers, id_server_to_add);
-
-		// fprintf(stderr, "data hostfile path=%s\n", arguments->args.data_hostfile);
 
 		// Get a copy of all endpoints addess.
 		imss_info imss_copy = {0};
@@ -600,9 +658,8 @@ void *Malleability(void *th_argv)
 
 		// Update the variables.
 		AddIPS(imss_info_struct, node_to_use, strlen(node_to_use));
-
 		// print the current IPS.
-		fprintf(stderr, "Printing EPS on the global structure.\n imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
+		fprintf(stderr, "Printing EPS on the global structure.\n imss_info_struct->num_storages=%d\n", imss_info_struct->num_storages);
 		for (size_t i = 0; i < imss_info_struct->num_storages; i++)
 		{
 			fprintf(stderr, "eps[%d] hostname=%s\n", i, imss_info_struct->ips[i]);
@@ -617,9 +674,9 @@ void *Malleability(void *th_argv)
 		id_server_to_modify = id_server_to_add;
 	}
 
-	if(malleability_on)
+	if (malleability_on)
 		CheckForMalleability(arguments, map_server_eps, arguments->curr_req);
-	else 
+	else
 	{
 		// No extra operations, just sending an ACK to the client to continue.
 		char response[PATH_MAX] = {'\0'};
@@ -865,12 +922,14 @@ int CheckForMalleability(const p_argv *arguments, void *map_server_eps, const ch
 	if (malleability_on)
 	{
 		waiting_clients++;
-		slog_debug("+ Clients waiting %d\n", waiting_clients);
-		fprintf(stderr, "+ Clients waiting %d, req=%s\n", waiting_clients, req);
+		// fprintf(stderr, "+ Clients waiting %d, req=%s\n", waiting_clients, req);
+		slog_debug("+ Clients waiting %d, req=%s", waiting_clients, req);
 		pthread_mutex_lock(&mutex_malleability);
 		pending_requests.push_back(*arguments);
 		pthread_cond_signal(&global_run_malleability_cond);
 		pthread_mutex_unlock(&mutex_malleability);
+		// fprintf(stderr, "+ Request saved, req=%s\n", req);
+		slog_debug("+ Request saved, req=%s", req);
 		return 1;
 	}
 	return 0;
@@ -954,7 +1013,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	{
 		// TODO: move this to the correct case.
 		// int number_active_storage_servers = 0;
-		sscanf(req, "%s %" PRIu32 "", mode, &number_active_storage_servers);
+		malleability_on = 1;
+		id_server_to_modify = arguments->args.id;
+		sscanf(req, "%s %" PRIu32 " %" PRIu32 "", mode, &number_active_storage_servers);
 		pthread_t thread;
 		p_argv arguments_aux = *arguments;
 		if (pthread_create(&thread, NULL, move_blocks_2_server, (void *)&arguments_aux) != 0)
@@ -980,6 +1041,28 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			perror("HERCULES_ERR_SRV_WORKER_SHUTDOWN_SERVER_FD\n");
 		}
 
+		return 1;
+	}
+	else if (!strcmp(mode, "REORDERSERVER"))
+	{
+		int32_t new_id = 0;
+		sscanf(req, "%s %" PRIu32 " %" PRIu32 "", mode, &number_active_storage_servers, &new_id);
+		arguments->args.id = new_id;
+		pthread_t thread;
+		p_argv arguments_aux = *arguments;
+		if (pthread_create(&thread, NULL, move_blocks_2_server, (void *)&arguments_aux) != 0)
+		{
+			perror("HERCULES_ERR_SRV_WORKER_THREAD_MOVE_BLOCKS_2_SERVER");
+			slog_error("HERCULES_ERR_SRV_WPORKER_THREAD_MOVE_BLOCKS_2_SERVER");
+			return -1;
+		}
+
+		if (pthread_detach(thread) != 0)
+		{
+			perror("HERCULES_ERR_SRV_WORKER_DETACH_THREAD_MOVE_BLOCKS_2_SERVER");
+			slog_error("HERCULES_ERR_SRV_WORKER_DETACH_THREAD_MOVE_BLOCKS_2_SERVER");
+			return 1;
+		}
 		return 1;
 	}
 	else
@@ -1535,6 +1618,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		if (ret == 0)
 		{
 			slog_debug("[WRITE_OP] NO key find %s", key.c_str());
+			// fprintf(stderr, "Inserting block %s\t", key.c_str());
 			void *buffer = NULL;
 			//  Receive the block into the buffer.
 			clock_t tr;
@@ -2094,11 +2178,18 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	// Save the request to be served.
 	slog_info("Request - '%s'", req);
-	fprintf(stderr, "Request=%s\n", req);
+	// fprintf(stderr, "Request=%s\n", req);
 	if (!strcmp(req, MSG_DECOM_DATASERVERS))
 	{
-		fprintf(stderr, "ACK received: %s\n", req);
-		AttendPendingRequests();
+		acks_received++;
+		int expected_acks = arguments->args.num_data_servers + 1;
+		fprintf(stderr, "[%d/%d] ACK received: %s\n", acks_received, expected_acks, req);
+		if (acks_received >= expected_acks)
+		{
+			AttendPendingRequests();
+			malleability_on = 0;
+			acks_received = 0;
+		}
 		return 0;
 	}
 	// TODO: GET and SET request does not have a consistent format. Try to change it.
@@ -3051,7 +3142,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 							// pthread_mutex_unlock(&lock_network);
 							return -1;
 						}
-						fprintf(stderr, "Updating dataset,\n printing intervals of prev. dataset.\n");
+						slog_debug("Updating dataset,\n printing intervals of prev. dataset.");
 						PrintIntervals(dataset);
 
 						dataset_info *received_struct = (dataset_info *)buffer;
@@ -3076,7 +3167,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 							memcpy(dataset->intervals[i], received_struct->intervals[i], sizeof(IntervalEntry));
 						}
 
-						fprintf(stderr, "Printing intervals of new dataset.\n");
+						slog_debug("Printing intervals of new dataset.");
 						PrintIntervals((dataset_info *)buffer);
 
 						// memcpy((dataset_info *)address_, (dataset_info *)buffer, sizeof(dataset_info));

@@ -1,5 +1,5 @@
-UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=2 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server m 0
-UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=2 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server d 0 2
+UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=3 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server m 0
+UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=3 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server d 0 3
 
 ## IMPORTANT
 # add the following line in case of memory errors.

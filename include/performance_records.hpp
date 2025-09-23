@@ -19,6 +19,7 @@ typedef struct
 
 typedef struct
 {
+    int server_id = 0;
     ServerMetrics write;
     ServerMetrics read;
 } IOServerMetrics;
@@ -26,6 +27,7 @@ typedef struct
 typedef struct
 {
     int server_id = 0;
+    std::string server_hostname;
     double rio = 0.0; // recomended io throughput.
     double aio = 0.0; // acctual I/O throughput.
     double write_performance = 0.0;
@@ -35,15 +37,19 @@ typedef struct
 } ElasticityMetric;
 
 // Use a map to store metrics, mapping server_id to its metrics.
-static std::map<int32_t, IOServerMetrics> backend_performance_metrics;
+// static std::map<int32_t, IOServerMetrics> backend_performance_metrics;
+static std::map<std::string, IOServerMetrics> backend_performance_metrics;
 // static std::vector<std::pair<int32_t, ElasticityMetric>> elasticy_records_history;
-static std::map<int32_t, std::vector<ElasticityMetric>> elasticity_records_history;
+// static std::map<int32_t, std::vector<ElasticityMetric>> elasticity_records_history;
+static std::map<std::string, std::vector<ElasticityMetric>> elasticity_records_history;
 static int best_number_of_servers = 0;
 static int number_of_history_records = 0;
 
-static void PerformanceRecordsRemoveKey(int32_t server_id)
+// static void PerformanceRecordsRemoveKey(int32_t server_id)
+static void PerformanceRecordsRemoveKey(char *server_hostname)
 {
-    backend_performance_metrics.erase(server_id);
+    // backend_performance_metrics.erase(server_id);
+    backend_performance_metrics.erase(server_hostname);
 }
 
 #endif // H_PERFORMANCE_RECORDS
