@@ -802,15 +802,16 @@ int32_t stat_init(char *stat_hostfile,
 		exit(-1);
 	}
 
-	char *stat_node = (char *)malloc(LINE_LENGTH);
-	if (stat_node == NULL)
-	{
-		perror("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_STAT_NODE");
-		slog_error("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_STAT_NODE");
-		free(stat_ids);
-		free(stat_eps);
-		exit(-1);
-	}
+	char *stat_node = NULL;
+	// char *stat_node = (char *)malloc(LINE_LENGTH);
+	// if (stat_node == NULL)
+	// {
+	// 	perror("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_STAT_NODE");
+	// 	slog_error("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_STAT_NODE");
+	// 	free(stat_ids);
+	// 	free(stat_eps);
+	// 	exit(-1);
+	// }
 	// Connect to all servers.
 	char request[REQUEST_SIZE] = {0};
 
@@ -905,7 +906,8 @@ int32_t stat_init(char *stat_hostfile,
 		slog_debug("created ep with %s:%ld", stat_node, port);
 	}
 
-	free(stat_node);
+	if(stat_node)
+		free(stat_node);
 	// Close the file.
 	if (fclose(stat_nodes_struct) != 0)
 	{
@@ -1455,6 +1457,7 @@ int32_t open_imss(char *imss_uri)
 
 int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root)
 {
+	// fprintf(stderr, "Creating network resources, stat_hostfile=%s, stat_port=%d, num_stat_servers=%d\n", stat_hostfile, stat_port, num_stat_servers);
 	if (stat_init(stat_hostfile, stat_port, num_stat_servers, rank) == -1)
 	{
 		// In case of error notify and exit
@@ -2653,7 +2656,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 		memcpy(current_ptr, &read_performance, sizeof(read_performance));
 		current_ptr += sizeof(read_performance);
 
-		fprintf(stderr, "key=%s, server_id=%d, write_performance=%f, read_performance=%f\n", pair.first.c_str(), pair.second.server_id, write_performance, read_performance);
+		// fprintf(stderr, "key=%s, server_id=%d, write_performance=%f, read_performance=%f\n", pair.first.c_str(), pair.second.server_id, write_performance, read_performance);
 
 		// fprintf(stderr, "Read Performance for server %d: %f\n", pair.first, read_performance);
 	}
@@ -2714,7 +2717,8 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 		}
 		else if (new_number_of_data_servers > curr_imss.info.num_active_storages)
 		{
-			// fprintf(stderr, "New server has been added to the deployment. ID=%d, new_number_of_data_servers=%d\n", id_modified_server, new_number_of_data_servers);
+			fprintf(stderr, "New server has been added to the deployment. ID=%d, new_number_of_data_servers=%d\n", id_modified_server, new_number_of_data_servers);
+			fprintf(stderr, "read | write, num servers=%d\n", new_number_of_data_servers);
 			slog_debug("New server has been added to the deployment. ID=%d, new_number_of_data_servers=%d", id_modified_server, new_number_of_data_servers);
 			PrintIntervals(curr_dataset);
 			release_network_resources(args.imss_uri, 1, process_rank);

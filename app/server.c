@@ -14,6 +14,8 @@
 #include "policies.h"
 #include "utils.h"
 
+extern int number_of_hosts;
+extern imss_info imss_copy;
 extern int SERVER_ID;
 // Pointer to the tree's root node.
 extern GNode *tree_root;
@@ -233,6 +235,15 @@ int32_t main(int32_t argc, char **argv)
 		// slog_debug("stat-logfile = %s", args.stat_logfile);
 		// bind port number.
 		bind_port = args.stat_port;
+
+		if (strlen(args.alloc_data_hostfile) != 0)
+		{
+			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
+		} 
+		else 
+		{
+			fprintf(stderr,"ERROR: alloc_data_hostfile has not ben set. HERCULES_ALLOC_DATA_HOSTFILE = hostfile_path\n");
+		}
 	}
 
 	// buffer size provided.

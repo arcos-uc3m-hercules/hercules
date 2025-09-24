@@ -40,6 +40,7 @@ struct arguments
 {
     char type;                      /* type of server (TYPE_DATA_SERVER or TYPE_METADATA_SERVER) */
     char data_hostfile[PATH_MAX]; /* deploy hostfile arg to '-d' */
+    char alloc_data_hostfile[PATH_MAX]; /* deploy hostfile arg to '-d' */
     char stat_logfile[PATH_MAX];    /* metadata logfile arg to '-l' */
     char imss_uri[URI_];        /* IMSS URI arg to '-i' */
     char hercules_path[PATH_MAX-100];   /* hercules path */

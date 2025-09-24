@@ -330,8 +330,10 @@ ATTACHED=$(cat "${FILE}" | grep "\<ATTACHED\>" | awk '{print $3}')
 HERCULES_BLOCK_SIZE=$(cat "${FILE}" | grep "\<BLOCK_SIZE\>" | awk '{print $3}')
 STORAGE_SIZE=$(cat "${FILE}" | grep "\<STORAGE_SIZE\>" | awk '{print $3}')
 HERCULES_DATA_HOSTFILE=$(cat "${FILE}" | grep "\<DATA_HOSTFILE\>" | awk '{print $3}')
+HERCULES_ALLOC_DATA_HOSTFILE=$(cat "${FILE}" | grep "\<ALLOC_DATA_HOSTFILE\>" | awk '{print $3}')
 HERCULES_METADATA_HOSTFILE=$(cat "${FILE}" | grep "\<METADATA_HOSTFILE\>" | awk '{print $3}')
 INIT_HERCULES_NUM_DATA=$(cat "${FILE}" | grep "\<INIT_NUM_DATA_SERVERS\>" | awk '{print $3}')
+UPPER_BOUND_MALLEABILITY=$(cat "${FILE}" | grep "\<UPPER_BOUND_MALLEABILITY\>" | awk '{print $3}')
 
 if [ -z "$INIT_HERCULES_NUM_DATA" ] || [ "$INIT_HERCULES_NUM_DATA" = "0" ] ; then
     INIT_HERCULES_NUM_DATA=$HERCULES_NUM_DATA
@@ -670,8 +672,8 @@ then
         ## If a data file was not defined and we have slurm's nodes allocated,
         ## then we create a file which contains the hostnames of the nodes that
         ## will be used to deploy the determinate set of data servers.
-        # readarray -t data_hosts < <(tail -n +$((HERCULES_NUM_METADATA+1)) hostfile | head -n $HERCULES_NUM_DATA)
         tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${HERCULES_NUM_DATA}" > "${HERCULES_DATA_HOSTFILE}"
+        tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${UPPER_BOUND_MALLEABILITY}" > "${HERCULES_ALLOC_DATA_HOSTFILE}"
     fi
     ## To create an array with the data nodes.
     readarray -t data_hosts < "${HERCULES_DATA_HOSTFILE}"
@@ -727,6 +729,8 @@ end=`date +%s.%N`
 runtime=$( echo "$end - $start" | bc -l )
 echo "[-] Data servers started in $runtime seconds"
 
+# cat "${HERCULES_TEMPORAL_PATH}/aux_hostfile" > "${HERCULES_DATA_HOSTFILE}"
+
 #module avail
 #whereis mpiexec
 ## Search for the mpi distribution installed.
@@ -771,6 +775,7 @@ export "HERCULES_NCPN=${NUM_CLIENTS_PER_NODE}"
 export "HERCULES_NNFC=${NUM_NODES_FOR_CLIENTS}"
 # data hostfile name.
 export "HERCULES_DATA_HOSTFILE=${HERCULES_DATA_HOSTFILE}"
+export "HERCULES_ALLOC_DATA_HOSTFILE=${HERCULES_ALLOC_DATA_HOSTFILE}"
 export "HERCULES_FULL_HOSTFILE=${FULL_HOSTFILE}"
 
 unset META_PORT

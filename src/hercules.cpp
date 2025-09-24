@@ -677,6 +677,13 @@ int getConfiguration(struct arguments *args)
 	else if (cfg_get(cfg, "DATA_HOSTFILE"))
 		strcpy(args->data_hostfile, cfg_get(cfg, "DATA_HOSTFILE"));
 
+	if (getenv("HERCULES_ALLOC_DATA_HOSTFILE") != NULL)
+		strcpy(args->alloc_data_hostfile, getenv("HERCULES_ALLOC_DATA_HOSTFILE"));
+	else if (cfg_get(cfg, "ALLOC_DATA_HOSTFILE"))
+		strcpy(args->alloc_data_hostfile, cfg_get(cfg, "ALLOC_DATA_HOSTFILE"));
+	else 
+		args->alloc_data_hostfile[0] = '\0';
+
 	if (getenv("HERCULES_THREAD_POOL") != NULL)
 		args->thread_pool = atol(getenv("HERCULES_THREAD_POOL"));
 	else if (cfg_get(cfg, "THREAD_POOL"))
