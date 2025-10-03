@@ -208,7 +208,7 @@ extern "C"
 		ctx.buffer = (void *)msg;
 		ctx.complete = 0;
 
-		ucp_worker_progress(ucp_worker);
+		// ucp_worker_progress(ucp_worker);
 		// send_param.flags = UCP_OP_ATTR_FLAG_NO_IMM_CMPL; // Ensure async progress
 		send_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
 								  UCP_OP_ATTR_FIELD_USER_DATA |
@@ -419,7 +419,7 @@ extern "C"
 		struct ucx_context *request;
 		ucs_status_t status;
 
-		async = 1;
+		// async = 1;
 
 		// recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
 		// 						  UCP_OP_ATTR_FIELD_CALLBACK |
@@ -432,23 +432,22 @@ extern "C"
 		recv_param.cb.recv = recv_handler;
 
 		slog_debug("[COMM] Probe tag (%lu bytes)", msg_length);
-		// if (async)
+		if (async)
 		{
 			request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
 		}
-		// else
-		// {
-		// 	request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
-		// 	memcpy(msg, recv_buffer, msg_length);
-		// }
-
-		status = ucx_wait(ucp_worker, request, "recv", "data");
-
-		if (status != UCS_OK)
+		else
 		{
-			slog_error("[COMM] HERCULES_RECV_DATA_ERR, msg_length=%lu", msg_length);
-			fprintf(stderr, "HERCULES_ERR_RECV_DATA\n");
-			return 0;
+			request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
+			status = ucx_wait(ucp_worker, request, "recv", "data");
+			if (status != UCS_OK)
+			{
+				slog_error("[COMM] HERCULES_RECV_DATA_ERR, msg_length=%lu", msg_length);
+				fprintf(stderr, "HERCULES_ERR_RECV_DATA\n");
+				return 0;
+			}
+			// request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
+			// memcpy(msg, recv_buffer, msg_length);
 		}
 
 		return msg_length;

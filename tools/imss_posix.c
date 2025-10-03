@@ -14,7 +14,7 @@ uint32_t DEPLOYMENT = 2; // Default 1=ATACHED, 0=DETACHED ONLY METADATA SERVER 2
 char POLICY[MAX_POLICY_LEN];
 uint64_t IMSS_SRV_PORT = 1; // Not default, 1 will fail
 uint64_t METADATA_PORT = 1; // Not default, 1 will fail
-int32_t N_SERVERS = 1;		// Default
+extern int32_t N_SERVERS;		
 int32_t N_BLKS = 1;			// Default 1
 int32_t N_META_SERVERS = 1;
 char *METADATA_FILE = NULL; // Not default
