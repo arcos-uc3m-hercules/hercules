@@ -37,7 +37,7 @@ extern size_t *local_addr_len;
 extern StsHeader *mem_pool;
 
 extern struct arguments args;
-std::shared_ptr<map_records> g_map;
+// std::shared_ptr<map_records> g_map;
 // uint64_t max_storage_size = 0;
 
 /* UCP objects */
@@ -573,7 +573,7 @@ int32_t main(int32_t argc, char **argv)
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));
 	hierarchical_map = HierarchicalMapCreate(std::string(args.imss_uri));
 	// copy the reference to a global map.
-	g_map = map;
+	// g_map = map;
 
 	int64_t data_reserved = 0;
 	// Pointer to the allocated buffer memory.

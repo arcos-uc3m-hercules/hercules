@@ -77,10 +77,29 @@ typedef struct
 typedef struct
 {
 	int client_socket;
-	uint32_t client_id_counter; // To maintain the client_id_ for modulo operation
+	uint32_t client_id_counter;
 	u_int16_t hercules_thread_pool_size;
-	// Add other necessary arguments here (e.g., local_addr, local_addr_len, slog functions if not global)
 } client_handler_args;
+
+/**
+ * @brief Arguments specifically for the CommissioningStage thread.
+ */
+typedef struct
+{
+    // The entire 'args' substruct containing configuration.
+    struct arguments args;
+
+    // A pointer to the shared Hercules instance information.
+    imss_info *hercules_info_struct;
+
+    // Fields needed to call SendConfirmationMessage and CheckForMalleability.
+    ucp_worker_h ucp_worker;
+    ucp_ep_h server_ep;
+    uint64_t worker_uid;
+    char curr_req[PATH_MAX];
+} CommissioningThreadArgs;
+
+
 
 
 // Thread method attending client data requests.
@@ -120,7 +139,8 @@ int ready(char *tmp_file_path, const char *msg);
  */
 int ReadHostfile(char *deployfile, imss_info *my_imss);
 int AddIPS(imss_info *my_imss, char *line, int32_t n_chars);
-int CheckForMalleability(const p_argv *arguments, void *map_server_eps, const char *req);
+int CheckForMalleability(const p_argv *arguments, const char *req);
+bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history);
 
 
 

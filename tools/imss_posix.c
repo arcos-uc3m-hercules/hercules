@@ -3137,7 +3137,6 @@ ssize_t read(int fd, void *buf, size_t size)
 		const char *pathname = pathname_ob.c_str();
 		if (size <= 0)
 		{
-			// buf = (void *)'\0';
 			return 0;
 		}
 
@@ -3155,7 +3154,6 @@ ssize_t read(int fd, void *buf, size_t size)
 		map_fd_search(map_fd, pathname, fd, &offset);
 
 		// fprintf(stderr, "[POSIX] Read Hercules size=%ld, offset=%lu\n", size, offset);
-		// ret = imss_read(pathname, buf, size, offset);
 		ret = TIMING(imss_sread(pathname, buf, size, offset), "imss_sread", ssize_t, rank);
 		if (ret > 0)
 		{

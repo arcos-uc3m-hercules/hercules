@@ -190,8 +190,8 @@ typedef struct
 	// GHashTable *intervals = NULL;
 	int num_intervals = 0;
 	int capacity = 100;
-	int64_t first_block_id = -1;
-	int64_t last_block_id = -1;
+	int32_t first_block_id = -1;
+	int32_t last_block_id = -1;
 	IntervalEntry **intervals;
 } dataset_info;
 
@@ -216,9 +216,10 @@ extern "C"
 
 	int GetValueFromInterval(dataset_info *curr_dataset, int data_id);
 	void PrintIntervals(dataset_info *curr_dataset);
-	IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int right_interval);
+	IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval, int right_interval);
 	void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int right_interval);
 	void ClearIntervalsStructure(dataset_info *curr_dataset);
+	int compare_intervals(const void *a, const void *b);
 
 	/****************************************************************************************************************************/
 	/****************************************** METADATA SERVICE MANAGEMENT FUNCTIONS  ******************************************/
@@ -479,7 +480,8 @@ The current function does not allocate memory.
 	 * requested block was not find in the remote server, or -2 in case of
 	 * error.
 	 */
-	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
+	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request);
+	ssize_t start_block_request(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
 
 	/**
 	 * @brief Method used during malleability to retrieving a data element

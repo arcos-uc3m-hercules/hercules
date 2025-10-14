@@ -2207,7 +2207,7 @@ int32_t create_dataset(char *dataset_uri,
 	if (ret == 1 || ret == -3)
 	{ // 1: The dataset exists in the local GArray.
 		// -3: The dataset was retrieved from the remote metadata server.
-		slog_live("[IMSS] ERRIMSS_CREATEDATASET_ALREADYEXISTS, associated_imss.conns.matching_server=%d", associated_imss.conns.matching_server);
+		slog_live("[IMSS] ERRIMSS_CREATEDATASET_ALREADYEXISTS, associated_imss.conns.matching_server=%d,ret=%d", associated_imss.conns.matching_server, ret);
 		new_dataset->imss_d = associated_imss_indx;
 		new_dataset->local_conn = associated_imss.conns.matching_server;
 
@@ -2236,6 +2236,10 @@ int32_t create_dataset(char *dataset_uri,
 			// memcpy(aux_dataset, &new_dataset, sizeof(dataset_info));
 			// add_dataset_entry(&datasetd, dataset_uri, aux_dataset);
 			add_dataset_entry_in_pool(dataset_uri, new_dataset);
+		}
+		else
+		{
+			ClearIntervalsStructure(new_dataset);
 		}
 
 		// fprintf(stderr, "dataset already exists, ret=%d\n", ret);
@@ -2330,6 +2334,8 @@ int32_t create_dataset(char *dataset_uri,
 	// new_dataset->intervals = g_hash_table_new(g_int_hash, g_int_equal);
 	// new_dataset->intervals = g_hash_table_new_full(int_pointer_hash, int_pointer_equal, key_destroy_func, key_destroy_func);
 	new_dataset->intervals = NULL; // (IntervalEntry **)calloc(new_dataset->capacity, sizeof(IntervalEntry *));
+	new_dataset->first_block_id = -1;
+	new_dataset->last_block_id = -1;
 
 	// slog_debug("interval add=%p, init size=%d", new_dataset->intervals, g_hash_table_size(new_dataset->intervals));
 	slog_live("[IMSS] new_dataset->type=%c, local_conn=%d, new_dataset->n_servers_when_created=%d", new_dataset->type, associated_imss.conns.matching_server, new_dataset->n_servers_when_created);
@@ -3514,7 +3520,7 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 	int num_storages = 0;
 	if (entry_value == -1)
 	{
-		slog_warn("Entry from intervals is NULL, setting num_storages=%d", curr_imss.info.num_storages);
+		slog_warn("Entry from intervals is NULL, setting num_storages=%d for data_id=%d", curr_imss.info.num_storages, data_id);
 		num_storages = curr_imss.info.num_storages;
 	}
 	else
@@ -4204,7 +4210,7 @@ void PrintIntervals(dataset_info *curr_dataset)
 	}
 }
 
-IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int right_interval)
+IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval, int right_interval)
 {
 	if (curr_dataset->intervals == NULL)
 	{
@@ -4216,7 +4222,13 @@ IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int right_interval
 	{
 		slog_debug("curr_dataset->num_intervals=%d", curr_dataset->num_intervals);
 		curr_interval = curr_dataset->intervals[i];
-		if (right_interval >= curr_interval->right_interval)
+		// block zero case.
+		if (left_interval == curr_interval->left_interval && right_interval == curr_interval->right_interval)
+		{
+			return curr_interval;
+		}
+
+		if (right_interval >= curr_interval->right_interval && curr_interval->right_interval != 0)
 		{
 			return curr_interval;
 		}
@@ -4234,7 +4246,7 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 	}
 
 	// Check if the current interval exists.
-	IntervalEntry *entry = GetIntervalPointer(curr_dataset, right_interval);
+	IntervalEntry *entry = GetIntervalPointer(curr_dataset, left_interval, right_interval);
 	if (entry == NULL)
 	{
 		// fprintf(stderr, "Making interval [%d, %d]=%d\n", left_interval, right_interval, value);
@@ -4272,10 +4284,29 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 	// }
 }
 
+int compare_intervals(const void *a, const void *b)
+{
+	// a and b are of type 'IntervalEntry **'
+	IntervalEntry *intervalA = *(IntervalEntry **)a;
+	IntervalEntry *intervalB = *(IntervalEntry **)b;
+
+	if (intervalA->left_interval < intervalB->left_interval)
+		return -1;
+	if (intervalA->left_interval > intervalB->left_interval)
+		return 1;
+	return 0;
+}
+
 // Method retrieving a data element associated to a certain dataset.
-ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset)
+ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request)
 {
 	slog_debug("dataset_uri=%s, dataset_id=%d, data_id=%d", dataset_uri, dataset_id, data_id);
+
+	if (buffer_request)
+	{
+		*buffer_request = NULL;
+	}
+	
 
 	int n_server = -1;
 	int replication_factor = 1;
@@ -4290,18 +4321,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	}
 	replication_factor = curr_dataset->repl_factor;
 
-	// IntervalEntry *entry = GetIntervalPointer(curr_dataset, data_id);
-	// if (entry == NULL)
-	// int entry_value = GetValueFromInterval(curr_dataset, data_id);
-	// if(entry_value == -1)
-	// {
-	// slog_warn("Entry from intervals is NULL, setting curr_imss_storages=%d", curr_imss_storages);
-	// curr_imss_storages = curr_imss.info.num_storages;
-	// }
-	// else
-	// {
-	// curr_imss_storages = entry_value;//entry->value;
-	// }
 	int entry_value = GetValueFromInterval(curr_dataset, data_id);
 	if (entry_value == -1)
 	{
@@ -4356,7 +4375,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 
 	char key_[REQUEST_SIZE] = {0};
 	clock_t t;
-	// double time_taken;
 	ucp_ep_h ep;
 	size_t msg_length = 0;
 	char mode[10] = {0};
@@ -4419,9 +4437,22 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			return -2;
 		}
 
-		// msg_length = TIMING(recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0), "recv_data", size_t, process_rank);
-		msg_length = TIMING(recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0), "recv_data", size_t, process_rank);
-		// msg_length = TIMING(recv_data_2(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, 0, info_tag, msg_tag), "recv_data_2", size_t, process_rank);
+		if (async == ASYNC)
+		{
+			ucs_status_ptr_t status_ptr;
+			status_ptr = start_recv_data_async(ucp_worker_data, ep, buffer, msg_length, local_data_uid);
+			if (UCS_PTR_IS_ERR(status_ptr))
+			{
+				slog_error("[COMM] Error running start_recv_data_async, status: %s", ucs_status_string(UCS_PTR_STATUS(status_ptr)));
+				return -2;
+			}
+			*buffer_request = status_ptr;
+		}
+		else
+		{
+			// original
+			msg_length = TIMING(recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async), "recv_data", size_t, process_rank);
+		}
 
 		t = clock() - t;
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
@@ -4540,6 +4571,106 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	}
 	pthread_mutex_unlock(&lock_network);
 	return -1;
+}
+
+ssize_t start_block_request(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset)
+{
+	slog_debug("dataset_uri=%s, dataset_id=%d, data_id=%d", dataset_uri, dataset_id, data_id);
+
+	int n_server = -1;
+	int replication_factor = 1;
+	int inf_prov = 0;
+	int32_t curr_imss_storages = 0;
+
+	// if the number of server to be used was not provided, we try to obtain the data location.
+	// Server containing the corresponding data to be retrieved.
+	if ((n_server = TIMING(get_data_location(dataset_uri, dataset_id, data_id, GET), "get_data_location", int32_t, process_rank)) == -1)
+	{
+		return -2;
+	}
+	replication_factor = curr_dataset->repl_factor;
+
+	int entry_value = GetValueFromInterval(curr_dataset, data_id);
+	if (entry_value == -1)
+	{
+		slog_warn("Entry from intervals is NULL, setting curr_imss_storages=%d", curr_imss.info.num_storages);
+		curr_imss_storages = curr_imss.info.num_storages;
+	}
+	else
+	{
+		curr_imss_storages = entry_value; // entry->value;
+	}
+	slog_debug("curr_imss_storages=%d", curr_imss_storages);
+
+	if (replication_factor < 0 || curr_imss_storages < 0)
+	{
+		fprintf(stderr, "HERCULES_ERR_GET_NDATA_BAD_PARAMS");
+		slog_error("HERCULES_ERR_GET_NDATA_BAD_PARAMS");
+		return -1;
+	}
+
+	// Servers that the data block is going to be requested to.
+	int32_t repl_servers[replication_factor];
+	int32_t session_policy = curr_dataset->session_plcy; //  get_policy();
+
+	uint32_t n_server_ = 0;
+	int32_t aux_conn = 0;
+	slog_debug("replication_factor=%d, curr_imss_storages=%d", replication_factor, curr_imss_storages);
+	// Retrieve the corresponding connections to the previous servers.
+	for (int32_t i = 0; i < replication_factor; i++)
+	{
+		// Server storing the current data block.
+		n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
+		slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset->n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset->n_servers, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
+
+		repl_servers[i] = n_server_;
+	}
+
+	char key_[REQUEST_SIZE] = {0};
+	clock_t t;
+	ucp_ep_h ep;
+	size_t msg_length = 0;
+	char mode[10] = {0};
+	pthread_mutex_lock(&lock_network);
+
+	// Request the concerned block to the involved servers.
+	size_t size_sent_req = 0;
+	for (int32_t i = 0; i < replication_factor; i++)
+	{
+		//  Key related to the requested data element.
+		if (session_policy == LOCAL_ || session_policy == ZCOPY_)
+		{
+			sprintf(mode, "LOCALGET");
+		}
+		else
+		{
+			sprintf(mode, "GET");
+		}
+
+		//  Key related to the requested data element.
+		sprintf(key_, "%s %lu %ld %s$%d %ld", mode, 0l, offset, curr_dataset->uri_, data_id, to_read);
+		ep = curr_imss.conns.eps[repl_servers[i]];
+		slog_debug("[IMSS] Request to data %d - '%s' to server %d", n_server_, key_, repl_servers[i]);
+		size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
+		if (size_sent_req == 0)
+		{
+			perror("HERCULES_ERR_GET_NDATA_SEND_REQ");
+			slog_error("HERCULES_ERR_GET_NDATA_SEND_REQ");
+			pthread_mutex_unlock(&lock_network);
+			return -2;
+		}
+
+		t = clock() - t;
+		// time_taken = ((double)t) / (CLOCKS_PER_SEC);
+		// performance read metrics.
+		// std::string used_hostname_server = curr_imss.info.ips[n_server_];
+		// backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + msg_length);
+		// backend_performance_metrics[used_hostname_server].read.total_data_time += time_taken;
+		// backend_performance_metrics[used_hostname_server].read.num_operations++;
+		// backend_performance_metrics[used_hostname_server].server_id = n_server_;
+	}
+	pthread_mutex_unlock(&lock_network);
+	return (size_sent_req > 0) ? 0 : -1; // Return 0 on success
 }
 
 // Method retrieving a data element associated to a certain dataset.
@@ -4667,7 +4798,6 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 	int32_t session_policy = curr_dataset->session_plcy;
 
 	ucp_ep_h ep;
-	// size_t ret = 0;
 	// Formated dataset uri to be sent to the metadata server.
 	char formated_uri[REQUEST_SIZE] = {'\0'};
 
@@ -4684,6 +4814,10 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 	{
 		// fprintf(stderr, "[update_dataset] num_intervals=%d\n", curr_dataset->num_intervals);
 		slog_debug("num_intervals=%d", curr_dataset->num_intervals);
+		// makes an interval for the zero block.
+		SetInterval(curr_dataset, curr_imss.info.num_storages, 0, 0);
+		// makes an interval for the rest of the blocks.
+		slog_debug("curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_dataset->first_block_id, curr_dataset->last_block_id);
 		SetInterval(curr_dataset, curr_imss.info.num_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
 	}
 	// print current intervals.
@@ -4789,7 +4923,7 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset)
 {
 	int ret = 0;
-	int32_t n_server;
+	int32_t n_server = 0;
 	size_t msg_length = 0;
 	// Server containing the corresponding data to be written.
 	if ((n_server = TIMING(get_data_location(dataset_uri, dataset_id, data_id, SET), "get_data_location", int32_t, process_rank)) == -1)
@@ -4804,16 +4938,18 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE] = {0};
 	int32_t curr_imss_storages = curr_imss.info.num_storages;
-	slog_debug("curr_imss_storages=%d", curr_imss_storages);
+	slog_debug("curr_imss_storages=%d, curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_imss_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
 
 	// keep the last block id.
-	if (data_id > curr_dataset->last_block_id)
+	if (data_id > curr_dataset->last_block_id && data_id != 0)
 	{
+		slog_debug("setting %d as last block id", data_id);
 		curr_dataset->last_block_id = data_id;
 	}
 
-	if (curr_dataset->first_block_id == -1)
+	if (curr_dataset->first_block_id == -1 && data_id != 0)
 	{
+		slog_debug("setting %d as first block id", data_id);
 		curr_dataset->first_block_id = data_id;
 	}
 
@@ -4987,8 +5123,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 }
 
 // Method storing a specific data element.
-int32_t
-set_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, char *buffer, uint32_t size)
+int32_t set_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, char *buffer, uint32_t size)
 {
 	int ret = 0;
 	int32_t n_server;
@@ -5478,7 +5613,7 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 
 	sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
 	slog_live("[IMSS] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)", data_id, n_server_, key_, size);
-	fprintf(stderr, "[IMSS] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)\n", data_id, n_server_, key_, size);
+	// fprintf(stderr, "[IMSS] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)\n", data_id, n_server_, key_, size);
 
 	ep = curr_imss.conns.eps[n_server_];
 	// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id)

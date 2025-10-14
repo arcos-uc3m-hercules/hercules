@@ -243,6 +243,46 @@ extern "C"
 		return msg_len;
 	}
 
+	void server_send_completion_callback(void *request, ucs_status_t status, void *user_data) {
+		ServerSendRequest *completed_req = (ServerSendRequest*)user_data;
+
+		if (status != UCS_OK) {
+			slog_error("Async server send failed with status: %s", ucs_status_string(status));
+			fprintf(stderr, "Async server send failed with status: %s\n", ucs_status_string(status));
+		} else {
+			slog_debug("Async server send completed successfully.");
+			// fprintf(stderr, "Async server send completed successfully.\n");
+		}
+
+		// Free the request handle and the tracking struct.
+		ucp_request_free(request);
+		delete completed_req;
+	}
+
+	/**
+	 * @brief Initiates a non-blocking data send and returns the request handle.
+	 * @return A pointer to the UCX request handle on success, or a UCS_PTR_ERR(...) on failure.
+	 */
+	void* isend_data2(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from, ServerSendRequest* tracking_struct)
+	{
+		ucp_request_param_t send_param;
+		send_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
+		send_param.cb.send       = server_send_completion_callback;
+		send_param.user_data     = tracking_struct; // Pass the tracking struct itself
+		send_param.datatype      = ucp_dt_make_contig(1);
+		slog_debug("sending asynchronous %s request", msg);
+		void *request = ucp_tag_send_nbx(ep, msg, msg_len, from, &send_param);
+
+		// IMPORTANT: If the operation completes immediately, the callback is NOT called.
+		if (request == NULL || UCS_PTR_IS_ERR(request)) {
+			slog_debug("request %s completes inmediately", msg);
+			// We must clean up the tracking struct ourselves in this case.
+			delete tracking_struct;
+		}
+
+		return request;
+	}
+
 	/***
 	 * @brief send data to the endpoint specified in "ep".
 	 * @return number of bytes sent on success, on error, 0 is returned.
@@ -376,7 +416,6 @@ extern "C"
 	{
 		ucp_tag_recv_info_t info_tag;
 		ucp_tag_message_h msg_tag;
-		// async = 1;
 		// TODO: Check why this function is too slow in read operations.
 		do
 		{
@@ -393,7 +432,6 @@ extern "C"
 	{
 		// ucp_tag_recv_info_t info_tag;
 		//  ucp_tag_message_h msg_tag;
-		//  async = 1;
 		//  TODO: Check why this function is too slow in read operations.
 		do
 		{
@@ -433,12 +471,13 @@ extern "C"
 
 		slog_debug("[COMM] Probe tag (%lu bytes)", msg_length);
 		if (async)
-		{
+		{ // asynchronous request
 			request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
 		}
 		else
-		{
+		{ // synchronous request
 			request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
+			// wait for the request to be completed.
 			status = ucx_wait(ucp_worker, request, "recv", "data");
 			if (status != UCS_OK)
 			{
@@ -451,6 +490,32 @@ extern "C"
 		}
 
 		return msg_length;
+	}
+
+	/**
+	 * @brief START asynchronous data reception from the server.
+	 */
+	void *start_recv_data_async(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest)
+	{
+		ucp_request_param_t recv_param;
+		ucs_status_ptr_t status_ptr;
+
+		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+								  UCP_OP_ATTR_FIELD_DATATYPE;
+		recv_param.datatype = ucp_dt_make_contig(1);
+		recv_param.cb.recv = recv_handler;
+
+		status_ptr = ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
+
+		// We check whether there was an error when starting the operation.
+		if (UCS_PTR_IS_ERR(status_ptr))
+		{
+			fprintf(stderr, "[COMM] Error running ucp_tag_recv_nbx, status: %s\n", ucs_status_string(UCS_PTR_STATUS(status_ptr)));
+			slog_error("[COMM] Error running ucp_tag_recv_nbx, status: %s", ucs_status_string(UCS_PTR_STATUS(status_ptr)));
+			return NULL;
+		}
+
+		return status_ptr;
 	}
 
 	size_t recv_data_2(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async, ucp_tag_recv_info_t info_tag, ucp_tag_message_h msg_tag)

@@ -36,6 +36,19 @@ typedef struct
     // double tolerance_threshold = 0.0;
 } ElasticityMetric;
 
+/**
+ * @brief Contains the minimal information needed to reply to a client
+ * whose request was queued during a malleability operation.
+ */
+typedef struct
+{
+    ucp_worker_h ucp_worker; // Needed for send_data
+    ucp_ep_h server_ep;      // The client endpoint to reply to
+    uint64_t worker_uid;     // The UCP worker ID for the send operation
+    char curr_req[PATH_MAX]; // The original request string, used for logging
+} PendingRequestInfo;
+
+
 // Use a map to store metrics, mapping server_id to its metrics.
 // static std::map<int32_t, IOServerMetrics> backend_performance_metrics;
 static std::map<std::string, IOServerMetrics> backend_performance_metrics;
@@ -44,6 +57,7 @@ static std::map<std::string, IOServerMetrics> backend_performance_metrics;
 static std::map<std::string, std::vector<ElasticityMetric>> elasticity_records_history;
 static int best_number_of_servers = 0;
 static int number_of_history_records = 0;
+static int consecutive_scale_up_signals = 0;
 
 // static void PerformanceRecordsRemoveKey(int32_t server_id)
 static void PerformanceRecordsRemoveKey(char *server_hostname)
