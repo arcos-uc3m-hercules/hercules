@@ -619,6 +619,167 @@ extern "C"
 
 	ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 	{
+		int32_t length = 0;
+		int eof_found = 0;
+		const char *rpath = path; // this pointer should not be free.
+
+		size_t curr_blk, num_of_blk, end_blk, start_offset, end_offset, block_offset, i_blk;
+		size_t first = 0;
+		int ds = 0;
+		curr_blk = offset / IMSS_DATA_BSIZE + 1; // Plus one to skip the header (0) block
+		start_offset = offset % IMSS_DATA_BSIZE;
+		end_offset = (offset + size) % IMSS_DATA_BSIZE;
+		// end_blk = (offset+size) / IMSS_DATA_BSIZE + 1; //Plus one to skip the header (0) block
+		end_blk = ceil((double)(offset + size) / IMSS_DATA_BSIZE);
+		num_of_blk = end_blk - curr_blk;
+
+		// Needed variables
+		ssize_t to_read = 0;
+		ssize_t been_read = 0;
+		ssize_t byte_count = 0;
+
+		int fd = -1;
+		struct stat stats;
+		char *aux;
+
+		fd_lookup((char *)rpath, &fd, &stats, &aux);
+		if (fd >= 0)
+			ds = fd;
+		else if (fd == -1)
+			return -ENOENT;
+
+		if (stats.st_size < size)
+		{
+			end_blk = ceil((double)(offset + stats.st_size) / IMSS_DATA_BSIZE);
+		}
+
+		slog_debug("TotalSizeToRead=%ld (%ld kb), start_offset=%ld, curr_blk=%ld, end_blk=%ld, num_of_blks=%ld, offset=%ld, end_offset=%ld, IMSS_DATA_BSIZE=%ld, stats.st_size=%ld", size, size / 1024, start_offset, curr_blk, end_blk, num_of_blk, offset, end_offset, IMSS_DATA_BSIZE, stats.st_size);
+
+		// Check if offset is bigger than filled, return 0 because is EOF case.
+		// If the file offset is at or past the end of file,
+		// no bytes are read, and read() returns zero
+		// https://man7.org/linux/man-pages/man2/read.2.html
+		if (offset >= stats.st_size)
+		{
+			slog_warn("[imss_read] returning EOF");
+			buf = (void *)'\0';
+			// memset(buf, '\0', size);
+			return 0;
+		}
+
+		if (start_offset >= stats.st_size)
+		{
+			slog_warn("[imss_read] returning EOF");
+			return 0;
+		}
+
+		i_blk = 0;
+		while (curr_blk <= end_blk)
+		{
+			if (first == 0) // First block case
+			{
+				block_offset = start_offset;
+				if (size < (stats.st_size - start_offset) && size < IMSS_DATA_BSIZE)
+				{
+					slog_info("[imss_read] case 1");
+					to_read = size;
+				}
+				else
+				{
+					if (stats.st_size < IMSS_DATA_BSIZE)
+					{
+						slog_info("[imss_read] case 2");
+						to_read = stats.st_size - start_offset;
+					}
+					else
+					{
+						slog_info("[imss_read] case 3");
+						to_read = IMSS_DATA_BSIZE - start_offset;
+					}
+				}
+				slog_debug("[imss_read] FIRST BLOCK CASE, to_read=%ld, fd=%d, ds=%d", to_read, fd, ds);
+
+				++first;
+				// Check if offset is bigger than filled, return 0 because is EOF case
+				slog_debug("[imss_read] start_offset=%ld, to_read=%ld, stats.st_size=%ld, start_offset + to_read=%ld", start_offset, to_read, stats.st_size, start_offset + to_read);
+				// if (start_offset + to_read > stats.st_size)
+				// {
+				// 	to_read = stats.st_size - start_offset + to_read;
+				// 	slog_warn("data block overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
+				// 	// slog_warn("[imss_read] returning size 0");
+				// 	// return 0;
+				// }
+
+				// prevents to read out of the block.
+				if (block_offset + to_read > IMSS_DATA_BSIZE)
+				{
+					to_read = IMSS_DATA_BSIZE - block_offset;
+					slog_warn("data block overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
+				}
+				// prevents to read out of the EOF.
+				if (offset + to_read > stats.st_size)
+				{
+					to_read = stats.st_size - offset;
+					eof_found = 1;
+					slog_warn("EOF overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
+				}
+			}
+			else if (curr_blk != end_blk) // Middle block case
+			{
+				to_read = IMSS_DATA_BSIZE;
+			}
+			else // End block case
+			{
+				// Read the minimum between end_offset and filled (read_ = min(end_offset, filled))
+				to_read = size - byte_count;
+				slog_debug("END BLOCK CASE, to_read=%zd", to_read);
+			}
+			slog_debug("curr_blk=%ld, reading %ld bytes (%ld kilobytes) with an offset of %ld bytes (%ld kilobytes), byte_count=%zd bytes (%zd kilobytes)", curr_blk, to_read, to_read / 1024, block_offset, block_offset / 1024, byte_count, byte_count / 1024);
+
+			if (to_read <= 0)
+			{
+				return to_read;
+			}
+
+			// get data from the data server.
+			been_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset, SYNC, NULL), "get_ndata", ssize_t, -1);
+			// Error handling when get_ndata does not found the request data.
+			
+			if (been_read < 0)
+			{
+				return been_read;
+			}
+
+			if (been_read != to_read)
+			{
+				slog_warn("Expecting to read %ld but %ld has been read.", to_read, been_read);
+			}
+
+			block_offset = 0;
+
+			++curr_blk;
+			byte_count += to_read;
+			// If eof was found, we end the while bucle to avoid trying to read
+			// additional blocks.
+			if (eof_found)
+			{
+				break;
+			}
+		}
+
+		update_dataset((char *)path, ds);
+
+		// total_amount_read += byte_count;
+		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, byte_count);
+
+		// performance =
+
+		// free(rpath);
+		return byte_count;
+	}
+
+	ssize_t imss_read_async(const char *path, void *buf, size_t size, off_t offset)
+	{
 		// Look up file metadata.
 		int fd = -1;
 		struct stat stats;

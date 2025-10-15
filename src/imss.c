@@ -3929,7 +3929,7 @@ int32_t readv_multiple(char *dataset_uri,
 		}
 	}
 	pthread_mutex_lock(&lock_network);
-	char key_[REQUEST_SIZE];
+	char key_[REQUEST_SIZE] = '\0';
 	// Key related to the requested data element.
 
 	// Request the concerned block to the involved servers.
@@ -4379,11 +4379,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	size_t msg_length = 0;
 	char mode[10] = {0};
 	pthread_mutex_lock(&lock_network);
-
-	// for (size_t j = 0; j < curr_imss.info.num_active_storages; j++)
-	// {
-	// 	slog_debug("eps[%d] address=%p", j, curr_imss.conns.eps[j]);
-	// }
 
 	// Request the concerned block to the involved servers.
 	for (int32_t i = 0; i < replication_factor; i++)
