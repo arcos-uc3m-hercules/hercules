@@ -243,19 +243,29 @@ extern "C"
 		return msg_len;
 	}
 
-	void server_send_completion_callback(void *request, ucs_status_t status, void *user_data) {
-		ServerSendRequest *completed_req = (ServerSendRequest*)user_data;
+	void server_send_completion_callback(void *request, ucs_status_t status, void *user_data)
+	{
+		ServerSendRequest *completed_req = (ServerSendRequest *)user_data;
 
-		if (status != UCS_OK) {
+		if (status != UCS_OK)
+		{
 			slog_error("Async server send failed with status: %s", ucs_status_string(status));
 			fprintf(stderr, "Async server send failed with status: %s\n", ucs_status_string(status));
-		} else {
+		}
+		else
+		{
 			slog_debug("Async server send completed successfully.");
 			// fprintf(stderr, "Async server send completed successfully.\n");
 		}
 
 		// Free the request handle and the tracking struct.
 		ucp_request_free(request);
+
+		if (completed_req->buffer_to_free != nullptr)
+		{
+			delete[] completed_req->buffer_to_free;
+		}
+
 		delete completed_req;
 	}
 
@@ -263,19 +273,20 @@ extern "C"
 	 * @brief Initiates a non-blocking data send and returns the request handle.
 	 * @return A pointer to the UCX request handle on success, or a UCS_PTR_ERR(...) on failure.
 	 */
-	void* isend_data2(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from, ServerSendRequest* tracking_struct)
+	void *isend_data2(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from, ServerSendRequest *tracking_struct)
 	{
 		ucp_request_param_t send_param;
 		send_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
-		send_param.cb.send       = server_send_completion_callback;
-		send_param.user_data     = tracking_struct; // Pass the tracking struct itself
-		send_param.datatype      = ucp_dt_make_contig(1);
-		slog_debug("sending asynchronous %s request", msg);
+		send_param.cb.send = server_send_completion_callback;
+		send_param.user_data = tracking_struct; // Pass the tracking struct itself
+		send_param.datatype = ucp_dt_make_contig(1);
+		slog_debug("sending asynchronous request");
 		void *request = ucp_tag_send_nbx(ep, msg, msg_len, from, &send_param);
 
 		// IMPORTANT: If the operation completes immediately, the callback is NOT called.
-		if (request == NULL || UCS_PTR_IS_ERR(request)) {
-			slog_debug("request %s completes inmediately", msg);
+		if (request == NULL || UCS_PTR_IS_ERR(request))
+		{
+			slog_debug("request completes inmediately");
 			// We must clean up the tracking struct ourselves in this case.
 			delete tracking_struct;
 		}
@@ -1182,6 +1193,7 @@ extern "C"
 				struct_->intervals[i] = (IntervalEntry *)malloc(memsize);
 				memcpy(struct_->intervals[i], msg_data, memsize);
 				msg_data += memsize;
+				slog_debug("Interval retrieved [%d,%d]=%d", struct_->intervals[i]->left_interval, struct_->intervals[i]->right_interval, struct_->intervals[i]->value);
 			}
 			break;
 		}

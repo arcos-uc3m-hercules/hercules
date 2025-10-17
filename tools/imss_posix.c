@@ -9,7 +9,7 @@
 #undef __USE_GNU
 
 #define KB 1024
-#define GB 1073741824
+// #define GB 1073741824
 uint32_t DEPLOYMENT = 2; // Default 1=ATACHED, 0=DETACHED ONLY METADATA SERVER 2=DETACHED METADATA AND DATA SERVERS
 char POLICY[MAX_POLICY_LEN];
 uint64_t IMSS_SRV_PORT = 1; // Not default, 1 will fail
@@ -3154,7 +3154,10 @@ ssize_t read(int fd, void *buf, size_t size)
 		map_fd_search(map_fd, pathname, fd, &offset);
 
 		// fprintf(stderr, "[POSIX] Read Hercules size=%ld, offset=%lu\n", size, offset);
-		ret = TIMING(imss_sread(pathname, buf, size, offset), "imss_sread", ssize_t, rank);
+		// original
+		// ret = TIMING(imss_sread(pathname, buf, size, offset), "imss_sread", ssize_t, rank);
+		// prueba con prefetch
+		ret = imss_sread_prefetch_v2(pathname, buf, size, offset);
 		if (ret > 0)
 		{
 			offset += ret;

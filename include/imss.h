@@ -44,7 +44,7 @@
 #define NO_LINK NULL
 
 extern int32_t IMSS_DEBUG;
-static uint64_t BLOCK_SIZE;
+static uint64_t BLOCK_SIZE; // TODO: there are multiple definitions for BLOCK SIZE on the front and back end. IMSS_DATA_BSIZE on the fron end.
 
 /* UCP objects */
 extern ucp_context_h ucp_context_client; // = (ucp_context_h)NULL;
@@ -432,17 +432,16 @@ RETURNS:	 0 - Release operation took place successfully.
 	// int32_t release_dataset(int32_t dataset_id);
 	int32_t release_dataset(const char *dataset_uri);
 
-	/* Method retrieving information related to a certain dataset.
-
-RECEIVES:	dataset_uri   - Dataset URI that the client is interested in.
-dataset_info_ - Reference to a dataset_info variable where the requested information will be stored.
-
-RETURNS:	 0 - No dataset was found with the provided URI.
-1 - The information was successfully retrieved from the metadata server.
-2 - The information was successfully retrieved from a local storage (the dataset must have been already created or opened).
--1 - In case of error.
-
-The current function does not allocate memory.
+	/**
+	 * @brief Method retrieving information related to a certain dataset from the metadata server.
+	 * It search first if the dataset has been stored on the local map "datasetd" to avoid extra calls.
+	 * The file information is supposed to be stored on this map if it was stated previously.
+	 * @param dataset_uri Path of the dataset.
+	 * @param dataset_info Pointer to the struct where the dataset information will be stored.
+	 * @param opened "1" indicates to the remote metadata server if the file is being to be opened by the current process
+	 * or "0" if it is a simple request. If "0", the counter of how many process has the file opened will not be increased.
+	 * @return if the dataset is on the local map "datasetd", the index is returned, -3 if the info was retreived from the remote metadata
+	 * server, -2 if the dataset does not exist, or -1 on error.
 	 */
 	int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int opened);
 
@@ -481,6 +480,8 @@ The current function does not allocate memory.
 	 * error.
 	 */
 	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request);
+	ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_id, void **buffer_prefetch);
+
 	ssize_t start_block_request(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
 
 	/**
@@ -545,12 +546,7 @@ char ** locations = get_dataloc(datasetd, data_id, &num_storages);
 	free(locations);
 	 */
 
-	int32_t
-	set_ndata(char *dataset_uri,
-			  int32_t dataset_id,
-			  int32_t data_id,
-			  char *buffer,
-			  uint32_t size);
+	int32_t set_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, char *buffer, uint32_t size);
 
 	char **get_dataloc(const char *dataset, int32_t data_id, int32_t *num_storages);
 

@@ -2,7 +2,7 @@
 #define HERCULES_INMEMORY
 
 #define KB 1024
-#define GB 1073741824
+#define GB 1073741824UL
 
 #include <string>
 // #include <cstring>

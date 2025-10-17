@@ -19,6 +19,7 @@
 #define RENAME_DIR_DIR_OP 6
 #define CLOSE_OP 7
 #define OPEN_OP 8
+#define READV2_OP 11 
 // #define STATFS			  7
 // #define DATASET_OP 8
 #define INSTANCE_OP 9
@@ -37,7 +38,7 @@
 
 #define KB 1024
 #define MB 1048576
-#define GB 1073741824
+// #define GB 1073741824UL
 
 
 // #define MAX_THREAD_POOL_SIZE 16

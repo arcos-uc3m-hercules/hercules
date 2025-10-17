@@ -112,7 +112,6 @@ std::mutex mtx;
 std::condition_variable cv;
 int data_ready = 0;
 
-
 // std::vector<ServerSendRequest*> async_requests;
 
 #define GARBAGE_COLLECTOR_PERIOD 10
@@ -438,7 +437,7 @@ void *move_blocks_2_server(void *th_argv)
 
 void *CommissioningStage(void *th_argv)
 {
-	CommissioningThreadArgs *arguments  = (CommissioningThreadArgs *)th_argv;
+	CommissioningThreadArgs *arguments = (CommissioningThreadArgs *)th_argv;
 
 	int32_t new_number_data_servers = arguments->args.num_data_servers;
 	// static int consecutive_scale_up_signals = 0;
@@ -549,10 +548,10 @@ void *CommissioningStage(void *th_argv)
 	}
 
 	p_argv temp_p_argv_for_calls;
-    temp_p_argv_for_calls.ucp_worker = arguments->ucp_worker;
-    temp_p_argv_for_calls.server_ep = arguments->server_ep;
-    temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
-    strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
+	temp_p_argv_for_calls.ucp_worker = arguments->ucp_worker;
+	temp_p_argv_for_calls.server_ep = arguments->server_ep;
+	temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
+	strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
 
 	if (malleability_on)
 	{
@@ -863,7 +862,7 @@ void *Malleability(void *th_argv)
 		return (void *)-1;
 	}
 	p_argv *source_args = (p_argv *)arguments;
-	comissioning_thread_args->args = source_args->args; 
+	comissioning_thread_args->args = source_args->args;
 	comissioning_thread_args->hercules_info_struct = source_args->hercules_info_struct;
 	comissioning_thread_args->ucp_worker = source_args->ucp_worker;
 	comissioning_thread_args->server_ep = source_args->server_ep;
@@ -930,7 +929,6 @@ void *hercules_ucx_server(void *th_argv)
 		map_server_eps = map_server_eps_create();
 		BLOCK_SIZE = arguments->blocksize * 1024;
 	}
-
 
 	for (;;)
 	{
@@ -1298,12 +1296,12 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// Here we do not need to check the number of links to the dataset
 				// because to know if the file is dirty, we use the metadata server.
 				// check if it is the block 0.
-				// int is_block_zero = 0;
-				// std::size_t found = key.find("$0");
-				// if (found != std::string::npos)
-				// {
-				// 	is_block_zero = 1;
-				// }
+				bool is_block_zero = false;
+				std::size_t found = key.find("$0");
+				if (found != std::string::npos)
+				{
+					is_block_zero = true;
+				}
 
 				// if (is_block_zero)
 				// {
@@ -1348,44 +1346,195 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// }
 				// else
 				// {
-					// Send the requested block.
-					// slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, stat->st_nlink=%lu, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, stats->st_nlink, is_shared_memory);
-					slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, is_shared_memory);
-					size_t ret_send_data = 0;
-					if (is_shared_memory)
+				// Send the requested block.
+				// slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, stat->st_nlink=%lu, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, stats->st_nlink, is_shared_memory);
+				slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, is_shared_memory);
+				size_t ret_send_data = 0;
+				if (is_shared_memory)
+				{
+					// pthread_mutex_lock(&lock_network);
+					ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_, block_size_rtvd, arguments->worker_uid);
+					// pthread_mutex_unlock(&lock_network);
+					slog_debug("[READ_OP][READ_OP] ret_send_data=%lu", ret_send_data);
+					if (ret_send_data == 0)
 					{
-						// pthread_mutex_lock(&lock_network);
-						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_, block_size_rtvd, arguments->worker_uid);
-						// pthread_mutex_unlock(&lock_network);
-						slog_debug("[READ_OP][READ_OP] ret_send_data=%lu", ret_send_data);
-						if (ret_send_data == 0)
-						{
-							slog_error("HERCULES_ERR_WORKER_SENDBLOCK");
-							perror("HERCULES_ERR_WORKER_SENDBLOCK");
-							return -1;
-						}
+						slog_error("HERCULES_ERR_WORKER_SENDBLOCK");
+						perror("HERCULES_ERR_WORKER_SENDBLOCK");
+						return -1;
+					}
+				}
+				else
+				{
+					// pthread_mutex_lock(&lock_network);
+					// ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
+					// ret_send_data = isend_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
+					// Create a tracking struct and add it to our list.
+					ServerSendRequest *new_send = new ServerSendRequest();
+					// Calculates a prefetch to send more data than requested.
+					// if (!is_block_zero)
+					// { // just for non-block zero.
+					// 	size_t prefetch_size = 1 * GB;
+					// 	uint64_t remaining = block_size_rtvd - block_offset;
+					// 	to_read = std::min(remaining, prefetch_size);
+					// }
+					void *ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid, new_send);
+					if (UCS_PTR_IS_PTR(ucx_req_handle))
+					{
+						// The request is sending. The callback will handle cleanup.
+					}
+					else if (UCS_PTR_IS_ERR(ucx_req_handle))
+					{
+						slog_error("Failed to initiate async send on server.");
+						fprintf(stderr, "Failed to initiate async send on server.");
+						// The send function already cleaned up new_send.
 					}
 					else
 					{
-						// pthread_mutex_lock(&lock_network);
-						// ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
-						// ret_send_data = isend_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
-						// Create a tracking struct and add it to our list.
-						ServerSendRequest* new_send = new ServerSendRequest();
-						void* ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid, new_send);
-						if (UCS_PTR_IS_PTR(ucx_req_handle)) {
-							// The request is sending. The callback will handle cleanup.
-						} else if (UCS_PTR_IS_ERR(ucx_req_handle)) {
-							slog_error("Failed to initiate async send on server.");
-							fprintf(stderr, "Failed to initiate async send on server.");
-							// The send function already cleaned up new_send.
-						} else {
-							// It completed immediately. The send function also cleaned up.
-						}
-						// pthread_mutex_unlock(&lock_network);
+						// It completed immediately. The send function also cleaned up.
 					}
+					// pthread_mutex_unlock(&lock_network);
+				}
 				// }
 			}
+			break;
+		}
+		case READV2_OP:
+		{
+			const size_t prefetch_size = 10*GB; // 512 * MB;
+			char *prefetch_buffer = new(std::nothrow) char[prefetch_size];
+			if (prefetch_buffer == nullptr)
+			{
+				slog_error("HERCULES_ERR_SRV_WORKER_HELPER_READV2_OP_PREFETCH_MEM_ERR %ld bytes.", prefetch_size);
+				return -1;
+			}
+
+			size_t total_sent = 0;
+			size_t buffer_offset = 0;
+
+			size_t delimiter_pos = key.find('$');
+			if (delimiter_pos == std::string::npos)
+			{
+				slog_error("Invalid format. Key: %s", key.c_str());
+				delete[] prefetch_buffer;
+				return -1;
+			}
+
+			std::string base_key = key.substr(0, delimiter_pos);
+			uint32_t current_block_id = (uint32_t )std::stoul(key.substr(delimiter_pos + 1));
+			bool first_block = true;
+			int next_server = 0;
+			const uint32_t BLOCK_ID_SIZE = sizeof(uint32_t);
+			const size_t BLOCK_DATA_SIZE = BLOCK_SIZE;
+			const size_t RECORD_SIZE = BLOCK_ID_SIZE + BLOCK_DATA_SIZE;
+
+			slog_debug("[PREFETCH_LOOP] Starting prefetch. Size to send: %ld bytes. base key: %s, initial block: %lld", prefetch_size, base_key.c_str(), current_block_id);
+			while (total_sent < prefetch_size)
+			{
+				// calculates the server id by passing the current_block_id to the policy function.
+				// TODO: change ROUND_ROBIN_ for the used policy.
+				// next_server = find_server(arguments->args.num_data_servers, current_block_id, base_key.c_str(), SET, TYPE_DATA_SERVER, ROUND_ROBIN_); // TODO: check for the current data policy in the dataset, not in the imss configuration.
+				// slog_debug("block %d corresponds to the server %d", current_block_id, next_server);
+				// if (next_server != arguments->args.id)
+				// {
+				// 	// current block does not correspond to this server. Go to the next one.
+				// 	current_block_id++;
+				// 	continue;
+				// }
+
+				// key for the current block.
+				std::string current_key = base_key + "$" + std::to_string(current_block_id);
+
+				int32_t ret = TIMING(HierarchicalMapGet(hierarchical_map, current_key, &address_, &block_size_rtvd);, "HierarchicalMapGet", int32_t, arguments->thread_id);
+				// Check if there was an associated block to the key.
+
+				if (ret == 0)
+				{ // block does not exist.
+					if (first_block)
+					{
+						//   Send the error code msg.
+						ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
+						if (ret < 0)
+						{
+							delete[] prefetch_buffer;
+							perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
+							slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
+							// pthread_mutex_unlock(&lock_network);
+							return -1;
+						}
+						// break the while loop.
+						break;
+					}
+					else
+					{
+						// the first block should be here, or the client should have already received the response if it does not exists.
+						// break the while loop.
+						break;
+					}
+				}
+
+				first_block = false;
+
+				if (block_size_rtvd != BLOCK_DATA_SIZE)
+				{
+					slog_warn("The block size does not match with the expected one, block size=%lu, expected size=%lu", block_size_rtvd, BLOCK_DATA_SIZE);
+					break;
+				}
+				
+				if (block_size_rtvd == 0)
+				{
+					slog_warn("The block size is 0");
+					// the size of the block is 0.
+					// TODO: add an extra condition for the requested block.
+					break;
+				}
+
+				
+				size_t space_left_in_buffer = prefetch_size - buffer_offset;
+				// size_t size_to_copy_now = std::min(block_size_rtvd, space_left_in_buffer);
+
+				if (space_left_in_buffer < BLOCK_DATA_SIZE)
+				{
+					// no more space left on the buffer.
+					// no space to write a new block.
+					slog_debug("No more space left or no enough space to write a new block, space_left_in_buffer=%lu", space_left_in_buffer);
+					break;
+				}
+
+				// write the block ID (4 bytes)
+    			*(uint32_t*)(prefetch_buffer + buffer_offset) = (uint32_t)current_block_id;
+
+				memcpy(prefetch_buffer + buffer_offset + BLOCK_ID_SIZE, address_, BLOCK_DATA_SIZE);
+
+				buffer_offset += RECORD_SIZE;
+				// current_block_id++;
+				current_block_id += arguments->args.num_data_servers;
+
+			} // end while
+
+			// Create a tracking struct and add it to our list.
+			ServerSendRequest *new_send = new ServerSendRequest();
+			new_send->buffer_to_free = prefetch_buffer;
+
+			void *ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, (char *)prefetch_buffer, buffer_offset, arguments->worker_uid, new_send);
+			if (UCS_PTR_IS_PTR(ucx_req_handle))
+			{
+				// The request is sending. The callback will handle cleanup.
+			}
+			else if (UCS_PTR_IS_ERR(ucx_req_handle))
+			{
+				slog_error("Failed to initiate async send on server.");
+				fprintf(stderr, "Failed to initiate async send on server.");
+				// The send function already cleaned up new_send.
+				delete[] prefetch_buffer;
+				delete new_send;
+			}
+			else
+			{
+				// It completed immediately. The send function also cleaned up.
+				// delete[] prefetch_buffer;
+				// delete new_send;
+			}
+
 			break;
 		}
 		case RELEASE:
@@ -2646,11 +2795,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 							break;
 						}
 						slog_debug("After dataset->n_open=%d", dataset->n_open);
-						msg_t m;
-						m.data = address_;
-						m.size = block_size_rtvd;
+						// msg_t m;
+						// m.data = address_;
+						// m.size = block_size_rtvd;
+
+						slog_debug("Printing intervals of dataset.");
+						PrintIntervals((dataset_info *)address_);
 						// pthread_mutex_lock(&lock_network);
-						err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
+						// err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
+						err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, address_, DATASET_INFO, arguments->worker_uid);
 						if (err < 0)
 						{
 							perror("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_STREAM");

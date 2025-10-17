@@ -151,6 +151,8 @@ struct ucx_context
  */
 struct ServerSendRequest {
     void* ucx_handle; // The handle returned by ucp_tag_send_nbx
+    char* buffer_to_free;
+    ServerSendRequest() : buffer_to_free(nullptr) {}
 };
 
 typedef struct worker_info

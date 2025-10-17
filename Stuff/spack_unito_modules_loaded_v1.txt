@@ -1,5 +1,0 @@
--- linux-ubuntu20.04-broadwell / gcc@9.4.0 ----------------------
-cmake@3.26.3
-glib@2.74.1
-pcre@8.45
-ucx@1.14.0
