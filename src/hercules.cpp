@@ -603,6 +603,8 @@ int getConfiguration(struct arguments *args)
 	else if (cfg_get(cfg, "BLOCK_SIZE"))
 		args->block_size = atol(cfg_get(cfg, "BLOCK_SIZE"));
 
+	BLOCK_SIZE = args->block_size*KB;
+
 	if (getenv("HERCULES_PATH") != NULL)
 		strcpy(args->hercules_path, getenv("HERCULES_PATH"));
 	else if (cfg_get(cfg, "HERCULES_PATH"))
@@ -723,7 +725,7 @@ int getConfiguration(struct arguments *args)
 			args->logging.hercules_debug_file = 0;
 			args->logging.hercules_debug_screen = 0;
 			args->logging.hercules_debug_level = SLOG_NONE;
-			unsetenv("IMSS_DEBUG");
+			// unsetenv("IMSS_DEBUG");
 		}
 		else
 		{
@@ -738,6 +740,13 @@ int getConfiguration(struct arguments *args)
 		args->storage_size = atol(cfg_get(cfg, "STORAGE_SIZE"));
 	else
 		args->storage_size = 1;
+
+	if (getenv("HERCULES_PREFETCH_SIZE") != NULL)
+		args->prefetch_size = atol(getenv("HERCULES_PREFETCH_SIZE"));
+	else if (cfg_get(cfg, "PREFETCH_SIZE"))
+		args->prefetch_size = atol(cfg_get(cfg, "PREFETCH_SIZE"));
+	else
+		args->prefetch_size = 0;
 
 	if (getenv("HERCULES_CHECKPOINT_PATH") != NULL)
 		strcpy(args->hercules_checkpoint_path, getenv("HERCULES_CHECKPOINT_PATH"));
@@ -766,6 +775,7 @@ int getConfiguration(struct arguments *args)
 		strcpy(args->ignore_paths_list, cfg_get(cfg, "IGNORE_PATHS_LIST"));
 	else
 		args->ignore_paths_list[0] = '\0';
+		
 
 	cfg_free(cfg);
 

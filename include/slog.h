@@ -49,9 +49,9 @@ extern "C"
  * Macro to measure the time spend by function_to_call.
  * char*::print_comment: comment to be concatenated to the elapsed time.
  */
-#define __TIMING__
-#define __TIMING_NO_RETURN__
-#define __NETWORK_TIMING__
+// #define __TIMING__
+// #define __TIMING_NO_RETURN__
+// #define __NETWORK_TIMING__
 
 #ifdef __TIMING__
 #define TIMING(function_to_call, print_comment, type, thread_id)            \
@@ -67,10 +67,7 @@ extern "C"
         ret;                                                                \
     })
 #else
-#define TIMING(function_to_call, print_comment, type) \
-    ({                                                \
-        function_to_call;                             \
-    })
+#define TIMING(function_to_call, print_comment, type, thread_id) (function_to_call)
 #endif
 
 #ifdef __TIMING_NO_RETURN__
@@ -85,10 +82,7 @@ extern "C"
         slog_time("%d,TIMING,%f,%s", thread_id, time_taken, print_comment); \
     })
 #else
-#define TIMING_NO_RETURN(function_to_call, print_comment) \
-    ({                                                    \
-        function_to_call;                                 \
-    })
+#define TIMING_NO_RETURN(function_to_call, print_comment, thread_id) (function_to_call)
 #endif
 
 #ifdef __NETWORK_TIMING__
@@ -105,10 +99,7 @@ extern "C"
         ret;                                                   \
     })
 #else
-#define NETWORK_TIMING(function_to_call, print_comment, type) \
-    ({                                                        \
-        function_to_call;                                     \
-    })
+#define NETWORK_TIMING(function_to_call, print_comment, type) (function_to_call)
 #endif
 
 /*

@@ -70,7 +70,8 @@ extern uint16_t connection_port; // FIXME
 
 char att_deployment[URI_] = {0};
 
-int32_t IMSS_DEBUG = 0;
+uint64_t BLOCK_SIZE = 0;
+// int32_t IMSS_DEBUG = 0;
 int32_t IMSS_WRITE_ASYNC = 1;
 
 /* UCP objects */
@@ -2816,6 +2817,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 
 	// size_t num_performance_entries = backend_performance_metrics.size();
 	// Send the struct of the performance metrics in a serializate way.
+	slog_debug("Sending %lu bytes", total_size);
 	if (send_data(ucp_worker_meta, ep, buffer_metrics_ser.data(), total_size, local_meta_uid) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -2827,6 +2829,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	// Wait for the metadata server to get the current number of data servers.
 	// This value can change due malleability operations.
 	// DATASERVERS operation. MSG_MALLEABILITY_DATASERVERS
+	slog_debug("Waiting for response");
 	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
 	slog_debug("[IMSS] get_recv_data_length, msg_length=%lu", msg_length);
 	if (msg_length == 0)
@@ -3042,19 +3045,19 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	// Renames the children of the old directory.
 	GHashTable *parent_subdir_children_table = TIMING((GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, old_dir), "g_hash_table_lookup in rename_dataset_metadata_dir_dir", GHashTable *, 0);
 	slog_debug("Replacing basepath of files in the directory %s", old_dir);
-	TIMING_NO_RETURN(replace_uri_base_path_dir(parent_subdir_children_table, old_dir, rdir_dest);, "replace_uri_base_path_dir", 0);
+	TIMING_NO_RETURN(replace_uri_base_path_dir(parent_subdir_children_table, old_dir, rdir_dest), "replace_uri_base_path_dir", 0);
 
 	// Find the parent hash table.
 	// char parent_dir[PATH_MAX] = {0};
 	// find_last_parent_dir(old_dir, parent_dir);
 
 	// Rename the parent directory.
-	TIMING_NO_RETURN(parent_subdir_children_table = FindCorrespondingHashTable(old_dir);, "FindCorrespondingHashTable", 0);
+	TIMING_NO_RETURN(parent_subdir_children_table = FindCorrespondingHashTable(old_dir), "FindCorrespondingHashTable", 0);
 	if (!parent_subdir_children_table)
 	{
 		return -1;
 	}
-	TIMING_NO_RETURN(replace_uri_base_path_regular_file(parent_subdir_children_table, old_dir, rdir_dest);, "replace_uri_base_path_regular_file", 0);
+	TIMING_NO_RETURN(replace_uri_base_path_regular_file(parent_subdir_children_table, old_dir, rdir_dest), "replace_uri_base_path_regular_file", 0);
 
 	/*********RENAME METADATA*******/
 	// Formated dataset uri to be sent to the metadata server.
@@ -3066,7 +3069,7 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	char first_parent_dir[URI_] = {0};
 	uint32_t m_srv = 0;
 	// int number_data_servers = 0;
-	int first_parent_offset = TIMING(find_first_parent_dir((char *)old_dir, first_parent_dir);, "find_first_parent_dir", int, 0);
+	int first_parent_offset = TIMING(find_first_parent_dir((char *)old_dir, first_parent_dir), "find_first_parent_dir", int, 0);
 	slog_debug("old_dir=%s, first_parent_dir=%s, first_parent_offset=%d", old_dir, first_parent_dir, first_parent_offset);
 
 	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
@@ -3088,7 +3091,7 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	}
 
 	size_t msg_length = 0;
-	msg_length = TIMING(get_recv_data_length(ucp_worker_meta, local_meta_uid);, "get_recv_data_length", size_t, 0);
+	msg_length = TIMING(get_recv_data_length(ucp_worker_meta, local_meta_uid), "get_recv_data_length", size_t, 0);
 	if (msg_length == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -3617,7 +3620,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 	for (int32_t i = 0; i < curr_imss.info.num_storages; i++)
 	{
 		ep = curr_imss.conns.eps[i];
-		msg_length = TIMING(get_recv_data_length(ucp_worker_data, local_data_uid);, "rename_dataset_srv_worker_dir_dir,get_recv_data_length", size_t, 0);
+		msg_length = TIMING(get_recv_data_length(ucp_worker_data, local_data_uid), "rename_dataset_srv_worker_dir_dir,get_recv_data_length", size_t, 0);
 		if (msg_length == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -3629,7 +3632,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 		// // char result[msg_length];
 		// char *result = (char *)malloc(msg_length * sizeof(char));
 		void *result = malloc(msg_length);
-		msg_length = TIMING(recv_data(ucp_worker_data, ep, result, msg_length, local_data_uid, 0);, "recv_data in rename_dataset_srv_worker_dir_dir", size_t, 0);
+		msg_length = TIMING(recv_data(ucp_worker_data, ep, result, msg_length, local_data_uid, 0), "recv_data in rename_dataset_srv_worker_dir_dir", size_t, 0);
 		// msg_length = recv_data_opt(ucp_worker_data, ep, &result, msg_length, local_data_uid, 0);
 		if (msg_length == 0)
 		{

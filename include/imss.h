@@ -44,7 +44,7 @@
 #define NO_LINK NULL
 
 extern int32_t IMSS_DEBUG;
-static uint64_t BLOCK_SIZE; // TODO: there are multiple definitions for BLOCK SIZE on the front and back end. IMSS_DATA_BSIZE on the fron end.
+extern uint64_t BLOCK_SIZE; // TODO: there are multiple definitions for BLOCK SIZE on the front and back end. IMSS_DATA_BSIZE on the fron end.
 
 /* UCP objects */
 extern ucp_context_h ucp_context_client; // = (ucp_context_h)NULL;
@@ -65,15 +65,15 @@ extern char client_ip[16];		// IP number of the node where the client is taking 
 #define MAX(x, y) ((x > y) ? x : y)
 #endif
 
-#ifdef __DEBUG__
-#define DPRINT(...)                   \
-	if (IMSS_DEBUG)                   \
-	{                                 \
-		fprintf(stderr, __VA_ARGS__); \
-	}
-#else
-#define DPRINT(...)
-#endif
+// #ifdef __DEBUG__
+// #define DPRINT(...)                   \
+// 	if (IMSS_DEBUG)                   \
+// 	{                                 \
+// 		fprintf(stderr, __VA_ARGS__); \
+// 	}
+// #else
+// #define DPRINT(...)
+// #endif
 
 // GHashMap functions.
 // int replace_dataset_entry_key(const char *old_uri, const char *new_uri);

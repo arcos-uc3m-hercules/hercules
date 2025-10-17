@@ -14,8 +14,8 @@ uint32_t DEPLOYMENT = 2; // Default 1=ATACHED, 0=DETACHED ONLY METADATA SERVER 2
 char POLICY[MAX_POLICY_LEN];
 uint64_t IMSS_SRV_PORT = 1; // Not default, 1 will fail
 uint64_t METADATA_PORT = 1; // Not default, 1 will fail
-extern int32_t N_SERVERS;		
-int32_t N_BLKS = 1;			// Default 1
+extern int32_t N_SERVERS;
+int32_t N_BLKS = 1; // Default 1
 int32_t N_META_SERVERS = 1;
 char *METADATA_FILE = NULL; // Not default
 char *IMSS_HOSTFILE = NULL; // Not default
@@ -124,11 +124,9 @@ void copy_stat_to_statx(const struct stat *src, struct statx *dest)
 	dest->stx_mtime.tv_sec = src->st_mtime;
 	dest->stx_ctime.tv_sec = src->st_ctime;
 #ifdef _STATX_BTIME
-    dest->stx_btime.tv_sec = 0;
+	dest->stx_btime.tv_sec = 0;
 #endif
-
 }
-
 
 int __fxstat(int ver, int fd, struct stat *buf);
 
@@ -635,7 +633,7 @@ void check_ld_preload(void)
 
 	if (LD_PRELOAD == 0)
 	{
-		DPRINT("\nActivating... ld_preload=%d\n\n", LD_PRELOAD);
+		// DPRINT("\nActivating... ld_preload=%d\n\n", LD_PRELOAD);
 		fprintf(stderr, "\nActivating... ld_preload\n");
 		LD_PRELOAD = 1;
 		imss_posix_init();
@@ -674,11 +672,11 @@ int close(int fd)
 			// close() returns zero on success.  On error, -1 is returned, and errno is set to indicate the error.
 			ret = 0;
 		}
-		slog_live("[POSIX]. Ending Hercules 'close', pathname=%s, ret=%d\n", pathname, ret);
 		// Set offset to 0.
 		// map_fd_update_value(map_fd, pathname, fd, 0);
 		map_fd_erase(map_fd, fd);
 		real_close(fd);
+		slog_live("[POSIX]. Ending Hercules 'close', pathname=%s, ret=%d\n", pathname, ret);
 		// free(pathname);
 	}
 	else
@@ -2352,7 +2350,7 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 			if (err_create == -EEXIST)
 			{
 				slog_live("[POSIX] 1 - Dataset already exists, imss_open(%s, %ld)", new_path, ret_ds);
-				ret = TIMING(imss_open(new_path, &ret_ds);, "generalOpen,imss_open", int, rank);
+				ret = TIMING(imss_open(new_path, &ret_ds), "generalOpen,imss_open", int, rank);
 				// errno = EEXIST;
 				// errno = -ret;
 				slog_live("[POSIX] 1 - imss_open(%s, %ld), ret=%d", new_path, ret_ds, ret);
@@ -2367,7 +2365,7 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 		else // if O_CREAT flag was not set, the file must exists.
 		{
 			slog_live("[POSIX] File must exists - imss_open(%s, %ld), create_flag: %d", new_path, ret_ds, create_flag);
-			ret = TIMING(imss_open(new_path, &ret_ds);, "generalOpen,imss_open", int, rank);
+			ret = TIMING(imss_open(new_path, &ret_ds), "generalOpen,imss_open", int, rank);
 			slog_live("[POSIX] 2 - ret_ds=%d, ret=%d, new_path=%s", ret_ds, ret, new_path);
 
 			if (ret < 0)
@@ -2386,7 +2384,7 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 				else
 					ret = real_open(new_path, flags, mode);
 				// stores the file descriptor "ret" into the map "map_fd".
-				TIMING_NO_RETURN(map_fd_put(map_fd, new_path, ret, p);, "generalOpen,map_fd_put", rank); // TO CHECK!
+				TIMING_NO_RETURN(map_fd_put(map_fd, new_path, ret, p), "generalOpen,map_fd_put", rank); // TO CHECK!
 			}
 		}
 		// if (ret == 0)
@@ -2401,12 +2399,12 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 			ret = real_open("/dev/null", 0); // Get a file descriptor
 			// stores the file descriptor "ret" into the map "map_fd".
 			slog_live("[POSIX] Puting fd %d into map", ret);
-			TIMING_NO_RETURN(map_fd_put(map_fd, new_path, ret, p);, "generalOpen,map_fd_put", rank);
+			TIMING_NO_RETURN(map_fd_put(map_fd, new_path, ret, p), "generalOpen,map_fd_put", rank);
 		}
 		else if (ret > -1 && createFd >= 0)
 		{
 			slog_live("[POSIX] Puting fd %d into map, passed from arguments.", createFd);
-			TIMING_NO_RETURN(map_fd_put(map_fd, new_path, createFd, p);, "generalOpen,map_fd_put", rank);
+			TIMING_NO_RETURN(map_fd_put(map_fd, new_path, createFd, p), "generalOpen,map_fd_put", rank);
 			ret = createFd;
 		}
 	}
@@ -2415,10 +2413,10 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 		slog_live("[POSIX]. exist=%d, O_TRUNC=%d, fd=%d", exist, flags & O_TRUNC, ret);
 		if (flags & O_TRUNC)
 		{
-			TIMING_NO_RETURN(map_fd_update_value(map_fd, new_path, ret, 0);, "generalOpen,map_fd_update_value", rank);
+			TIMING_NO_RETURN(map_fd_update_value(map_fd, new_path, ret, 0), "generalOpen,map_fd_update_value", rank);
 			int ret_aux = 0;
 			struct stat stats;
-			ret_aux = TIMING(imss_getattr(new_path, &stats);, "generalOpen,imss_getattr", int, rank);
+			ret_aux = TIMING(imss_getattr(new_path, &stats), "generalOpen,imss_getattr", int, rank);
 			if (ret_aux < 0)
 			{
 				errno = -ret_aux;
@@ -2428,7 +2426,7 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 				return ret;
 			}
 			stats.st_size = 0;
-			TIMING_NO_RETURN(HierarchicalMapUpdate(hierarchical_map, new_path, ret, stats);, "generalOpen,map_fd_update_value", rank);
+			TIMING_NO_RETURN(HierarchicalMapUpdate(hierarchical_map, new_path, ret, stats), "generalOpen,map_fd_update_value", rank);
 		}
 	}
 	// pthread_mutex_unlock(&system_lock);
@@ -3154,10 +3152,17 @@ ssize_t read(int fd, void *buf, size_t size)
 		map_fd_search(map_fd, pathname, fd, &offset);
 
 		// fprintf(stderr, "[POSIX] Read Hercules size=%ld, offset=%lu\n", size, offset);
-		// original
-		// ret = TIMING(imss_sread(pathname, buf, size, offset), "imss_sread", ssize_t, rank);
-		// prueba con prefetch
-		ret = imss_sread_prefetch_v2(pathname, buf, size, offset);
+		if (args.prefetch_size > 0)
+		{
+			// prefetch is enable.
+			ret = imss_sread_prefetch_v2(pathname, buf, size, offset);
+		}
+		else
+		{
+			// original
+			ret = TIMING(imss_sread(pathname, buf, size, offset), "imss_sread", ssize_t, rank);
+		}
+
 		if (ret > 0)
 		{
 			offset += ret;

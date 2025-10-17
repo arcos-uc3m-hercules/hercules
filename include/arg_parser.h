@@ -59,10 +59,11 @@ struct arguments
     uint64_t data_port;                  /* port arg to '-p' */
     uint64_t storage_size;          /* total storage size in GB to -s */
     uint64_t thread_pool;           /* thread pool size '-t' */
+    uint64_t prefetch_size;         /* prefetch size, 0 means no prefetch */
     int64_t bufsize;                /* buffer size arg to '-b' */
     int64_t stat_port;              /* Metadata server port number arg to '-P' */
     int64_t num_data_servers;       /* number of data servers arg to '-n' */
-    int64_t num_metadata_servers;   /* number of metaa servers */
+    int64_t num_metadata_servers;   /* number of metada servers */
     int32_t malleability;
     int32_t malleability_type;
     int32_t upper_bound_servers;

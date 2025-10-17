@@ -64,7 +64,7 @@ extern pthread_mutex_t mutex_prefetch;
 extern pthread_mutex_t lock;
 pthread_mutex_t lock_file = PTHREAD_MUTEX_INITIALIZER;
 
-extern int32_t IMSS_DEBUG;
+// extern int32_t IMSS_DEBUG;
 
 // to simulate maliability.
 int32_t ior_operation_number;
@@ -260,7 +260,7 @@ extern "C"
 		}
 
 		// get block 0 from data server.
-		ret = TIMING(get_ndata(imss_path, ds, 0, aux, 0, 0, SYNC, NULL);, "get_ndata0,imss_refresh", int32_t, 0);
+		ret = TIMING(get_ndata(imss_path, ds, 0, aux, 0, 0, SYNC, NULL), "get_ndata0,imss_refresh", int32_t, 0);
 		if (ret < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN];
@@ -538,7 +538,7 @@ extern "C"
 		if (fd >= 0)
 		{
 			print_file_type(stats, imss_path);
-			ret = TIMING(open_local_dataset(imss_path, 1);, "imss_open,open_local_dataset", int32_t, 0);
+			ret = TIMING(open_local_dataset(imss_path, 1), "imss_open,open_local_dataset", int32_t, 0);
 			file_desc = fd;
 			slog_debug("[FUSE]open_local_dataset, ret=%d, file_desc=%d, nlink=%lu", ret, file_desc, stats.st_nlink);
 		}
@@ -548,7 +548,7 @@ extern "C"
 		}
 		else
 		{
-			file_desc = TIMING(open_dataset((char *)imss_path, 1);, "imss_open,open_dataset", int32_t, 0);
+			file_desc = TIMING(open_dataset((char *)imss_path, 1), "imss_open,open_dataset", int32_t, 0);
 			switch (file_desc)
 			{
 			case -EEXIST: // file already exists case.
@@ -577,7 +577,7 @@ extern "C"
 
 			// aux = (char *)malloc(IMSS_DATA_BSIZE);
 			void *data = (void *)malloc(sizeof(struct stat) * sizeof(char) + 1);
-			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0, SYNC, NULL);, "imss_open,get_ndata", int, 0);
+			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0, SYNC, NULL), "imss_open,get_ndata", int, 0);
 			if (ret < 0)
 			{
 				free(data);
@@ -591,7 +591,7 @@ extern "C"
 			// pthread_mutex_lock(&lock_file);
 			// storing block 0 on the local map.
 			// map_put(map, imss_path, file_desc, stats, (char *)data);
-			TIMING_NO_RETURN(HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data);, "imss_open,HierarchicalMapPut", 0);
+			TIMING_NO_RETURN(HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data), "imss_open,HierarchicalMapPut", 0);
 			print_file_type(stats, imss_path);
 			// if (PREFETCH != 0)
 			// {

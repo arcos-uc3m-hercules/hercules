@@ -11,7 +11,6 @@
 std::mutex hierarchical_map_lock;
 std::mutex hierarchical_map_lock_aux;
 
-
 extern "C"
 {
 	char SERVER_TYPE;
@@ -229,6 +228,69 @@ extern "C"
 		}
 	}
 
+	ssize_t HierarchicalMapGetPrefetch(void *hierarchical_map,
+									   const std::string &base_key,
+									   uint32_t start_block_id,
+									   int num_data_servers,
+									   char *prefetch_buffer,
+									   size_t prefetch_size)
+	{
+		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+
+		// Find the parent map just ONCE.
+		// We construct a dummy full key to find the correct parent map.
+		std::string initial_key = base_key + "$" + std::to_string(start_block_id);
+		std::shared_ptr<map_records> children_map = HierarchicalMapGetChild(hierarchical_map, initial_key.c_str());
+
+		if (children_map == nullptr)
+		{
+			slog_warn("Parent map for base key '%s' not found.", base_key.c_str());
+			return 0;
+		}
+
+		// Define the format constants inside the loop.
+		const uint32_t BLOCK_ID_SIZE = sizeof(uint32_t);
+		const size_t BLOCK_DATA_SIZE = BLOCK_SIZE;
+		const size_t RECORD_SIZE = BLOCK_ID_SIZE + BLOCK_DATA_SIZE;
+
+		size_t buffer_offset = 0;
+		uint32_t current_block_id = start_block_id;
+
+		// The main prefetch loop is now INSIDE the locked function.
+		while (buffer_offset + RECORD_SIZE <= prefetch_size)
+		{
+			std::string current_key = base_key + "$" + std::to_string(current_block_id);
+
+			void *address = nullptr;
+			uint64_t block_size_rtvd = 0;
+
+			// Perform the inner lookup directly on the children_map. This is much faster.
+			if (children_map->get(current_key, &address, &block_size_rtvd) == 0)
+			{
+				slog_debug("Prefetch loop ended: block '%s' not found.", current_key.c_str());
+				break; // Block not found, end of data.
+			}
+
+			if (block_size_rtvd != BLOCK_DATA_SIZE)
+			{
+				slog_warn("Prefetch stop: block size mismatch for '%s'. Expected %lu, got %lu.",
+						  current_key.c_str(), BLOCK_DATA_SIZE, block_size_rtvd);
+				break;
+			}
+
+			// Write the block ID and data into the buffer.
+			*(uint32_t *)(prefetch_buffer + buffer_offset) = current_block_id;
+			memcpy(prefetch_buffer + buffer_offset + BLOCK_ID_SIZE, address, BLOCK_DATA_SIZE);
+
+			// Update offsets and the next block ID.
+			buffer_offset += RECORD_SIZE;
+			current_block_id += num_data_servers;
+		}
+
+		// The mutex is automatically unlocked here when 'lck' goes out of scope.
+		return buffer_offset;
+	}
+
 	// void HierarchicalMapUpdate(void *hierarchical_map, const char *k, int v, struct stat stat_info)
 	// {
 	// 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
@@ -244,7 +306,6 @@ extern "C"
 	// 		slog_debug("%s not found in the map", k);
 	// 	}
 	// }
-
 
 	/**
 	 * @brief Rename the name of a regular file on the local hierarchical_map.
@@ -304,7 +365,7 @@ extern "C"
 				aux_rdir_dest = rdir_dest.append("$0");
 				// lck.unlock();
 				sprintf(msg, "BackEndHierarchicalMapRenameDirDir,rename_metadata_dir_stat_worker %ld", map->get_buffer_size());
-				ret = TIMING(map->rename_data_dir_srv_worker(old_dir, rdir_dest);, "BackEndHierarchicalMapRenameDirDir,rename_data_dir_srv_worker", int32_t, 0);
+				ret = TIMING(map->rename_data_dir_srv_worker(old_dir, rdir_dest), "BackEndHierarchicalMapRenameDirDir,rename_data_dir_srv_worker", int32_t, 0);
 			}
 			break;
 			case TYPE_METADATA_SERVER:
@@ -417,8 +478,8 @@ extern "C"
 
 	/**
 	 * @brief Method searching a record in the garbage collector vector.
-	 * @return 1 if the "key" was find in the garbage collectorvector, 
-	 * 0 was NOT find in the garbage collectorvector, or 
+	 * @return 1 if the "key" was find in the garbage collectorvector,
+	 * 0 was NOT find in the garbage collectorvector, or
 	 * -1 if the "key" was NOT find in the Hierarchical Map.
 	 * */
 	int32_t HierarchicalMapSearchInGarbageCollector(void *hierarchical_map, const std::string &key)
@@ -446,16 +507,17 @@ extern "C"
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
-		
+
 		slog_debug("Running HierarchicalMapCleanGarbageCollector");
-		for (const auto& pair : *hiermap) {
-			const std::string& key = pair.first;
+		for (const auto &pair : *hiermap)
+		{
+			const std::string &key = pair.first;
 			slog_debug("Running garbage collector for %s", key.c_str());
-			const std::shared_ptr<map_records>& map = pair.second;
+			const std::shared_ptr<map_records> &map = pair.second;
 			// std::cout << "Key: " << key << ", Value Data: " << record_ptr->data << std::endl;
 			map->cleaning(SERVER_TYPE);
 			slog_debug("---\n");
-    	}
+		}
 		return 0;
 	}
 

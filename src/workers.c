@@ -218,7 +218,7 @@ int SendConfirmationMessage(const p_argv *arguments, const char *msg)
 {
 	int ret = 0;
 	slog_debug("Sending msg %s", msg);
-	ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, (const void *)msg, strlen(msg) + 1, arguments->worker_uid);, "Send data", int);
+	ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, (const void *)msg, strlen(msg) + 1, arguments->worker_uid), "Send data", int);
 	return ret;
 }
 
@@ -563,6 +563,7 @@ void *CommissioningStage(void *th_argv)
 		char response[PATH_MAX] = {'\0'};
 		sprintf(response, "%s %" PRId32 " -1", MSG_MALLEABILITY_DATASERVERS, new_number_data_servers);
 		int ret = -1;
+		fprintf(stderr, "Malleability=%d, Sending response %s to client=%lu\n", arguments->args.malleability,  response, temp_p_argv_for_calls.worker_uid);
 		ret = SendConfirmationMessage(&temp_p_argv_for_calls, response);
 		if (ret == 0)
 		{
@@ -570,6 +571,7 @@ void *CommissioningStage(void *th_argv)
 			slog_error("HERCULES_ERR_STAT_WORKER_SEND_DATASERVERS");
 			return NULL;
 		}
+		fprintf(stderr, "Reponse sent to client=%lu\n", temp_p_argv_for_calls.worker_uid);
 	}
 
 	free(arguments);
@@ -614,6 +616,7 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	pthread_mutex_lock(&mutext_malleability); // history is a shared resource.
 	if (history.empty())
 	{
+		pthread_mutex_unlock(&mutext_malleability);
 		return false;
 	}
 
@@ -854,7 +857,6 @@ void *Malleability(void *th_argv)
 	// Increase the number of servers.
 	pthread_t comissioning_stage_thread;
 	CommissioningThreadArgs *comissioning_thread_args = (CommissioningThreadArgs *)malloc(sizeof(CommissioningThreadArgs));
-
 	if (!comissioning_thread_args)
 	{
 		perror("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
@@ -1142,7 +1144,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	int sender = 0;
 
 	// Get the GET, SET, ..., operation (mode).
-	TIMING_NO_RETURN(sscanf(req, "%s", mode);, "sscanf mode", arguments->thread_id);
+	TIMING_NO_RETURN(sscanf(req, "%s", mode), "sscanf mode", arguments->thread_id);
 
 	if (!strcmp(mode, "BROADCAST"))
 	{
@@ -1252,7 +1254,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		return -1;
 	}
 
-	TIMING_NO_RETURN(sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read);, "sscanf requeest", arguments->thread_id);
+	TIMING_NO_RETURN(sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read), "sscanf requeest", arguments->thread_id);
 
 	slog_debug(" Request - mode '%s', block_size_recv '%" PRIu32 "', block_offset '%" PRIu32 "', uri_ '%s', more %ld", mode, block_size_recv, block_offset, uri_, more);
 
@@ -1274,7 +1276,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		case READ_OP:
 		{
 			// int32_t ret = map->get(key, &address_, &block_size_rtvd);
-			int32_t ret = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd);, "HierarchicalMapGet", int32_t, arguments->thread_id);
+			int32_t ret = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id);
 
 			// Check if there was an associated block to the key.
 			if (ret == 0)
@@ -1370,13 +1372,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					// ret_send_data = isend_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
 					// Create a tracking struct and add it to our list.
 					ServerSendRequest *new_send = new ServerSendRequest();
-					// Calculates a prefetch to send more data than requested.
-					// if (!is_block_zero)
-					// { // just for non-block zero.
-					// 	size_t prefetch_size = 1 * GB;
-					// 	uint64_t remaining = block_size_rtvd - block_offset;
-					// 	to_read = std::min(remaining, prefetch_size);
-					// }
 					void *ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid, new_send);
 					if (UCS_PTR_IS_PTR(ucx_req_handle))
 					{
@@ -1400,7 +1395,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		}
 		case READV2_OP:
 		{
-			const size_t prefetch_size = 10*GB; // 512 * MB;
+			const size_t prefetch_size = 1024 * MB; // 10*GB; // 512 * MB;
 			char *prefetch_buffer = new(std::nothrow) char[prefetch_size];
 			if (prefetch_buffer == nullptr)
 			{
@@ -1408,8 +1403,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				return -1;
 			}
 
-			size_t total_sent = 0;
-			size_t buffer_offset = 0;
+			// size_t total_sent = 0;
+			// size_t buffer_offset = 0;
 
 			size_t delimiter_pos = key.find('$');
 			if (delimiter_pos == std::string::npos)
@@ -1420,96 +1415,117 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			}
 
 			std::string base_key = key.substr(0, delimiter_pos);
-			uint32_t current_block_id = (uint32_t )std::stoul(key.substr(delimiter_pos + 1));
-			bool first_block = true;
-			int next_server = 0;
-			const uint32_t BLOCK_ID_SIZE = sizeof(uint32_t);
-			const size_t BLOCK_DATA_SIZE = BLOCK_SIZE;
-			const size_t RECORD_SIZE = BLOCK_ID_SIZE + BLOCK_DATA_SIZE;
+			uint32_t current_block_id = (uint32_t)std::stoul(key.substr(delimiter_pos + 1));
+			// bool first_block = true;
+			// int next_server = 0;
+			// const uint32_t BLOCK_ID_SIZE = sizeof(uint32_t);
+			// const size_t BLOCK_DATA_SIZE = BLOCK_SIZE;
+			// const size_t RECORD_SIZE = BLOCK_ID_SIZE + BLOCK_DATA_SIZE;
 
-			slog_debug("[PREFETCH_LOOP] Starting prefetch. Size to send: %ld bytes. base key: %s, initial block: %lld", prefetch_size, base_key.c_str(), current_block_id);
-			while (total_sent < prefetch_size)
+			// slog_debug("[PREFETCH_LOOP] Starting prefetch. Size to send: %ld bytes. base key: %s, initial block: %lld", prefetch_size, base_key.c_str(), current_block_id);
+			// while (total_sent < prefetch_size)
+			// {
+			// 	// calculates the server id by passing the current_block_id to the policy function.
+			// 	// TODO: change ROUND_ROBIN_ for the used policy.
+			// 	// next_server = find_server(arguments->args.num_data_servers, current_block_id, base_key.c_str(), SET, TYPE_DATA_SERVER, ROUND_ROBIN_); // TODO: check for the current data policy in the dataset, not in the imss configuration.
+			// 	// slog_debug("block %d corresponds to the server %d", current_block_id, next_server);
+			// 	// if (next_server != arguments->args.id)
+			// 	// {
+			// 	// 	// current block does not correspond to this server. Go to the next one.
+			// 	// 	current_block_id++;
+			// 	// 	continue;
+			// 	// }
+
+			// 	// key for the current block.
+			// 	std::string current_key = base_key + "$" + std::to_string(current_block_id);
+
+			// 	int32_t ret = TIMING(HierarchicalMapGet(hierarchical_map, current_key, &address_, &block_size_rtvd);, "HierarchicalMapGet", int32_t, arguments->thread_id);
+			// 	// Check if there was an associated block to the key.
+
+			// 	if (ret == 0)
+			// 	{ // block does not exist.
+			// 		if (first_block)
+			// 		{
+			// 			//   Send the error code msg.
+			// 			ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
+			// 			if (ret < 0)
+			// 			{
+			// 				delete[] prefetch_buffer;
+			// 				perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
+			// 				slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
+			// 				// pthread_mutex_unlock(&lock_network);
+			// 				return -1;
+			// 			}
+			// 			// break the while loop.
+			// 			break;
+			// 		}
+			// 		else
+			// 		{
+			// 			// the first block should be here, or the client should have already received the response if it does not exists.
+			// 			// break the while loop.
+			// 			break;
+			// 		}
+			// 	}
+
+			// 	first_block = false;
+
+			// 	if (block_size_rtvd != BLOCK_DATA_SIZE)
+			// 	{
+			// 		slog_warn("The block size does not match with the expected one, block size=%lu, expected size=%lu", block_size_rtvd, BLOCK_DATA_SIZE);
+			// 		break;
+			// 	}
+
+			// 	if (block_size_rtvd == 0)
+			// 	{
+			// 		slog_warn("The block size is 0");
+			// 		// the size of the block is 0.
+			// 		// TODO: add an extra condition for the requested block.
+			// 		break;
+			// 	}
+
+			// 	size_t space_left_in_buffer = prefetch_size - buffer_offset;
+			// 	// size_t size_to_copy_now = std::min(block_size_rtvd, space_left_in_buffer);
+
+			// 	if (space_left_in_buffer < BLOCK_DATA_SIZE)
+			// 	{
+			// 		// no more space left on the buffer.
+			// 		// no space to write a new block.
+			// 		slog_debug("No more space left or no enough space to write a new block, space_left_in_buffer=%lu", space_left_in_buffer);
+			// 		break;
+			// 	}
+
+			// 	// write the block ID (4 bytes)
+			// 	*(uint32_t*)(prefetch_buffer + buffer_offset) = (uint32_t)current_block_id;
+
+			// 	memcpy(prefetch_buffer + buffer_offset + BLOCK_ID_SIZE, address_, BLOCK_DATA_SIZE);
+
+			// 	buffer_offset += RECORD_SIZE;
+			// 	// current_block_id++;
+			// 	current_block_id += arguments->args.num_data_servers;
+
+			// } // end while
+			ssize_t buffer_offset = HierarchicalMapGetPrefetch(
+				hierarchical_map,
+				base_key,
+				current_block_id,
+				arguments->args.num_data_servers,
+				prefetch_buffer,
+				prefetch_size);
+
+			if (buffer_offset == 0)
 			{
-				// calculates the server id by passing the current_block_id to the policy function.
-				// TODO: change ROUND_ROBIN_ for the used policy.
-				// next_server = find_server(arguments->args.num_data_servers, current_block_id, base_key.c_str(), SET, TYPE_DATA_SERVER, ROUND_ROBIN_); // TODO: check for the current data policy in the dataset, not in the imss configuration.
-				// slog_debug("block %d corresponds to the server %d", current_block_id, next_server);
-				// if (next_server != arguments->args.id)
-				// {
-				// 	// current block does not correspond to this server. Go to the next one.
-				// 	current_block_id++;
-				// 	continue;
-				// }
-
-				// key for the current block.
-				std::string current_key = base_key + "$" + std::to_string(current_block_id);
-
-				int32_t ret = TIMING(HierarchicalMapGet(hierarchical_map, current_key, &address_, &block_size_rtvd);, "HierarchicalMapGet", int32_t, arguments->thread_id);
-				// Check if there was an associated block to the key.
-
-				if (ret == 0)
-				{ // block does not exist.
-					if (first_block)
-					{
-						//   Send the error code msg.
-						ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
-						if (ret < 0)
-						{
-							delete[] prefetch_buffer;
-							perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
-							slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
-							// pthread_mutex_unlock(&lock_network);
-							return -1;
-						}
-						// break the while loop.
-						break;
-					}
-					else
-					{
-						// the first block should be here, or the client should have already received the response if it does not exists.
-						// break the while loop.
-						break;
-					}
-				}
-
-				first_block = false;
-
-				if (block_size_rtvd != BLOCK_DATA_SIZE)
+				delete[] prefetch_buffer;
+				//  Send the error code msg. 
+				ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
+				if (ret < 0)
 				{
-					slog_warn("The block size does not match with the expected one, block size=%lu, expected size=%lu", block_size_rtvd, BLOCK_DATA_SIZE);
-					break;
+					perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
+					slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
+					// pthread_mutex_unlock(&lock_network);
+					return -1;
 				}
-				
-				if (block_size_rtvd == 0)
-				{
-					slog_warn("The block size is 0");
-					// the size of the block is 0.
-					// TODO: add an extra condition for the requested block.
-					break;
-				}
-
-				
-				size_t space_left_in_buffer = prefetch_size - buffer_offset;
-				// size_t size_to_copy_now = std::min(block_size_rtvd, space_left_in_buffer);
-
-				if (space_left_in_buffer < BLOCK_DATA_SIZE)
-				{
-					// no more space left on the buffer.
-					// no space to write a new block.
-					slog_debug("No more space left or no enough space to write a new block, space_left_in_buffer=%lu", space_left_in_buffer);
-					break;
-				}
-
-				// write the block ID (4 bytes)
-    			*(uint32_t*)(prefetch_buffer + buffer_offset) = (uint32_t)current_block_id;
-
-				memcpy(prefetch_buffer + buffer_offset + BLOCK_ID_SIZE, address_, BLOCK_DATA_SIZE);
-
-				buffer_offset += RECORD_SIZE;
-				// current_block_id++;
-				current_block_id += arguments->args.num_data_servers;
-
-			} // end while
+				return 0;
+			}
 
 			// Create a tracking struct and add it to our list.
 			ServerSendRequest *new_send = new ServerSendRequest();
@@ -1653,7 +1669,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// RENAME MAP
 				slog_debug("rename_data_dir_srv_worker, old_dir=%s, dest_dir=%s", old_dir.c_str(), rdir_dest.c_str());
 				// ret = TIMING(map->rename_data_dir_srv_worker(old_dir, rdir_dest);,"rename_data_dir_srv_worker,RENAME_DIR_DIR_OP", int32_t, arguments->thread_id);
-				ret = TIMING(BackEndHierarchicalMapRenameDirDir(hierarchical_map, old_dir, rdir_dest, NULL);, "BackEndHierarchicalMapRenameDirDir,RENAME_DIR_DIR_OP", int32_t, arguments->thread_id);
+				ret = TIMING(BackEndHierarchicalMapRenameDirDir(hierarchical_map, old_dir, rdir_dest, NULL), "BackEndHierarchicalMapRenameDirDir,RENAME_DIR_DIR_OP", int32_t, arguments->thread_id);
 				// Rename the old directory on the hierarchical map.
 				slog_debug("Renaming %s to %s on the directory map", old_dir.c_str(), rdir_dest.c_str());
 				ret = HierarchicalMapRenameKey(hierarchical_map, old_dir.c_str(), rdir_dest.c_str());
@@ -1949,7 +1965,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		else
 		{
 			// ret = TIMING(map->get(key, &address_, &block_size_rtvd);, "Does it exist? map->get", int, arguments->thread_id);
-			ret = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd);, "Does it exist? map->get", int, arguments->thread_id);
+			ret = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "Does it exist? map->get", int, arguments->thread_id);
 		}
 
 		std::size_t found = key.find("$0");
@@ -1976,7 +1992,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				slog_debug("[WRITE_OP] is_shared_memory=%d", is_shared_memory);
 				// Get the length of the data to be received.
 				// pthread_mutex_lock(&lock_network);
-				msg_length = TIMING(get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);, "[write] get_recv_data_length", size_t, arguments->thread_id);
+				msg_length = TIMING(get_recv_data_length(arguments->ucp_worker, arguments->worker_uid), "[write] get_recv_data_length", size_t, arguments->thread_id);
 				// ucp_tag_recv_info_t info_tag;
 				// ucp_tag_message_h msg_tag;
 				// msg_length = TIMING(get_recv_data_length_2(arguments->ucp_worker, arguments->worker_uid, &info_tag, &msg_tag), "[write] get_recv_data_length_2", size_t, arguments->thread_id);
@@ -2033,7 +2049,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 				// Receive the data from the front end.
 				// pthread_mutex_lock(&lock_network);
-				msg_length = NETWORK_TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);, "[write] recv_data", size_t);
+				msg_length = NETWORK_TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1), "[write] recv_data", size_t);
 				// msg_length = TIMING(recv_data_2(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 0, info_tag, msg_tag), "[write] recv_data_2", size_t, arguments->thread_id);
 				// pthread_mutex_unlock(&lock_network);
 				if (msg_length == 0)
@@ -2106,7 +2122,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// Fill buffer_broadcast with the data received from the other servers.
 				// buffer_broadcast[];
 				slog_debug("Snapshot operation, origin server=%s", key.c_str());
-				insert_successful = TIMING(map->put_broadcast(key, buffer, msg_length);, " new block map-put_broadcast", int, arguments->thread_id);
+				insert_successful = TIMING(map->put_broadcast(key, buffer, msg_length), " new block map-put_broadcast", int, arguments->thread_id);
 			}
 			else
 			{
@@ -2129,10 +2145,10 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// when snapshot is enabled we saved block 0.
 			if (!global_finish_snapshot)
 			{
-				std::size_t found = TIMING(key.find("$0");, "check if block 0", std::size_t, arguments->thread_id);
+				std::size_t found = TIMING(key.find("$0"), "check if block 0", std::size_t, arguments->thread_id);
 				if (found != std::string::npos) // block 0.
 				{
-					insert_successful = TIMING(map->put_snapshot(key, -1);, "map->put_snapshot", int, arguments->thread_id);
+					insert_successful = TIMING(map->put_snapshot(key, -1), "map->put_snapshot", int, arguments->thread_id);
 					// Include the new record in the tracking structure.
 					if (insert_successful != 0)
 					{
@@ -2739,7 +2755,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			slog_debug("[READ_OP]");
 			// Check if there was an associated block to the key.
 			// int err = map->get(key, &address_, &block_size_rtvd);
-			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd);, "READ_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
+			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "READ_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
@@ -2829,7 +2845,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			slog_debug("DELETE_OP");
 			// int err = map->get(key, &address_, &block_size_rtvd);
-			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd);, "DELETE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
+			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "DELETE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 
@@ -2991,7 +3007,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				GNode *gnode = NULL;
 				// RENAME MAP
 				// ret = TIMING(map->rename_metadata_dir_stat_worker(old_key, new_key, &gnode), msg, int, arguments->args.id);
-				ret = TIMING(BackEndHierarchicalMapRenameDirDir(hierarchical_map, old_key, new_key, &gnode);, "RENAME_DIR_DIR_OP,BackEndHierarchicalMapRenameDirDir", int32_t, arguments->thread_id);
+				ret = TIMING(BackEndHierarchicalMapRenameDirDir(hierarchical_map, old_key, new_key, &gnode), "RENAME_DIR_DIR_OP,BackEndHierarchicalMapRenameDirDir", int32_t, arguments->thread_id);
 
 				// Rename the old directory on the hierarchical map.
 				slog_debug("Renaming %s to %s on the directory map", old_key.c_str(), new_key.c_str());
@@ -3052,7 +3068,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			slog_debug("CLOSE_OP");
 			// int err = map->get(key, &address_, &block_size_rtvd);
-			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd);, "CLOSE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
+			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "CLOSE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
 			{
@@ -3114,7 +3130,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			slog_debug("OPEN_OP");
 			// int err = map->get(key, &address_, &block_size_rtvd);
-			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd);, "OPEN_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
+			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "OPEN_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
@@ -3180,7 +3196,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			// TODO: this function can be called on a thread.
 			// This avoid blocking future operations.
+			fprintf(stderr, "Receiving performance, client=%lu\n", arguments->worker_uid);
 			Malleability((void *)arguments);
+			fprintf(stderr, "Performance received, client=%lu\n", arguments->worker_uid);
 		}
 		break;
 		default:
