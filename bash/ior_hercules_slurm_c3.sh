@@ -163,7 +163,7 @@ set -x
 # export MPICH_NO_LOCAL=1          # Disables shared-memory optimizations (may help in overcommit)
 # export MPICH_ASYNC_PROGRESS=1    # Helps with task scheduling
 # -env MPICH_NEMESIS_NETMOD=ib0
-sleep 10
+# sleep 10
 time mpiexec $HERCULES_MPI_NP$NUMBER_OF_PROCESS $HERCULES_MPI_PPN$HERCULES_NCPN  $HERCULES_MPI_HOSTFILE_DEF$HERCULES_MPI_HOSTFILE_NAME \
    $HERCULES_MPI_ENV_DEF HERCULES_CONF=$HERCULES_CONF \
    $HERCULES_MPI_ENV_DEF LD_PRELOAD=$HERCULES_POSIX_PRELOAD \
