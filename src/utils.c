@@ -1,6 +1,3 @@
-#ifndef UTILS_
-#define UTILS_
-
 #include "utils.h"
 
 int get_hostname(char *buffer, size_t buffer_size) {
@@ -21,4 +18,7 @@ int get_hostname(char *buffer, size_t buffer_size) {
     }
 }
 
-#endif
+bool double_are_equal(double a, double b){
+    return fabs(a - b) < epsilon;
+}
+

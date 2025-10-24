@@ -2328,10 +2328,10 @@ int32_t create_dataset(char *dataset_uri,
 	// else
 
 	new_dataset->type = file_type;
-	if (new_dataset->capacity <= 0)
-	{
-		new_dataset->capacity = 100;
-	}
+	// if (new_dataset->capacity <= 0)
+	// {
+		new_dataset->capacity = MAX_NUM_INTERVALS;
+	// }
 	// new_dataset->intervals = g_hash_table_new(g_int_hash, g_int_equal);
 	// new_dataset->intervals = g_hash_table_new_full(int_pointer_hash, int_pointer_equal, key_destroy_func, key_destroy_func);
 	new_dataset->intervals = NULL; // (IntervalEntry **)calloc(new_dataset->capacity, sizeof(IntervalEntry *));
@@ -2792,27 +2792,45 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 		current_ptr += sizeof(pair.second.server_id);
 
 		// Calculates the write performance.
-		if (pair.second.write.total_data_time > 0)
+		if (pair.second.write.total_data_time > 0.0 && !double_are_equal(pair.second.write.total_data_size, 0.0) && pair.second.write.total_data_size > 1 * MB)
+		{
 			write_performance = pair.second.write.total_data_size / pair.second.write.total_data_time;
+		}
 		else
+		{
 			write_performance = 0.0;
+		}
 
 		memcpy(current_ptr, &write_performance, sizeof(write_performance));
 		current_ptr += sizeof(write_performance);
 		// fprintf(stderr, "Write Performance for server %d: %f\n", pair.first, write_performance);
 
 		// Calculates the read performance.
-		if (pair.second.read.total_data_time > 0)
+		if (pair.second.read.total_data_time > 0.0 && !double_are_equal(pair.second.read.total_data_size, 0.0) && pair.second.read.total_data_size > 1 * MB)
+		{
 			read_performance = pair.second.read.total_data_size / pair.second.read.total_data_time;
+		}
 		else
+		{
 			read_performance = 0.0;
+		}
 
 		memcpy(current_ptr, &read_performance, sizeof(read_performance));
 		current_ptr += sizeof(read_performance);
 
-		// fprintf(stderr, "key=%s, server_id=%d, write_performance=%f, read_performance=%f\n", pair.first.c_str(), pair.second.server_id, write_performance, read_performance);
-
-		// fprintf(stderr, "Read Performance for server %d: %f\n", pair.first, read_performance);
+		// fprintf(stderr, "key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, write_performance=%.2f (%.2f MB), read_size=%lld (%lld MB), read_time=%.2f, read_performance=%.2f (%.2f MB)\n",
+		// 		pair.first.c_str(),
+		// 		pair.second.server_id,
+		// 		pair.second.write.total_data_size,
+		// 		pair.second.write.total_data_size / MB,
+		// 		pair.second.write.total_data_time,
+		// 		write_performance,
+		// 		write_performance / MB,
+		// 		pair.second.read.total_data_size,
+		// 		pair.second.read.total_data_size / MB,
+		// 		pair.second.read.total_data_time,
+		// 		read_performance,
+		// 		read_performance / MB);
 	}
 
 	// size_t num_performance_entries = backend_performance_metrics.size();
@@ -2831,7 +2849,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	// DATASERVERS operation. MSG_MALLEABILITY_DATASERVERS
 	slog_debug("Waiting for response");
 	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
-	slog_debug("[IMSS] get_recv_data_length, msg_length=%lu", msg_length);
+	slog_debug("get_recv_data_length, msg_length=%lu", msg_length);
 	if (msg_length == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -4175,28 +4193,44 @@ int32_t imss_flush_data()
 
 void ClearIntervalsStructure(dataset_info *curr_dataset)
 {
-	slog_debug("Clearing intervals of %s", curr_dataset->original_name);
+	slog_debug("Clearing %d intervals of %s", curr_dataset->num_intervals, curr_dataset->original_name);
+	if (!curr_dataset->intervals || curr_dataset->num_intervals == 0)
+	{
+		return;
+	}
+	
 	IntervalEntry *curr_interval = NULL;
 	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
 	{
 		curr_interval = curr_dataset->intervals[i];
-		free(curr_interval);
-		curr_interval = NULL;
+		if (curr_interval != NULL)
+		{
+			free(curr_interval);
+			curr_interval = NULL;
+		}
 	}
-	free(curr_dataset->intervals);
-	curr_dataset->intervals = NULL;
+	if (curr_dataset->intervals != NULL)
+	{
+		free(curr_dataset->intervals);
+		curr_dataset->intervals = NULL;
+	}
 	curr_dataset->num_intervals = 0;
 }
 
 int GetValueFromInterval(dataset_info *curr_dataset, int data_id)
 {
+	if (curr_dataset->num_intervals <= 0)
+	{
+		return -1;
+	}
+	
 	IntervalEntry *curr_interval = NULL;
 	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
 	{
 		curr_interval = curr_dataset->intervals[i];
 		if (data_id >= curr_interval->left_interval && data_id <= curr_interval->right_interval)
 		{
-			slog_debug("interval for %s data_id=%d=[%d,%d] found, value=%d", curr_dataset->uri_, data_id, curr_interval->left_interval, curr_interval->right_interval,  curr_interval->value);
+			slog_debug("interval for %s data_id=%d=[%d,%d] found, value=%d", curr_dataset->uri_, data_id, curr_interval->left_interval, curr_interval->right_interval, curr_interval->value);
 			return curr_interval->value;
 		}
 	}
@@ -4209,7 +4243,7 @@ void PrintIntervals(dataset_info *curr_dataset)
 	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
 	{
 		IntervalEntry *curr_interval = curr_dataset->intervals[i];
-		slog_debug("%d Interval [%d, %d]=%d", i, curr_interval->left_interval, curr_interval->right_interval, curr_interval->value);
+		slog_debug("%d, size=%d, Interval [%d, %d]=%d", i, curr_interval->right_interval-curr_interval->left_interval+1, curr_interval->left_interval, curr_interval->right_interval, curr_interval->value);
 	}
 }
 
@@ -4217,24 +4251,41 @@ IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval,
 {
 	if (curr_dataset->intervals == NULL)
 	{
+		slog_debug("Alloc memory for %d intervals\n", curr_dataset->capacity);
 		curr_dataset->intervals = (IntervalEntry **)calloc(curr_dataset->capacity, sizeof(IntervalEntry *));
 	}
 
 	IntervalEntry *curr_interval = NULL;
+	slog_debug("curr_dataset->num_intervals=%d", curr_dataset->num_intervals);
 	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
 	{
-		slog_debug("curr_dataset->num_intervals=%d", curr_dataset->num_intervals);
 		curr_interval = curr_dataset->intervals[i];
 		// block zero case.
-		if (left_interval == curr_interval->left_interval && right_interval == curr_interval->right_interval)
+		// if (left_interval == curr_interval->left_interval && right_interval == curr_interval->right_interval)
+		// {
+		// 	// slog_debug("block zero case");
+		// 	return curr_interval;
+		// }
+
+		// if (right_interval >= curr_interval->right_interval && curr_interval->right_interval != 0)
+		// {
+		// 	slog_debug("right interval case.");
+		// 	return curr_interval;
+		// }
+		// TODO: mix with the previous if.
+		// expected interval is equals or is between the compared one.
+		if (left_interval >= curr_interval->left_interval && right_interval <= curr_interval->right_interval)
 		{
 			return curr_interval;
 		}
 
-		if (right_interval >= curr_interval->right_interval && curr_interval->right_interval != 0)
+		if (left_interval >= curr_interval->left_interval && right_interval <= curr_interval->right_interval)
 		{
-			return curr_interval;
+
 		}
+
+
+
 	}
 	return NULL;
 }
@@ -4248,12 +4299,20 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 		return;
 	}
 
+	if (left_interval > right_interval)
+	{
+		fprintf(stderr,"Error: Invalid interval [%d, %d]\n", left_interval, right_interval);
+		slog_error("Invalid interval [%d, %d]", left_interval, right_interval);
+		return;
+	}
+	
+
 	// Check if the current interval exists.
 	IntervalEntry *entry = GetIntervalPointer(curr_dataset, left_interval, right_interval);
 	if (entry == NULL)
 	{
 		// fprintf(stderr, "Making interval [%d, %d]=%d\n", left_interval, right_interval, value);
-		slog_debug("Making interval [%d, %d]=%d", left_interval, right_interval, value);
+		slog_debug("Making interval number %d of size %d, [%d, %d]=%d", curr_dataset->num_intervals, right_interval-left_interval+1, left_interval, right_interval, value);
 		// Create a new IntervalEntry and populate it
 		IntervalEntry *new_entry = (IntervalEntry *)calloc(1, sizeof(IntervalEntry));
 		new_entry->value = value;
@@ -4267,24 +4326,15 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 	else
 	{
 		// fprintf(stderr, "Updating interval [%d, %d]=%d-->[%d, %d]=%d\n", entry->left_interval, entry->right_interval, entry->value, left_interval, right_interval, value);
+		if (left_interval == 0 && right_interval == 0)
+		{ // skip updating block zero.
+			return;
+		}
+		
 		slog_debug("Updating interval [%d, %d]=%d-->[%d, %d]=%d", entry->left_interval, entry->right_interval, entry->value, left_interval, right_interval, value);
 		entry->right_interval = right_interval;
 		entry->value = value;
 	}
-
-	// Check if we need to resize the array to add a new interval
-	// if (curr_dataset->num_intervals >= curr_dataset->capacity)
-	// {
-	// 	size_t new_capacity = (curr_dataset->capacity == 0) ? 1 : curr_dataset->capacity * 2;
-	// 	IntervalEntry *new_intervals = realloc(curr_dataset->intervals, new_capacity * sizeof(IntervalEntry));
-	// 	if (new_intervals == NULL)
-	// 	{
-	// 		// Handle memory allocation failure
-	// 		return;
-	// 	}
-	// 	curr_dataset->intervals = new_intervals;
-	// 	curr_dataset->capacity = new_capacity;
-	// }
 }
 
 int compare_intervals(const void *a, const void *b)
@@ -4308,7 +4358,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	{
 		*buffer_request = NULL;
 	}
-	
 
 	int n_server = -1;
 	int replication_factor = 1;
@@ -4323,6 +4372,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	}
 	replication_factor = curr_dataset->repl_factor;
 
+	// TOCHECK: GetValueFromInterval is called twice, the first one is on get_data_location.
 	int entry_value = GetValueFromInterval(curr_dataset, data_id);
 	if (entry_value == -1)
 	{
@@ -4409,9 +4459,11 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		}
 
 		clock_t t;
-		double time_taken;
+		double time_taken = 0.0;
 		t = clock();
 		msg_length = TIMING(get_recv_data_length(ucp_worker_data, local_data_uid), "get_recv_data_length", size_t, process_rank);
+		t = clock() - t;
+		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 		// ucp_tag_recv_info_t info_tag;
 		// ucp_tag_message_h msg_tag;
 		// msg_length = TIMING(get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t, process_rank);
@@ -4448,11 +4500,12 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		else
 		{
 			// original
+			t = clock();
 			msg_length = TIMING(recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async), "recv_data", size_t, process_rank);
+			t = clock() - t;
+			time_taken += ((double)t) / (CLOCKS_PER_SEC);
 		}
 
-		t = clock() - t;
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 		// performance read metrics.
 		std::string used_hostname_server = curr_imss.info.ips[n_server_];
 		backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + msg_length);
@@ -4572,10 +4625,10 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 
 // Method retrieving a data element associated to a certain dataset.
 // ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request)
-ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_id, void **buffer_prefetch)
+ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_id, void **buffer_prefetch, size_t total_read_size, size_t num_blocks_to_read)
 {
 	slog_debug("dataset_uri=%s, dataset_id=%d, data_id=%d", dataset_uri, dataset_id, data_id);
-	
+
 	int n_server = -1;
 	int replication_factor = 1;
 	int inf_prov = 0;
@@ -4613,7 +4666,7 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 	int32_t session_policy = curr_dataset->session_plcy; //  get_policy();
 
 	uint32_t n_server_ = 0;
-	int32_t aux_conn = 0;
+	// int32_t aux_conn = 0;
 	slog_debug("replication_factor=%d, curr_imss_storages=%d", replication_factor, curr_imss_storages);
 	// Retrieve the corresponding connections to the previous servers.
 	for (int32_t i = 0; i < replication_factor; i++)
@@ -4641,6 +4694,12 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 	char mode[10] = {0};
 	pthread_mutex_lock(&lock_network);
 
+	int offset = 0;
+	// acording to the current number of servers, it calculates the approximate size for prefetching.
+	// number of blocks on the server plus the size to store each block id on the string.
+	size_t size_used_per_server = (total_read_size / curr_imss_storages) + (num_blocks_to_read / curr_imss_storages) * sizeof(uint32_t);
+	slog_debug("Prefetch size=%ld", size_used_per_server);
+
 	// Request the concerned block to the involved servers.
 	for (int32_t i = 0; i < replication_factor; i++)
 	{
@@ -4655,10 +4714,8 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		}
 
 		//  Key related to the requested data element.
-		int offset = 0;
-		int to_read = 0;
-		sprintf(key_, "%s %lu %ld %s$%d %ld", mode, READV2_OP, offset, curr_dataset->uri_, data_id, to_read);
-		// sprintf(key_, "GET 8 0 %s$%d %d %ld %ld %ld", curr_dataset->uri_, curr_block, end_block, BLOCKSIZE, start_offset, size);
+		// sprintf(key_, "%s %lu %ld %s$%d %ld", mode, READV2_OP, offset, curr_dataset->uri_, data_id, to_read);
+		sprintf(key_, "%s %lu %ld %s$%d %ld", mode, READV2_OP, offset, curr_dataset->uri_, data_id, size_used_per_server);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 		slog_debug("[IMSS] Request to data %d - '%s' to server %d", n_server_, key_, repl_servers[i]);
 		size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
@@ -4685,8 +4742,10 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 			pthread_mutex_unlock(&lock_network);
 			return -2;
 		}
+		t = clock() - t;
+		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
-		*buffer_prefetch = (void *)malloc(msg_length);
+		*buffer_prefetch = (void *)malloc(msg_length+1);
 		// void *response_buffer = &(*buffer_prefetch);
 		if (*buffer_prefetch == NULL)
 		{
@@ -4710,17 +4769,11 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		// else
 		{
 			// original
+			t = clock();
 			msg_length = TIMING(recv_data(ucp_worker_data, ep, *buffer_prefetch, msg_length, local_data_uid, SYNC), "recv_data", size_t, process_rank);
+			t = clock() - t;
+			time_taken += ((double)t) / (CLOCKS_PER_SEC);
 		}
-
-		t = clock() - t;
-		time_taken = ((double)t) / (CLOCKS_PER_SEC);
-		// performance read metrics.
-		std::string used_hostname_server = curr_imss.info.ips[n_server_];
-		backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + msg_length);
-		backend_performance_metrics[used_hostname_server].read.total_data_time += time_taken;
-		backend_performance_metrics[used_hostname_server].read.num_operations++;
-		backend_performance_metrics[used_hostname_server].server_id = n_server_;
 
 		slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
@@ -4742,7 +4795,7 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		if (!strncmp((const char *)*buffer_prefetch, "$ERRIMSS_NO_KEY_AVAIL$", 22))
 		{ // key not avaiable on the remote server.
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			sprintf(err_msg, "HERCULES_ERR_GET_NDATA_NO_KEY_AVAIL, %s$%d to server %d (%s), curr_imss_storages=%d", curr_dataset->uri_, data_id, repl_servers[i], curr_imss.info.ips[i], curr_imss_storages);
+			sprintf(err_msg, "HERCULES_ERR_GET_NDATA_PREFETCH_NO_KEY_AVAIL, %s$%d to server %d (%s), curr_imss_storages=%d", curr_dataset->uri_, data_id, repl_servers[i], curr_imss.info.ips[i], curr_imss_storages);
 			fprintf(stderr, "%s\n", err_msg);
 			slog_error("%s", err_msg);
 			free(*buffer_prefetch);
@@ -4751,6 +4804,13 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		else
 		{
 			slog_info("OK!, length=%ld", msg_length);
+
+			// performance read metrics.
+			std::string used_hostname_server = curr_imss.info.ips[n_server_];
+			backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + msg_length);
+			backend_performance_metrics[used_hostname_server].read.total_data_time += time_taken;
+			backend_performance_metrics[used_hostname_server].read.num_operations++;
+			backend_performance_metrics[used_hostname_server].server_id = n_server_;
 
 			pthread_mutex_unlock(&lock_network);
 			return (ssize_t)msg_length;
@@ -5012,7 +5072,7 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 	// return 1;
 	// send the dataset structure to be updated on the metadata server.
 	size_t len_dataset_uri = strlen(curr_dataset->uri_);
-	uint64_t msg_size = sizeof(dataset_info);
+	uint64_t msg_size = (uint64_t)getpid(); // sizeof(dataset_info);
 
 	int32_t opened = 0;
 	if (curr_dataset->type == TYPE_DIRECTORY && curr_dataset->uri_[len_dataset_uri - 1] != '/')
@@ -5238,8 +5298,6 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				pthread_mutex_unlock(&lock_network);
 				return -1;
 			}
-
-			// LOS DATOS NO TERMINAN DE ENVIARSE CUANDO SE ACTIVA LA MALEABILIDAD!!!!
 
 			t = clock() - t;
 			time_taken = ((double)t) / (CLOCKS_PER_SEC);

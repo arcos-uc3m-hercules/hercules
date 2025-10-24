@@ -23,10 +23,11 @@
 #include "policies.h"
 
 #define XYZ 10
-const double MINIMUM_PERFORMANCE_THRESHOLD = 4000.0; // In MB/s
-const int ANALYSIS_WINDOW_SIZE = 5;
-const double CRITICAL_SLOPE = -50.0;		  // Performance loss rate that triggers scaling
-const int CONSECUTIVE_SIGNALS_THRESHOLD = 10; // Trigger scaling after 3 consecutive signals.
+const double MINIMUM_PERFORMANCE_THRESHOLD = 1000.0; // In MB/s
+const int ANALYSIS_WINDOW_SIZE = 2;					 // 20;
+const double CRITICAL_SLOPE = -50.0;				 // Performance loss rate that triggers scaling
+const int CONSECUTIVE_SIGNALS_THRESHOLD = 2;		 // 50; // Trigger scaling after 3 consecutive signals.
+static int NUMBER_OF_LAUNCHED_THREADS = 0;
 
 void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
@@ -151,6 +152,7 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
 	{
 		((my_imss->ips)[count])[n_chars - 1] = '\0';
 	}
+	// Increase the num. of storages. This is the "master" value used on all code.
 	my_imss->num_storages++;
 	return 0;
 }
@@ -218,7 +220,9 @@ int SendConfirmationMessage(const p_argv *arguments, const char *msg)
 {
 	int ret = 0;
 	slog_debug("Sending msg %s", msg);
+	pthread_mutex_lock(&lock_network);
 	ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, (const void *)msg, strlen(msg) + 1, arguments->worker_uid), "Send data", int);
+	pthread_mutex_unlock(&lock_network);
 	return ret;
 }
 
@@ -439,39 +443,39 @@ void *CommissioningStage(void *th_argv)
 {
 	CommissioningThreadArgs *arguments = (CommissioningThreadArgs *)th_argv;
 
-	int32_t new_number_data_servers = arguments->args.num_data_servers;
-	// static int consecutive_scale_up_signals = 0;
+	// int32_t new_number_data_servers = imss_info_struct->num_storages;// arguments->args.num_data_servers;
 
 	if (arguments->args.malleability && !malleability_on)
 	{
 		// Always check the performance trend.
-		if (make_scaling_decision(elasticity_records_history))
+		bool to_add_server = make_scaling_decision(elasticity_records_history);
+		pthread_mutex_lock(&mutext_malleability);
+		if (to_add_server)
 		{
-			pthread_mutex_lock(&mutext_malleability);
+			// pthread_mutex_lock(&mutext_malleability);
 			consecutive_scale_up_signals++; // Increment counter if scaling is needed.
-			pthread_mutex_unlock(&mutext_malleability);
 			fprintf(stderr, "Scale-up signal received. Consecutive count: %d\n", consecutive_scale_up_signals);
+			// pthread_mutex_unlock(&mutext_malleability);
 		}
 		else
 		{
-			pthread_mutex_lock(&mutext_malleability);
+			// pthread_mutex_lock(&mutext_malleability);
 			consecutive_scale_up_signals = 0; // Reset counter if performance is fine.
-			pthread_mutex_unlock(&mutext_malleability);
+											  // pthread_mutex_unlock(&mutext_malleability);
 		}
 
 		// Only trigger the actual scaling operation if the threshold is met.
+		// pthread_mutex_lock(&mutext_malleability);
 		if (consecutive_scale_up_signals >= CONSECUTIVE_SIGNALS_THRESHOLD)
 		{
-			pthread_mutex_lock(&mutext_malleability);
 			consecutive_scale_up_signals = 0;
 			pthread_mutex_unlock(&mutext_malleability);
 			imss_info *imss_info_struct = arguments->hercules_info_struct;
 			int num_server_to_increase = 1;
-			int id_server_to_add = new_number_data_servers;
 			// ****************************
 			char command_to_exec[PATH_MAX] = {0};
 			// ****************************
-			fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
+			// fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
 			// char *node_to_use = NULL;
 			int found = 0;
 			for (size_t j = 0; j < number_of_hosts; j++)
@@ -500,30 +504,9 @@ void *CommissioningStage(void *th_argv)
 			}
 			else
 			{
-				// sprintf(command_to_exec_1, "head -n %d %s | tail -n %d > ./data2start_hostfile", new_number_data_servers, arguments->args.data_hostfile, num_server_to_increase);
-				// sprintf(command_to_exec_1, "echo %s > ./data2start_hostfile", node_to_use);
-
-				// sprintf(command_to_exec, "%s/scripts/hercules addV2 -f %s -d ./data2start_hostfile", arguments->args.hercules_path, arguments->args.hercules_path);
-				// TODO: set the path of the binary dinamically.
-				// sprintf(command_to_exec, "( ssh %s HERCULES_DEBUG_LEVEL=all UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s ~/gesanche/hercules/build/hercules_server d %d %d > %s/tmp/hercules_server_%d_log.txt 2>&1 ) &", node_to_use, arguments->args.configuration_file_path, id_server_to_add, imss_info_struct->num_active_storages, arguments->args.hercules_path, id_server_to_add);
-				char *workdir = getenv("PWD");
-				sprintf(command_to_exec,
-						"( ssh %s 'cd %s && UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s ~/gesanche/hercules/build/hercules_server d %d %d > %s/tmp/hercules_server_%d_log.txt 2>&1' ) &",
-						node_to_use,
-						workdir,
-						arguments->args.configuration_file_path,
-						id_server_to_add,
-						imss_info_struct->num_active_storages,
-						arguments->args.hercules_path,
-						id_server_to_add);
-
-				// system(command_to_exec_1);
-				fprintf(stderr, "Running command: %s\n", command_to_exec);
-				// Deploy the new hercules instance on the avaiable node.
-				system(command_to_exec);
-
 				// Update the variables.
 				pthread_mutex_lock(&mutext_malleability);
+				// Here we incresae imss_info_struct->num_storages + 1.
 				AddIPS(imss_info_struct, node_to_use, strlen(node_to_use));
 				// print the current IPS.
 				// fprintf(stderr, "Printing EPS on the global structure.\n imss_info_struct->num_storages=%d\n", imss_info_struct->num_storages);
@@ -532,18 +515,37 @@ void *CommissioningStage(void *th_argv)
 				// 	fprintf(stderr, "eps[%d] hostname=%s\n", i, imss_info_struct->ips[i]);
 				// }
 
-				new_number_data_servers = imss_info_struct->num_storages;
-				imss_info_struct->num_active_storages = new_number_data_servers;
-				arguments->args.num_data_servers = new_number_data_servers;
-				malleability_on = 1;
+				// new_number_data_servers = imss_info_struct->num_storages;
 				number_active_storage_servers = imss_info_struct->num_storages;
-				id_server_to_modify = id_server_to_add;
+				imss_info_struct->num_active_storages = number_active_storage_servers;
+				arguments->args.num_data_servers = number_active_storage_servers;
+				malleability_on = 1;
+				id_server_to_modify = number_active_storage_servers - 1;
+
 				pthread_mutex_unlock(&mutext_malleability);
+
+				char *workdir = getenv("PWD");
+				sprintf(command_to_exec,
+						"( ssh %s 'cd %s && UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s ~/gesanche/hercules/build/hercules_server d %d %d > %s/tmp/hercules_server_%d_log.txt 2>&1' ) &",
+						node_to_use,
+						workdir,
+						arguments->args.configuration_file_path,
+						id_server_to_modify,
+						imss_info_struct->num_active_storages,
+						arguments->args.hercules_path,
+						id_server_to_modify);
+
+				// system(command_to_exec_1);
+				fprintf(stderr, "Running command: %s, id server=%d\n", command_to_exec, id_server_to_modify);
+				// Deploy the new hercules instance on the avaiable node.
+				system(command_to_exec);
 			}
 		}
 		else
 		{
-			fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
+			// fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
+			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
+			pthread_mutex_unlock(&mutext_malleability);
 		}
 	}
 
@@ -561,9 +563,8 @@ void *CommissioningStage(void *th_argv)
 	{
 		// No extra operations, just sending an ACK to the client to continue.
 		char response[PATH_MAX] = {'\0'};
-		sprintf(response, "%s %" PRId32 " -1", MSG_MALLEABILITY_DATASERVERS, new_number_data_servers);
+		sprintf(response, "%s %" PRId32 " -1", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers);
 		int ret = -1;
-		fprintf(stderr, "Malleability=%d, Sending response %s to client=%lu\n", arguments->args.malleability,  response, temp_p_argv_for_calls.worker_uid);
 		ret = SendConfirmationMessage(&temp_p_argv_for_calls, response);
 		if (ret == 0)
 		{
@@ -571,7 +572,7 @@ void *CommissioningStage(void *th_argv)
 			slog_error("HERCULES_ERR_STAT_WORKER_SEND_DATASERVERS");
 			return NULL;
 		}
-		fprintf(stderr, "Reponse sent to client=%lu\n", temp_p_argv_for_calls.worker_uid);
+		// fprintf(stderr, "Reponse sent to client=%lu\n", temp_p_argv_for_calls.worker_uid);
 	}
 
 	free(arguments);
@@ -624,7 +625,8 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 
 	if (num_records < ANALYSIS_WINDOW_SIZE)
 	{
-		fprintf(stderr, "Not enough data to make a decision. Need %d records, have %zu.\n", ANALYSIS_WINDOW_SIZE, num_records);
+		// fprintf(stderr, "Not enough data to make a decision. Need %d records, have %zu.\n", ANALYSIS_WINDOW_SIZE, num_records);
+		slog_debug("Not enough data to make a decision. Need %d records, have %zu.", ANALYSIS_WINDOW_SIZE, num_records);
 		pthread_mutex_unlock(&mutext_malleability);
 		return false;
 	}
@@ -640,6 +642,17 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 		{
 			if (i < pair.second.size())
 			{
+				// fprintf(stderr, "Entry %d:%s, size=%ld, overall performance='%.2f' ('%.2f' MB), W='%.2f' ('%.2f' MB), R='%.2f' ('%.2f' MB)\n",
+				// 		i,
+				// 		pair.second[i].server_hostname,
+				// 		pair.second.size(),
+				// 		pair.second[i].overall_performance,
+				// 		pair.second[i].overall_performance / MB,
+				// 		pair.second[i].write_performance,
+				// 		pair.second[i].write_performance / MB,
+				// 		pair.second[i].read_performance,
+				// 		pair.second[i].read_performance / MB);
+
 				total_performance_at_point_i += pair.second[i].overall_performance;
 				active_servers_count++;
 			}
@@ -647,7 +660,8 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 
 		if (active_servers_count > 0)
 		{
-			aggregate_performance_history.push_back(total_performance_at_point_i / active_servers_count);
+			// aggregate_performance_history.push_back(total_performance_at_point_i / active_servers_count);
+			aggregate_performance_history.push_back(total_performance_at_point_i);
 		}
 	}
 	pthread_mutex_unlock(&mutext_malleability);
@@ -660,27 +674,31 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	// Calculate the Simple Moving Average (SMA).
 	double performance_sum = std::accumulate(aggregate_performance_history.begin(), aggregate_performance_history.end(), 0.0);
 	double moving_average = performance_sum / aggregate_performance_history.size();
+	// fprintf(stderr, "Performance sum=%.2f (%.2f MB), aggregate_performance_history.size()=%ld\n", performance_sum, performance_sum / MB, aggregate_performance_history.size());
+	slog_debug("Performance sum=%.2f (%.2f MB), aggregate_performance_history.size()=%ld", performance_sum, performance_sum / MB, aggregate_performance_history.size());
 
-	fprintf(stderr, "Elasticity analysis: Moving Average Performance = %.2f MB/s\n", moving_average / MB);
+	// fprintf(stderr, "Elasticity analysis: Moving Average Performance = %.2f MB/s\n", moving_average / MB);
+	slog_debug("Elasticity analysis: Moving Average Performance = %.2f MB/s", moving_average / MB);
 
 	// Calculate the trend slope.
 	double slope = calculate_trend_slope(aggregate_performance_history);
-	fprintf(stderr, "Elasticity analysis: Performance Trend Slope = %.2f\n", slope);
+	// fprintf(stderr, "Elasticity analysis: Performance Trend Slope = %.2f\n", slope);
+	slog_debug("Elasticity analysis: Performance Trend Slope = %.2f", slope);
 
 	// Decision Logic.
 	if (moving_average < MINIMUM_PERFORMANCE_THRESHOLD * MB)
 	{
-		fprintf(stderr, "DECISION: SCALE UP! Moving average (%.2f MB/s) is below threshold (%.2f MB/s).\n", moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD);
+		fprintf(stderr, "DECISION: SCALE UP! Moving average (%.2f MB/s) is below threshold (%.2f MB/s), number of active servers=%d\n", moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, number_active_storage_servers);
 		return true;
 	}
 
 	if (slope < CRITICAL_SLOPE)
 	{
-		fprintf(stderr, "DECISION: SCALE UP! Performance trend is strongly negative (%.2f).\n", slope);
+		fprintf(stderr, "DECISION: SCALE UP! Performance trend is strongly negative (%.2f), number of active servers=%d\n", slope, number_active_storage_servers);
 		return true;
 	}
 
-	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold.\n");
+	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, number of active servers=%d\n", number_active_storage_servers);
 	return false;
 }
 
@@ -727,6 +745,7 @@ void *Malleability(void *th_argv)
 	pthread_mutex_unlock(&mutext_malleability);
 
 	size_t key_length = 0;
+	int metric_recorded = 0;
 	for (size_t i = 0; i < num_entries; ++i)
 	{
 		// int32_t server_id = 0;
@@ -753,10 +772,36 @@ void *Malleability(void *th_argv)
 		// Deserialize read performance.
 		memcpy(&received_metrics.read_performance, current_ptr, sizeof(received_metrics.read_performance));
 		current_ptr += sizeof(received_metrics.read_performance);
-		// fprintf(stderr, "Read Performance for server %d: %f\n", server_id, read_performance/MB);
+		// fprintf(stderr, "Read Performance for server %d: %.2f\n", server_id, read_performance/MB);
 
 		// Calculates overall performance.
-		received_metrics.overall_performance = (received_metrics.read_performance + received_metrics.write_performance) / 2;
+		if (!double_are_equal(received_metrics.read_performance, 0.0))
+		{ // read performance is not zero.
+			metric_recorded++;
+		}
+		else
+		{
+			slog_debug("read performance is near zero, %.2f", received_metrics.read_performance);
+		}
+
+		if (!double_are_equal(received_metrics.write_performance, 0.0))
+		{ // write performance is not zero.
+			metric_recorded++;
+		}
+		else
+		{
+			slog_debug("write performance is near zero, %.2f", received_metrics.write_performance);
+		}
+
+		if (num_entries == 0)
+		{
+			// both read and write performances was zero.
+			// skip this record.
+			slog_debug("both metrics are zero, skipping this entry.");
+			continue;
+		}
+
+		received_metrics.overall_performance = (received_metrics.read_performance + received_metrics.write_performance) / metric_recorded;
 
 		// TODO: use a different lock here to prevent delays on other operations.
 		// if (i == 0)
@@ -764,15 +809,17 @@ void *Malleability(void *th_argv)
 		// 	fprintf(stderr, "Server id\t Write (MB/s)\t Read (MB/s)\t Overall (MB/s)\n");
 		// }
 		// fprintf(stderr, "%s\t %d\t %f\t %f\t %f\t %d\n",received_metrics.server_hostname.c_str(), received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, number_of_history_records);
+		slog_debug("%s\t %d\t %f\t %f\t %f\t %d", received_metrics.server_hostname.c_str(), received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, number_of_history_records);
+
 		// Add the new record to the history for the specific server ID.
 		pthread_mutex_lock(&mutext_malleability);
 		elasticity_records_history[received_metrics.server_hostname].push_back(received_metrics);
 		pthread_mutex_unlock(&mutext_malleability);
-		if (min_overall_performance == -1.0 || received_metrics.overall_performance < min_overall_performance)
-		{
-			min_overall_performance = received_metrics.overall_performance;
-			slowest_server_id = received_metrics.server_id;
-		}
+		// if (min_overall_performance == -1.0 || received_metrics.overall_performance < min_overall_performance)
+		// {
+		// 	min_overall_performance = received_metrics.overall_performance;
+		// 	slowest_server_id = received_metrics.server_id;
+		// }
 	}
 
 	// checks if the struct is not pointing to the hercules instance.
@@ -879,12 +926,21 @@ void *Malleability(void *th_argv)
 		return (void *)-1;
 	}
 
-	if (pthread_detach(comissioning_stage_thread) != 0)
+	// TO FIX: making a parallel thread is throwing an IOR WARNING on write operations.
+	int *ret_thread = NULL;
+	if (pthread_join(comissioning_stage_thread, (void **)&ret_thread) != 0)
 	{
-		perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
-		slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
+		perror("HERCULES_ERR_MALLEABILITY_PTHREAD_JOIN_COMISSIONING_STAGE");
+		slog_error("HERCULES_ERR_MALLEABILITY_PTHREAD_JOIN_COMISSIONING_STAGE");
 		return (void *)-1;
 	}
+
+	// if (pthread_detach(comissioning_stage_thread) != 0)
+	// {
+	// 	perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
+	// 	slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
+	// 	return (void *)-1;
+	// }
 
 	return NULL;
 
@@ -1191,7 +1247,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	else if (!strcmp(mode, "STOPSERVER"))
 	{
 		// TODO: move this to the correct case.
-		// int number_active_storage_servers = 0;
 		malleability_on = 1;
 		id_server_to_modify = arguments->args.id;
 		sscanf(req, "%s %" PRIu32 " %" PRIu32 "", mode, &number_active_storage_servers);
@@ -1395,16 +1450,46 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		}
 		case READV2_OP:
 		{
-			const size_t prefetch_size = 1024 * MB; // 10*GB; // 512 * MB;
+
+			// use the prefetch size calculated on the front-end.
+			uint64_t prefetch_size = to_read;
+
+			const uint32_t BLOCK_ID_SIZE = sizeof(uint32_t);
+			const size_t BLOCK_DATA_SIZE = BLOCK_SIZE;
+			const size_t RECORD_SIZE = BLOCK_ID_SIZE + BLOCK_DATA_SIZE;
+			slog_debug("BLOCK_ID_SIZE=%lu, BLOCK_DATA_SIZE=%lu, RECORD_SIZE=%lu, prefetch_size=%lu", BLOCK_ID_SIZE, BLOCK_DATA_SIZE, RECORD_SIZE, prefetch_size);
+
+			if (prefetch_size <= 0)
+			{
+				// use the prefetch size defined on the configuration file.
+				prefetch_size = arguments->args.prefetch_size;
+			}
+
+			if (prefetch_size < RECORD_SIZE)
+			{
+				slog_warn("Record size %lu is bigger than prefetch size %lu", RECORD_SIZE, prefetch_size);
+				// record size is bigger than the defined prefetch size.
+				// use the record size.
+				prefetch_size =  RECORD_SIZE;
+			}
+			
+			// if (prefetch_size <= 0)
+			// {
+			// 	slog_error("HERCULES_ERR_SRV_WORKER_HELPER_READV2_OP_PREFETCH_INVALID_SIZE, %" PRIu64 " bytes.", prefetch_size);
+			// 	fprintf(stderr, "WARNING: Invalid prefetch size, using a block size of %" PRIu64 " bytes instead.\n", BLOCK_SIZE);
+			// 	// use the defined block size as prefetch size.
+			// 	prefetch_size = BLOCK_SIZE;
+			// }
+
+			slog_debug("prefetch_size=%" PRIu64 "", prefetch_size);
+			
+			// create the prefetching block.
 			char *prefetch_buffer = new(std::nothrow) char[prefetch_size];
 			if (prefetch_buffer == nullptr)
 			{
 				slog_error("HERCULES_ERR_SRV_WORKER_HELPER_READV2_OP_PREFETCH_MEM_ERR %ld bytes.", prefetch_size);
 				return -1;
 			}
-
-			// size_t total_sent = 0;
-			// size_t buffer_offset = 0;
 
 			size_t delimiter_pos = key.find('$');
 			if (delimiter_pos == std::string::npos)
@@ -1416,94 +1501,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 			std::string base_key = key.substr(0, delimiter_pos);
 			uint32_t current_block_id = (uint32_t)std::stoul(key.substr(delimiter_pos + 1));
-			// bool first_block = true;
-			// int next_server = 0;
-			// const uint32_t BLOCK_ID_SIZE = sizeof(uint32_t);
-			// const size_t BLOCK_DATA_SIZE = BLOCK_SIZE;
-			// const size_t RECORD_SIZE = BLOCK_ID_SIZE + BLOCK_DATA_SIZE;
-
-			// slog_debug("[PREFETCH_LOOP] Starting prefetch. Size to send: %ld bytes. base key: %s, initial block: %lld", prefetch_size, base_key.c_str(), current_block_id);
-			// while (total_sent < prefetch_size)
-			// {
-			// 	// calculates the server id by passing the current_block_id to the policy function.
-			// 	// TODO: change ROUND_ROBIN_ for the used policy.
-			// 	// next_server = find_server(arguments->args.num_data_servers, current_block_id, base_key.c_str(), SET, TYPE_DATA_SERVER, ROUND_ROBIN_); // TODO: check for the current data policy in the dataset, not in the imss configuration.
-			// 	// slog_debug("block %d corresponds to the server %d", current_block_id, next_server);
-			// 	// if (next_server != arguments->args.id)
-			// 	// {
-			// 	// 	// current block does not correspond to this server. Go to the next one.
-			// 	// 	current_block_id++;
-			// 	// 	continue;
-			// 	// }
-
-			// 	// key for the current block.
-			// 	std::string current_key = base_key + "$" + std::to_string(current_block_id);
-
-			// 	int32_t ret = TIMING(HierarchicalMapGet(hierarchical_map, current_key, &address_, &block_size_rtvd);, "HierarchicalMapGet", int32_t, arguments->thread_id);
-			// 	// Check if there was an associated block to the key.
-
-			// 	if (ret == 0)
-			// 	{ // block does not exist.
-			// 		if (first_block)
-			// 		{
-			// 			//   Send the error code msg.
-			// 			ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
-			// 			if (ret < 0)
-			// 			{
-			// 				delete[] prefetch_buffer;
-			// 				perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
-			// 				slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
-			// 				// pthread_mutex_unlock(&lock_network);
-			// 				return -1;
-			// 			}
-			// 			// break the while loop.
-			// 			break;
-			// 		}
-			// 		else
-			// 		{
-			// 			// the first block should be here, or the client should have already received the response if it does not exists.
-			// 			// break the while loop.
-			// 			break;
-			// 		}
-			// 	}
-
-			// 	first_block = false;
-
-			// 	if (block_size_rtvd != BLOCK_DATA_SIZE)
-			// 	{
-			// 		slog_warn("The block size does not match with the expected one, block size=%lu, expected size=%lu", block_size_rtvd, BLOCK_DATA_SIZE);
-			// 		break;
-			// 	}
-
-			// 	if (block_size_rtvd == 0)
-			// 	{
-			// 		slog_warn("The block size is 0");
-			// 		// the size of the block is 0.
-			// 		// TODO: add an extra condition for the requested block.
-			// 		break;
-			// 	}
-
-			// 	size_t space_left_in_buffer = prefetch_size - buffer_offset;
-			// 	// size_t size_to_copy_now = std::min(block_size_rtvd, space_left_in_buffer);
-
-			// 	if (space_left_in_buffer < BLOCK_DATA_SIZE)
-			// 	{
-			// 		// no more space left on the buffer.
-			// 		// no space to write a new block.
-			// 		slog_debug("No more space left or no enough space to write a new block, space_left_in_buffer=%lu", space_left_in_buffer);
-			// 		break;
-			// 	}
-
-			// 	// write the block ID (4 bytes)
-			// 	*(uint32_t*)(prefetch_buffer + buffer_offset) = (uint32_t)current_block_id;
-
-			// 	memcpy(prefetch_buffer + buffer_offset + BLOCK_ID_SIZE, address_, BLOCK_DATA_SIZE);
-
-			// 	buffer_offset += RECORD_SIZE;
-			// 	// current_block_id++;
-			// 	current_block_id += arguments->args.num_data_servers;
-
-			// } // end while
 			ssize_t buffer_offset = HierarchicalMapGetPrefetch(
 				hierarchical_map,
 				base_key,
@@ -1512,10 +1509,12 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				prefetch_buffer,
 				prefetch_size);
 
+			slog_debug("buffer_offset=%zu", buffer_offset);
 			if (buffer_offset == 0)
 			{
 				delete[] prefetch_buffer;
-				//  Send the error code msg. 
+				slog_debug("Sending not found code: %s", err_code);
+				//  Send the error code msg.
 				ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
 				if (ret < 0)
 				{
@@ -3151,13 +3150,14 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				dataset = (dataset_info *)address_;
 				if (!strncmp(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY)))
 				{ // dataset is dirty. We will delete from the garbage collector vector.
-					slog_debug("Dirty dataset found %s, recovering from the garbage collector.", key.c_str());
+					slog_debug("Dirty dataset found %s on OPEN operation, recovering from the garbage collector.", key.c_str());
 					// int ret = map->garbage_collector_pop(key);
 					int ret = HierarchicalMapPopFromGarbageCollector(hierarchical_map, key_for_tree);
 					if (ret == 0)
 					{
 						slog_debug("%s has not been found on the garbage collector map, but it found as dirty.", key.c_str());
 					}
+					ClearIntervalsStructure(dataset);
 					strncpy(dataset->status, STATUS_ATACH, strlen(STATUS_ATACH) + 1);
 				}
 
@@ -3196,9 +3196,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			// TODO: this function can be called on a thread.
 			// This avoid blocking future operations.
-			fprintf(stderr, "Receiving performance, client=%lu\n", arguments->worker_uid);
+			// fprintf(stderr, "Receiving performance, client=%lu\n", arguments->worker_uid);
+			NUMBER_OF_LAUNCHED_THREADS++;
 			Malleability((void *)arguments);
-			fprintf(stderr, "Performance received, client=%lu\n", arguments->worker_uid);
+			NUMBER_OF_LAUNCHED_THREADS--;
+			// fprintf(stderr, "Performance received, client=%lu\n", arguments->worker_uid);
 		}
 		break;
 		default:
@@ -3308,22 +3310,25 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// arguments->pt += block_size_recv;
 				slog_debug("Dataset %s has been created.", key.c_str());
 			}
-			// If was already stored:
+			// If it was already stored:
 			else
 			{
 				// fprintf(stderr, "%s found", key.c_str());
+				pthread_mutex_lock(&memory_protect);
 				dataset = (dataset_info *)address_;
 				if (!strncmp(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY)))
 				{ // dataset is dirty. We will delete from the garbage collector.
-					slog_debug("Dirty dataset found %s, recovering from the garbage collector.", key.c_str());
+					slog_debug("Dirty dataset found %s on SET operation, recovering from the garbage collector.", key.c_str());
 					// int ret = map->garbage_collector_pop(key);
 					int ret = HierarchicalMapPopFromGarbageCollector(hierarchical_map, key_for_tree);
 					if (ret == 0)
 					{
 						slog_debug("%s has not been found on the garbage collector map, but it found as dirty.", key.c_str());
 					}
+					ClearIntervalsStructure(dataset);
 					strncpy(dataset->status, STATUS_ATACH, strlen(STATUS_ATACH) + 1);
 				}
+				pthread_mutex_unlock(&memory_protect);
 
 				// Follow a certain behavior if the received block was already stored.
 				slog_debug("LOCAL DATASET_UPDATE %ld", block_size_recv);
@@ -3481,7 +3486,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						return -1;
 					}
 
-					void *buffer = (void *)malloc(block_size_recv);
+					void *buffer = (void *)malloc(length);
 					// buffer = address_;
 					if (buffer == NULL)
 					{
@@ -3501,57 +3506,60 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						// pthread_mutex_unlock(&lock_network);
 						return -1;
 					}
+
+					// prev. dataset.
 					slog_debug("Updating dataset,\n printing intervals of prev. dataset.");
 					PrintIntervals(dataset);
 
 					dataset_info *received_struct = (dataset_info *)buffer;
 
+					slog_debug("printing intervals of received dataset.");
+					PrintIntervals(received_struct);
+
 					// check if the received interval is highest that the prev. one.
 					// first check who has most intervals.
-					if (dataset->num_intervals <= received_struct->num_intervals && dataset->intervals != NULL)
+					// if (dataset->num_intervals <= received_struct->num_intervals && dataset->intervals != NULL)
 					{
-						// Check if intervals is not NULL before freeing.
-						// if (dataset->last_block_id <= received_struct->last_block_id)
-						// if (dataset->intervals[dataset->num_intervals-1].)
+						// free the old intrvals.
+						// if (dataset->intervals != NULL)
 						// {
-
+						// 	for (size_t i = 0; i < dataset->num_intervals; i++)
+						// 	{
+						// 		free(dataset->intervals[i]);
+						// 	}
+						// 	free(dataset->intervals);
 						// }
 
-						if (dataset->intervals != NULL)
-						{
-							for (size_t i = 0; i < dataset->num_intervals; i++)
-							{
-								free(dataset->intervals[i]);
-							}
-							free(dataset->intervals);
-						}
-
-						memcpy(dataset, received_struct, sizeof(dataset_info));
-						dataset->intervals = (IntervalEntry **)malloc(sizeof(IntervalEntry *) * received_struct->num_intervals);
-
+						// memcpy(dataset, received_struct, sizeof(dataset_info));
+						// dataset->intervals = (IntervalEntry **)malloc(sizeof(IntervalEntry *) * received_struct->num_intervals);
+						pthread_mutex_lock(&memory_protect);
 						for (size_t i = 0; i < received_struct->num_intervals; i++)
 						{
 							// Allocate memory for each individual IntervalEntry and copy the data.
-							dataset->intervals[i] = (IntervalEntry *)malloc(sizeof(IntervalEntry));
-							memcpy(dataset->intervals[i], received_struct->intervals[i], sizeof(IntervalEntry));
+							// dataset->intervals[i] = (IntervalEntry *)malloc(sizeof(IntervalEntry));
+							// memcpy(dataset->intervals[i], received_struct->intervals[i], sizeof(IntervalEntry));
+							SetInterval(dataset, received_struct->intervals[i]->value, received_struct->intervals[i]->left_interval, received_struct->intervals[i]->right_interval);
 						}
+						pthread_mutex_unlock(&memory_protect);
 
-						slog_debug("Printing intervals of new dataset.");
-						PrintIntervals((dataset_info *)buffer);
+						slog_debug("Printing intervals of the updated dataset.");
+						PrintIntervals((dataset_info *)dataset);
 
 						// memcpy((dataset_info *)address_, (dataset_info *)buffer, sizeof(dataset_info));
 						// memcpy(dataset->intervals, ((dataset_info *)buffer)->intervals, sizeof(dataset->intervals) * dataset->num_intervals);
-						// Free the received buffer.
-						if (received_struct->intervals != NULL)
-						{
-							for (size_t i = 0; i < received_struct->num_intervals; i++)
-							{
-								free(received_struct->intervals[i]);
-							}
-							free(received_struct->intervals);
-						}
-						free(received_struct);
 					}
+					// Free the received buffer.
+					ClearIntervalsStructure(received_struct);
+					// if (received_struct->intervals != NULL)
+					// {
+					// 	for (size_t i = 0; i < received_struct->num_intervals; i++)
+					// 	{
+					// 		free(received_struct->intervals[i]);
+					// 	}
+					// 	free(received_struct->intervals);
+					// }
+					free(received_struct);
+					received_struct = NULL;
 					//  slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 				}
 

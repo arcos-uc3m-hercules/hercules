@@ -133,6 +133,7 @@ typedef struct
 } imss;
 
 // Key-value struct to store "interval" entries on dataset_info.
+static int MAX_NUM_INTERVALS=100;
 typedef struct
 {
 	int value;
@@ -189,7 +190,7 @@ typedef struct
 	int32_t n_servers_when_created; // Number of active servers when this dataset is created.
 	// GHashTable *intervals = NULL;
 	int num_intervals = 0;
-	int capacity = 100;
+	int capacity = 0;
 	int32_t first_block_id = -1;
 	int32_t last_block_id = -1;
 	IntervalEntry **intervals;
@@ -480,7 +481,7 @@ RETURNS:	 0 - Release operation took place successfully.
 	 * error.
 	 */
 	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request);
-	ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_id, void **buffer_prefetch);
+	ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_id, void **buffer_prefetch, size_t total_read_size, size_t num_blocks_to_read);
 
 	ssize_t start_block_request(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
 

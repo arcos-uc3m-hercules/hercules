@@ -280,7 +280,7 @@ extern "C"
 		send_param.cb.send = server_send_completion_callback;
 		send_param.user_data = tracking_struct; // Pass the tracking struct itself
 		send_param.datatype = ucp_dt_make_contig(1);
-		slog_debug("sending asynchronous request");
+		slog_debug("sending asynchronous request of len %ld", msg_len);
 		void *request = ucp_tag_send_nbx(ep, msg, msg_len, from, &send_param);
 
 		// IMPORTANT: If the operation completes immediately, the callback is NOT called.
@@ -1186,14 +1186,17 @@ extern "C"
 
 			// Copy the intervals.
 			int memsize = 0;
-			struct_->intervals = (IntervalEntry **)malloc(sizeof(IntervalEntry *));
-			memsize = sizeof(IntervalEntry);
-			for (size_t i = 0; i < struct_->num_intervals; i++)
+			if (struct_->num_intervals > 0)
 			{
-				struct_->intervals[i] = (IntervalEntry *)malloc(memsize);
-				memcpy(struct_->intervals[i], msg_data, memsize);
-				msg_data += memsize;
-				slog_debug("Interval retrieved [%d,%d]=%d", struct_->intervals[i]->left_interval, struct_->intervals[i]->right_interval, struct_->intervals[i]->value);
+				struct_->intervals = (IntervalEntry **)malloc(struct_->num_intervals * sizeof(IntervalEntry *));
+				memsize = sizeof(IntervalEntry);
+				for (size_t i = 0; i < struct_->num_intervals; i++)
+				{
+					struct_->intervals[i] = (IntervalEntry *)malloc(memsize);
+					memcpy(struct_->intervals[i], msg_data, memsize);
+					msg_data += memsize;
+					slog_debug("Interval retrieved [%d,%d]=%d", struct_->intervals[i]->left_interval, struct_->intervals[i]->right_interval, struct_->intervals[i]->value);
+				}
 			}
 			break;
 		}

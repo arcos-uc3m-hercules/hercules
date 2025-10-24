@@ -8,7 +8,7 @@
 
 #undef __USE_GNU
 
-#define KB 1024
+// #define KB 1024
 // #define GB 1073741824
 uint32_t DEPLOYMENT = 2; // Default 1=ATACHED, 0=DETACHED ONLY METADATA SERVER 2=DETACHED METADATA AND DATA SERVERS
 char POLICY[MAX_POLICY_LEN];
@@ -3155,11 +3155,15 @@ ssize_t read(int fd, void *buf, size_t size)
 		if (args.prefetch_size > 0)
 		{
 			// prefetch is enable.
+			// TODO: change this on all read calls.
+			// fprintf(stderr, "Prefetching is enable wih a size of %" PRIu64 " GB\n", args.prefetch_size/GB);
+			slog_debug("Prefetching is enable wih a size of %" PRIu64 " MB", args.prefetch_size/MB);
 			ret = imss_sread_prefetch_v2(pathname, buf, size, offset);
 		}
 		else
 		{
 			// original
+			// fprintf(stderr, "Prefetching is NOT enable with a size of %" PRIu64 " GB\n", args.prefetch_size/GB);
 			ret = TIMING(imss_sread(pathname, buf, size, offset), "imss_sread", ssize_t, rank);
 		}
 

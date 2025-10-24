@@ -7,6 +7,7 @@
 #include "hierarchical_records.hpp"
 #include "shared_memory.h"
 // #include "hercules.hpp"
+#include "utils.h"
 #include <memory>
 
 // Backend operations.
@@ -36,8 +37,8 @@
 
 #define LOCAL_DATASET_UPDATE 0
 
-#define KB 1024
-#define MB 1048576
+// #define KB 1024
+// #define MB 1048576
 // #define GB 1073741824UL
 
 

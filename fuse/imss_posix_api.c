@@ -17,8 +17,6 @@
 #include <sys/time.h>
 #include <libgen.h>
 
-#define KB 1024
-// #define GB 1073741824
 #define HEADER sizeof(uint32_t)
 
 /*
@@ -617,8 +615,7 @@ extern "C"
 		return 0;
 	}
 
-	void parse_prefetch_buffer(void *received_buffer, size_t received_length,
-							   std::map<uint32_t, void *> &block_map)
+	void parse_prefetch_buffer(void *received_buffer, size_t received_length, std::map<uint32_t, void *> &block_map)
 	{
 		const uint32_t BLOCK_ID_SIZE = sizeof(uint32_t);
 		const size_t BLOCK_DATA_SIZE = IMSS_DATA_BSIZE;
@@ -630,14 +627,15 @@ extern "C"
 		char *end_ptr = current_ptr + received_length;
 
 		// block_map.clear();
-
+		uint32_t block_id = 0;
+		void *data_ptr = 0;
 		while (current_ptr + RECORD_SIZE <= end_ptr)
 		{
 			// get the block id.
-			uint32_t block_id = *(uint32_t *)current_ptr;
+			block_id = *(uint32_t *)current_ptr;
 
-			// get the data.
-			void *data_ptr = current_ptr + BLOCK_ID_SIZE;
+			// get the pointer to the data.
+			data_ptr = current_ptr + BLOCK_ID_SIZE;
 
 			block_map[block_id] = data_ptr;
 			// move to the next record.
@@ -645,14 +643,15 @@ extern "C"
 		}
 	}
 
-	int find_data_on_prefetch(void *destination_buf, size_t curr_blk, ssize_t to_read, std::map<uint32_t, void *> &block_map)
+	int find_data_on_prefetch(void *destination_buf, size_t curr_blk, ssize_t to_read, size_t offset_in_block, std::map<uint32_t, void *> &block_map)
 	{
+		// search the block on the block map.
 		auto it = block_map.find(curr_blk);
 		if (it != block_map.end())
 		{
 			void *data = it->second;
 			slog_debug("Block %d found, reading %lu bytes", curr_blk, to_read);
-			memcpy(destination_buf, data, to_read);
+			memcpy(destination_buf, (char *)data+offset_in_block, to_read);
 			return 1;
 		}
 		else
@@ -664,152 +663,92 @@ extern "C"
 
 	ssize_t imss_sread_prefetch_v2(const char *path, void *buf, size_t size, off_t offset)
 	{
-		int32_t length = 0;
 		int eof_found = 0;
 		const char *rpath = path; // this pointer should not be free.
 
-		size_t curr_blk, num_of_blk, end_blk, start_offset, end_offset, block_offset, i_blk;
-		size_t first = 0;
-		int ds = 0;
-		curr_blk = offset / IMSS_DATA_BSIZE + 1; // Plus one to skip the header (0) block
-		start_offset = offset % IMSS_DATA_BSIZE;
-		end_offset = (offset + size) % IMSS_DATA_BSIZE;
-		// end_blk = (offset+size) / IMSS_DATA_BSIZE + 1; //Plus one to skip the header (0) block
-		end_blk = ceil((double)(offset + size) / IMSS_DATA_BSIZE);
-		num_of_blk = end_blk - curr_blk;
-
 		// Needed variables
-		ssize_t to_read = 0;
 		ssize_t been_read = 0;
-		ssize_t byte_count = 0;
-
+		size_t total_bytes_scheduled = 0;
 		int fd = -1;
 		struct stat stats;
 		char *aux;
+		fd_lookup((char *)path, &fd, &stats, &aux);
 
-		fd_lookup((char *)rpath, &fd, &stats, &aux);
-		if (fd >= 0)
-			ds = fd;
-		else if (fd == -1)
+		if (fd < 0)
 			return -ENOENT;
+		int ds = fd; // Use dataset handle
 
-		if (stats.st_size < size)
-		{
-			end_blk = ceil((double)(offset + stats.st_size) / IMSS_DATA_BSIZE);
-		}
-
-		slog_debug("TotalSizeToRead=%ld (%ld kb), start_offset=%ld, curr_blk=%ld, end_blk=%ld, num_of_blks=%ld, offset=%ld, end_offset=%ld, IMSS_DATA_BSIZE=%ld, stats.st_size=%ld", size, size / 1024, start_offset, curr_blk, end_blk, num_of_blk, offset, end_offset, IMSS_DATA_BSIZE, stats.st_size);
-
-		// Check if offset is bigger than filled, return 0 because is EOF case.
-		// If the file offset is at or past the end of file,
-		// no bytes are read, and read() returns zero
-		// https://man7.org/linux/man-pages/man2/read.2.html
+		// Handle edge case: read request starts at or after the end of the file.
 		if (offset >= stats.st_size)
 		{
-			slog_warn("[imss_read] returning EOF");
-			buf = (void *)'\0';
-			// memset(buf, '\0', size);
 			return 0;
 		}
 
-		if (start_offset >= stats.st_size)
+		// If the user requests 0 bytes, we are done.
+		if (size == 0)
 		{
-			slog_warn("[imss_read] returning EOF");
 			return 0;
 		}
 
-		i_blk = 0;
-		// const ssize_t prefetch_size = 1 * GB;
-		// void *prefetch_buffer_block = (void *)malloc(prefetch_size);
+		/*
+		No data transfer shall occur past the current end-of-file. If the starting position is at or after the end-of-file, 0 shall be returned. If the file refers to a device special file, the result of subsequent read() requests is implementation-defined.
+		ref: https://linux.die.net/man/3/read
+		*/
+		if (offset + size > stats.st_size)
+		{
+			return 0;
+		}
+
+		size_t blocks_launched = 0;
+		size_t start_blk = offset / IMSS_DATA_BSIZE + 1;
+		size_t end_blk = (offset + size + IMSS_DATA_BSIZE - 1) / IMSS_DATA_BSIZE;
+		size_t num_blocks_to_read = end_blk - start_blk + 1;
+
+		slog_debug("TotalSizeToRead=%ld (%ld kb), start_offset=%ld, start_blk=%ld, end_blk=%ld, num_of_blks=%ld, offset=%ld, IMSS_DATA_BSIZE=%ld, stats.st_size=%ld", size, size / 1024, offset, start_blk, end_blk, num_blocks_to_read, offset, IMSS_DATA_BSIZE, stats.st_size);
+
 		std::map<uint32_t, void *> block_map;
 		std::vector<void *> prefetch_buffers_to_free;
-		while (curr_blk <= end_blk)
+		slog_debug("blocks_launched=%d, num_blocks_to_read=%d", blocks_launched, num_blocks_to_read);
+		size_t current_block_id = 0;
+		size_t offset_in_block = 0;
+		size_t max_read_for_block = 0;
+		size_t remaining_bytes_in_request = 0;
+		size_t bytes_to_read_in_block = 0;
+		int found = 0;
+		while (blocks_launched < num_blocks_to_read)
 		{
-			if (first == 0) // First block case
-			{
-				block_offset = start_offset;
-				if (size < (stats.st_size - start_offset) && size < IMSS_DATA_BSIZE)
-				{
-					slog_info("[imss_read] case 1");
-					to_read = size;
-				}
-				else
-				{
-					if (stats.st_size < IMSS_DATA_BSIZE)
-					{
-						slog_info("[imss_read] case 2");
-						to_read = stats.st_size - start_offset;
-					}
-					else
-					{
-						slog_info("[imss_read] case 3");
-						to_read = IMSS_DATA_BSIZE - start_offset;
-					}
-				}
-				slog_debug("[imss_read] FIRST BLOCK CASE, to_read=%ld, fd=%d, ds=%d", to_read, fd, ds);
+			current_block_id = start_blk + blocks_launched;
+			// Calculate read size and offset for this specific block
+			offset_in_block = 0;
+			if (blocks_launched == 0)
+			{ // First block has a specific offset
+				offset_in_block = offset % IMSS_DATA_BSIZE;
+			}
 
-				++first;
-				// Check if offset is bigger than filled, return 0 because is EOF case
-				slog_debug("[imss_read] start_offset=%ld, to_read=%ld, stats.st_size=%ld, start_offset + to_read=%ld", start_offset, to_read, stats.st_size, start_offset + to_read);
-				// if (start_offset + to_read > stats.st_size)
-				// {
-				// 	to_read = stats.st_size - start_offset + to_read;
-				// 	slog_warn("data block overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
-				// 	// slog_warn("[imss_read] returning size 0");
-				// 	// return 0;
-				// }
+			max_read_for_block = IMSS_DATA_BSIZE - offset_in_block;
+			remaining_bytes_in_request = size - total_bytes_scheduled;
+			bytes_to_read_in_block = std::min(max_read_for_block, remaining_bytes_in_request);
 
-				// prevents to read out of the block.
-				if (block_offset + to_read > IMSS_DATA_BSIZE)
-				{
-					to_read = IMSS_DATA_BSIZE - block_offset;
-					slog_warn("data block overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
-				}
-				// prevents to read out of the EOF.
-				if (offset + to_read > stats.st_size)
-				{
-					to_read = stats.st_size - offset;
-					eof_found = 1;
-					slog_warn("EOF overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
-				}
-			}
-			else if (curr_blk != end_blk) // Middle block case
-			{
-				to_read = IMSS_DATA_BSIZE;
-			}
-			else // End block case
-			{
-				// Read the minimum between end_offset and filled (read_ = min(end_offset, filled))
-				to_read = size - byte_count;
-				slog_debug("END BLOCK CASE, to_read=%zd", to_read);
-			}
-			slog_debug("curr_blk=%ld, reading %ld bytes (%ld kilobytes) with an offset of %ld bytes (%ld kilobytes), byte_count=%zd bytes (%zd kilobytes)", curr_blk, to_read, to_read / 1024, block_offset, block_offset / 1024, byte_count, byte_count / 1024);
-
-			if (to_read <= 0)
-			{
-				return to_read;
-			}
 			// check the prefetch before requesting new nada.
-			slog_debug("reading %lu bytes, offset(byte_count)=%lu", to_read, byte_count);
-			int found = find_data_on_prefetch((char *)buf + byte_count, curr_blk, to_read, block_map);
+			slog_debug("block %ld, reading %lu bytes, offset(byte_count)=%lu", current_block_id, bytes_to_read_in_block, total_bytes_scheduled);
+			found = find_data_on_prefetch((char *)buf + total_bytes_scheduled, current_block_id, bytes_to_read_in_block, offset_in_block, block_map);
 			if (!found)
 			{
 				void *prefetch_buffer_block = NULL;
-				// get data from the data server.
-				// been_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset, SYNC, NULL), "get_ndata", ssize_t, -1);
 				// TODO: get ndata prefetch can be called asynchronous or in a thread to retrieve more data during the current blocks are processing.
-				been_read = get_ndata_prefetch((char *)path, ds, curr_blk, &prefetch_buffer_block);
+				been_read = get_ndata_prefetch((char *)path, ds, current_block_id, &prefetch_buffer_block, size, num_blocks_to_read);
 				if (been_read > 0 && prefetch_buffer_block != NULL)
 				{
 					prefetch_buffers_to_free.push_back(prefetch_buffer_block);
 					parse_prefetch_buffer(prefetch_buffer_block, been_read, block_map);
 					slog_debug("Prefetch buffer contains %lu blocks.", block_map.size());
 					// get the current expected block.
-					found = find_data_on_prefetch((char *)buf + byte_count, curr_blk, to_read, block_map);
+					found = find_data_on_prefetch((char *)buf + total_bytes_scheduled, current_block_id, bytes_to_read_in_block, offset_in_block, block_map);
 					if (!found)
 					{
 						// fatal error. error is not on the back-end.
-						slog_error("Fatal: Block %lu not found even after prefetch.", curr_blk);
+						fprintf(stderr, "Fatal: Block %lu not found even after prefetch.\n", current_block_id);
+						slog_error("Fatal: Block %lu not found even after prefetch.", current_block_id);
 						eof_found = 1;
 					}
 				}
@@ -817,13 +756,10 @@ extern "C"
 				{
 					eof_found = 1;
 				}
-			}			
-			
+			}
 
-			block_offset = 0;
-
-			++curr_blk;
-			byte_count += to_read;
+			total_bytes_scheduled += bytes_to_read_in_block;
+			blocks_launched++;
 			// If eof was found, we end the while bucle to avoid trying to read
 			// additional blocks.
 			if (eof_found)
@@ -835,7 +771,7 @@ extern "C"
 		update_dataset((char *)path, ds);
 
 		// total_amount_read += byte_count;
-		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, byte_count);
+		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, total_bytes_scheduled);
 
 		// clean the memory of all prefetch buffers.
 		slog_debug("Cleaning up %lu prefetch buffers.", prefetch_buffers_to_free.size());
@@ -843,7 +779,7 @@ extern "C"
 		{
 			free(buffer);
 		}
-		return byte_count;
+		return total_bytes_scheduled;
 	}
 
 	ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
@@ -1032,7 +968,8 @@ extern "C"
 		}
 
 		/*
-		No data transfer shall occur past the current end-of-file. If the starting position is at or after the end-of-file, 0 shall be returned. If the file refers to a device special file, the result of subsequent read() requests is implementation-defined.
+		No data transfer shall occur past the current end-of-file. If the starting position is at or after the end-of-file, 0 shall be returned. 
+		If the file refers to a device special file, the result of subsequent read() requests is implementation-defined.
 		ref: https://linux.die.net/man/3/read
 		*/
 		if (offset + size > stats.st_size)

@@ -1,7 +1,8 @@
 #ifndef HERCULES_INMEMORY
 #define HERCULES_INMEMORY
 
-#define KB 1024
+#define KB 1024L
+#define MB 1048576L
 #define GB 1073741824UL
 
 #include <string>

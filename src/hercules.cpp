@@ -11,6 +11,7 @@
 #include "records.hpp"
 #include "comms.h"
 #include "utils.h"
+#include <cinttypes>
 
 /***************************************************************************
 *******************************  STRUCTURES  *******************************
@@ -603,7 +604,7 @@ int getConfiguration(struct arguments *args)
 	else if (cfg_get(cfg, "BLOCK_SIZE"))
 		args->block_size = atol(cfg_get(cfg, "BLOCK_SIZE"));
 
-	BLOCK_SIZE = args->block_size*KB;
+	BLOCK_SIZE = args->block_size * KB;
 
 	if (getenv("HERCULES_PATH") != NULL)
 		strcpy(args->hercules_path, getenv("HERCULES_PATH"));
@@ -683,7 +684,7 @@ int getConfiguration(struct arguments *args)
 		strcpy(args->alloc_data_hostfile, getenv("HERCULES_ALLOC_DATA_HOSTFILE"));
 	else if (cfg_get(cfg, "ALLOC_DATA_HOSTFILE"))
 		strcpy(args->alloc_data_hostfile, cfg_get(cfg, "ALLOC_DATA_HOSTFILE"));
-	else 
+	else
 		args->alloc_data_hostfile[0] = '\0';
 
 	if (getenv("HERCULES_THREAD_POOL") != NULL)
@@ -741,12 +742,27 @@ int getConfiguration(struct arguments *args)
 	else
 		args->storage_size = 1;
 
+	// Get the prefetching size in MB.
 	if (getenv("HERCULES_PREFETCH_SIZE") != NULL)
 		args->prefetch_size = atol(getenv("HERCULES_PREFETCH_SIZE"));
 	else if (cfg_get(cfg, "PREFETCH_SIZE"))
 		args->prefetch_size = atol(cfg_get(cfg, "PREFETCH_SIZE"));
 	else
+	{
 		args->prefetch_size = 0;
+		printf("Prefetching is not enable.\n");
+	}
+
+	if (args->prefetch_size < 0)
+	{
+		fprintf(stderr, "WARNING: Invalid prefetch size of %" PRIu64 " MB, setting to 0 MB\n", args->prefetch_size);
+		args->prefetch_size = 0;
+	}
+	// Convert from GB to bytes.
+	if (args->prefetch_size > 0) {
+		printf("Prefetching of %" PRIu64 " MB enable.\n", args->prefetch_size);	
+		args->prefetch_size *= MB;
+	}
 
 	if (getenv("HERCULES_CHECKPOINT_PATH") != NULL)
 		strcpy(args->hercules_checkpoint_path, getenv("HERCULES_CHECKPOINT_PATH"));
@@ -775,7 +791,6 @@ int getConfiguration(struct arguments *args)
 		strcpy(args->ignore_paths_list, cfg_get(cfg, "IGNORE_PATHS_LIST"));
 	else
 		args->ignore_paths_list[0] = '\0';
-		
 
 	cfg_free(cfg);
 

@@ -252,6 +252,7 @@ extern "C"
 		const uint32_t BLOCK_ID_SIZE = sizeof(uint32_t);
 		const size_t BLOCK_DATA_SIZE = BLOCK_SIZE;
 		const size_t RECORD_SIZE = BLOCK_ID_SIZE + BLOCK_DATA_SIZE;
+		slog_debug("BLOCK_ID_SIZE=%lu, BLOCK_DATA_SIZE=%lu, RECORD_SIZE=%lu, prefetch_size=%lu", BLOCK_ID_SIZE, BLOCK_DATA_SIZE, RECORD_SIZE, prefetch_size);
 
 		size_t buffer_offset = 0;
 		uint32_t current_block_id = start_block_id;
