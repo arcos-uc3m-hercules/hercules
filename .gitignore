@@ -25,6 +25,8 @@ bash/scripts
 prev_CMakes
 hostfiles
 .vscode
+data_hostfile
+meta_hostfile
 # To ignore all directories named logs.
 logs/
 *.log
@@ -35,9 +37,14 @@ bash/tests/malleability/sink/*
 bash/tests/malleability/source/*
 bash/tests/metadata/Benchmarks/HerculesConfigurations/Detach/*
 bash/tests/metadata/Benchmarks/HerculesConfigurations/Attach/*
+# To ignore all directories of temporal configuration files.
+**/configurations_hercules/Detach/
+**/configurations_hercules/Attach/
 *.nc
 *.conf_*
 # To ignore all directories named HerculesConfigurations
 HerculesConfigurations/
 # io500
 bash/tests/metadata/Benchmarks/io500/results*
+# out files
+*.out
