@@ -2330,7 +2330,7 @@ int32_t create_dataset(char *dataset_uri,
 	new_dataset->type = file_type;
 	// if (new_dataset->capacity <= 0)
 	// {
-		new_dataset->capacity = MAX_NUM_INTERVALS;
+	new_dataset->capacity = MAX_NUM_INTERVALS;
 	// }
 	// new_dataset->intervals = g_hash_table_new(g_int_hash, g_int_equal);
 	// new_dataset->intervals = g_hash_table_new_full(int_pointer_hash, int_pointer_equal, key_destroy_func, key_destroy_func);
@@ -2624,25 +2624,6 @@ int32_t release_dataset(const char *dataset_uri)
 
 int32_t clear_dataset(const char *dataset_uri)
 {
-	// Deletes the dataset from the local "datsetd".
-	// TODO: verify it works when using threads.
-	// dataset_info *dataset_info_;
-	// // fprintf(stderr, "datasetd->len=%d\n", datasetd->len);
-	// for (int32_t i = 0; i < datasetd->len; i++)
-	// {
-	// 	dataset_info_ = &g_array_index(datasetd, dataset_info, i);
-
-	// 	// if (!strcmp(dataset_uri, dataset_info_.uri_))
-	// 	//  if (strstr(dataset_info_.uri_, old_dir) != NULL)
-	// 	if (dataset_uri, dataset_info_->uri_)
-	// 	{
-	// 		g_array_remove_index(datasetd, i);
-	// 		g_array_insert_val(datasetd, i, empty_dataset);
-	// 		g_array_append_val(free_datasetd, i);
-	// 		// fprintf(stderr, "after remove %s, datasetd->len=%d\n", dataset_info_.uri_, datasetd->len);
-	// 		// break;
-	// 	}
-	// }
 	ClearIntervalsStructure(curr_dataset);
 	remove_dataset_entry(datasetd, dataset_uri);
 	return 0;
@@ -2874,9 +2855,9 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	char message[PATH_MAX] = {'\0'};
 	int32_t new_number_of_data_servers = 0;
 	int32_t id_modified_server = 0;
-	char node_to_use[PATH_MAX] = {'\0'};
+	char list_of_active_nodes[PATH_MAX] = {'\0'};
 	// get the server id to remove.
-	sscanf((const char *)result, "%s %" PRId32 "%" PRId32 " %s", message, &new_number_of_data_servers, &id_modified_server, node_to_use);
+	sscanf((const char *)result, "%s %" PRId32 "%" PRId32 " %s", message, &new_number_of_data_servers, &id_modified_server, list_of_active_nodes);
 	slog_debug("message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 "", message, new_number_of_data_servers, id_modified_server);
 	// sort the array of ips and endpoints according to the new data servers number.
 	if (id_modified_server != -1)
@@ -2900,8 +2881,30 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 			// imss_comm_cleanup();
 			// init_network_resources(args.meta_hostfile, args.stat_port, args.num_metadata_servers, process_rank, args.imss_uri);
 			slog_debug("&(my_imss)->num_storages=%p", &curr_imss.info.num_storages);
-			AddIPS(&curr_imss.info, node_to_use, strlen(node_to_use));
-			AddBackEndServer2Imss(IMSS_ROOT);
+			char *token = strtok(list_of_active_nodes, ",");
+			while (token != NULL)
+			{
+				int found = 0;
+				slog_debug("Node found: %s", token);
+				for (size_t i = 0; i < curr_imss.info.num_storages; i++)
+				{
+					if (!strcmp(token, curr_imss.info.ips[i]))
+					{
+						// token found in the struct.
+						found = 1;
+					}
+				}
+				if (!found)
+				{
+					// AddIPS(&curr_imss.info, node_to_use, strlen(node_to_use));
+					AddIPS(&curr_imss.info, token, strlen(token));
+					AddBackEndServer2Imss(IMSS_ROOT);
+				} else 
+				{
+					slog_debug("%s node already on the local struct.", token);
+				}
+				token = strtok(NULL, ",");
+			}
 		}
 	}
 	free(result);
@@ -4198,7 +4201,7 @@ void ClearIntervalsStructure(dataset_info *curr_dataset)
 	{
 		return;
 	}
-	
+
 	IntervalEntry *curr_interval = NULL;
 	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
 	{
@@ -4223,7 +4226,7 @@ int GetValueFromInterval(dataset_info *curr_dataset, int data_id)
 	{
 		return -1;
 	}
-	
+
 	IntervalEntry *curr_interval = NULL;
 	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
 	{
@@ -4243,7 +4246,7 @@ void PrintIntervals(dataset_info *curr_dataset)
 	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
 	{
 		IntervalEntry *curr_interval = curr_dataset->intervals[i];
-		slog_debug("%d, size=%d, Interval [%d, %d]=%d", i, curr_interval->right_interval-curr_interval->left_interval+1, curr_interval->left_interval, curr_interval->right_interval, curr_interval->value);
+		slog_debug("%d, size=%d, Interval [%d, %d]=%d", i, curr_interval->right_interval - curr_interval->left_interval + 1, curr_interval->left_interval, curr_interval->right_interval, curr_interval->value);
 	}
 }
 
@@ -4281,11 +4284,7 @@ IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval,
 
 		if (left_interval >= curr_interval->left_interval && right_interval <= curr_interval->right_interval)
 		{
-
 		}
-
-
-
 	}
 	return NULL;
 }
@@ -4301,18 +4300,17 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 
 	if (left_interval > right_interval)
 	{
-		fprintf(stderr,"Error: Invalid interval [%d, %d]\n", left_interval, right_interval);
+		fprintf(stderr, "Error: Invalid interval [%d, %d]\n", left_interval, right_interval);
 		slog_error("Invalid interval [%d, %d]", left_interval, right_interval);
 		return;
 	}
-	
 
 	// Check if the current interval exists.
 	IntervalEntry *entry = GetIntervalPointer(curr_dataset, left_interval, right_interval);
 	if (entry == NULL)
 	{
 		// fprintf(stderr, "Making interval [%d, %d]=%d\n", left_interval, right_interval, value);
-		slog_debug("Making interval number %d of size %d, [%d, %d]=%d", curr_dataset->num_intervals, right_interval-left_interval+1, left_interval, right_interval, value);
+		slog_debug("Making interval number %d of size %d, [%d, %d]=%d", curr_dataset->num_intervals, right_interval - left_interval + 1, left_interval, right_interval, value);
 		// Create a new IntervalEntry and populate it
 		IntervalEntry *new_entry = (IntervalEntry *)calloc(1, sizeof(IntervalEntry));
 		new_entry->value = value;
@@ -4330,7 +4328,7 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 		{ // skip updating block zero.
 			return;
 		}
-		
+
 		slog_debug("Updating interval [%d, %d]=%d-->[%d, %d]=%d", entry->left_interval, entry->right_interval, entry->value, left_interval, right_interval, value);
 		entry->right_interval = right_interval;
 		entry->value = value;
@@ -4431,7 +4429,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	size_t msg_length = 0;
 	char mode[10] = {0};
 	pthread_mutex_lock(&lock_network);
-
+	char *node_hostname = NULL;
 	// Request the concerned block to the involved servers.
 	for (int32_t i = 0; i < replication_factor; i++)
 	{
@@ -4448,7 +4446,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		//  Key related to the requested data element.
 		sprintf(key_, "%s %lu %ld %s$%d %ld", mode, 0l, offset, curr_dataset->uri_, data_id, to_read);
 		ep = curr_imss.conns.eps[repl_servers[i]];
-		slog_debug("[IMSS] Request to data %d - '%s' to server %d", n_server_, key_, repl_servers[i]);
+		node_hostname = curr_imss.info.ips[repl_servers[i]];
+		slog_debug("[IMSS] Request to data %d (%s) - '%s' to server %d (%s)", n_server_, node_hostname, key_, repl_servers[i], curr_imss.conns.eps[i]);
 		size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
 		if (size_sent_req == 0)
 		{
@@ -4745,7 +4744,7 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		t = clock() - t;
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
-		*buffer_prefetch = (void *)malloc(msg_length+1);
+		*buffer_prefetch = (void *)malloc(msg_length + 1);
 		// void *response_buffer = &(*buffer_prefetch);
 		if (*buffer_prefetch == NULL)
 		{
@@ -5146,6 +5145,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		curr_dataset->first_block_id = data_id;
 	}
 
+	char *node_hostname = NULL;
 	// Send the data block to every server implementing redundancy.
 	for (int32_t i = 0; i < curr_dataset->repl_factor; i++)
 	{
@@ -5162,8 +5162,9 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		if (session_policy == LOCAL_ || session_policy == ZCOPY_)
 		{
 			ep = curr_imss.conns.eps[n_server_];
+			node_hostname = curr_imss.info.ips[n_server_];
 			sprintf(key_, "LOCALSET %lu %ld %s$%d", size, offset, curr_dataset->uri_, data_id);
-			slog_info("[IMSS] BLOCK %d SENT TO SERVER %d  with Request: %s (%d)", data_id, n_server_, key_, size);
+			slog_info("[IMSS] BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%d)", data_id, n_server_, node_hostname, key_, size);
 			// send the request to the data server, indicating we will perform a local write operation (LOCALSET) to certain data block (data_id)
 			// in a dataset (curr_dataset->uri).
 			if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)

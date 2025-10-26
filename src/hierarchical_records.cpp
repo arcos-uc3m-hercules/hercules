@@ -466,7 +466,7 @@ extern "C"
 		if (map != NULL)
 		{
 			// Pop the key from the garbage collector vector.
-			slog_debug("Pop %s fron the garbage collector of %s", key.c_str(), first_parent_dir);
+			slog_debug("Pop %s from the garbage collector of %s", key.c_str(), first_parent_dir);
 			return map->garbage_collector_pop(key);
 		}
 		else

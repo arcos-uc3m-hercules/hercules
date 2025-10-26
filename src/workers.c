@@ -32,6 +32,7 @@ static int NUMBER_OF_LAUNCHED_THREADS = 0;
 void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
 imss_info imss_copy = {0};
+imss_info *curr_globa_imss = NULL;
 int number_of_hosts = 0;
 
 // Lock dealing when cleaning blocks
@@ -154,6 +155,12 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
 	}
 	// Increase the num. of storages. This is the "master" value used on all code.
 	my_imss->num_storages++;
+
+	// print all ips.
+	// for (size_t j = 0; j < my_imss->num_storages; j++)
+	// {
+	// 	slog_debug("eps[%d] hostname=%s", j, my_imss->ips[j]);
+	// }
 	return 0;
 }
 
@@ -247,7 +254,22 @@ void AttendPendingRequests()
 	pthread_mutex_unlock(&mutex_malleability);
 
 	char response[PATH_MAX] = {'\0'};
-	sprintf(response, "%s %" PRIu32 " %" PRId32 "%s\0", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, node_to_use);
+	char list_of_active_nodes[PATH_MAX] = {'\0'};
+	slog_debug("Making list of avaiable nodes.");
+	for (size_t i = 0; i < curr_globa_imss->num_storages; i++)
+	{
+		slog_debug("Adding %s to the list", curr_globa_imss->ips[i]);
+		strcat(list_of_active_nodes, curr_globa_imss->ips[i]);
+		if (i+1 < curr_globa_imss->num_storages)
+		{
+			strcat(list_of_active_nodes,",");
+		}
+	}
+	slog_debug("List ot send: %s", list_of_active_nodes);
+	
+	
+	// sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, node_to_use);
+	sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, list_of_active_nodes);
 	int ret = -1;
 	// fprintf(stderr, "[AttendingPendingRequests] There are %d pending requests\n", pending_requests.size());
 	slog_debug("[AttendingPendingRequests] There are %d pending requests", pending_requests.size());
@@ -476,23 +498,27 @@ void *CommissioningStage(void *th_argv)
 			char command_to_exec[PATH_MAX] = {0};
 			// ****************************
 			// fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
-			// char *node_to_use = NULL;
 			int found = 0;
+			// Iterates over all hosts defined on the "hostfile" in order to find a 
+			// hostname that is not already under use.
 			for (size_t j = 0; j < number_of_hosts; j++)
 			{
 				found = 0;
-				slog_debug("eps[%d] hostname=%s\n", j, imss_copy.ips[j]);
+				// slog_debug("eps[%d] hostname=%s", j, imss_copy.ips[j]);
 				// fprintf(stderr, "eps[%d] hostname=%s\n", j, imss_copy.ips[j]);
 				for (size_t i = 0; i < imss_info_struct->num_storages; i++)
 				{
+					// check if the host is already on the struct. 
 					if (!strcmp(imss_info_struct->ips[i], imss_copy.ips[j]))
 					{
+						// this host is in the struct, so we have to skip it. 
 						found = 1;
 						break;
 					}
 				}
 				if (!found)
 				{
+					// if we have not found this host on the curren imss_info_struct, we break the loop.
 					node_to_use = imss_copy.ips[j];
 					break;
 				}
@@ -508,6 +534,17 @@ void *CommissioningStage(void *th_argv)
 				pthread_mutex_lock(&mutext_malleability);
 				// Here we incresae imss_info_struct->num_storages + 1.
 				AddIPS(imss_info_struct, node_to_use, strlen(node_to_use));
+				// if (strlen(list_of_active_nodes) == 0)
+				// { // list is empty.
+				// 	slog_debug("First element on the list");
+				// 	sprintf(list_of_active_nodes, "%s", node_to_use);
+				// }
+				// else
+				// {
+				// 	slog_debug("Adding element on the list: %s", list_of_active_nodes);
+				// 	sprintf(list_of_active_nodes, "%s,%s", list_of_active_nodes, node_to_use);
+				// }
+
 				// print the current IPS.
 				// fprintf(stderr, "Printing EPS on the global structure.\n imss_info_struct->num_storages=%d\n", imss_info_struct->num_storages);
 				// for (size_t i = 0; i < imss_info_struct->num_storages; i++)
@@ -681,9 +718,9 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	slog_debug("Elasticity analysis: Moving Average Performance = %.2f MB/s", moving_average / MB);
 
 	// Calculate the trend slope.
-	double slope = calculate_trend_slope(aggregate_performance_history);
+	// double slope = calculate_trend_slope(aggregate_performance_history);
 	// fprintf(stderr, "Elasticity analysis: Performance Trend Slope = %.2f\n", slope);
-	slog_debug("Elasticity analysis: Performance Trend Slope = %.2f", slope);
+	// slog_debug("Elasticity analysis: Performance Trend Slope = %.2f", slope);
 
 	// Decision Logic.
 	if (moving_average < MINIMUM_PERFORMANCE_THRESHOLD * MB)
@@ -692,13 +729,13 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 		return true;
 	}
 
-	if (slope < CRITICAL_SLOPE)
-	{
-		fprintf(stderr, "DECISION: SCALE UP! Performance trend is strongly negative (%.2f), number of active servers=%d\n", slope, number_active_storage_servers);
-		return true;
-	}
+	// if (slope < CRITICAL_SLOPE)
+	// {
+	// 	fprintf(stderr, "DECISION: SCALE UP! Performance trend is strongly negative (%.2f), number of active servers=%d\n", slope, number_active_storage_servers);
+	// 	return true;
+	// }
 
-	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, number of active servers=%d\n", number_active_storage_servers);
+	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold (%.2f MB/s of %.2f MB/s), number of active servers=%d\n", moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, number_active_storage_servers);
 	return false;
 }
 
@@ -823,10 +860,11 @@ void *Malleability(void *th_argv)
 	}
 
 	// checks if the struct is not pointing to the hercules instance.
-	if (arguments->hercules_info_struct == NULL)
+	if (arguments->hercules_info_struct == NULL || curr_globa_imss == NULL)
 	{
 		if (HierarchicalMapGet(hierarchical_map, arguments->args.imss_uri, &address_, &block_size_rtvd))
 		{
+			curr_globa_imss = (imss_info *)address_;
 			arguments->hercules_info_struct = (imss_info *)address_;
 		}
 		else
@@ -1470,9 +1508,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				slog_warn("Record size %lu is bigger than prefetch size %lu", RECORD_SIZE, prefetch_size);
 				// record size is bigger than the defined prefetch size.
 				// use the record size.
-				prefetch_size =  RECORD_SIZE;
+				prefetch_size = RECORD_SIZE;
 			}
-			
+
 			// if (prefetch_size <= 0)
 			// {
 			// 	slog_error("HERCULES_ERR_SRV_WORKER_HELPER_READV2_OP_PREFETCH_INVALID_SIZE, %" PRIu64 " bytes.", prefetch_size);
@@ -1482,7 +1520,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// }
 
 			slog_debug("prefetch_size=%" PRIu64 "", prefetch_size);
-			
+
 			// create the prefetching block.
 			char *prefetch_buffer = new(std::nothrow) char[prefetch_size];
 			if (prefetch_buffer == nullptr)
@@ -2445,6 +2483,7 @@ void *Snapshot(void *th_argv)
 	sleep(1);
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
+	arguments->hercules_info_struct = NULL;
 
 	const char *snapshot_dir = arguments->args.hercules_snapshot_path;
 	const int server_id = arguments->args.id;

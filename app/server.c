@@ -204,7 +204,7 @@ int32_t main(int32_t argc, char **argv)
 	// char *workdir = getenv("PWD");
 	slog_debug("Server type=%c\n", args.type);
 	struct tm tm = *localtime(&t);
-	sprintf(log_path, "%c-server-%d.%02d-%02d-%02d", args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
+	sprintf(log_path, "%c-%s-server-%d.%02d-%02d-%02d", args.type, args.data_hostname, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
 	// Initializate logger.
 	slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, args.id);
@@ -634,6 +634,7 @@ int32_t main(int32_t argc, char **argv)
 		arguments[i].port = bind_port;
 		arguments[i].tmp_file_path = tmp_file_path;
 		arguments[i].hercules_thread_pool_size = hercules_thread_pool_size;
+		arguments[i].hercules_info_struct = NULL;
 
 		// Add the instance URI to the thread arguments.
 		strcpy(arguments[i].my_uri, args.imss_uri);
