@@ -23,16 +23,16 @@
 #include "policies.h"
 
 #define XYZ 10
-const double MINIMUM_PERFORMANCE_THRESHOLD = 1000.0; // In MB/s
-const int ANALYSIS_WINDOW_SIZE = 2;					 // 20;
-const double CRITICAL_SLOPE = -50.0;				 // Performance loss rate that triggers scaling
-const int CONSECUTIVE_SIGNALS_THRESHOLD = 2;		 // 50; // Trigger scaling after 3 consecutive signals.
+double MINIMUM_PERFORMANCE_THRESHOLD = 5000.0; // In MB/s
+const int ANALYSIS_WINDOW_SIZE = 20;		   // 20;
+const double CRITICAL_SLOPE = -50.0;		   // Performance loss rate that triggers scaling
+const int CONSECUTIVE_SIGNALS_THRESHOLD = 100; // 50; // Trigger scaling after 3 consecutive signals.
 static int NUMBER_OF_LAUNCHED_THREADS = 0;
 
 void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
 imss_info imss_copy = {0};
-imss_info *curr_globa_imss = NULL;
+imss_info *curr_global_imss = NULL;
 int number_of_hosts = 0;
 
 // Lock dealing when cleaning blocks
@@ -47,7 +47,10 @@ uint32_t number_active_storage_servers = 0;
 int32_t id_server_to_modify = -1;
 char *node_to_use = NULL;
 int32_t acks_received = 0;
-#define MALLEABILITY_MESSAGE = "MALLEABILITY";
+// #define MALLEABILITY_MESSAGE = "MALLEABILITY";
+// malleability time measure.
+clock_t global_malleability_t;
+double global_malleability_time_taken = 0.0;
 // To synchronize network operations.
 // pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
@@ -98,7 +101,6 @@ pthread_cond_t global_free_space_cond;
 // Malleability decomissioning.
 int waiting_clients = 0;
 pthread_mutex_t mutex_malleability = PTHREAD_MUTEX_INITIALIZER;
-// sem_t mutex_malleability;
 pthread_cond_t global_run_malleability_cond;
 pthread_cond_t global_run_shutdown_cond;
 
@@ -256,18 +258,17 @@ void AttendPendingRequests()
 	char response[PATH_MAX] = {'\0'};
 	char list_of_active_nodes[PATH_MAX] = {'\0'};
 	slog_debug("Making list of avaiable nodes.");
-	for (size_t i = 0; i < curr_globa_imss->num_storages; i++)
+	for (size_t i = 0; i < curr_global_imss->num_storages; i++)
 	{
-		slog_debug("Adding %s to the list", curr_globa_imss->ips[i]);
-		strcat(list_of_active_nodes, curr_globa_imss->ips[i]);
-		if (i+1 < curr_globa_imss->num_storages)
+		slog_debug("Adding %s to the list", curr_global_imss->ips[i]);
+		strcat(list_of_active_nodes, curr_global_imss->ips[i]);
+		if (i + 1 < curr_global_imss->num_storages)
 		{
-			strcat(list_of_active_nodes,",");
+			strcat(list_of_active_nodes, ",");
 		}
 	}
 	slog_debug("List ot send: %s", list_of_active_nodes);
-	
-	
+
 	// sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, node_to_use);
 	sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, list_of_active_nodes);
 	int ret = -1;
@@ -347,7 +348,6 @@ int ShutdownServer()
 void *move_blocks_2_server(void *th_argv)
 {
 	const p_argv *arguments = (p_argv *)th_argv;
-	// malleability_on = 1;
 
 	uint64_t stat_port = arguments->args.stat_port;
 	uint32_t server_id = arguments->args.id;
@@ -476,7 +476,8 @@ void *CommissioningStage(void *th_argv)
 		{
 			// pthread_mutex_lock(&mutext_malleability);
 			consecutive_scale_up_signals++; // Increment counter if scaling is needed.
-			fprintf(stderr, "Scale-up signal received. Consecutive count: %d\n", consecutive_scale_up_signals);
+			// fprintf(stderr, "Scale-up signal received. Consecutive count: %d\n", consecutive_scale_up_signals);
+			slog_debug("Scale-up signal received. Consecutive count: %d", consecutive_scale_up_signals);
 			// pthread_mutex_unlock(&mutext_malleability);
 		}
 		else
@@ -492,14 +493,14 @@ void *CommissioningStage(void *th_argv)
 		{
 			consecutive_scale_up_signals = 0;
 			pthread_mutex_unlock(&mutext_malleability);
-			imss_info *imss_info_struct = arguments->hercules_info_struct;
+			imss_info *imss_info_struct = curr_global_imss; // arguments->hercules_info_struct;
 			int num_server_to_increase = 1;
 			// ****************************
 			char command_to_exec[PATH_MAX] = {0};
 			// ****************************
 			// fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
 			int found = 0;
-			// Iterates over all hosts defined on the "hostfile" in order to find a 
+			// Iterates over all hosts defined on the "hostfile" in order to find a
 			// hostname that is not already under use.
 			for (size_t j = 0; j < number_of_hosts; j++)
 			{
@@ -508,10 +509,10 @@ void *CommissioningStage(void *th_argv)
 				// fprintf(stderr, "eps[%d] hostname=%s\n", j, imss_copy.ips[j]);
 				for (size_t i = 0; i < imss_info_struct->num_storages; i++)
 				{
-					// check if the host is already on the struct. 
+					// check if the host is already on the struct.
 					if (!strcmp(imss_info_struct->ips[i], imss_copy.ips[j]))
 					{
-						// this host is in the struct, so we have to skip it. 
+						// this host is in the struct, so we have to skip it.
 						found = 1;
 						break;
 					}
@@ -530,27 +531,13 @@ void *CommissioningStage(void *th_argv)
 			}
 			else
 			{
+				// start timer to now how much time it takes the malleability.
+				global_malleability_t = clock();
+
 				// Update the variables.
 				pthread_mutex_lock(&mutext_malleability);
 				// Here we incresae imss_info_struct->num_storages + 1.
 				AddIPS(imss_info_struct, node_to_use, strlen(node_to_use));
-				// if (strlen(list_of_active_nodes) == 0)
-				// { // list is empty.
-				// 	slog_debug("First element on the list");
-				// 	sprintf(list_of_active_nodes, "%s", node_to_use);
-				// }
-				// else
-				// {
-				// 	slog_debug("Adding element on the list: %s", list_of_active_nodes);
-				// 	sprintf(list_of_active_nodes, "%s,%s", list_of_active_nodes, node_to_use);
-				// }
-
-				// print the current IPS.
-				// fprintf(stderr, "Printing EPS on the global structure.\n imss_info_struct->num_storages=%d\n", imss_info_struct->num_storages);
-				// for (size_t i = 0; i < imss_info_struct->num_storages; i++)
-				// {
-				// 	fprintf(stderr, "eps[%d] hostname=%s\n", i, imss_info_struct->ips[i]);
-				// }
 
 				// new_number_data_servers = imss_info_struct->num_storages;
 				number_active_storage_servers = imss_info_struct->num_storages;
@@ -723,9 +710,10 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	// slog_debug("Elasticity analysis: Performance Trend Slope = %.2f", slope);
 
 	// Decision Logic.
-	if (moving_average < MINIMUM_PERFORMANCE_THRESHOLD * MB)
+	if (moving_average < MINIMUM_PERFORMANCE_THRESHOLD)
 	{
-		fprintf(stderr, "DECISION: SCALE UP! Moving average (%.2f MB/s) is below threshold (%.2f MB/s), number of active servers=%d\n", moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, number_active_storage_servers);
+		fprintf(stderr, "DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d\n", moving_average, moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, MINIMUM_PERFORMANCE_THRESHOLD / MB, number_active_storage_servers);
+		slog_debug("DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d", moving_average, moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, MINIMUM_PERFORMANCE_THRESHOLD / MB, number_active_storage_servers);
 		return true;
 	}
 
@@ -735,7 +723,8 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	// 	return true;
 	// }
 
-	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold (%.2f MB/s of %.2f MB/s), number of active servers=%d\n", moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, number_active_storage_servers);
+	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d\n", moving_average, moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, MINIMUM_PERFORMANCE_THRESHOLD / MB, number_active_storage_servers);
+	slog_debug("DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d", moving_average, moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, MINIMUM_PERFORMANCE_THRESHOLD / MB, number_active_storage_servers);
 	return false;
 }
 
@@ -852,20 +841,16 @@ void *Malleability(void *th_argv)
 		pthread_mutex_lock(&mutext_malleability);
 		elasticity_records_history[received_metrics.server_hostname].push_back(received_metrics);
 		pthread_mutex_unlock(&mutext_malleability);
-		// if (min_overall_performance == -1.0 || received_metrics.overall_performance < min_overall_performance)
-		// {
-		// 	min_overall_performance = received_metrics.overall_performance;
-		// 	slowest_server_id = received_metrics.server_id;
-		// }
 	}
 
 	// checks if the struct is not pointing to the hercules instance.
-	if (arguments->hercules_info_struct == NULL || curr_globa_imss == NULL)
+	// if (arguments->hercules_info_struct == NULL || curr_global_imss == NULL)
+	if (curr_global_imss == NULL)
 	{
 		if (HierarchicalMapGet(hierarchical_map, arguments->args.imss_uri, &address_, &block_size_rtvd))
 		{
-			curr_globa_imss = (imss_info *)address_;
-			arguments->hercules_info_struct = (imss_info *)address_;
+			curr_global_imss = (imss_info *)address_;
+			// arguments->hercules_info_struct = (imss_info *)address_;
 		}
 		else
 		{
@@ -981,9 +966,6 @@ void *Malleability(void *th_argv)
 	// }
 
 	return NULL;
-
-	// To access to all records for server 0:
-	// std::vector<ElasticityMetric>& server_zero_records = elasticity_records_history[0];
 }
 
 void *hercules_ucx_server(void *th_argv)
@@ -1001,6 +983,10 @@ void *hercules_ucx_server(void *th_argv)
 	// Map that stores server side endpoints
 	char server_name[PATH_MAX] = {0};
 	char server_tag[PATH_MAX] = {0};
+	// calculates the minimun performance threshold in megabytes.
+	MINIMUM_PERFORMANCE_THRESHOLD *= MB;
+	// set the initial value to the global "active number of servers".
+	number_active_storage_servers = arguments->args.num_data_servers;
 
 	switch (arguments->args.type)
 	{
@@ -2483,7 +2469,7 @@ void *Snapshot(void *th_argv)
 	sleep(1);
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
-	arguments->hercules_info_struct = NULL;
+	// arguments->hercules_info_struct = NULL;
 
 	const char *snapshot_dir = arguments->args.hercules_snapshot_path;
 	const int server_id = arguments->args.id;
@@ -2608,14 +2594,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	}
 	else if (!strcmp(mode, "SETSERVER"))
 	{
-
 		int server_id_request = operation;
-
 		imss new_imss;
-
 		new_imss.conns.peer_addr = (ucp_address_t **)malloc(1 * sizeof(ucp_address_t *));
-		// new_imss.conns.eps = (ucp_ep_h *)malloc(1 * sizeof(ucp_ep_h));
-		// new_imss.conns.id = (uint32_t *)malloc(1 * sizeof(uint32_t));
 
 		int oob_sock = -1;
 		size_t addr_len = 0;
@@ -2678,16 +2659,17 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		client_create_ep_data(arguments->ucp_worker, &data_endpoints[server_id_request], new_imss.conns.peer_addr[0], NULL);
 
-		fprintf(stderr, "Server %d connected.\n", server_id_request);
-
-		// finish malleability UP process.
+		// finish malleability comissioning process.
 		AttendPendingRequests();
 		malleability_on = 0;
+		
+		global_malleability_t = clock() - global_malleability_t;
+		global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
+		fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, global_malleability_time_taken);
+		slog_debug("Server %d connected in %.4f seconds", server_id_request, global_malleability_time_taken);
 
 		free(new_imss.conns.peer_addr[0]);
 		free(new_imss.conns.peer_addr);
-		// free(new_imss.conns.eps);
-		// free(new_imss.conns.id);
 
 		return 0;
 	}
@@ -3298,7 +3280,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{ // Hercules instance case.
 					ret = TIMING(recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, IMSS_INFO, arguments->worker_uid, length), "recv_dynamic_stream IMSS_INFO", int32_t, arguments->thread_id);
 					// save the pointer to the hercules instance to be access on malleability.
-					arguments->hercules_info_struct = (imss_info *)buffer;
+					// arguments->hercules_info_struct = (imss_info *)buffer;
 				}
 				else
 				{

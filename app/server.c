@@ -47,7 +47,7 @@ ucp_ep_h *metadata_endpoints = NULL;
 // ucp_ep_h data_endpoints[100];
 size_t req_addr_len = 0;
 
-unsigned long number_active_storage_serversX = 0; // stores the current number of active storage servers.
+// unsigned long number_active_storage_serversX = 0; // stores the current number of active storage servers.
 pthread_t *threads;
 
 // global variables usted to finish threads.
@@ -310,7 +310,7 @@ int32_t main(int32_t argc, char **argv)
 		// number of servers conforming the HERCULES deployment.
 		num_servers = args.num_data_servers;
 		// Dynamic number of servers conforming the HERCULES deployment used by malleability.
-		number_active_storage_serversX = num_servers;
+		// number_active_storage_serversX = num_servers;
 		// HERCULES' MPI deployment file.
 		deployfile = args.data_hostfile;
 		// data block size

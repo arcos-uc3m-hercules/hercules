@@ -1736,8 +1736,6 @@ extern "C"
 			return ret;
 		}
 
-		// char *aux_block = NULL;
-
 		// Compute offsets to write
 		int64_t curr_blk, end_blk, start_offset, end_offset, block_offset, i_blk, num_of_blk;
 		int64_t start_blk = off / IMSS_DATA_BSIZE + 1; // Add one to skip block 0
