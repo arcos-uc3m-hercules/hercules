@@ -651,7 +651,7 @@ extern "C"
 		{
 			void *data = it->second;
 			slog_debug("Block %d found, reading %lu bytes", curr_blk, to_read);
-			memcpy(destination_buf, (char *)data+offset_in_block, to_read);
+			memcpy(destination_buf, (char *)data + offset_in_block, to_read);
 			return 1;
 		}
 		else
@@ -968,7 +968,7 @@ extern "C"
 		}
 
 		/*
-		No data transfer shall occur past the current end-of-file. If the starting position is at or after the end-of-file, 0 shall be returned. 
+		No data transfer shall occur past the current end-of-file. If the starting position is at or after the end-of-file, 0 shall be returned.
 		If the file refers to a device special file, the result of subsequent read() requests is implementation-defined.
 		ref: https://linux.die.net/man/3/read
 		*/
@@ -1842,14 +1842,12 @@ extern "C"
 			// 	}
 			// 	i_blk++;
 			// }
-			// else
+			// sync send.
+			if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset), "set_data", int32_t, -1) < 0)
 			{
-				if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset), "set_data", int32_t, -1) < 0)
-				{
-					slog_error("[imss_write] Error writing to Hercules.\n");
-					error_print = -ENOENT;
-					return -ENOENT;
-				}
+				slog_error("[imss_write] Error writing to Hercules.\n");
+				error_print = -ENOENT;
+				return -ENOENT;
 			}
 
 			bytes_stored += bytes_to_copy;
@@ -1857,6 +1855,11 @@ extern "C"
 			block_offset = 0; // first block has been stored, next blocks don't have an offset
 			++curr_blk;
 		}
+
+		// while (outstanding_sends > 0)
+		// {
+			ucp_worker_progress(ucp_worker_data);
+		// }
 
 		// updates intervals on the back-end.
 		update_dataset((char *)path, ds);

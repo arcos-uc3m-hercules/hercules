@@ -27,7 +27,7 @@ double MINIMUM_PERFORMANCE_THRESHOLD = 5000.0; // In MB/s
 const int ANALYSIS_WINDOW_SIZE = 20;		   // 20;
 const double CRITICAL_SLOPE = -50.0;		   // Performance loss rate that triggers scaling
 const int CONSECUTIVE_SIGNALS_THRESHOLD = 100; // 50; // Trigger scaling after 3 consecutive signals.
-static int NUMBER_OF_LAUNCHED_THREADS = 0;
+// static int NUMBER_OF_LAUNCHED_THREADS = 0;
 
 void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
@@ -51,8 +51,6 @@ int32_t acks_received = 0;
 // malleability time measure.
 clock_t global_malleability_t;
 double global_malleability_time_taken = 0.0;
-// To synchronize network operations.
-// pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
 // Initial buffer address.
 // char *buffer_address;
@@ -3218,9 +3216,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			// TODO: this function can be called on a thread.
 			// This avoid blocking future operations.
 			// fprintf(stderr, "Receiving performance, client=%lu\n", arguments->worker_uid);
-			NUMBER_OF_LAUNCHED_THREADS++;
+			// NUMBER_OF_LAUNCHED_THREADS++;
 			Malleability((void *)arguments);
-			NUMBER_OF_LAUNCHED_THREADS--;
+			// NUMBER_OF_LAUNCHED_THREADS--;
 			// fprintf(stderr, "Performance received, client=%lu\n", arguments->worker_uid);
 		}
 		break;

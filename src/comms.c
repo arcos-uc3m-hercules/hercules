@@ -267,6 +267,9 @@ extern "C"
 		}
 
 		delete completed_req;
+		size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
+		// fprintf(stderr, "Petition send, decresing outstanding_sends=%zu\n", current_outstanding);
+		outstanding_sends--;
 	}
 
 	/**
@@ -355,11 +358,7 @@ extern "C"
 
 		msg_req_t *msg = NULL;
 
-		// msg_len = sizeof(uint64_t) + REQUEST_SIZE + addr_len;
 		msg_len = sizeof(msg_req_t) + addr_len;
-		// slog_info("[COMM][send_req] msg_len=%ld", msg_len);
-		// slog_info("[COMM][send_req] msg_len=%ld, before malloc", msg_len);
-		// msg = (msg_req_t *)malloc(msg_len);
 		msg = (msg_req_t *)calloc(1, msg_len);
 		if (msg == NULL)
 		{

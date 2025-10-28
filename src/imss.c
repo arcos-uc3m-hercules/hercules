@@ -13,14 +13,13 @@
 #include <sys/utsname.h>
 #include <time.h>
 #include <inttypes.h>
+#include <ucp/api/ucp.h>
 #include "crc.h"
 #include "imss.h"
 #include "map_ep.hpp"
 #include "workers.h"
 #include "policies.h"
 #include "shared_memory.h"
-
-#include <ucp/api/ucp.h>
 
 /**********************************************************************************/
 /******************************** GLOBAL VARIABLES ********************************/
@@ -2708,6 +2707,10 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	free(result);
 	result = NULL;
 
+	time_t init_malleability_t = clock();
+	time_t end_malleability_t, end_send_performance_t;
+	double malleability_time_taken = 0.0, send_performance_time_taken;
+
 	// Send performance metrics.
 	if (backend_performance_metrics.empty())
 	{
@@ -2859,6 +2862,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	// get the server id to remove.
 	sscanf((const char *)result, "%s %" PRId32 "%" PRId32 " %s", message, &new_number_of_data_servers, &id_modified_server, list_of_active_nodes);
 	slog_debug("message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 "", message, new_number_of_data_servers, id_modified_server);
+
 	// sort the array of ips and endpoints according to the new data servers number.
 	if (id_modified_server != -1)
 	{
@@ -2873,9 +2877,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 		}
 		else if (new_number_of_data_servers > curr_imss.info.num_storages)
 		{
-			fprintf(stderr, "New server has been added to the deployment. ID=%d, new_number_of_data_servers=%d\n", id_modified_server, new_number_of_data_servers);
-			fprintf(stderr, "read | write, num servers=%d\n", new_number_of_data_servers);
-			slog_debug("New server has been added to the deployment. ID=%d, new_number_of_data_servers=%d", id_modified_server, new_number_of_data_servers);
+			// fprintf(stderr, "read | write, num servers=%d\n", new_number_of_data_servers);
 			PrintIntervals(curr_dataset);
 			// release_network_resources(args.imss_uri, 1, process_rank);
 			// imss_comm_cleanup();
@@ -2899,14 +2901,25 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 					// AddIPS(&curr_imss.info, node_to_use, strlen(node_to_use));
 					AddIPS(&curr_imss.info, token, strlen(token));
 					AddBackEndServer2Imss(IMSS_ROOT);
-				} else 
+				}
+				else
 				{
 					slog_debug("%s node already on the local struct.", token);
 				}
 				token = strtok(NULL, ",");
 			}
+			end_malleability_t = clock() - init_malleability_t;
+			malleability_time_taken = ((double)end_malleability_t) / CLOCKS_PER_SEC; // in seconds
+			fprintf(stderr, "read | write, New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d\n", malleability_time_taken, id_modified_server, new_number_of_data_servers);
+			slog_debug("New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d", malleability_time_taken, id_modified_server, new_number_of_data_servers);
 		}
 	}
+
+	end_send_performance_t = clock() - init_malleability_t;
+	send_performance_time_taken = ((double)end_send_performance_t) / CLOCKS_PER_SEC; // in seconds
+	slog_debug("Send performance time %f seconds", send_performance_time_taken);
+	fprintf(stderr, "Send performance time %f seconds\n", send_performance_time_taken);
+
 	free(result);
 	result = NULL;
 
@@ -4447,7 +4460,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		sprintf(key_, "%s %lu %ld %s$%d %ld", mode, 0l, offset, curr_dataset->uri_, data_id, to_read);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 		node_hostname = curr_imss.info.ips[repl_servers[i]];
-		slog_debug("[IMSS] Request to data %d (%s) - '%s' to server %d (%s)", n_server_, node_hostname, key_, repl_servers[i], curr_imss.conns.eps[i]);
+		slog_debug("[IMSS] Request to data %d (%s) - '%s' to server %d (%s)", n_server_, node_hostname, key_, repl_servers[i], curr_imss.conns.eps[repl_servers[i]]);
 		size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
 		if (size_sent_req == 0)
 		{
@@ -5289,15 +5302,60 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				pthread_mutex_unlock(&lock_network);
 				exit(-1);
 			}
+			size_t size_sent_data = 0;
+			if (ASYNC) // TO FIX: put the correct condition.
+			{		   // async send.
+				while (outstanding_sends >= curr_imss_storages)
+				{
+					// This allows UCX to process network operations and call callbacks.
+					// The callback will decrease outstanding_sends.
+					// fprintf(stderr, "Max outstanding sends reached %d/%d\n", outstanding_sends, curr_imss_storages);
+					size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
+					fprintf(stderr, "Limite alcanzado, esperando... outstanding_sends = %zu\n", current_outstanding);
+					ucp_worker_progress(ucp_worker_data);
+				}
 
-			// send the data to the data server of the current dataset.
-			size_t size_sent_data = TIMING(send_data(ucp_worker_data, ep, buffer, size, local_data_uid), "send_data", size_t, process_rank);
-			if (size_sent_data == 0)
+				ServerSendRequest *new_send = new ServerSendRequest();
+				void *ucx_req_handle = isend_data2(ucp_worker_data, ep, buffer, size, local_data_uid, new_send);
+				// if (UCS_PTR_IS_ERR(ucx_req_handle))
+				// {
+				// 	slog_error("Failed to initiate async send on server.");
+				// 	fprintf(stderr, "Error: Failed to initiate async send on server.\n");
+				// 	// The send function already cleaned up new_send.
+				// }
+				// else
+				// {
+				// 	size_sent_data = size;
+				// }
+				if (UCS_PTR_IS_PTR(ucx_req_handle))
+				{
+					// The request is sending. The callback will handle cleanup.
+					size_sent_data = size;
+					outstanding_sends++;
+				}
+				else if (UCS_PTR_IS_ERR(ucx_req_handle))
+				{
+					slog_error("Failed to initiate async send on server.");
+					fprintf(stderr, "Failed to initiate async send on server.");
+					// The send function already cleaned up new_send.
+				}
+				else
+				{
+					// It completed immediately. The send function also cleaned up.
+					size_sent_data = size;
+				}
+			}
+			else
 			{
-				perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
-				slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
-				pthread_mutex_unlock(&lock_network);
-				return -1;
+				// send the data to the data server of the current dataset.
+				size_sent_data = TIMING(send_data(ucp_worker_data, ep, buffer, size, local_data_uid), "send_data", size_t, process_rank);
+				if (size_sent_data == 0)
+				{
+					perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
+					slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
+					pthread_mutex_unlock(&lock_network);
+					return -1;
+				}
 			}
 
 			t = clock() - t;

@@ -10,6 +10,9 @@
 #include "queue.h"
 #include "map_ep.hpp"
 
+// TODO: move this to the correct header.
+std::atomic<size_t> outstanding_sends(0);
+
 
 void* map_ep_create() {
 	return reinterpret_cast<void*> (new map_ep_t);
