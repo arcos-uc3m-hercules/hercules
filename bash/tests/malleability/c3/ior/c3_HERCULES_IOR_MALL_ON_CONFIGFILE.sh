@@ -1,14 +1,14 @@
 #!/bin/bash
 
 SBATCH_FLAGS="--partition=large -A uc3m_a0-sciot" # -- exclusiv # -- exclusive
-SCRIPT_NAME="c3_ior_hercules_slurm.sh"
+SCRIPT_NAME="c3_hercules_ior_slurm.sh"
 # FILE_SIZE=$((1024*1024*100))
 FILE_SIZE=$((1024*1024*10))
 
 ATTACHED=0
 
 # 0 = Shared single file, 1 = File per process.
-IOR_FILE_PER_PROCESS=0
+IOR_FILE_PER_PROCESS=1
 # 0 = Do not avoid cache, 1 = Avoid cache (recommend by https://ior.readthedocs.io/en/latest/userDoc/tutorial.html).
 IOR_AVOID_CACHE=0
 
@@ -27,7 +27,7 @@ export POLICY="RR"
 
 #MAX_DATA_SERVERS_RANGE=(16)
 MALLEABILITY=1
-MAX_DATA_SERVERS_RANGE=(8)
+MAX_DATA_SERVERS_RANGE=(16)
 NUM_DATA_SERVERS_RANGE=(1)
 #NUM_DATA_SERVERS_RANGE=( 1 2 4 8 16 )
 NUM_METADATA_SERVERS_RANGE=(1)
