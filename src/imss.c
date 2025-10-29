@@ -1406,6 +1406,11 @@ int32_t open_imss(char *imss_uri)
 
 	curr_imss = new_imss;
 
+	// for (size_t k = 0; k < curr_imss.info.num_storages; k++)
+	// {
+	// 	slog_debug("curr_imss.info.ips[%d]=%s", k, curr_imss.info.ips[k]);
+	// }
+
 	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
 	{
 		// Open shared memory segment.
@@ -1459,7 +1464,6 @@ int32_t open_imss(char *imss_uri)
 
 int32_t AddBackEndServer2Imss(char *imss_uri)
 {
-
 	ucp_address_t **temp_peer_addr = NULL;
 	ucp_ep_h *temp_eps = NULL;
 	uint32_t *temp_id = 0;
@@ -1496,29 +1500,7 @@ int32_t AddBackEndServer2Imss(char *imss_uri)
 		curr_imss.conns.id = temp_id;
 	}
 
-	// curr_imss.conns.eps = (ucp_ep_h *)malloc(new_imss.info.num_storages * sizeof(ucp_ep_h));
-	// curr_imss.conns.id = (uint32_t *)malloc(new_imss.info.num_storages * sizeof(uint32_t));
-
-	// if (!new_imss.conns.peer_addr || !new_imss.conns.eps || !new_imss.conns.id)
-	// {
-	// 	perror("HERCULES_ERR_OPEN_IMSS_MEMORY_ALLOC");
-	// 	slog_error("HERCULES_ERR_OPEN_IMSS_MEMORY_ALLOC");
-	// 	exit(-1);
-	// }
-
-	// new_imss.conns.matching_server = -1;
-
-	// status = ucp_worker_get_address(ucp_worker_data, &local_addr_data, &local_addr_len_data);
-	// ucp_worker_address_attr_t attr;
-	// attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
-	// ucp_worker_address_query(local_addr_data, &attr);
-	// local_data_uid = attr.worker_uid;
-
-	// fprintf(stderr, "Connecting to %d servers\n", new_imss.info.num_storages);
-	// for (int32_t i = 0; i < new_imss.info.num_storages; i++)
-	// {
 	int i = curr_imss.info.num_storages - 1;
-	// fprintf(stderr, "node=%s, status=%d, curr_imss.info.num_storages=%d\n", curr_imss.info.ips[i], curr_imss.info.status[i], curr_imss.info.num_storages);
 
 	// skip current server.
 	int oob_sock = -1;
@@ -2866,16 +2848,17 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	// sort the array of ips and endpoints according to the new data servers number.
 	if (id_modified_server != -1)
 	{
-		// when the metadata server response with an ID != -1 it means
-		// that server will be shutting down or a new one will be added.
-		if (new_number_of_data_servers < curr_imss.info.num_storages)
-		{ // Decomissioning.
-			// fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from close_dataset.\n");
-			slog_debug("Calling ReleaseSpecificDataServerNetworkResources from close_dataset.");
-			ReleaseSpecificDataServerNetworkResources("imss://", 1, id_modified_server, new_number_of_data_servers);
-			SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
-		}
-		else if (new_number_of_data_servers > curr_imss.info.num_storages)
+		// // when the metadata server response with an ID != -1 it means
+		// // that server will be shutting down or a new one will be added.
+		// if (new_number_of_data_servers < curr_imss.info.num_storages)
+		// { // Decomissioning.
+		// 	// fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from close_dataset.\n");
+		// 	slog_debug("Calling ReleaseSpecificDataServerNetworkResources from close_dataset.");
+		// 	ReleaseSpecificDataServerNetworkResources("imss://", 1, id_modified_server, new_number_of_data_servers);
+		// 	SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+		// }
+		// else
+		// if (new_number_of_data_servers > curr_imss.info.num_storages)
 		{
 			// fprintf(stderr, "read | write, num servers=%d\n", new_number_of_data_servers);
 			PrintIntervals(curr_dataset);
@@ -4460,7 +4443,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		sprintf(key_, "%s %lu %ld %s$%d %ld", mode, 0l, offset, curr_dataset->uri_, data_id, to_read);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 		node_hostname = curr_imss.info.ips[repl_servers[i]];
-		slog_debug("[IMSS] Request to data %d (%s) - '%s' to server %d (%s)", n_server_, node_hostname, key_, repl_servers[i], curr_imss.conns.eps[repl_servers[i]]);
+
+		slog_debug("[IMSS] Request to data %d (%s) - '%s' to server %d (%s)", n_server_, node_hostname, key_, repl_servers[i], curr_imss.info.ips[repl_servers[i]]);
 		size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
 		if (size_sent_req == 0)
 		{
@@ -5286,7 +5270,10 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		else
 		{
 			sprintf(key_, "SET %lu %ld %s$%d", size, offset, curr_dataset->uri_, data_id);
-			slog_info("[IMSS] BLOCK %d SENT TO SERVER %d  with Request: %s (%d)", data_id, n_server_, key_, size);
+			// slog_info("[IMSS] BLOCK %d SENT TO SERVER %d  with Request: %s (%d)", data_id, n_server_, key_, size);
+			node_hostname = curr_imss.info.ips[n_server_];
+			slog_info("[IMSS] BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%d)", data_id, n_server_, node_hostname, key_, size);
+
 			ep = curr_imss.conns.eps[n_server_];
 
 			clock_t t;

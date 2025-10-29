@@ -78,7 +78,7 @@ uint64_t backend_buffer_size;
 pthread_mutex_t backend_buff_mut;
 
 // URI of the attached deployment.
-extern char att_imss_uri[URI_];
+// extern char att_imss_uri[URI_];
 
 uint16_t connection_port; // FIXME
 
@@ -177,7 +177,7 @@ void *imss_server(void *arg_)
 		// Specify the address used by each thread to write inside the buffer.
 		arguments[i].pt = 0;
 		// URI of the corresponding IMSS instance.
-		strcpy(arguments[i].my_uri, att_imss_uri);
+		// strcpy(arguments[i].my_uri, att_imss_uri);
 
 		// Throw thread with the corresponding function and arguments.
 		if (pthread_create(&threads[i], NULL, hercules_ucx_server, (void *)&arguments[i]) == -1)

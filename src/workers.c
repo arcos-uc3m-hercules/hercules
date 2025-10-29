@@ -71,7 +71,7 @@ int32_t copied;
 StsHeader *mem_pool;
 
 // URI of the attached deployment.
-char att_imss_uri[URI_];
+// char att_imss_uri[URI_];
 // pthread_mutex_t tree_mut = PTHREAD_MUTEX_INITIALIZER;
 
 ucp_ep_h data_endpoints[100];
@@ -122,16 +122,14 @@ int data_ready = 0;
 int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
 {
 	int count = my_imss->num_storages;
-	// fprintf(stderr, "[AddIPS] Adding %s (%d), count=%d\n", line, n_chars, count);
-	slog_debug("[AddIPS] Adding %s (%d), count=%d, my_imss->num_storages add=%p", line, n_chars, count, &(my_imss)->num_storages);
+	fprintf(stderr, "[AddIPS] Adding %s (%d), count=%d\n", line, n_chars, count);
+	slog_debug("Adding %s (%d), count=%d, my_imss->num_storages add=%p", line, n_chars, count, &(my_imss)->num_storages);
 	char **new_ips = (char **)realloc(my_imss->ips, (count + 1) * sizeof(char *));
 
 	if (!new_ips)
 	{
 		perror("HERCULES_ERR_WORKER_ADD_IPS_MEM_ERR");
 		slog_fatal("HERCULES_ERR_WORKER_ADD_IPS_MEM_ERR");
-		// fclose(svr_nodes);
-		// free(line);
 		return -1;
 	}
 	my_imss->ips = new_ips;
@@ -141,8 +139,6 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
 	{
 		perror("HERCULES_ERR_WORKER_ADD_IPS_CALLOC_ERR");
 		slog_fatal("HERCULES_ERR_WORKER_ADD_IPS_CALLOC_ERR");
-		// free(line);
-		// fclose(svr_nodes);
 		return -1;
 	}
 	// Copy the line.
@@ -265,7 +261,7 @@ void AttendPendingRequests()
 			strcat(list_of_active_nodes, ",");
 		}
 	}
-	slog_debug("List ot send: %s", list_of_active_nodes);
+	slog_debug("List to send: %s", list_of_active_nodes);
 
 	// sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, node_to_use);
 	sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, list_of_active_nodes);
@@ -463,8 +459,6 @@ void *CommissioningStage(void *th_argv)
 {
 	CommissioningThreadArgs *arguments = (CommissioningThreadArgs *)th_argv;
 
-	// int32_t new_number_data_servers = imss_info_struct->num_storages;// arguments->args.num_data_servers;
-
 	if (arguments->args.malleability && !malleability_on)
 	{
 		// Always check the performance trend.
@@ -535,14 +529,16 @@ void *CommissioningStage(void *th_argv)
 				// Update the variables.
 				pthread_mutex_lock(&mutext_malleability);
 				// Here we incresae imss_info_struct->num_storages + 1.
-				AddIPS(imss_info_struct, node_to_use, strlen(node_to_use));
+				// AddIPS(imss_info_struct, node_to_use, strlen(node_to_use));
 
 				// new_number_data_servers = imss_info_struct->num_storages;
 				number_active_storage_servers = imss_info_struct->num_storages;
 				imss_info_struct->num_active_storages = number_active_storage_servers;
 				arguments->args.num_data_servers = number_active_storage_servers;
-				malleability_on = 1;
+				// malleability_on = 1;
 				id_server_to_modify = number_active_storage_servers - 1;
+
+				slog_debug("number_active_storage_servers=%d", number_active_storage_servers);
 
 				pthread_mutex_unlock(&mutext_malleability);
 
@@ -577,15 +573,31 @@ void *CommissioningStage(void *th_argv)
 	temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
 	strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
 
-	if (malleability_on)
-	{
-		CheckForMalleability(&temp_p_argv_for_calls, arguments->curr_req);
-	}
-	else
+	// if (malleability_on)
+	// {
+	// 	CheckForMalleability(&temp_p_argv_for_calls, arguments->curr_req);
+	// }
+	// else
 	{
 		// No extra operations, just sending an ACK to the client to continue.
+		// char response[PATH_MAX] = {'\0'};
+		// sprintf(response, "%s %" PRId32 " -1", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers);
 		char response[PATH_MAX] = {'\0'};
-		sprintf(response, "%s %" PRId32 " -1", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers);
+		char list_of_active_nodes[PATH_MAX] = {'\0'};
+		slog_debug("Making list of avaiable nodes.");
+		for (size_t i = 0; i < curr_global_imss->num_storages; i++)
+		{
+			slog_debug("Adding %s to the list", curr_global_imss->ips[i]);
+			strcat(list_of_active_nodes, curr_global_imss->ips[i]);
+			if (i + 1 < curr_global_imss->num_storages)
+			{
+				strcat(list_of_active_nodes, ",");
+			}
+		}
+		slog_debug("List ot send: %s", list_of_active_nodes);
+
+		// sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, node_to_use);
+		sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, list_of_active_nodes);
 		int ret = -1;
 		ret = SendConfirmationMessage(&temp_p_argv_for_calls, response);
 		if (ret == 0)
@@ -2600,6 +2612,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		size_t addr_len = 0;
 		int ret = 0;
 		// number  == client ip.
+		// uri_ == hostname.
+		char* added_hostname = uri_;
 		oob_sock = connect_common(number, 85000, AF_INET);
 		if (oob_sock < 0)
 		{
@@ -2660,7 +2674,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		// finish malleability comissioning process.
 		AttendPendingRequests();
 		malleability_on = 0;
-		
+
 		global_malleability_t = clock() - global_malleability_t;
 		global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
 		fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, global_malleability_time_taken);
@@ -2668,6 +2682,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		free(new_imss.conns.peer_addr[0]);
 		free(new_imss.conns.peer_addr);
+
+		imss_info *imss_info_struct = curr_global_imss;
+		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname));
 
 		return 0;
 	}
@@ -2794,7 +2811,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				if (operation == IMSS_INFO)
 				{ // Hercules instance case.
 					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, address_, IMSS_INFO, arguments->worker_uid);
-					imss_info *my_imss = (imss_info *)address_;
+					// imss_info *my_imss = (imss_info *)address_;
 				}
 				else
 				{
@@ -3279,6 +3296,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					ret = TIMING(recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, IMSS_INFO, arguments->worker_uid, length), "recv_dynamic_stream IMSS_INFO", int32_t, arguments->thread_id);
 					// save the pointer to the hercules instance to be access on malleability.
 					// arguments->hercules_info_struct = (imss_info *)buffer;
+					curr_global_imss = (imss_info *)buffer;
+					slog_debug("Hercules Instance received, num of initial servers = %d", curr_global_imss->num_storages);
 				}
 				else
 				{

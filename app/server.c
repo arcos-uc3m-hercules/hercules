@@ -758,59 +758,9 @@ int32_t main(int32_t argc, char **argv)
 		my_imss.num_active_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important
-		// FILE entity managing the HERCULES deployfile.
-		// FILE *svr_nodes;
-
-		// if ((svr_nodes = fopen(deployfile, "r+")) == NULL)
-		// {
-		// 	char err_msg[MAX_ERR_MSG_LEN];
-		// 	sprintf(err_msg, "HERCULES_ERR_DEPLOYFILE_OPEN:%s", deployfile);
-		// 	perror(err_msg);
-		// 	slog_fatal("%s", err_msg);
-		// 	return -1;
-		// }
-
-		// // Number of characters successfully read from the line.
-		// int32_t n_chars;
-		// int init_server_status = 1;
-		// // int num_active_data_servers = 0;
-		// for (int32_t i = 0; i < num_servers; i++)
-		// {
-		// 	// Allocate resources in the metadata structure so as to store the current HERCULES's IP.
-		// 	(my_imss.ips)[i] = (char *)calloc(LINE_LENGTH, sizeof(char));
-		// 	size_t l_size = LINE_LENGTH;
-
-		// 	// Save HERCULES metadata deployment.
-		// 	n_chars = getline(&((my_imss.ips)[i]), &l_size, svr_nodes);
-
-		// 	// Erase the new line character ('') from the string.
-		// 	if (((my_imss.ips)[i])[n_chars - 1] == '\n')
-		// 	{
-		// 		((my_imss.ips)[i])[n_chars - 1] = '\0';
-		// 	}
-
-		// 	if (i < init_number_of_server)
-		// 	{
-		// 		// fprintf(stderr, "Server %d is active\n", i);
-		// 		init_server_status = 1;
-		// 	}
-		// 	else
-		// 	{
-		// 		// fprintf(stderr, "Server %d is inactive\n", i);
-		// 		init_server_status = 0;
-		// 	}
-		// 	my_imss.status[i] = init_server_status;
-		// 	my_imss.arr_num_active_storages[i] = init_number_of_server;
-		// }
-
-		// // Close the file.
-		// if (fclose(svr_nodes) != 0)
-		// {
-		// 	perror("HERCULES_ERR_DEPLOYFILE_CLOSE");
-		// 	slog_fatal("HERCULES_ERR_DEPLOYFILE_CLOSE");
-		// 	return -1;
-		// }
 		ReadHostfile(deployfile, &my_imss);
+
+		my_imss.num_storages = 0;
 
 		char key_plus_size[REQUEST_SIZE] = {0};
 		// Send the created structure to the metadata server.
@@ -879,13 +829,12 @@ int32_t main(int32_t argc, char **argv)
 
 		for (int i = 0; i < args.num_metadata_servers; i++)
 		{
-
 			ucp_worker_attr_t worker_attr;
 			ucs_status_t status;
 			worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
 			status = ucp_worker_query(ucp_worker_meta, &worker_attr);
 			char request[REQUEST_SIZE] = {0};
-			sprintf(request, "%d SETSERVER %s", args.id, client_ip);
+			sprintf(request, "%d SETSERVER %s %s", args.id, client_ip, args.data_hostname);
 			slog_debug("[main] Request - %s", request);
 			if (send_req(ucp_worker_meta, stat_eps[i], worker_attr.address, worker_attr.address_length, request) == 0)
 			{
