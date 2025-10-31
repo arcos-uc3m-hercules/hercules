@@ -1854,12 +1854,16 @@ extern "C"
 			data_pointer = (char *)data_pointer + bytes_to_copy;
 			block_offset = 0; // first block has been stored, next blocks don't have an offset
 			++curr_blk;
+			ucp_worker_progress(ucp_worker_data);
 		}
 
 		// while (outstanding_sends > 0)
 		// {
-			ucp_worker_progress(ucp_worker_data);
+		// fprintf(stderr,"calling progress");
+		// ucp_worker_progress(ucp_worker_data);
 		// }
+		async_data_worker_progress(0);
+		
 
 		// updates intervals on the back-end.
 		update_dataset((char *)path, ds);

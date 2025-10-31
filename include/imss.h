@@ -133,7 +133,7 @@ typedef struct
 } imss;
 
 // Key-value struct to store "interval" entries on dataset_info.
-static int MAX_NUM_INTERVALS=100;
+static int MAX_NUM_INTERVALS = 100;
 typedef struct
 {
 	int value;
@@ -612,6 +612,8 @@ RETURNS:	0 - Resources were released successfully.
 	int32_t imss_flush_data();
 
 	int32_t imss_comm_cleanup();
+
+	void async_data_worker_progress(int umbral);
 
 	int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root);
 	int32_t release_network_resources(const char *imss_uri, int is_parent, int process_rank);

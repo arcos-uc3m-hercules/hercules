@@ -2846,7 +2846,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	slog_debug("message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 "", message, new_number_of_data_servers, id_modified_server);
 
 	// sort the array of ips and endpoints according to the new data servers number.
-	if (id_modified_server != -1)
+	// if (id_modified_server != -1)
 	{
 		// // when the metadata server response with an ID != -1 it means
 		// // that server will be shutting down or a new one will be added.
@@ -2882,6 +2882,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 				if (!found)
 				{
 					// AddIPS(&curr_imss.info, node_to_use, strlen(node_to_use));
+					fprintf(stderr, "Adding %s on the client %d.\n", token, process_rank);
 					AddIPS(&curr_imss.info, token, strlen(token));
 					AddBackEndServer2Imss(IMSS_ROOT);
 				}
@@ -2901,7 +2902,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	end_send_performance_t = clock() - init_malleability_t;
 	send_performance_time_taken = ((double)end_send_performance_t) / CLOCKS_PER_SEC; // in seconds
 	slog_debug("Send performance time %f seconds", send_performance_time_taken);
-	fprintf(stderr, "Send performance time %f seconds\n", send_performance_time_taken);
+	// fprintf(stderr, "Send performance time %f seconds\n", send_performance_time_taken);
 
 	free(result);
 	result = NULL;
@@ -5105,6 +5106,19 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 	return 1;
 }
 
+void async_data_worker_progress(int umbral)
+{
+	while (outstanding_sends > umbral)
+	{
+		// This allows UCX to process network operations and call callbacks.
+		// The callback will decrease outstanding_sends.
+		// fprintf(stderr, "Max outstanding sends reached %d/%d\n", outstanding_sends, curr_imss_storages);
+		size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
+		fprintf(stderr, "+ waiting outstanding_sends = %zu\n", current_outstanding);
+		ucp_worker_progress(ucp_worker_data);
+	}
+}
+
 /**
  * @brief Method storing a specific data element on the data backend.
  * @return 1 on success, on error -1 is returned.
@@ -5292,15 +5306,16 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			size_t size_sent_data = 0;
 			if (ASYNC) // TO FIX: put the correct condition.
 			{		   // async send.
-				while (outstanding_sends >= curr_imss_storages)
-				{
-					// This allows UCX to process network operations and call callbacks.
-					// The callback will decrease outstanding_sends.
-					// fprintf(stderr, "Max outstanding sends reached %d/%d\n", outstanding_sends, curr_imss_storages);
-					size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
-					fprintf(stderr, "Limite alcanzado, esperando... outstanding_sends = %zu\n", current_outstanding);
-					ucp_worker_progress(ucp_worker_data);
-				}
+				// while (outstanding_sends >= curr_imss_storages)
+				// {
+				// 	// This allows UCX to process network operations and call callbacks.
+				// 	// The callback will decrease outstanding_sends.
+				// 	// fprintf(stderr, "Max outstanding sends reached %d/%d\n", outstanding_sends, curr_imss_storages);
+				// 	size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
+				// 	fprintf(stderr, "Limite alcanzado, esperando... outstanding_sends = %zu\n", current_outstanding);
+				// 	ucp_worker_progress(ucp_worker_data);
+				// }
+				async_data_worker_progress(curr_imss_storages);
 
 				ServerSendRequest *new_send = new ServerSendRequest();
 				void *ucx_req_handle = isend_data2(ucp_worker_data, ep, buffer, size, local_data_uid, new_send);

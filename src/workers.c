@@ -27,7 +27,6 @@ double MINIMUM_PERFORMANCE_THRESHOLD = 5000.0; // In MB/s
 const int ANALYSIS_WINDOW_SIZE = 20;		   // 20;
 const double CRITICAL_SLOPE = -50.0;		   // Performance loss rate that triggers scaling
 const int CONSECUTIVE_SIGNALS_THRESHOLD = 100; // 50; // Trigger scaling after 3 consecutive signals.
-// static int NUMBER_OF_LAUNCHED_THREADS = 0;
 
 void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
@@ -43,6 +42,7 @@ pthread_mutex_t mutext_malleability = PTHREAD_MUTEX_INITIALIZER;
 // if malleability_on = 1, new requests will be not handled and server will
 // respond with a "malleability" string.
 int malleability_on = 0;
+bool comissioning_on = false;
 uint32_t number_active_storage_servers = 0;
 int32_t id_server_to_modify = -1;
 char *node_to_use = NULL;
@@ -69,10 +69,6 @@ pthread_cond_t buff_size_cond;
 int32_t copied;
 
 StsHeader *mem_pool;
-
-// URI of the attached deployment.
-// char att_imss_uri[URI_];
-// pthread_mutex_t tree_mut = PTHREAD_MUTEX_INITIALIZER;
 
 ucp_ep_h data_endpoints[100];
 ucp_worker_h *ucp_worker_threads;
@@ -125,7 +121,6 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
 	fprintf(stderr, "[AddIPS] Adding %s (%d), count=%d\n", line, n_chars, count);
 	slog_debug("Adding %s (%d), count=%d, my_imss->num_storages add=%p", line, n_chars, count, &(my_imss)->num_storages);
 	char **new_ips = (char **)realloc(my_imss->ips, (count + 1) * sizeof(char *));
-
 	if (!new_ips)
 	{
 		perror("HERCULES_ERR_WORKER_ADD_IPS_MEM_ERR");
@@ -459,28 +454,23 @@ void *CommissioningStage(void *th_argv)
 {
 	CommissioningThreadArgs *arguments = (CommissioningThreadArgs *)th_argv;
 
-	if (arguments->args.malleability && !malleability_on)
+	if (arguments->args.malleability && !comissioning_on)
 	{
 		// Always check the performance trend.
 		bool to_add_server = make_scaling_decision(elasticity_records_history);
 		pthread_mutex_lock(&mutext_malleability);
 		if (to_add_server)
 		{
-			// pthread_mutex_lock(&mutext_malleability);
 			consecutive_scale_up_signals++; // Increment counter if scaling is needed.
 			// fprintf(stderr, "Scale-up signal received. Consecutive count: %d\n", consecutive_scale_up_signals);
 			slog_debug("Scale-up signal received. Consecutive count: %d", consecutive_scale_up_signals);
-			// pthread_mutex_unlock(&mutext_malleability);
 		}
 		else
 		{
-			// pthread_mutex_lock(&mutext_malleability);
 			consecutive_scale_up_signals = 0; // Reset counter if performance is fine.
-											  // pthread_mutex_unlock(&mutext_malleability);
 		}
 
 		// Only trigger the actual scaling operation if the threshold is met.
-		// pthread_mutex_lock(&mutext_malleability);
 		if (consecutive_scale_up_signals >= CONSECUTIVE_SIGNALS_THRESHOLD)
 		{
 			consecutive_scale_up_signals = 0;
@@ -535,7 +525,9 @@ void *CommissioningStage(void *th_argv)
 				number_active_storage_servers = imss_info_struct->num_storages;
 				imss_info_struct->num_active_storages = number_active_storage_servers;
 				arguments->args.num_data_servers = number_active_storage_servers;
+				// Set comissioning ON to avoid doing twice at same time.
 				// malleability_on = 1;
+				comissioning_on = true;
 				id_server_to_modify = number_active_storage_servers - 1;
 
 				slog_debug("number_active_storage_servers=%d", number_active_storage_servers);
@@ -565,6 +557,11 @@ void *CommissioningStage(void *th_argv)
 			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
 			pthread_mutex_unlock(&mutext_malleability);
 		}
+	}
+	else 
+	{
+		// just for testing. It must be comment on production.
+		make_scaling_decision(elasticity_records_history);
 	}
 
 	p_argv temp_p_argv_for_calls;
@@ -2672,8 +2669,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		client_create_ep_data(arguments->ucp_worker, &data_endpoints[server_id_request], new_imss.conns.peer_addr[0], NULL);
 
 		// finish malleability comissioning process.
-		AttendPendingRequests();
-		malleability_on = 0;
+		// AttendPendingRequests();
+		comissioning_on = false;
 
 		global_malleability_t = clock() - global_malleability_t;
 		global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
@@ -2684,8 +2681,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		free(new_imss.conns.peer_addr);
 
 		imss_info *imss_info_struct = curr_global_imss;
+		// num_storages is increased inside AddIPS.
+		fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
 		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname));
-
 		return 0;
 	}
 

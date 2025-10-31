@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=hercules    # Job name
 #SBATCH --output=logs/hercules/%j-ior.log   # Standard output and error log
-#SBATCH --time=3:00:00               # Time limit hrs:min:sec
+#SBATCH --time=1:00:00               # Time limit hrs:min:sec
 #SBATCH --cpus-per-task=1
 #SBATCH --partition=large
 #SBATCH --ntasks-per-node=100 # fix the mpirun error: "There are not enough slots available in the system.."
