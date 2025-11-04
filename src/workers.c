@@ -553,7 +553,7 @@ void *CommissioningStage(void *th_argv)
 			pthread_mutex_unlock(&mutext_malleability);
 		}
 	}
-	else 
+	else
 	{
 		// just for testing. It must be comment on production.
 		make_scaling_decision(elasticity_records_history, arguments->args.malleability_windows_size, arguments->args.malleability_performance_threshold);
@@ -717,8 +717,8 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	// Decision Logic.
 	if (moving_average < minimum_performance_threshold)
 	{
-		fprintf(stderr, "DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d\n", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers);
-		slog_debug("DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers);
+		fprintf(stderr, "DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s) \n", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers, performance_sum, performance_sum / MB);
+		slog_debug("DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f, performance_sum=%.2f bytes (%.2f MB/s)", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers, performance_sum, performance_sum / MB);
 		return true;
 	}
 
@@ -2608,7 +2608,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		int ret = 0;
 		// number  == client ip.
 		// uri_ == hostname.
-		char* added_hostname = uri_;
+		char *added_hostname = uri_;
 		oob_sock = connect_common(number, 85000, AF_INET);
 		if (oob_sock < 0)
 		{

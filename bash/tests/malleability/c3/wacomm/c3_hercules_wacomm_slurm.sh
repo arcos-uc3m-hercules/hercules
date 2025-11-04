@@ -5,9 +5,9 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --partition=large
 #SBATCH --ntasks-per-node=100 # fix the mpirun error: "There are not enough slots available in the system.."
+#SBATCH --exclude=srvgpu[01-05],srv103,srv108
 ##SBATCH --nodelist=srv[101-108]
 ##SBATCH --nodefile=/home/tester004/gesanche/hercules/tmp/hostfile_3419
-##SBATCH --exclude=srvgpu[01-05],srv103,srv108
 
 
 ## I am passing a nodefile to use the same nodes for all tests, because some 
