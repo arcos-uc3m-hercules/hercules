@@ -155,7 +155,14 @@ struct ServerSendRequest {
     ServerSendRequest() : buffer_to_free(nullptr) {}
 };
 
-
+/**
+ * @brief Manages the state of a single asynchronous receive operation on the server.
+ * 
+ */
+struct ServerRecvRequest {
+    // void *buffer_to_free;
+    void *client_pointer;
+};
 
 typedef struct worker_info
 {
@@ -205,6 +212,7 @@ extern "C"
     size_t recv_data_2(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async, ucp_tag_recv_info_t info_tag, ucp_tag_message_h msg_tag);
     size_t recv_data_opt(ucp_worker_h ucp_worker, ucp_ep_h ep, void **msg, size_t msg_length, uint64_t dest, int async);
     size_t recv_req(ucp_worker_h ucp_worker, ucp_ep_h ep, char *msg);
+	void *irecv_data(ucp_worker_h ucp_worker, void *allocated_buffer, size_t buffer_len, uint64_t tag, ServerRecvRequest *tracking_struct);
     ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request, send_req_t *ctx);
     void stream_recv_cb(void *request, ucs_status_t status, size_t length, void *user_data);
     void send_handler_data(void *request, ucs_status_t status, void *ctx);

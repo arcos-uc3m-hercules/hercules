@@ -22,12 +22,6 @@
 #include "map_server_eps.hpp"
 #include "policies.h"
 
-#define XYZ 10
-double MINIMUM_PERFORMANCE_THRESHOLD = 5000.0; // In MB/s
-const int ANALYSIS_WINDOW_SIZE = 20;		   // 20;
-const double CRITICAL_SLOPE = -50.0;		   // Performance loss rate that triggers scaling
-const int CONSECUTIVE_SIGNALS_THRESHOLD = 100; // 50; // Trigger scaling after 3 consecutive signals.
-
 void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
 imss_info imss_copy = {0};
@@ -453,11 +447,12 @@ void *move_blocks_2_server(void *th_argv)
 void *CommissioningStage(void *th_argv)
 {
 	CommissioningThreadArgs *arguments = (CommissioningThreadArgs *)th_argv;
-
+	fprintf(stderr, "arguments->args.malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args.malleability, comissioning_on, consecutive_scale_up_signals);
 	if (arguments->args.malleability && !comissioning_on)
 	{
 		// Always check the performance trend.
-		bool to_add_server = make_scaling_decision(elasticity_records_history);
+		bool to_add_server = make_scaling_decision(elasticity_records_history, arguments->args.malleability_windows_size, arguments->args.malleability_performance_threshold);
+		fprintf(stderr, "to_add_server=%d\n", to_add_server);
 		pthread_mutex_lock(&mutext_malleability);
 		if (to_add_server)
 		{
@@ -471,7 +466,7 @@ void *CommissioningStage(void *th_argv)
 		}
 
 		// Only trigger the actual scaling operation if the threshold is met.
-		if (consecutive_scale_up_signals >= CONSECUTIVE_SIGNALS_THRESHOLD)
+		if (consecutive_scale_up_signals >= arguments->args.malleability_tolerance)
 		{
 			consecutive_scale_up_signals = 0;
 			pthread_mutex_unlock(&mutext_malleability);
@@ -480,7 +475,7 @@ void *CommissioningStage(void *th_argv)
 			// ****************************
 			char command_to_exec[PATH_MAX] = {0};
 			// ****************************
-			// fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
+			fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
 			int found = 0;
 			// Iterates over all hosts defined on the "hostfile" in order to find a
 			// hostname that is not already under use.
@@ -554,14 +549,15 @@ void *CommissioningStage(void *th_argv)
 		else
 		{
 			// fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
-			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
+			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args.malleability_tolerance);
 			pthread_mutex_unlock(&mutext_malleability);
 		}
 	}
 	else 
 	{
 		// just for testing. It must be comment on production.
-		make_scaling_decision(elasticity_records_history);
+		make_scaling_decision(elasticity_records_history, arguments->args.malleability_windows_size, arguments->args.malleability_performance_threshold);
+		fprintf(stderr, "Testing block\n");
 	}
 
 	p_argv temp_p_argv_for_calls;
@@ -643,9 +639,10 @@ double calculate_trend_slope(const std::vector<double> &y)
  * @param history The map containing the metrics history for all servers.
  * @return true if a server should be added, false otherwise.
  */
-bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history)
+bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double minimum_performance_threshold)
 {
 	pthread_mutex_lock(&mutext_malleability); // history is a shared resource.
+	fprintf(stderr, "analysis_window_size=%" PRId32 ", minimum_performance_threshold=%f, history.empty()=%d\n", analysis_window_size, minimum_performance_threshold, history.empty());
 	if (history.empty())
 	{
 		pthread_mutex_unlock(&mutext_malleability);
@@ -654,17 +651,17 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 
 	size_t num_records = history.begin()->second.size();
 
-	if (num_records < ANALYSIS_WINDOW_SIZE)
+	if (num_records < analysis_window_size)
 	{
-		// fprintf(stderr, "Not enough data to make a decision. Need %d records, have %zu.\n", ANALYSIS_WINDOW_SIZE, num_records);
-		slog_debug("Not enough data to make a decision. Need %d records, have %zu.", ANALYSIS_WINDOW_SIZE, num_records);
+		fprintf(stderr, "Not enough data to make a decision. Need %d records, have %zu.\n", analysis_window_size, num_records);
+		slog_debug("Not enough data to make a decision. Need %d records, have %zu.", analysis_window_size, num_records);
 		pthread_mutex_unlock(&mutext_malleability);
 		return false;
 	}
 
 	// Calculate the aggregate system performance for the analysis window.
 	std::vector<double> aggregate_performance_history;
-	for (size_t i = num_records - ANALYSIS_WINDOW_SIZE; i < num_records; ++i)
+	for (size_t i = num_records - analysis_window_size; i < num_records; ++i)
 	{
 		double total_performance_at_point_i = 0.0;
 		int active_servers_count = 0;
@@ -699,6 +696,7 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 
 	if (aggregate_performance_history.empty())
 	{
+		fprintf(stderr, "aggregate performance history is empty.\n");
 		return false;
 	}
 
@@ -717,10 +715,10 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	// slog_debug("Elasticity analysis: Performance Trend Slope = %.2f", slope);
 
 	// Decision Logic.
-	if (moving_average < MINIMUM_PERFORMANCE_THRESHOLD)
+	if (moving_average < minimum_performance_threshold)
 	{
-		fprintf(stderr, "DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d\n", moving_average, moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, MINIMUM_PERFORMANCE_THRESHOLD / MB, number_active_storage_servers);
-		slog_debug("DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d", moving_average, moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, MINIMUM_PERFORMANCE_THRESHOLD / MB, number_active_storage_servers);
+		fprintf(stderr, "DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d\n", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers);
+		slog_debug("DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers);
 		return true;
 	}
 
@@ -730,8 +728,8 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	// 	return true;
 	// }
 
-	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d\n", moving_average, moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, MINIMUM_PERFORMANCE_THRESHOLD / MB, number_active_storage_servers);
-	slog_debug("DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d", moving_average, moving_average / MB, MINIMUM_PERFORMANCE_THRESHOLD, MINIMUM_PERFORMANCE_THRESHOLD / MB, number_active_storage_servers);
+	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d\n", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers);
+	slog_debug("DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers);
 	return false;
 }
 
@@ -991,7 +989,7 @@ void *hercules_ucx_server(void *th_argv)
 	char server_name[PATH_MAX] = {0};
 	char server_tag[PATH_MAX] = {0};
 	// calculates the minimun performance threshold in megabytes.
-	MINIMUM_PERFORMANCE_THRESHOLD *= MB;
+	// MINIMUM_PERFORMANCE_THRESHOLD *= MB;
 	// set the initial value to the global "active number of servers".
 	number_active_storage_servers = arguments->args.num_data_servers;
 

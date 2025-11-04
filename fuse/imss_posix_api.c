@@ -933,6 +933,7 @@ extern "C"
 		}
 
 		update_dataset((char *)path, ds);
+		async_data_worker_progress(0);
 
 		// total_amount_read += byte_count;
 		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, byte_count);
@@ -1101,6 +1102,8 @@ extern "C"
 			// Progress the UCX worker to ensure communication continues
 			ucp_worker_progress(ucp_worker_data);
 		}
+
+		async_data_worker_progress(0);
 
 		for (int i = 0; i < MAX_CONCURRENT_REQUESTS; ++i)
 		{
@@ -1863,7 +1866,6 @@ extern "C"
 		// ucp_worker_progress(ucp_worker_data);
 		// }
 		async_data_worker_progress(0);
-		
 
 		// updates intervals on the back-end.
 		update_dataset((char *)path, ds);

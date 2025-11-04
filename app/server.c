@@ -239,6 +239,7 @@ int32_t main(int32_t argc, char **argv)
 		if (strlen(args.alloc_data_hostfile) != 0)
 		{
 			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
+			fprintf(stderr, "Number of hosts in %s are %d\n", args.alloc_data_hostfile, number_of_hosts);
 		} 
 		else 
 		{
@@ -569,7 +570,6 @@ int32_t main(int32_t argc, char **argv)
 	IMSS_ROOT_LEN = strlen(IMSS_ROOT);
 	SERVER_ID = args.id;
 	BLOCK_SIZE = args.block_size * 1024;
-
 
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));

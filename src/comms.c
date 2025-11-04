@@ -273,6 +273,35 @@ extern "C"
 	}
 
 	/**
+	 * @brief Callback function invoked when an asynchronous read is complete.
+	 * @param request The handle of the UCX request that has completed.
+     * @param status The final status of the operation.
+     * @param info Pointer to the reception label information (contains the actual length). 
+     * @param user_data Pointer to our ServerRecvRequest structure.
+	 */
+	void server_recv_completion_callback(void *request, ucs_status_t status,
+										 const ucp_tag_recv_info_t *info, void *user_data)
+	{
+		ServerRecvRequest *completed_req = (ServerRecvRequest *)user_data;
+
+		if (status != UCS_OK)
+		{
+			slog_error("Async server recv failed with status: %s", ucs_status_string(status));
+			fprintf(stderr, "Async server recv failed with status: %s\n", ucs_status_string(status));
+		}
+		// else
+		// {
+		// 	slog_debug("Async server recv completed successfully. Received %zu bytes.", info->length);
+		// 	// fprintf(stderr, "Async server recv completed successfully. Received %zu bytes.\n", info->length);
+		// }
+
+		// free the UCX handle.
+		ucp_request_free(request);
+
+		outstanding_sends--;
+	}
+
+	/**
 	 * @brief Initiates a non-blocking data send and returns the request handle.
 	 * @return A pointer to the UCX request handle on success, or a UCS_PTR_ERR(...) on failure.
 	 */
@@ -294,6 +323,25 @@ extern "C"
 			delete tracking_struct;
 		}
 
+		return request;
+	}
+
+	void *irecv_data(ucp_worker_h ucp_worker, void *allocated_buffer, size_t buffer_len, uint64_t tag, ServerRecvRequest *tracking_struct)
+	{
+		ucp_request_param_t recv_param;
+		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+								  UCP_OP_ATTR_FIELD_USER_DATA;
+
+		recv_param.cb.recv = server_recv_completion_callback;
+		recv_param.user_data = tracking_struct;
+		recv_param.datatype = ucp_dt_make_contig(1);
+
+		slog_debug("Posting asynchronous receive for max_len %ld, tag %lu", buffer_len, tag);
+
+		void *request = ucp_tag_recv_nbx(ucp_worker, allocated_buffer, buffer_len, tag, tag_mask, &recv_param);
+
+		// TO CHECK: if the request completes immediatly, the callback is not called.
+		
 		return request;
 	}
 

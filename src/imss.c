@@ -4483,35 +4483,63 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			return -2;
 		}
 
+		size_t size_received_data = 0;
 		if (async == ASYNC)
 		{
-			ucs_status_ptr_t status_ptr;
-			status_ptr = start_recv_data_async(ucp_worker_data, ep, buffer, msg_length, local_data_uid);
-			if (UCS_PTR_IS_ERR(status_ptr))
+			// ucs_status_ptr_t status_ptr;
+			// status_ptr = start_recv_data_async(ucp_worker_data, ep, buffer, msg_length, local_data_uid);
+			// if (UCS_PTR_IS_ERR(status_ptr))
+			// {
+			// 	slog_error("[COMM] Error running start_recv_data_async, status: %s", ucs_status_string(UCS_PTR_STATUS(status_ptr)));
+			// 	return -2;
+			// }
+			// *buffer_request = status_ptr;
+
+			// async get.
+			async_data_worker_progress(curr_imss_storages);
+			// ServerSendRequest *new_send = new ServerSendRequest();
+			// void *ucx_req_handle = isend_data2(ucp_worker_data, ep, buffer, size, local_data_uid, new_send);
+			// ucp_tag_recv_info_t immediate_recv_info;
+			ServerRecvRequest *new_recv = new ServerRecvRequest();
+			// new_recv->buffer_to_free = response_buffer;
+			new_recv->client_pointer = response_buffer;
+			void *ucx_req_handle = irecv_data(ucp_worker_data, response_buffer, msg_length, local_data_uid, new_recv);
+			// size_received_data = TIMING(recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async), "recv_data", size_t, process_rank);
+			if (UCS_PTR_IS_PTR(ucx_req_handle))
 			{
-				slog_error("[COMM] Error running start_recv_data_async, status: %s", ucs_status_string(UCS_PTR_STATUS(status_ptr)));
-				return -2;
+				// The request is sending. The callback will be called.
+				size_received_data = msg_length;
+				outstanding_sends++;
 			}
-			*buffer_request = status_ptr;
+			else if (UCS_PTR_IS_ERR(ucx_req_handle))
+			{
+				slog_error("Failed to initiate async send on server.");
+				fprintf(stderr, "Failed to initiate async send on server.");
+			}
+			else
+			{
+				// It completed immediately.
+				size_received_data = msg_length;
+			}
 		}
 		else
 		{
 			// original
 			t = clock();
-			msg_length = TIMING(recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async), "recv_data", size_t, process_rank);
+			size_received_data = TIMING(recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async), "recv_data", size_t, process_rank);
 			t = clock() - t;
 			time_taken += ((double)t) / (CLOCKS_PER_SEC);
 		}
 
 		// performance read metrics.
 		std::string used_hostname_server = curr_imss.info.ips[n_server_];
-		backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + msg_length);
+		backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + size_received_data);
 		backend_performance_metrics[used_hostname_server].read.total_data_time += time_taken;
 		backend_performance_metrics[used_hostname_server].read.num_operations++;
 		backend_performance_metrics[used_hostname_server].server_id = n_server_;
 
-		slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
-		if (msg_length == 0)
+		slog_info("[IMSS] After recv_data, size_received_data=%lu", size_received_data);
+		if (size_received_data == 0)
 		{
 			if (errno != EAGAIN)
 			{
@@ -4563,7 +4591,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		// }
 		else
 		{
-			slog_info("OK!, length=%ld", msg_length);
+			slog_info("OK!, length=%ld", size_received_data);
 
 			// TODO: do not delete this, is to work with shared memory.
 			// if (session_policy == LOCAL_ || session_policy == ZCOPY_)
@@ -4613,7 +4641,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 
 			// free(response_buffer);
 			pthread_mutex_unlock(&lock_network);
-			return (ssize_t)msg_length;
+			return (ssize_t)size_received_data;
 		}
 	}
 	pthread_mutex_unlock(&lock_network);
@@ -5108,13 +5136,18 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 
 void async_data_worker_progress(int umbral)
 {
+	int waiting_count = 1;
 	while (outstanding_sends > umbral)
 	{
 		// This allows UCX to process network operations and call callbacks.
 		// The callback will decrease outstanding_sends.
 		// fprintf(stderr, "Max outstanding sends reached %d/%d\n", outstanding_sends, curr_imss_storages);
 		size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
-		fprintf(stderr, "+ waiting outstanding_sends = %zu\n", current_outstanding);
+		if ((waiting_count % 1000) == 0)
+		{
+			fprintf(stderr, "+ waiting outstanding_sends = %zu\n", current_outstanding);
+		}
+		waiting_count++;
 		ucp_worker_progress(ucp_worker_data);
 	}
 }

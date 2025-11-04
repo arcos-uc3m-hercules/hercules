@@ -631,6 +631,8 @@ int getConfiguration(struct arguments *args)
 	else if (cfg_get(cfg, "NUM_META_SERVERS"))
 		args->num_metadata_servers = atoi(cfg_get(cfg, "NUM_META_SERVERS"));
 
+	// Malleability configuration.
+	// 1 to enable malleability, 0 to disable it.
 	if (getenv("HERCULES_MALLEABILITY") != NULL)
 		args->malleability = atoi(getenv("HERCULES_MALLEABILITY"));
 	else if (cfg_get(cfg, "MALLEABILITY"))
@@ -638,20 +640,80 @@ int getConfiguration(struct arguments *args)
 	else
 		args->malleability = 0;
 
-	if (getenv("HERCULES_MALLEABILITY_TYPE") != NULL)
-		args->malleability_type = atoi(getenv("HERCULES_MALLEABILITY_TYPE"));
-	else if (cfg_get(cfg, "MALLEABILITY_TYPE"))
-		args->malleability_type = atoi(cfg_get(cfg, "MALLEABILITY_TYPE"));
+	// if (args->malleability)
+	{
+		// tolerance for performing a malleability operation.
+		int32_t default_tolerance = 100;
+		if (getenv("HERCULES_MALLEABILITY_TOLERANCE") != NULL)
+			args->malleability_tolerance = atoi(getenv("HERCULES_MALLEABILITY_TOLERANCE"));
+		else if (cfg_get(cfg, "MALLEABILITY_TOLERANCE"))
+			args->malleability_tolerance = atoi(cfg_get(cfg, "MALLEABILITY_TOLERANCE"));
+		else
+			// default value.
+			args->malleability_tolerance = default_tolerance;
 
-	if (getenv("HERCULES_UPPER_BOUND_MALLEABILITY") != NULL)
-		args->upper_bound_servers = atoi(getenv("HERCULES_UPPER_BOUND_MALLEABILITY"));
-	else if (cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"))
-		args->upper_bound_servers = atoi(cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"));
+		if (args->malleability_tolerance < 0)
+		{
+			fprintf(stderr, "WARNING: Invalid performance windows size of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_tolerance, default_tolerance);
+			args->malleability_tolerance = default_tolerance;
+		}
 
-	if (getenv("HERCULES_LOWER_BOUND_MALLEABILITY") != NULL)
-		args->lower_bound_servers = atoi(getenv("HERCULES_LOWER_BOUND_MALLEABILITY"));
-	else if (cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"))
-		args->lower_bound_servers = atoi(cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"));
+		// windows size or how many records are used to check the performance status.
+		int32_t default_windows_size = 20;
+		if (getenv("HERCULES_MALLEABILITY_WSIZE") != NULL)
+			args->malleability_windows_size = atoi(getenv("HERCULES_MALLEABILITY_WSIZE"));
+		else if (cfg_get(cfg, "MALLEABILITY_WSIZE"))
+			args->malleability_windows_size = atoi(cfg_get(cfg, "MALLEABILITY_WSIZE"));
+		else
+			// default value.
+			args->malleability_windows_size = default_windows_size;
+
+		if (args->malleability_windows_size < 0)
+		{
+			fprintf(stderr, "WARNING: Invalid performance windows size of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_windows_size, default_windows_size);
+			args->malleability_windows_size = default_windows_size;
+		}
+
+		// performance threshold in MB/s.
+		double default_threshold = 5000.0;
+		if (getenv("HERCULES_MALLEABILITY_THRESHOLD") != NULL)
+			args->malleability_performance_threshold = atoi(getenv("HERCULES_MALLEABILITY_THRESHOLD"));
+		else if (cfg_get(cfg, "MALLEABILITY_THRESHOLD"))
+			args->malleability_performance_threshold = atoi(cfg_get(cfg, "MALLEABILITY_THRESHOLD"));
+		else
+			// default value.
+			args->malleability_performance_threshold = default_threshold;
+
+		if (args->malleability_performance_threshold < 0)
+		{
+			fprintf(stderr, "WARNING: Invalid performance threshold of %f MB, setting to %f MB\n", args->malleability_performance_threshold, default_threshold);
+			args->malleability_performance_threshold = default_threshold;
+		}
+		// Convert from MB to bytes.
+		args->malleability_performance_threshold *= MB;
+		fprintf(stderr, "Malleability is enabled.\n HERCULES_MALLEABILITY_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f\n", 
+			args->malleability_tolerance, 
+			args->malleability_windows_size, 
+			args->malleability_performance_threshold);
+	}
+
+	// @deprecated
+	// if (getenv("HERCULES_MALLEABILITY_TYPE") != NULL)
+	// 	args->malleability_type = atoi(getenv("HERCULES_MALLEABILITY_TYPE"));
+	// else if (cfg_get(cfg, "MALLEABILITY_TYPE"))
+	// 	args->malleability_type = atoi(cfg_get(cfg, "MALLEABILITY_TYPE"));
+
+	// if (getenv("HERCULES_UPPER_BOUND_MALLEABILITY") != NULL)
+	// 	args->upper_bound_servers = atoi(getenv("HERCULES_UPPER_BOUND_MALLEABILITY"));
+	// else if (cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"))
+	// 	args->upper_bound_servers = atoi(cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"));
+
+	// if (getenv("HERCULES_LOWER_BOUND_MALLEABILITY") != NULL)
+	// 	args->lower_bound_servers = atoi(getenv("HERCULES_LOWER_BOUND_MALLEABILITY"));
+	// else if (cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"))
+	// 	args->lower_bound_servers = atoi(cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"));
+
+	// end of Malleability configuration.
 
 	if (getenv("HERCULES_REPL_FACTOR") != NULL)
 		args->repl_factor = atoi(getenv("HERCULES_REPL_FACTOR"));
@@ -759,8 +821,9 @@ int getConfiguration(struct arguments *args)
 		args->prefetch_size = 0;
 	}
 	// Convert from GB to bytes.
-	if (args->prefetch_size > 0) {
-		printf("Prefetching of %" PRIu64 " MB enable.\n", args->prefetch_size);	
+	if (args->prefetch_size > 0)
+	{
+		printf("Prefetching of %" PRIu64 " MB enable.\n", args->prefetch_size);
 		args->prefetch_size *= MB;
 	}
 

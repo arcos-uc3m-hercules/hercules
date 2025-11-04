@@ -31,7 +31,7 @@ int32_t REPL_FACTOR = NONE;			 // Default none
 int32_t REPL_TYPE = ASYNC;			 // Default async
 
 extern int32_t MALLEABILITY;
-extern int32_t MALLEABILITY_TYPE;
+// extern int32_t MALLEABILITY_TYPE;
 extern int32_t UPPER_BOUND_SERVERS;
 extern int32_t LOWER_BOUND_SERVERS;
 
@@ -460,7 +460,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	N_META_SERVERS = args.num_metadata_servers;
 	STORAGE_SIZE = args.storage_size;
 	MALLEABILITY = args.malleability;
-	MALLEABILITY_TYPE = args.malleability_type;
+	// MALLEABILITY_TYPE = args.malleability_type;
 	UPPER_BOUND_SERVERS = args.upper_bound_servers;
 	LOWER_BOUND_SERVERS = args.lower_bound_servers;
 	REPL_FACTOR = args.repl_factor;
@@ -498,7 +498,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_live(" -- HERCULES_METADATA_FILE: %s", METADATA_FILE);
 	slog_live(" -- HERCULES_DEPLOYMENT: %d", DEPLOYMENT);
 	slog_live(" -- HERCULES_MALLEABILITY: %d", MALLEABILITY);
-	slog_live(" -- HERCULES_MALLEABILITY_TYPE: %d", MALLEABILITY_TYPE);
+	// slog_live(" -- HERCULES_MALLEABILITY_TYPE: %d", MALLEABILITY_TYPE);
 	slog_live(" -- UPPER_BOUND_SERVERS: %d", UPPER_BOUND_SERVERS);
 	slog_live(" -- LOWER_BOUND_SERVERS: %d", LOWER_BOUND_SERVERS);
 	slog_live(" -- REPL_FACTOR: %d", REPL_FACTOR);
@@ -595,7 +595,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 
 	init = 1;
 	slog_live("Client %d ready in %f sec.", rank, elapsed);
-	// fprintf(stdout, "Client %d ready in %f sec.\n", rank, elapsed);
+	fprintf(stdout, "[%s] Client %d ready in %f sec.\n", args.data_hostname, rank, elapsed);
 	// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
 
