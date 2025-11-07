@@ -700,6 +700,7 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 		return false;
 	}
 
+
 	// Calculate the Simple Moving Average (SMA).
 	double performance_sum = std::accumulate(aggregate_performance_history.begin(), aggregate_performance_history.end(), 0.0);
 	double moving_average = performance_sum / aggregate_performance_history.size();
@@ -728,8 +729,8 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	// 	return true;
 	// }
 
-	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d\n", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers);
-	slog_debug("DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers);
+	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)\n", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers, performance_sum, performance_sum / MB);
+	slog_debug("DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers, performance_sum, performance_sum / MB);
 	return false;
 }
 

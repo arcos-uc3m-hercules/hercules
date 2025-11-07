@@ -1846,7 +1846,7 @@ extern "C"
 			// 	i_blk++;
 			// }
 			// sync send.
-			if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset), "set_data", int32_t, -1) < 0)
+			if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, SYNC), "set_data", int32_t, -1) < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
 				error_print = -ENOENT;
@@ -2350,8 +2350,7 @@ extern "C"
 		// memcpy(head, &stats, sizeof(struct stat));
 
 		// Updates the size of the file in the block 0.
-		// if (set_data(ds, 0, head, 0, 0) < 0)
-		if (set_data((char *)path, ds, 0, (char *)&stats, 0, 0) < 0)
+		if (set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC) < 0)
 		{
 			perror("HERCULES_ERR_WRITTING_BLOCK");
 			slog_error("HERCULES_ERR_WRITTING_BLOCK");
@@ -2459,7 +2458,7 @@ extern "C"
 		pthread_mutex_lock(&lock); // lock.
 		// stores block 0.
 		// fprintf(stdout, "size of stat=%lu bytes\n", sizeof(struct stat));
-		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0);
+		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0, SYNC);
 		if (ret < 0)
 		{
 			slog_error("HERCULES_ERR_IMSS_CREATE_SET_DATA_0");
@@ -2606,7 +2605,7 @@ extern "C"
 		// Write initial block (0).
 		memcpy(buff, &header, sizeof(struct stat));
 		slog_debug("header.st_nlink=%lu, head.st_size=%lu", header.st_nlink, header.st_size);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0);
+		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
 		// if it is the last link, the file is deleted (we also should to check if other process is open).
@@ -2700,7 +2699,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0);
+		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
 		// free(rpath);
@@ -2846,7 +2845,7 @@ extern "C"
 		memcpy(buff, &stats, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		if (set_data((char *)path, file_desc, 0, (char *)buff, 0, 0) < 0)
+		if (set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC) < 0)
 		{
 			// fprintf(stderr, "[IMSS-FUSE]	Error writing to imss.\n");
 			slog_error("[IMSS-FUSE]	Error writing to imss.");
@@ -2907,7 +2906,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, buff, 0, 0);
+		set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
 		free(rpath);
@@ -2955,7 +2954,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0);
+		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 		free(rpath);
 		return 0;

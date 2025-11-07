@@ -2894,7 +2894,9 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 			}
 			end_malleability_t = clock() - init_malleability_t;
 			malleability_time_taken = ((double)end_malleability_t) / CLOCKS_PER_SEC; // in seconds
+			#ifdef PRINTF
 			fprintf(stderr, "read | write, New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d\n", malleability_time_taken, id_modified_server, new_number_of_data_servers);
+			#endif
 			slog_debug("New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d", malleability_time_taken, id_modified_server, new_number_of_data_servers);
 		}
 	}
@@ -5156,7 +5158,7 @@ void async_data_worker_progress(int umbral)
  * @brief Method storing a specific data element on the data backend.
  * @return 1 on success, on error -1 is returned.
  */
-int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset)
+int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int async)
 {
 	int ret = 0;
 	int32_t n_server = 0;
@@ -5337,8 +5339,8 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				exit(-1);
 			}
 			size_t size_sent_data = 0;
-			if (ASYNC) // TO FIX: put the correct condition.
-			{		   // async send.
+			if (async == ASYNC) // TO FIX: put the correct condition.
+			{ // async send.
 				// while (outstanding_sends >= curr_imss_storages)
 				// {
 				// 	// This allows UCX to process network operations and call callbacks.

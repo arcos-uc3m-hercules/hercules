@@ -131,7 +131,8 @@ extern "C"
 #define SLOG_READ 10
 
 // Comment the following line to remove logs calls on compilation time.
-#define USESLOG
+#define PRINTF
+// #define USESLOG
 #ifdef USESLOG
 #define slog_none(...) \
     slog(SLOG_NONE, __func__, __VA_ARGS__);

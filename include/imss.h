@@ -512,7 +512,7 @@ offset     - Offset within the block.
 RETURNS:	 0 - The requested block was successfully stored.
 -1 - In case of error.
 	 */
-	int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset);
+	int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int async);
 
 	int32_t set_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
 

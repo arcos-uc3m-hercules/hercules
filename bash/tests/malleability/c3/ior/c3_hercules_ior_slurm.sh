@@ -5,9 +5,9 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --partition=large
 #SBATCH --ntasks-per-node=100 # fix the mpirun error: "There are not enough slots available in the system.."
+#SBATCH --exclude=srvgpu[01-05],srv103,srv104,srv108,srv109,srv114
 ##SBATCH --nodelist=srv[101-110,113-122]
 ##SBATCH --nodefile=/home/tester004/gesanche/hercules/tmp/hostfile_3419
-##SBATCH --exclude=srvgpu[01-05],srv103,srv108
 
 
 ## I am passing a nodefile to use the same nodes for all tests, because some 
@@ -88,7 +88,7 @@ set -x
 
 #HERCULES_CONF=$HERCULES_CONF LD_PRELOAD=$HERCULES_POSIX_PRELOAD ${COMMAND}
 # --oversubscribe
-time mpiexec  $HERCULES_MPI_NP$NUMBER_OF_PROCESS  $HERCULES_MPI_HOSTFILE_DEF$HERCULES_MPI_HOSTFILE_NAME \
+time mpiexec --map-by node $HERCULES_MPI_NP$NUMBER_OF_PROCESS  $HERCULES_MPI_HOSTFILE_DEF$HERCULES_MPI_HOSTFILE_NAME \
    $HERCULES_MPI_ENV_DEF HERCULES_CONF=$HERCULES_CONF \
    $HERCULES_MPI_ENV_DEF LD_PRELOAD=$HERCULES_POSIX_PRELOAD \
    $COMMAND
