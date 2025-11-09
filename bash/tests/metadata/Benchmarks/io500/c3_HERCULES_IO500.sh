@@ -1,8 +1,9 @@
 #!/bin/bash
 
+SBATCH_FLAGS="--partition=large -A uc3m_a0-sciot --exclusive" 
 SCRIPT_NAME="c3_io500_hercules_slurm.sh"
 # Minimal test.
-#IO500_CONFFILE="/home/tester004/gesanche/io500/config-hercules-minimal.ini"
+#IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks/io500/Configurations/config-hercules-minimal.ini"
 # Full test.
 IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks/io500/Configurations/config-hercules-full.ini"
 #IO500_CONFFILE="/home/tester004/gesanche/io500/config-hercules-find.ini"
@@ -110,7 +111,7 @@ for test_number in $(seq 1 $MAX_ITERATIONS); do
 						set -x
 
 						## The first job does not have dependencie (do not wait for another job to end).
-						jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$TOTAL_NUMBER_OF_CLIENTS" "${IO500_CONFFILE}" | cut -d ' ' -f4)
+						jid=$(sbatch ${SBATCH_FLAGS} --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$TOTAL_NUMBER_OF_CLIENTS" "${IO500_CONFFILE}" | cut -d ' ' -f4)
 						echo $jid
 						set +x
 

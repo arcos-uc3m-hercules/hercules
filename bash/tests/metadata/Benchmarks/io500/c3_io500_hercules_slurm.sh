@@ -2,11 +2,11 @@
 #SBATCH --job-name=hercules    # Job name
 #SBATCH --output=logs/hercules/%j-io500.log   # Standard output and error log
 #SBATCH --time=8:00:00               # Time limit hrs:min:sec
-#SBATCH --cpus-per-task=36
+#SBATCH --cpus-per-task=1
 #SBATCH --partition=large
+#SBATCH --ntasks-per-node=100 # fix the mpirun error: "There are not enough slots available in the system.."
 #SBATCH --exclude=srvgpu[01-05],srv103,srv108
-#SBATCH --nodefile=/home/tester004/gesanche/hercules/tmp/hostfile_3419
-
+##SBATCH --nodefile=/home/tester004/gesanche/hercules/tmp/hostfile_3419
 ## I am passing a nodefile to use the same nodes for all tests, because some 
 ## nodes could have less resources.
 
@@ -67,7 +67,7 @@ IOR_PATH=/home/tester004/gesanche/io500/
 #spack load glib@2.78.3/4c7p6mc
 #spack load cmake@3.31.5/bbzu7or
 source "/home/tester004/load-local-spack.sh"
-source "/home/tester004/gesanche/hercules/Stuff/c3-spack-modules.sh"
+source "/home/tester004/gesanche/hercules/stuff/c3-spack-modules.sh"
 module load hpcx
 #whereis mpiexec
 # spack load \
@@ -118,7 +118,7 @@ if [ -z "$CONFIG_PATH" ]; then
    source hercules start
 else
    echo "Configuration file pass $CONFIG_PATH"
-#   export HERCULES_DEBUG_LEVEL=none
+   export HERCULES_DEBUG_LEVEL=none
    source /home/tester004/gesanche/hercules/scripts/hercules start \
    -f "$CONFIG_PATH" 
    unset HERCULES_DEBUG_LEVEL

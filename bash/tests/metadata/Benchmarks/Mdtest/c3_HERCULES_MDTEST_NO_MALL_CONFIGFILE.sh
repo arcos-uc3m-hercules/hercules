@@ -1,5 +1,6 @@
 #!/bin/bash
 
+SBATCH_FLAGS="--partition=large -A uc3m_a0-sciot --exclusive" 
 SCRIPT_NAME="c3_mdtest_hercules_slurm.sh"
 TOTAL_NUMBER_OF_FILES=10000
 MDTEST_ITERATIONS=5
@@ -116,7 +117,7 @@ for test_number in $(seq 1 $MAX_ITERATIONS); do
 						# 	jid=$(sbatch -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$FILE_SIZE_PER_CLIENT" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "$IOR_FILE_PER_PROCESS" "$IOR_AVOID_CACHE" | cut -d ' ' -f4)
 						# ## The following jobs wait for the previous job to finish.
 						# else
-							jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$NUMBER_OF_FILES_PER_PROCESS" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "${MDTEST_ITERATIONS}" | cut -d ' ' -f4)
+							jid=$(sbatch ${SBATCH_FLAGS} --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME "$CONFIG_PATH" "$NUMBER_OF_FILES_PER_PROCESS" "$TOTAL_NUMBER_OF_CLIENTS" "$CLIENTS_PER_NODE" "${MDTEST_ITERATIONS}" | cut -d ' ' -f4)
 						echo $jid
 						### exit 0
 						set +x

@@ -2,8 +2,9 @@
 #SBATCH --job-name=hercules    # Job name
 #SBATCH --output=logs/hercules/%j_mdtest.log   # Standard output and error log
 #SBATCH --time=8:00:00               # Time limit hrs:min:sec
-#SBATCH --cpus-per-task=36
+#SBATCH --cpus-per-task=1
 #SBATCH --partition=large
+#SBATCH --ntasks-per-node=100 # fix the mpirun error: "There are not enough slots available in the system.."
 #SBATCH --exclude=srvgpu[01-05],srv103,srv108
 
 CONFIG_PATH=$1
@@ -27,7 +28,7 @@ cat "${CONFIG_PATH}"
 MDTEST_PATH=/home/tester004/gesanche/io500/bin/
 
 source "/home/tester004/load-local-spack.sh"
-source "/home/tester004/gesanche/hercules/Stuff/c3-spack-modules.sh"
+source "/home/tester004/gesanche/hercules/stuff/c3-spack-modules.sh"
 module load hpcx
 
 export UCX_NET_DEVICES="ib0"
