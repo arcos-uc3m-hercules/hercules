@@ -20,7 +20,6 @@
 // Structure storing configuration info for the IMSS buffer servers.
 typedef struct
 {
-
 	// Port number that the server will be connecting to.
 	int32_t port;
 
@@ -84,6 +83,7 @@ uint16_t connection_port; // FIXME
 
 // Metadata deployment flag.
 uint32_t metadata_server_deployed;
+
 
 /***************************************************************************
 *******************************  FUNCTIONS  ********************************
@@ -640,7 +640,7 @@ int getConfiguration(struct arguments *args)
 	else
 		args->malleability = 0;
 
-	// if (args->malleability)
+	if (args->malleability)
 	{
 		// tolerance for performing a malleability operation.
 		int32_t default_tolerance = 100;
@@ -691,10 +691,10 @@ int getConfiguration(struct arguments *args)
 		}
 		// Convert from MB to bytes.
 		args->malleability_performance_threshold *= MB;
-		fprintf(stderr, "Malleability is enabled.\n HERCULES_MALLEABILITY_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f\n", 
-			args->malleability_tolerance, 
-			args->malleability_windows_size, 
-			args->malleability_performance_threshold);
+		fprintf(stderr, "Malleability is enabled.\n HERCULES_MALLEABILITY_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f\n",
+				args->malleability_tolerance,
+				args->malleability_windows_size,
+				args->malleability_performance_threshold);
 	}
 
 	// @deprecated
@@ -713,8 +713,9 @@ int getConfiguration(struct arguments *args)
 	// else if (cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"))
 	// 	args->lower_bound_servers = atoi(cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"));
 
-	// end of Malleability configuration.
+	// End of Malleability configuration.
 
+	// Fault-tolerance.
 	if (getenv("HERCULES_REPL_FACTOR") != NULL)
 		args->repl_factor = atoi(getenv("HERCULES_REPL_FACTOR"));
 	else if (cfg_get(cfg, "REPL_FACTOR"))
@@ -728,6 +729,24 @@ int getConfiguration(struct arguments *args)
 		args->repl_type = atoi(cfg_get(cfg, "REPL_TYPE"));
 	else
 		args->repl_type = ASYNC;
+	// End of Fault-tolerance.
+
+	// Sync or Async I/O.
+	if (getenv("HERCULES_ASYNC_IO") != NULL)
+		args->async_io = atoi(getenv("HERCULES_ASYNC_IO"));
+	else if (cfg_get(cfg, "ASYNC_IO"))
+		args->async_io = atoi(cfg_get(cfg, "ASYNC_IO"));
+	else
+		args->async_io = SYNC; // by default we use sync calls.
+
+	if (args->async_io != SYNC && args->async_io != ASYNC)
+	{
+		fprintf(stderr, "WARNING: Invalid async IO option: %" PRIu32 ", setting to %d (SYNCHRONOUS)", args->async_io, SYNC);
+		args->async_io = SYNC; // by default we use sync calls.
+	}
+	fprintf(stderr,"Asynchronous IO: %" PRIu32 "\n", args->async_io);
+	ASYNC_IO = args->async_io;
+	// End of Sync or Async I/O.
 
 	if (getenv("HERCULES_BUFF_SIZE") != NULL)
 		args->bufsize = atol(getenv("HERCULES_BUFF_SIZE"));

@@ -73,6 +73,7 @@ struct arguments
     int32_t lower_bound_servers;
     int32_t repl_factor;
     int32_t repl_type;
+    int32_t async_io;              /* flag control to enable asynchronous IO. */
     size_t block_size;            /* block size in KB arg to -B */
     int id;                         /* server ID arg to -r */
     struct logging_opts logging;

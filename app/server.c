@@ -222,7 +222,6 @@ int32_t main(int32_t argc, char **argv)
 	{
 		// args.stat_host = argv[3];
 		slog_debug("imss_uri = %s, stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
-		// fprintf(stderr, "imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "\n", args.imss_uri, args.stat_host, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
 		// bind port number.
 		bind_port = args.data_port;
 		init_number_of_server = atoi(argv[3]);
@@ -236,15 +235,16 @@ int32_t main(int32_t argc, char **argv)
 		// bind port number.
 		bind_port = args.stat_port;
 
-		if (strlen(args.alloc_data_hostfile) != 0)
+		if (strlen(args.alloc_data_hostfile) != 0 && args.malleability > 0)
 		{
 			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
 			fprintf(stderr, "Number of hosts in %s are %d\n", args.alloc_data_hostfile, number_of_hosts);
 		} 
-		else 
-		{
-			fprintf(stderr,"ERROR: alloc_data_hostfile has not ben set. HERCULES_ALLOC_DATA_HOSTFILE = hostfile_path\n");
-		}
+		// TODO: put the following message on the workers.c, where malleability is applied.
+		// else 
+		// {
+		// 	fprintf(stderr,"ERROR: alloc_data_hostfile has not ben set. HERCULES_ALLOC_DATA_HOSTFILE = hostfile_path\n");
+		// }
 	}
 
 	// buffer size provided.

@@ -2882,7 +2882,9 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 				if (!found)
 				{
 					// AddIPS(&curr_imss.info, node_to_use, strlen(node_to_use));
+#ifdef DPRINTF
 					fprintf(stderr, "Adding %s on the client %d.\n", token, process_rank);
+#endif
 					AddIPS(&curr_imss.info, token, strlen(token));
 					AddBackEndServer2Imss(IMSS_ROOT);
 				}
@@ -2894,9 +2896,9 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 			}
 			end_malleability_t = clock() - init_malleability_t;
 			malleability_time_taken = ((double)end_malleability_t) / CLOCKS_PER_SEC; // in seconds
-			#ifdef PRINTF
+#ifdef DPRINTF
 			fprintf(stderr, "read | write, New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d\n", malleability_time_taken, id_modified_server, new_number_of_data_servers);
-			#endif
+#endif
 			slog_debug("New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d", malleability_time_taken, id_modified_server, new_number_of_data_servers);
 		}
 	}
@@ -5145,11 +5147,13 @@ void async_data_worker_progress(int umbral)
 		// The callback will decrease outstanding_sends.
 		// fprintf(stderr, "Max outstanding sends reached %d/%d\n", outstanding_sends, curr_imss_storages);
 		size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
+#ifdef DPRINTF
 		if ((waiting_count % 1000) == 0)
 		{
 			fprintf(stderr, "+ waiting outstanding_sends = %zu\n", current_outstanding);
 		}
 		waiting_count++;
+#endif
 		ucp_worker_progress(ucp_worker_data);
 	}
 }
@@ -5339,7 +5343,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				exit(-1);
 			}
 			size_t size_sent_data = 0;
-			if (async == ASYNC) // TO FIX: put the correct condition.
+			if (async == ASYNC)
 			{ // async send.
 				// while (outstanding_sends >= curr_imss_storages)
 				// {

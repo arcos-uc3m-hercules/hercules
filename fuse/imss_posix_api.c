@@ -1846,7 +1846,7 @@ extern "C"
 			// 	i_blk++;
 			// }
 			// sync send.
-			if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, SYNC), "set_data", int32_t, -1) < 0)
+			if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO), "set_data", int32_t, -1) < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
 				error_print = -ENOENT;
@@ -1860,13 +1860,11 @@ extern "C"
 			ucp_worker_progress(ucp_worker_data);
 		}
 
-		// while (outstanding_sends > 0)
-		// {
-		// fprintf(stderr,"calling progress");
-		// ucp_worker_progress(ucp_worker_data);
-		// }
-		async_data_worker_progress(0);
-
+		if (ASYNC_IO == ASYNC)
+		{
+			async_data_worker_progress(0);
+		}
+		
 		// updates intervals on the back-end.
 		update_dataset((char *)path, ds);
 

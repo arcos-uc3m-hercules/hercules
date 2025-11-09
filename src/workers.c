@@ -112,7 +112,9 @@ int data_ready = 0;
 int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
 {
 	int count = my_imss->num_storages;
+#ifdef DPRINTF
 	fprintf(stderr, "[AddIPS] Adding %s (%d), count=%d\n", line, n_chars, count);
+#endif
 	slog_debug("Adding %s (%d), count=%d, my_imss->num_storages add=%p", line, n_chars, count, &(my_imss)->num_storages);
 	char **new_ips = (char **)realloc(my_imss->ips, (count + 1) * sizeof(char *));
 	if (!new_ips)
@@ -447,12 +449,16 @@ void *move_blocks_2_server(void *th_argv)
 void *CommissioningStage(void *th_argv)
 {
 	CommissioningThreadArgs *arguments = (CommissioningThreadArgs *)th_argv;
+#ifdef DPRINTF
 	fprintf(stderr, "arguments->args.malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args.malleability, comissioning_on, consecutive_scale_up_signals);
+#endif
 	if (arguments->args.malleability && !comissioning_on)
 	{
 		// Always check the performance trend.
 		bool to_add_server = make_scaling_decision(elasticity_records_history, arguments->args.malleability_windows_size, arguments->args.malleability_performance_threshold);
+#ifdef DPRINTF
 		fprintf(stderr, "to_add_server=%d\n", to_add_server);
+#endif
 		pthread_mutex_lock(&mutext_malleability);
 		if (to_add_server)
 		{
@@ -555,9 +561,11 @@ void *CommissioningStage(void *th_argv)
 	}
 	else
 	{
-		// just for testing. It must be comment on production.
+// just for testing. It must be comment on production.
+#ifdef DPRINTF
 		make_scaling_decision(elasticity_records_history, arguments->args.malleability_windows_size, arguments->args.malleability_performance_threshold);
 		fprintf(stderr, "Testing block\n");
+#endif
 	}
 
 	p_argv temp_p_argv_for_calls;
@@ -642,7 +650,9 @@ double calculate_trend_slope(const std::vector<double> &y)
 bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double minimum_performance_threshold)
 {
 	pthread_mutex_lock(&mutext_malleability); // history is a shared resource.
+#ifdef DPRINTF
 	fprintf(stderr, "analysis_window_size=%" PRId32 ", minimum_performance_threshold=%f, history.empty()=%d\n", analysis_window_size, minimum_performance_threshold, history.empty());
+#endif
 	if (history.empty())
 	{
 		pthread_mutex_unlock(&mutext_malleability);
@@ -700,7 +710,6 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 		return false;
 	}
 
-
 	// Calculate the Simple Moving Average (SMA).
 	double performance_sum = std::accumulate(aggregate_performance_history.begin(), aggregate_performance_history.end(), 0.0);
 	double moving_average = performance_sum / aggregate_performance_history.size();
@@ -718,7 +727,9 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	// Decision Logic.
 	if (moving_average < minimum_performance_threshold)
 	{
+#ifdef DPRINTF
 		fprintf(stderr, "DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s) \n", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers, performance_sum, performance_sum / MB);
+#endif
 		slog_debug("DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f, performance_sum=%.2f bytes (%.2f MB/s)", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers, performance_sum, performance_sum / MB);
 		return true;
 	}
@@ -728,8 +739,9 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	// 	fprintf(stderr, "DECISION: SCALE UP! Performance trend is strongly negative (%.2f), number of active servers=%d\n", slope, number_active_storage_servers);
 	// 	return true;
 	// }
-
+#ifdef DPRINTF
 	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)\n", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers, performance_sum, performance_sum / MB);
+#endif
 	slog_debug("DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)", moving_average, moving_average / MB, minimum_performance_threshold, minimum_performance_threshold / MB, number_active_storage_servers, performance_sum, performance_sum / MB);
 	return false;
 }
@@ -1452,27 +1464,33 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				}
 				else
 				{
-					// pthread_mutex_lock(&lock_network);
-					// ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
-					// ret_send_data = isend_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
-					// Create a tracking struct and add it to our list.
-					ServerSendRequest *new_send = new ServerSendRequest();
-					void *ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid, new_send);
-					if (UCS_PTR_IS_PTR(ucx_req_handle))
-					{
-						// The request is sending. The callback will handle cleanup.
-					}
-					else if (UCS_PTR_IS_ERR(ucx_req_handle))
-					{
-						slog_error("Failed to initiate async send on server.");
-						fprintf(stderr, "Failed to initiate async send on server.");
-						// The send function already cleaned up new_send.
+					if (arguments->args.async_io == SYNC)
+					{ // Synchronous.
+					  // pthread_mutex_lock(&lock_network);
+					  ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
+					  // ret_send_data = isend_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
+					  // pthread_mutex_unlock(&lock_network);
 					}
 					else
-					{
-						// It completed immediately. The send function also cleaned up.
+					{ // Asynchronous.
+						// Create a tracking struct and add it to our list.
+						ServerSendRequest *new_send = new ServerSendRequest();
+						void *ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid, new_send);
+						if (UCS_PTR_IS_PTR(ucx_req_handle))
+						{
+							// The request is sending. The callback will handle cleanup.
+						}
+						else if (UCS_PTR_IS_ERR(ucx_req_handle))
+						{
+							slog_error("Failed to initiate async send on server.");
+							fprintf(stderr, "Failed to initiate async send on server.");
+							// The send function already cleaned up new_send.
+						}
+						else
+						{
+							// It completed immediately. The send function also cleaned up.
+						}
 					}
-					// pthread_mutex_unlock(&lock_network);
 				}
 				// }
 			}
