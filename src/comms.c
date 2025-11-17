@@ -275,9 +275,9 @@ extern "C"
 	/**
 	 * @brief Callback function invoked when an asynchronous read is complete.
 	 * @param request The handle of the UCX request that has completed.
-     * @param status The final status of the operation.
-     * @param info Pointer to the reception label information (contains the actual length). 
-     * @param user_data Pointer to our ServerRecvRequest structure.
+	 * @param status The final status of the operation.
+	 * @param info Pointer to the reception label information (contains the actual length).
+	 * @param user_data Pointer to our ServerRecvRequest structure.
 	 */
 	void server_recv_completion_callback(void *request, ucs_status_t status,
 										 const ucp_tag_recv_info_t *info, void *user_data)
@@ -341,7 +341,7 @@ extern "C"
 		void *request = ucp_tag_recv_nbx(ucp_worker, allocated_buffer, buffer_len, tag, tag_mask, &recv_param);
 
 		// TO CHECK: if the request completes immediatly, the callback is not called.
-		
+
 		return request;
 	}
 
@@ -398,6 +398,14 @@ extern "C"
 	 */
 	size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len, char *req)
 	{
+
+		if (ep == NULL)
+		{
+			slog_error("[COMM][send_req] CRITICAL: Attempted to send request '%s' via NULL endpoint.", req);
+			fprintf(stderr, "[COMM][send_req] CRITICAL: Attempted to send request '%s' via NULL endpoint.\n", req);
+			exit(-1);
+		}
+
 		ucs_status_t status = UCS_OK;
 		struct ucx_context *request;
 		size_t msg_len = 0;
@@ -528,12 +536,12 @@ extern "C"
 		recv_param.cb.recv = recv_handler;
 
 		slog_debug("[COMM] Probe tag (%lu bytes)", msg_length);
-		if (async)
-		{ // asynchronous request
-			request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
-		}
-		else
-		{ // synchronous request
+		// if (async)
+		// { // asynchronous request
+		// 	request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
+		// }
+		// else
+		// { // synchronous request
 			request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
 			// wait for the request to be completed.
 			status = ucx_wait(ucp_worker, request, "recv", "data");
@@ -545,7 +553,7 @@ extern "C"
 			}
 			// request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
 			// memcpy(msg, recv_buffer, msg_length);
-		}
+		// }
 
 		return msg_length;
 	}
@@ -1083,17 +1091,7 @@ extern "C"
 			for (size_t i = 0; i < struct_->num_intervals; i++)
 			{
 				memcpy(offset_pt, struct_->intervals[i], memsize);
-				// 	// Copy the left interval.
-				// 	memsize = sizeof(struct_->intervals[i]->left_interval);
-				// 	memcpy(offset_pt, &struct_->intervals[i]->left_interval, memsize);
-				// 	offset_pt += memsize;
-				// 	// Copy the right interval.
-				// 	memsize = sizeof(struct_->intervals[i]->right_interval);
-				// 	memcpy(offset_pt, &struct_->intervals[i]->right_interval, memsize);
-				// 	offset_pt += memsize;
-				// 	// Copy the value.
-				// 	memsize = sizeof(struct_->intervals[i]->value);
-				// 	memcpy(offset_pt, &struct_->intervals[i]->value, memsize);
+
 				offset_pt += memsize;
 			}
 
@@ -1179,18 +1177,30 @@ extern "C"
 			slog_info(" \t\t receiving IMSS_INFO %lu", length);
 			imss_info *struct_ = (imss_info *)data_struct;
 
+			if ((length >= 22) && (strncmp("$ERRIMSS_NO_KEY_AVAIL$", msg_data, 22) == 0))
+			{
+				slog_error("[COMM] recv_dynamic_stream end with error (received ERRIMSS_NO_KEY_AVAIL$), length=%lu", length);
+
+				// using the uri to store the error message.
+				strncpy(struct_->uri_, "$ERRIMSS_NO_KEY_AVAIL$", sizeof(struct_->uri_) - 1);
+				struct_->uri_[sizeof(struct_->uri_) - 1] = '\0';
+
+				free(result);
+				return -1;
+			}
+
 			// Copy the actual structure into the one provided through reference.
 			memcpy(struct_, msg_data, sizeof(imss_info));
 
 			slog_info(" \t\t msg_data=%s", msg_data);
 
-			if (!strncmp("$ERRIMSS_NO_KEY_AVAIL$", struct_->uri_, 22))
-			{
-				slog_error("[COMM] recv_dynamic_stream end  with error, length=%lu", length);
-				// return length;
-				free(result);
-				return -1;
-			}
+			// if (!strncmp("$ERRIMSS_NO_KEY_AVAIL$", struct_->uri_, 22))
+			// {
+			// 	slog_error("[COMM] recv_dynamic_stream end  with error, length=%lu", length);
+			// 	// return length;
+			// 	free(result);
+			// 	return -1;
+			// }
 
 			msg_data += sizeof(imss_info);
 
@@ -1698,7 +1708,7 @@ extern "C"
 		}
 		if (status != UCS_OK)
 		{
-			// fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str, ucs_status_string(status));
+			fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str, ucs_status_string(status));
 			slog_warn("unable to %s %s (%s)\n", op_str, data_str, ucs_status_string(status));
 		}
 		// ep_err_detected = 0;

@@ -768,7 +768,11 @@ extern "C"
 			}
 		}
 
-		update_dataset((char *)path, ds);
+		if (MALLEABILITY_ON == 1)
+		{
+			update_dataset((char *)path, ds);			
+		}
+		
 
 		// total_amount_read += byte_count;
 		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, total_bytes_scheduled);
@@ -932,7 +936,10 @@ extern "C"
 			}
 		}
 
-		update_dataset((char *)path, ds);
+		if (MALLEABILITY_ON == 1)
+		{
+			update_dataset((char *)path, ds);
+		}
 		async_data_worker_progress(0);
 
 		// total_amount_read += byte_count;
@@ -1831,21 +1838,6 @@ extern "C"
 			slog_debug("writting %" PRIu64 " kilobytes (%" PRIu64 " bytes) with an offset of %" PRIu64 " kilobytes (%" PRIu64 " bytes)", bytes_to_copy / 1024, bytes_to_copy, block_offset / 1024, block_offset);
 
 			// Send data to data server.
-			// if (MALLEABILITY)
-			// {
-
-			// 	int32_t num_storages = 0;
-			// 	num_storages = get_number_of_data_servers(i_blk, num_of_blk);
-			// 	slog_debug("[imss_write] i_blk=%ld, num_storages=%ld, N_SERVERS=%ld", i_blk, num_storages, N_SERVERS);
-			// 	if (set_data_mall(ds, curr_blk, data_pointer, bytes_to_copy, block_offset, num_storages) < 0)
-			// 	{
-			// 		slog_error("[IMSS-FUSE]	Error writing to imss.\n");
-			// 		error_print = -ENOENT;
-			// 		return -ENOENT;
-			// 	}
-			// 	i_blk++;
-			// }
-			// sync send.
 			if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO), "set_data", int32_t, -1) < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
@@ -1866,7 +1858,11 @@ extern "C"
 		}
 		
 		// updates intervals on the back-end.
-		update_dataset((char *)path, ds);
+		if (MALLEABILITY_ON == 1)
+		{
+			update_dataset((char *)path, ds);
+		}
+		
 
 		// Update header count if the file has become bigger.
 		if (size + off > stats.st_size)

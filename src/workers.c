@@ -21,6 +21,7 @@
 #include "records.hpp"
 #include "map_server_eps.hpp"
 #include "policies.h"
+#include "shared_memory.h"
 
 void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
@@ -1225,7 +1226,10 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	// Resources specifying if the request set in the sender.
 	int64_t more = 0;
 	size_t more_size = sizeof(more);
-	int is_shared_memory = 0, snapshot_op = 0;
+	int is_shared_memory = 0;
+	int default_params = 1;
+	int snapshot_op = 0;
+	key_t shm_key = -1;
 
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
@@ -1276,10 +1280,22 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		more = GET_OP;
 		is_shared_memory = 1;
 	}
-	else if (!strcmp(mode, "LOCALSET"))
+	else if (!strcmp(mode, "LOCALGETBLOCK"))
+	{
+		more = GET_OP;
+		is_shared_memory = 1;
+		default_params = 0;
+	}
+	// else if (!strcmp(mode, "LOCALSET"))
+	// {
+	// 	more = SET_OP;
+	// 	is_shared_memory = 1;
+	// }
+	else if (!strcmp(mode, "LOCALSETBLOCK"))
 	{
 		more = SET_OP;
 		is_shared_memory = 1;
+		default_params = 0;
 	}
 	else if (!strcmp(mode, "SNAPSET"))
 	{
@@ -1351,7 +1367,15 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		return -1;
 	}
 
-	TIMING_NO_RETURN(sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read), "sscanf requeest", arguments->thread_id);
+	if (!default_params)
+	{ // special case for "LOCALSETBLOCK" (shared memory).
+		sscanf(req, "%s %" PRIu32 " %" PRIu32 " %d %s %lu", mode, &block_size_recv, &block_offset, &shm_key, uri_, &to_read);
+		// fprintf(stderr, "request=%s, block_size_recv=%d, shm_key=%d\n", req, block_size_recv, shm_key);
+	}
+	else
+	{
+		TIMING_NO_RETURN(sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu", mode, &block_size_recv, &block_offset, uri_, &to_read), "sscanf requeest", arguments->thread_id);
+	}
 
 	slog_debug(" Request - mode '%s', block_size_recv '%" PRIu32 "', block_offset '%" PRIu32 "', uri_ '%s', more %ld", mode, block_size_recv, block_offset, uri_, more);
 
@@ -1372,7 +1396,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		{
 		case READ_OP:
 		{
-			// int32_t ret = map->get(key, &address_, &block_size_rtvd);
 			int32_t ret = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id);
 
 			// Check if there was an associated block to the key.
@@ -1447,29 +1470,66 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// {
 				// Send the requested block.
 				// slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, stat->st_nlink=%lu, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, stats->st_nlink, is_shared_memory);
-				slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld kb, is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read / 1024, is_shared_memory);
+				slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld bytes (%ld kb), is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read, to_read / 1024, is_shared_memory);
 				size_t ret_send_data = 0;
 				if (is_shared_memory)
 				{
-					// pthread_mutex_lock(&lock_network);
-					ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_, block_size_rtvd, arguments->worker_uid);
-					// pthread_mutex_unlock(&lock_network);
-					slog_debug("[READ_OP][READ_OP] ret_send_data=%lu", ret_send_data);
-					if (ret_send_data == 0)
+					// put the private data on the shared memory.
+					// uint64_t remaining = block_size_rtvd - block_offset;
+					// SharedMemory *sh_memory_struct = setContentSMByID(shm_key, to_read, (char *)address_ + block_offset); //setContentSM(shm_key, to_read, (char *)address_ + block_offset);
+					void *content = setContentSMByID(shm_key, to_read, (char *)address_ + block_offset);
+					const char *response = MSG_OK_OP;
+
+					if (content == NULL)
 					{
-						slog_error("HERCULES_ERR_WORKER_SENDBLOCK");
-						perror("HERCULES_ERR_WORKER_SENDBLOCK");
+						fprintf(stderr, "HERCULES_ERR_SETTING_SHM_CONTENT_READ_OP\n");
+						slog_error("HERCULES_ERR_SETTING_SHM_CONTENT_READ_OP");
+						response = MSG_ERROR_OP;
+					}
+					else
+					{
+						unlinkSM(content);
+					}
+
+					// send the confirmation to the client.
+					ret = SendConfirmationMessage(arguments, response);
+					if (ret == 0)
+					{
+						perror("HERCULES_ERR_PUBLISH_READ_BLOCK_SHM");
+						slog_error("HERCULES_ERR_PUBLISH_READ_BLOCK_SHM");
 						return -1;
 					}
+
+					// unlinkSM(sh_memory_struct->content);
+					// free(sh_memory_struct);
+					// ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (void *)MSG_OK_OP, STRING, arguments->worker_uid);
+					// if (ret < 0)
+					// {
+					// 	perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_CONFIRMATION_SHM");
+					// 	slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_CONFIRMATION_SHM");
+					// 	// pthread_mutex_unlock(&lock_network);
+					// 	return -1;
+					// }
+
+					// // pthread_mutex_lock(&lock_network);
+					// ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_, block_size_rtvd, arguments->worker_uid);
+					// // pthread_mutex_unlock(&lock_network);
+					// slog_debug("[READ_OP][READ_OP] ret_send_data=%lu", ret_send_data);
+					// if (ret_send_data == 0)
+					// {
+					// 	slog_error("HERCULES_ERR_WORKER_SENDBLOCK");
+					// 	perror("HERCULES_ERR_WORKER_SENDBLOCK");
+					// 	return -1;
+					// }
 				}
 				else
 				{
 					if (arguments->args.async_io == SYNC)
 					{ // Synchronous.
-					  // pthread_mutex_lock(&lock_network);
-					  ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
-					  // ret_send_data = isend_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
-					  // pthread_mutex_unlock(&lock_network);
+						// pthread_mutex_lock(&lock_network);
+						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
+						// ret_send_data = isend_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
+						// pthread_mutex_unlock(&lock_network);
 					}
 					else
 					{ // Asynchronous.
@@ -1492,7 +1552,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						}
 					}
 				}
-				// }
 			}
 			break;
 		}
@@ -1990,7 +2049,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			break;
 		}
 		default:
-			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_INVALID_MSG_TYPE");
+			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_INVALID_MSG_TYPE\n");
 			slog_error("HERCULES_ERR_SRV_WORKER_INVALID_MSG_TYPE");
 			break;
 		}
@@ -2109,24 +2168,61 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			}
 			else // Data in shared memory.
 			{
-				//  Tell the client this is a new block to be copy in the shared memory with an offset "global_offset".
-				char answer[RESPONSE_SIZE] = {0};
-				sprintf(answer, "NEW %ld", global_offset);
-				slog_info("Answer=%s", answer);
-				// pthread_mutex_lock(&lock_network);
-				ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
-				// pthread_mutex_unlock(&lock_network);
-				if (ret < 0)
+				// get the content from the shared memory.
+				// SharedMemory *sh_memory_struct = getContentSM(shm_key, block_size_recv);
+				void *content = getContentSMByID(shm_key);
+				if (content == NULL)
 				{
-					perror("ERR_HERCULES_WORKER_SEND_DYNAMIC_SHM_LOCAL");
-					slog_error("ERR_HERCULES_WORKER_SEND_DYNAMIC_SHM_LOCAL");
-					// pthread_mutex_unlock(&memory_protect);
+					perror("HERCULES_ERR_GET_CONTENT_SHM_BY_ID_REGULAR_BLOCK_NEW_BLOCK");
+					slog_error("HERCULES_ERR_GET_CONTENT_SHM_BY_ID_REGULAR_BLOCK_NEW_BLOCK");
 					return -1;
 				}
 
-				// Find the length of the string required to store the number, including the null terminator
-				int length_number = snprintf(NULL, 0, "%lu %d", global_offset, block_size_recv) + 1;
-				buffer = (void *)calloc(length_number, sizeof(char));
+				// Send confirmation message.
+				// NOTE: we put this confirmation message because
+				// a pointer needs to be pointing to the shared memory in order to be alive.
+				// if there are not at least one pointer, the system will remove the shared memory.
+				// this is not an expected behaviour, so we have to check it later.
+				ret = SendConfirmationMessage(arguments, MSG_OK_OP);
+				if (ret == 0)
+				{
+					perror("HERCULES_ERR_PUBLISH_UPDATE_ZERO_BLOCK_SHM");
+					slog_error("HERCULES_ERR_PUBLISH_UPDATE_ZERO_BLOCK_SHM");
+					return -1;
+				}
+
+				// here we do not receive the data by UCX, we use the size specified on the request message.
+				msg_length = block_size_recv;
+				// alloc memory to copy from shared memory to private memory.
+				slog_debug("[WRITE_OP SHM] msg_length=%lu, is_block_zero=%d, snapshot_op=%d", msg_length, is_block_zero, snapshot_op);
+				if (is_block_zero || snapshot_op)
+				{
+					// Snapshot operation sends data bigger than BLOCK_SIZE, and
+					// block 0 is usually smaller than BLOCK_SIZE
+					// TOCHECK: does block_size_recv works for snapshot_op?
+					buffer = (void *)malloc(msg_length * sizeof(char));
+					// fprintf(stdout, "Using %lu bytes for block %s\n", msg_length,  key.c_str());
+					size_asigned_to_block = msg_length; // TODO: check if this follows the snapshot requirements.
+					reused_memory = 0;
+				}
+				else
+				{
+					// reutilizate memory from the memory pool.
+					buffer = (void *)StsQueue.pop(mem_pool);
+					if (buffer == NULL)
+					{
+						// buffer = TIMING((void *)mem_type_malloc(BLOCK_SIZE * sizeof(char));, "[write] mem_type_malloc", void *, arguments->thread_id);
+						buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
+						reused_memory = 0;
+						slog_debug("Allocating buffer of size %lu", BLOCK_SIZE);
+					}
+					else
+					{
+						slog_debug("Reusing buffer");
+					}
+					size_asigned_to_block = BLOCK_SIZE;
+				}
+
 				if (buffer == NULL)
 				{
 					perror("HERCULES_ERR_MEMORY_ALLOCATION_SHM");
@@ -2135,20 +2231,17 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					return -1;
 				}
 
-				// When using shared memory, "buffer" will store the offset and the block size.
-				ret = snprintf((char *)buffer, length_number, "%lu %d", global_offset, block_size_recv);
-				if (ret < 0)
-				{
-					perror("HERCULES_ERR_ENCODING");
-					slog_error("HERCULES_ERR_ENCODING");
-					// pthread_mutex_unlock(&memory_protect);
-					return -1;
-				}
+				// copy from shared memory to private memory.
+				// copyContentSM(buffer, sh_memory_struct->content, sh_memory_struct->size);
+				copyContentSM(buffer, content, block_size_recv);
 
-				slog_info("buffer=%s, length_number=%d, global_offset=%lu", buffer, length_number, global_offset);
-
-				size_asigned_to_block = length_number;
-				global_offset += block_size_recv;
+				// detach shared memory.
+				// unlinkSM(sh_memory_struct->content);
+				unlinkSM(content);
+				// Destroy the shared memory segment.
+				// freeSM(sh_memory_struct->id);
+				freeSM(shm_key);
+				// free(sh_memory_struct);
 			}
 
 			int32_t insert_successful = -1;
@@ -2285,20 +2378,59 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				}
 				else
 				{ // data is in shared memory.
-					//  Tell the client to update the shared memory.
-					char answer[RESPONSE_SIZE] = {0};
-					// "address_" is the shared memory offset.
-					sprintf(answer, "TOUPDATE %s", (char *)address_);
-					// pthread_mutex_lock(&lock_network);
-					ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
-					// pthread_mutex_unlock(&lock_network);
-					if (ret < 0)
+					// SharedMemory *sh_memory_struct = getContentSM(shm_key, block_size_recv);
+					void *content = getContentSMByID(shm_key);
+					if (content == NULL)
 					{
-						slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_BLOCK_0_WRITE_OP");
-						perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_BLOCK_0_WRITE_OP");
-						// pthread_mutex_unlock(&memory_protect);
+						perror("HERCULES_ERR_GET_CONTENT_SHM_BY_ID_BLOCK_ZERO");
+						slog_error("HERCULES_ERR_GET_CONTENT_SHM_BY_ID_BLOCK_ZERO");
 						return -1;
 					}
+					void *buffer = content; // sh_memory_struct->content;
+					// copy from shared memory to private memory.
+					// copyContentSM(buffer, sh_memory_struct->content, sh_memory_struct->size);
+					pthread_mutex_lock(&memory_protect);
+					old = (struct stat *)address_;
+					latest = (struct stat *)buffer;
+					slog_debug(" File size new %ld old %ld", latest->st_size, old->st_size);
+					latest->st_size = std::max(latest->st_size, old->st_size);
+					// slog_debug(" buffer->st_size: %ld, block_offset=%ld", latest->st_size, block_offset);
+					slog_debug(" buffer->st_size: %ld, block_offset=%ld, old->st_nlink: %ld, new->st_nlink: %ld", latest->st_size, block_offset, old->st_nlink, latest->st_nlink);
+					// Overwrite block 0 data.
+					memcpy((char *)address_ + block_offset, buffer, block_size_recv);
+					pthread_mutex_unlock(&memory_protect);
+
+					// No confirmation is needed here.
+					ret = SendConfirmationMessage(arguments, MSG_OK_OP);
+					if (ret == 0)
+					{
+						perror("HERCULES_ERR_PUBLISH_UPDATE_ZERO_BLOCK_SHM");
+						slog_error("HERCULES_ERR_PUBLISH_UPDATE_ZERO_BLOCK_SHM");
+						return -1;
+					}
+
+					// detach shared memory.
+					// slog_debug("Unlinking shm key %d", sh_memory_struct->key);
+					// unlinkSM(sh_memory_struct->content);
+					unlinkSM(content);
+					// Destroy the shared memory segment.
+					// freeSM(sh_memory_struct->id);
+					freeSM(shm_key);
+					// free(sh_memory_struct);
+					//  Tell the client to update the shared memory.
+					// char answer[RESPONSE_SIZE] = {0};
+					// // "address_" is the shared memory offset.
+					// sprintf(answer, "TOUPDATE %s", (char *)address_);
+					// // pthread_mutex_lock(&lock_network);
+					// ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
+					// // pthread_mutex_unlock(&lock_network);
+					// if (ret < 0)
+					// {
+					// 	slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_BLOCK_0_WRITE_OP");
+					// 	perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_BLOCK_0_WRITE_OP");
+					// 	// pthread_mutex_unlock(&memory_protect);
+					// 	return -1;
+					// }
 				}
 			}
 			else
@@ -2338,20 +2470,37 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				}
 				else
 				{ // Data is in shared memory.
-					//  Tell the client to update the shared memory.
-					char answer[RESPONSE_SIZE] = {0};
-					// "address_" is the shared memory offset.
-					sprintf(answer, "TOUPDATE %s", (char *)address_);
-					// pthread_mutex_lock(&lock_network);
-					ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, answer, STRING, arguments->worker_uid);
-					// pthread_mutex_unlock(&lock_network);
-					if (ret < 0)
+					// SharedMemory *sh_memory_struct = getContentSM(shm_key, block_size_recv);
+					void *content = getContentSMByID(shm_key);
+					if (content == NULL)
 					{
-						slog_error("ERR_HERCULES_WORKER_SEND_DYNAMIC_NON_BLOCK_0_WRITE_OP");
-						perror("ERR_HERCULES_WORKER_SEND_DYNAMIC_NON_BLOCK_0_WRITE_OP");
-						// pthread_mutex_unlock(&memory_protect);
+						perror("HERCULES_ERR_GET_CONTENT_SHM_BY_ID_REGULAR_BLOCK");
+						slog_error("HERCULES_ERR_GET_CONTENT_SHM_BY_ID_REGULAR_BLOCK");
 						return -1;
 					}
+
+					pthread_mutex_lock(&memory_protect);
+					// copy from shared memory to private memory.
+					// copyContentSM((char *)address_ + block_offset, sh_memory_struct->content, block_size_recv);
+					copyContentSM((char *)address_ + block_offset, content, block_size_recv);
+					pthread_mutex_unlock(&memory_protect);
+
+					// No confirmation is needed here.
+					ret = SendConfirmationMessage(arguments, MSG_OK_OP);
+					if (ret == 0)
+					{
+						perror("HERCULES_ERR_PUBLISH_UPDATE_BLOCK_SHM");
+						slog_error("HERCULES_ERR_PUBLISH_UPDATE_BLOCK_SHM");
+						return -1;
+					}
+
+					// detach shared memory.
+					// unlinkSM(sh_memory_struct->content);
+					unlinkSM(content);
+					// Destroy the shared memory segment.
+					// freeSM(sh_memory_struct->id);
+					freeSM(shm_key);
+					// free(sh_memory_struct);
 				}
 			}
 		}

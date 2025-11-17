@@ -45,6 +45,9 @@ extern "C"
 // #include <sys/types.h>
 #include <unistd.h>
 
+// to indicates that slog_init was been called.
+static int init_slog = 0;
+
 /**
  * Macro to measure the time spend by function_to_call.
  * char*::print_comment: comment to be concatenated to the elapsed time.
@@ -132,7 +135,7 @@ extern "C"
 
 // Comment the following line to remove logs calls on compilation time.
 //#define DPRINTF
-#define USESLOG
+// #define USESLOG
 #ifdef USESLOG
 #define slog_none(...) \
     slog(SLOG_NONE, __func__, __VA_ARGS__);

@@ -14,7 +14,7 @@
 
 static u_int16_t HERCULES_THREAD_POOL_SIZE = 1;
 static u_int16_t ASYNC_IO = 1;
-
+static u_int16_t MALLEABILITY_ON = 0;
 // using std::string;
 
 #ifdef __cplusplus

@@ -24,7 +24,6 @@ extern pthread_mutex_t tree_mut;
 extern imss curr_imss;
 
 // Initial buffer address.
-// extern char *buffer_address;
 // Set of locks dealing with the memory buffer access.
 extern pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
@@ -454,7 +453,7 @@ int32_t main(int32_t argc, char **argv)
 					return -1;
 				}
 				// Receive the associated structure.
-				imss_info *imss_info_ = (imss_info *)malloc(sizeof(imss_info) * length);
+				imss_info *imss_info_ = (imss_info *)malloc(sizeof(imss_info));//malloc(sizeof(imss_info) * length);
 				ret = recv_dynamic_stream(ucp_worker, metadata_endpoints[i], imss_info_, IMSS_INFO, attr.worker_uid, length);
 				// If another data server has taken the URI, this HERCULES configuration should not be deployed.
 				// Two HERCULES configurations cannot have the same URI.
@@ -495,47 +494,50 @@ int32_t main(int32_t argc, char **argv)
 				// return 0;
 			}
 
-			// When LOCAL policy is used, the server creates a shared memory region.
-			if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
-			{
-				// Get the shared memory key and tries to create the shared memory region (pool).
-				key_t key = getKeySM();
-				slog_info("Generated Key = %d\n", key);
+			// // When LOCAL policy is used, the server creates a shared memory region.
+			// if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
+			// {
+			// 	// Get the shared memory key and tries to create the shared memory region (pool).
+			// 	key_t key = getKeySM();
+			// 	slog_info("Generated Key = %d\n", key);
 
-				shm_data_id = getIdentifierSM(key, SHM_SIZE);
-				if (shm_data_id == -1)
-				{
-					perror("ERR_HERCULES_GET_SM_IDENTIFIER");
-					// Do not stop the process.
-				}
-				else
-				{
-					void *pool_memory = createSM(shm_data_id);
-					if (pool_memory == NULL)
-					{ // error creating the shared memory region.
-						perror("HERCULES_ERR_CREATE_SM");
-						slog_error("HERCULES_ERR_CREATE_SM");
-						ready(tmp_file_path, "ERROR");
-						exit(0);
-					}
-					else
-					{
-						// Shared memory has been created.
-						args.pool_memory = pool_memory;
-						// Becasue the shared memory was successfully created, we
-						// initializate a semaphore to sincronize block 0.
-						sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1);
-						if (sem_shared_memory == SEM_FAILED)
-						{
-							perror("HERCULES_ERR_SHM_SEM_OPEN");
-							exit(-1);
-						}
-						// Close the semaphore. The semaphore will remain and can
-						// be used by the front-end until unlink is called.
-						sem_close(sem_shared_memory);
-					}
-				}
-			}
+			// 	shm_data_id = getIdentifierSM(key, SHM_SIZE);
+			// 	if (shm_data_id == -1)
+			// 	{
+			// 		perror("ERR_HERCULES_GET_SM_IDENTIFIER");
+			// 		// Do not stop the process.
+			// 	}
+			// 	else
+			// 	{
+			// 		void *pool_memory = createSM(shm_data_id);
+			// 		if (pool_memory == NULL)
+			// 		{ // error creating the shared memory region.
+			// 			perror("HERCULES_ERR_CREATE_SM");
+			// 			slog_error("HERCULES_ERR_CREATE_SM");
+			// 			ready(tmp_file_path, "ERROR");
+			// 			exit(0);
+			// 		}
+			// 		else
+			// 		{
+			// 			// Shared memory has been created.
+			// 			args.pool_memory = pool_memory;
+			// 			// Becasue the shared memory was successfully created, we
+			// 			// initializate a semaphore to sincronize block 0.
+			// 			sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1);
+			// 			if (sem_shared_memory == SEM_FAILED)
+			// 			{
+			// 				perror("HERCULES_ERR_SHM_SEM_OPEN");
+			// 				exit(-1);
+			// 			}
+			// 			// Close the semaphore. The semaphore will remain and can
+			// 			// be used by the front-end until unlink is called.
+			// 			sem_close(sem_shared_memory);
+
+			// 			// Initializate the shared memory manager.
+			// 			// memory_manager_init(&g_shm_manager, SHM_SIZE);
+			// 		}
+			// 	}
+			// }
 		}
 
 		// Close the file.
@@ -941,10 +943,10 @@ int32_t main(int32_t argc, char **argv)
 	}
 	else
 	{
-		// Destroy the shared memory segment.
-		freeSM(shm_data_id);
-		// Remove the named semaphore.
-		sem_unlink("/hercules_shm_sem");
+		// // Destroy the shared memory segment.
+		// freeSM(shm_data_id);
+		// // Remove the named semaphore.
+		// sem_unlink("/hercules_shm_sem");
 
 		free(region_locks);
 	}

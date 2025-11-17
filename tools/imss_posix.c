@@ -214,7 +214,15 @@ void ResolvePathsAndFD(const int fd_dir, const char *path_to_check, std::string 
 		directory_path = map_fd_search_by_val(map_fd, fd_dir);
 		// slog_debug("path found=%s", directory_path.c_str());
 		// *directory_path = directory_path_ob.c_str();
-		slog_debug("directory path found in the map: %s, fd=%d", directory_path.c_str(), fd_dir);
+		if (!directory_path.empty())
+		{
+			slog_debug("directory path found in the map: %s, fd=%d", directory_path.c_str(), fd_dir);
+		}
+		// else
+		// {
+		// 	slog_debug("file descriptor %d is not a Hercules directory", fd_dir);
+		// }
+
 		*file_path = NULL;
 	}
 	// return ret;
@@ -593,9 +601,9 @@ __attribute__((constructor)) void imss_posix_init(void)
 	useconds = end.tv_usec - start.tv_usec;
 	elapsed = seconds + useconds / 1e6;
 
-	init = 1;
 	slog_live("Client %d ready in %f sec.", rank, elapsed);
-	fprintf(stdout, "[%s] Client %d ready in %f sec.\n", args.data_hostname, rank, elapsed);
+	fprintf(stdout, "[%s] Client %d/%d ready in %f sec.\n", args.data_hostname, rank, getpid(), elapsed);
+	init = 1;
 	// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
 
@@ -675,7 +683,9 @@ int close(int fd)
 		// Set offset to 0.
 		// map_fd_update_value(map_fd, pathname, fd, 0);
 		map_fd_erase(map_fd, fd);
-		real_close(fd);
+		if(real_close(fd) == -1){
+			fprintf(stderr, "Cannot close aux fd used by HERCULES %d\n", fd);
+		}
 		slog_live("[POSIX]. Ending Hercules 'close', pathname=%s, ret=%d\n", pathname, ret);
 		// free(pathname);
 	}
@@ -914,8 +924,8 @@ pid_t fork(void)
 		// log init.
 		time_t t = time(NULL);
 		struct tm tm = *localtime(&t);
-		sprintf(log_path, "client-thread-%ld.%02d-%02d.%d", pthread_self(), tm.tm_hour, tm.tm_min, getpid());
-		slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
+		// sprintf(log_path, "client-thread-%ld.%02d-%02d.%d", pthread_self(), tm.tm_hour, tm.tm_min, getpid());
+		// slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
 		slog_live("[POSIX] Child process");
 		init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
 	}
@@ -929,6 +939,21 @@ pid_t fork(void)
 	}
 
 	return pid;
+}
+
+pid_t vfork(void)
+{
+	if (!real_vfork)
+		real_vfork = (pid_t (*)())dlsym(RTLD_NEXT, "vfork");
+
+	if (!init)
+	{
+		return real_vfork();
+	}
+	WarnOperationNotSupported(__func__, "GENERIC");
+	// pid_t pid = real_vfork();
+	// slog_live("[POSIX] Ending real '%s', pid=%d", __func__, pid);
+	return real_vfork();
 }
 
 // pid_t vfork(void)
@@ -3157,7 +3182,7 @@ ssize_t read(int fd, void *buf, size_t size)
 			// prefetch is enable.
 			// TODO: change this on all read calls.
 			// fprintf(stderr, "Prefetching is enable wih a size of %" PRIu64 " GB\n", args.prefetch_size/GB);
-			slog_debug("Prefetching is enable wih a size of %" PRIu64 " MB", args.prefetch_size/MB);
+			slog_debug("Prefetching is enable wih a size of %" PRIu64 " MB", args.prefetch_size / MB);
 			ret = imss_sread_prefetch_v2(pathname, buf, size, offset);
 		}
 		else
