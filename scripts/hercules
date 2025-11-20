@@ -637,7 +637,7 @@ do
         # a valid entry here is "--cpus-per-task =18". This allows the execution of the next step 
         # "WaitForServers", which is being executed on the same node as the server task.
         srun  -N 1 -n 1 --cpus-per-task=18 -w $node -- $COMMAND &
-        set +x
+        set +x 
     fi
     i=$((i+1))
 done

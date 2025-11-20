@@ -745,7 +745,7 @@ int getConfiguration(struct arguments *args)
 		fprintf(stderr, "WARNING: Invalid async IO option: %" PRIu32 ", setting to %d (SYNCHRONOUS)", args->async_io, SYNC);
 		args->async_io = SYNC; // by default we use sync calls.
 	}
-	fprintf(stderr,"Asynchronous IO: %" PRIu32 "\n", args->async_io);
+	// fprintf(stderr,"Asynchronous IO: %" PRIu32 "\n", args->async_io);
 	ASYNC_IO = args->async_io;
 	// End of Sync or Async I/O.
 

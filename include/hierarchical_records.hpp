@@ -22,13 +22,9 @@ extern "C"
 	std::shared_ptr<map_records> HierarchicalMapGetDir(void *hierarchical_map, const char *k);
 	int HierarchicalMapRenameKey(void *hierarchical_map, const char *old_dir, const char *new_dir);
 	std::shared_ptr<map_records> HierarchicalMapGetChild(void *hierarchical_map, const char *k);
+	int32_t HierarchicalMapGetChildrenSerialized(void *hierarchical_map, std::string k, char **buffer, const int uri_size);
 	int32_t HierarchicalMapGet(void *hierarchical_map, std::string k, void **add_, uint64_t *size_);
-	ssize_t HierarchicalMapGetPrefetch(void *hierarchical_map,
-									   const std::string &base_key,
-									   uint32_t start_block_id,
-									   int num_data_servers,
-									   char *prefetch_buffer,
-									   size_t prefetch_size);
+	ssize_t HierarchicalMapGetPrefetch(void *hierarchical_map, const std::string &base_key, uint32_t start_block_id, int num_data_servers, char *prefetch_buffer, size_t prefetch_size);
 	// void HierarchicalMapUpdate(void *hierarchical_map, const char *k, int v, struct stat stat_info);
 	int32_t HierarchicalMapRenameRegularFile(void *hierarchical_map, const std::string &oldname, const std::string &newname);
 	int32_t BackEndHierarchicalMapRenameDirDir(void *hierarchical_map, std::string old_dir, std::string rdir_dest, GNode **gnode);

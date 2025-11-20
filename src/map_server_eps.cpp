@@ -46,7 +46,7 @@ void map_server_eps_erase(void *map, uint64_t uuid, ucp_worker_h ucp_worker)
 	{
 		std::unique_lock<std::mutex> lock(mut_eps);
 		auto search = m->find(uuid);
-		fprintf(stdout, "Before closing the number of conextions are %d\n", m->size());
+		// fprintf(stdout, "Before closing the number of conextions are %d\n", m->size());
 		//  close ep if found
 		if (search != m->end())
 		{
@@ -66,7 +66,7 @@ void map_server_eps_erase(void *map, uint64_t uuid, ucp_worker_h ucp_worker)
 	}
 	if (ep_to_close != NULL)
 	{
-		fprintf(stdout, "Deleting ep %p for uuid %" PRIu64 ", number of conextion %d\n", ep_to_close, uuid, m->size());
+		// fprintf(stdout, "Deleting ep %p for uuid %" PRIu64 ", number of conextion %d\n", ep_to_close, uuid, m->size());
 		// Ahora es seguro llamar a progress sin bloquear a otros hilos
 		close_ucx_endpoint(ucp_worker, ep_to_close);
 	}

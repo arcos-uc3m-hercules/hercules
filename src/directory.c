@@ -153,7 +153,6 @@ int32_t GTree_search(GNode *parent_node,
 	if (!strcmp((char *)parent_node->data, desired_data))
 	{
 		*found_node = parent_node;
-
 		return 1;
 	}
 	// slog_debug("Init searching of %s", desired_data);
@@ -642,7 +641,6 @@ char *GTree_getdir(char *desired_dir, int32_t *numdir_elems, void *hierarchical_
 	GNode *dir_node;
 
 	// print_tree_structure(tree_root, 0);
-
 	// Check if the node is inserted.
 	// pthread_mutex_lock(&tree_mut);
 	int32_t ret = GTree_search(tree_root, desired_dir, &dir_node);

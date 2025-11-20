@@ -9,7 +9,45 @@
 
 // for sincronization in the map.
 std::mutex hierarchical_map_lock;
-std::mutex hierarchical_map_lock_aux;
+// std::mutex hierarchical_map_lock_aux;
+
+// Non-blocking functions.
+static std::shared_ptr<map_records> get_child_unsafe(HierarchicalMap *hiermap, const char *k)
+{
+	char first_parent_dir[PATH_MAX] = {0};
+	find_last_parent_dir(k, first_parent_dir);
+
+	// Buscar en el mapa
+	auto parent_map = hiermap->find(std::string(first_parent_dir));
+	if (parent_map != hiermap->end())
+	{
+		slog_debug("Parent %s map found for %s", parent_map->first.c_str(), k);
+		return parent_map->second;
+	}
+	else
+	{
+		slog_debug("Parent map %s of %s not found.", first_parent_dir, k);
+		return nullptr;
+	}
+}
+
+static std::shared_ptr<map_records> get_dir_unsafe(HierarchicalMap *hiermap, const char *k)
+{
+	slog_debug("Seeking for directory on the directory table %s", k);
+	auto parent_map = hiermap->find(std::string(k));
+
+	if (parent_map != hiermap->end())
+	{
+		slog_debug("%s map found, requested=%s", parent_map->first.c_str(), k);
+		return parent_map->second;
+	}
+	else
+	{
+		slog_debug("Parent map %s not found.", k);
+		return nullptr;
+	}
+}
+// End of Non-blocking functions.
 
 extern "C"
 {
@@ -36,6 +74,7 @@ extern "C"
 
 	size_t HierarchicalMapGetSize(void *hierarchical_map)
 	{
+		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 		return hiermap->size();
 	}
@@ -127,25 +166,11 @@ extern "C"
 
 	std::shared_ptr<map_records> HierarchicalMapGetDir(void *hierarchical_map, const char *k)
 	{
-		std::unique_lock<std::mutex> lck(hierarchical_map_lock_aux);
+		// std::unique_lock<std::mutex> lck(hierarchical_map_lock_aux);
+		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
-		// Look up the parent directory's children map in 'HierarchicalMap'.
-		slog_debug("Seeking for directory on the directory table %s", k);
-		auto parent_map = hiermap->find(std::string(k));
-
-		if (parent_map != hiermap->end())
-		{
-			// Parent Map found.
-			// Map *parent_children_map = parent_map->second;
-			slog_debug("%s map found, requested=%s", parent_map->first.c_str(), k);
-			return parent_map->second;
-		}
-		else
-		{
-			slog_debug("Parent map %s not found.", k);
-			return nullptr;
-		}
+		return get_dir_unsafe(hiermap, k);
 	}
 
 	int HierarchicalMapRenameKey(void *hierarchical_map, const char *old_dir, const char *new_dir)
@@ -170,11 +195,11 @@ extern "C"
 
 			slog_debug("Parent %s map changed to %s", old_dir, new_dir);
 
-			parent_map = hiermap->find(std::string(new_dir));
-			if (parent_map != hiermap->end())
-			{
-				slog_debug("New dir %s is on the hierarchical map", new_dir);
-			}
+			// parent_map = hiermap->find(std::string(new_dir));
+			// if (parent_map != hiermap->end())
+			// {
+			// 	slog_debug("New dir %s is on the hierarchical map", new_dir);
+			// }
 
 			return 0;
 		}
@@ -187,35 +212,21 @@ extern "C"
 
 	std::shared_ptr<map_records> HierarchicalMapGetChild(void *hierarchical_map, const char *k)
 	{
-		std::unique_lock<std::mutex> lck(hierarchical_map_lock_aux);
+		// std::unique_lock<std::mutex> lck(hierarchical_map_lock_aux);
+		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
-		char first_parent_dir[PATH_MAX] = {0};
-		find_last_parent_dir(k, first_parent_dir);
-
-		// Look up the parent directory's children map in 'HierarchicalMap'.
-		auto parent_map = hiermap->find(std::string(first_parent_dir));
-		if (parent_map != hiermap->end())
-		{
-			// Parent Map found.
-			// Map *parent_children_map = parent_map->second;
-			slog_debug("Parent %s map found for %s", parent_map->first.c_str(), k);
-			return parent_map->second;
-		}
-		else
-		{
-			slog_debug("Parent map %s of %s not found.", first_parent_dir, k);
-			return NULL;
-		}
+		return get_child_unsafe(hiermap, k);
 	}
 
 	int32_t HierarchicalMapGet(void *hierarchical_map, std::string k, void **add_, uint64_t *size_)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
-		// HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 		// Look up the parent directory's children map in 'hierarchical_map'.
-		std::shared_ptr<map_records> parent_children_map = HierarchicalMapGetChild(hierarchical_map, k.c_str());
-		if (parent_children_map != NULL)
+		// std::shared_ptr<map_records> parent_children_map = HierarchicalMapGetChild(hierarchical_map, k.c_str());
+		std::shared_ptr<map_records> parent_children_map = get_child_unsafe(hiermap, k.c_str());
+		if (parent_children_map != nullptr)
 		{ // Parent Map found.
 			slog_debug("looking up %s in the parent map", k.c_str());
 			// Look up the stat_info on the parent's children map.
@@ -227,6 +238,7 @@ extern "C"
 			return 0;
 		}
 	}
+
 
 	ssize_t HierarchicalMapGetPrefetch(void *hierarchical_map,
 									   const std::string &base_key,
@@ -240,7 +252,9 @@ extern "C"
 		// Find the parent map just ONCE.
 		// We construct a dummy full key to find the correct parent map.
 		std::string initial_key = base_key + "$" + std::to_string(start_block_id);
-		std::shared_ptr<map_records> children_map = HierarchicalMapGetChild(hierarchical_map, initial_key.c_str());
+		// std::shared_ptr<map_records> children_map = HierarchicalMapGetChild(hierarchical_map, initial_key.c_str());
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+		std::shared_ptr<map_records> children_map = get_child_unsafe(hiermap, initial_key.c_str());
 
 		if (children_map == nullptr)
 		{
@@ -315,9 +329,11 @@ extern "C"
 	int32_t HierarchicalMapRenameRegularFile(void *hierarchical_map, const std::string &oldname, const std::string &newname)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		// Look up the parent directory's children map in 'hierarchical_map'.
-		std::shared_ptr<map_records> parent_children_map = HierarchicalMapGetChild(hierarchical_map, oldname.c_str());
+		// std::shared_ptr<map_records> parent_children_map = HierarchicalMapGetChild(hierarchical_map, oldname.c_str());
+		std::shared_ptr<map_records> parent_children_map = get_child_unsafe(hiermap, oldname.c_str());
 		if (parent_children_map != NULL)
 		{
 			// map_erase(parent_children_map, k);
@@ -338,10 +354,12 @@ extern "C"
 	int32_t BackEndHierarchicalMapRenameDirDir(void *hierarchical_map, std::string old_dir, std::string rdir_dest, GNode **gnode)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 		// HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		// Find the hash map of this dir.
-		std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, old_dir.c_str()), "BackEndHierarchicalMapRenameDirDir,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
+		// std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, old_dir.c_str()), "BackEndHierarchicalMapRenameDirDir,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
+		std::shared_ptr<map_records> map = TIMING(get_dir_unsafe(hiermap, old_dir.c_str()), "BackEndHierarchicalMapRenameDirDir,get_dir_unsafe", std::shared_ptr<map_records>, 0);
 
 		// Look up the parent directory's children map in 'hierarchical_map'.
 		// Map *parent_children_map = HierarchicalMapGetChild(hierarchical_map, old_dir);
@@ -354,7 +372,11 @@ extern "C"
 			char msg[PATH_MAX] = {0};
 			char first_parent_dir[PATH_MAX] = {0};
 			find_last_parent_dir(old_dir.c_str(), first_parent_dir);
-			std::shared_ptr<map_records> parent_map = HierarchicalMapGetDir(hierarchical_map, first_parent_dir);
+			// std::shared_ptr<map_records> parent_map = HierarchicalMapGetDir(hierarchical_map, first_parent_dir);
+			std::shared_ptr<map_records> parent_map = get_dir_unsafe(hiermap, first_parent_dir);
+			if (!parent_map)
+				return -1;
+
 			std::string aux_old_dir;
 			std::string aux_rdir_dest;
 			switch (SERVER_TYPE)
@@ -433,21 +455,24 @@ extern "C"
 	int32_t HierarchicalMapPutInGarbageCollector(void *hierarchical_map, const std::string &key)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+
 		// Find the hash map of this dir.
 		char first_parent_dir[PATH_MAX] = {0};
 		find_last_parent_dir(key.c_str(), first_parent_dir);
-		std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, first_parent_dir), "HierarchicalMapPutInGarbageCollector,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
+		// std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, first_parent_dir), "HierarchicalMapPutInGarbageCollector,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
+		std::shared_ptr<map_records> map = get_dir_unsafe(hiermap, first_parent_dir);
 		if (map != NULL)
 		{
 			slog_debug("Putting %s on the garbage collector of %s", key.c_str(), first_parent_dir);
 			// Add the key to the garbage collector map.
 			return map->put_garbage_collector(key);
 		}
-		else
-		{
-			slog_debug("%s not found in the map", key.c_str());
-			return -1;
-		}
+		// else
+		// {
+		slog_debug("%s not found in the map", key.c_str());
+		return -1;
+		// }
 	}
 
 	/**
@@ -459,22 +484,24 @@ extern "C"
 	int32_t HierarchicalMapPopFromGarbageCollector(void *hierarchical_map, const std::string &key)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 		// Find the hash map of this dir.
 		char first_parent_dir[PATH_MAX] = {0};
 		find_last_parent_dir(key.c_str(), first_parent_dir);
-		std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, first_parent_dir), "HierarchicalMapPutInGarbageCollector,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
+		// std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, first_parent_dir), "HierarchicalMapPutInGarbageCollector,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
+		std::shared_ptr<map_records> map = get_dir_unsafe(hiermap, first_parent_dir);
 		if (map != NULL)
 		{
 			// Pop the key from the garbage collector vector.
 			slog_debug("Pop %s from the garbage collector of %s", key.c_str(), first_parent_dir);
 			return map->garbage_collector_pop(key);
 		}
-		else
-		{
-			// key was not find in the hierarchical map.
-			slog_debug("%s not found in the map", key.c_str());
-			return -1;
-		}
+		// else
+		// {
+		// key was not find in the hierarchical map.
+		slog_debug("%s not found in the map", key.c_str());
+		return -1;
+		// }
 	}
 
 	/**
@@ -486,22 +513,24 @@ extern "C"
 	int32_t HierarchicalMapSearchInGarbageCollector(void *hierarchical_map, const std::string &key)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 		// Find the hash map of this dir.
 		char first_parent_dir[PATH_MAX] = {0};
 		find_last_parent_dir(key.c_str(), first_parent_dir);
-		std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, first_parent_dir), "HierarchicalMapPutInGarbageCollector,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
+		// std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, first_parent_dir), "HierarchicalMapPutInGarbageCollector,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
+		std::shared_ptr<map_records> map = get_dir_unsafe(hiermap, first_parent_dir);
 		if (map != NULL)
 		{
 			// Search the key in the garbage collector vector.
 			slog_debug("Searching %s on the garbage collector of %s", key.c_str(), first_parent_dir);
 			return map->garbage_collector_search(key);
 		}
-		else
-		{
-			// key was not find in the hierarchical map.
-			slog_debug("%s not found in the map", key.c_str());
-			return -1;
-		}
+		// else
+		// {
+		// key was not find in the hierarchical map.
+		slog_debug("%s not found in the map", key.c_str());
+		return -1;
+		// }
 	}
 
 	int32_t HierarchicalMapCleanGarbageCollector(void *hierarchical_map)

@@ -78,6 +78,7 @@ pid_t g_pid = -1;
 // prefech.
 char *buf_pref = NULL;
 
+
 // #ifdef __cplusplus
 // extern "C"
 // {
@@ -602,7 +603,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	elapsed = seconds + useconds / 1e6;
 
 	slog_live("Client %d ready in %f sec.", rank, elapsed);
-	fprintf(stdout, "[%s] Client %d/%d ready in %f sec.\n", args.data_hostname, rank, getpid(), elapsed);
+	// fprintf(stdout, "[%s] Client %d/%d ready in %f sec.\n", args.data_hostname, rank, getpid(), elapsed);
 	init = 1;
 	// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
@@ -2335,7 +2336,7 @@ ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size,
 	{
 		if (ds_stat_n.st_size + size > ds_stat_n.st_size)
 		{
-			slog_live("pathname=%s, updating , file size=%ld, size=%ld", pathname, ds_stat_n.st_size, size);
+			slog_live("pathname=%s, updating , file size=%ld, current size=%ld, new local size=%d", pathname, ds_stat_n.st_size, size, ds_stat_n.st_size+size);
 			map_fd_update_value(map_fd, pathname, fd, ds_stat_n.st_size + size);
 		}
 	}

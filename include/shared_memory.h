@@ -17,7 +17,6 @@ struct SharedMemory
 	char error[100];
 };
 
-static MemoryManager g_shm_manager;
 
 void freeSM(int idSM);
 void *createSM(int idSM);

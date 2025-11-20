@@ -135,7 +135,7 @@ static int init_slog = 0;
 
 // Comment the following line to remove logs calls on compilation time.
 //#define DPRINTF
-// #define USESLOG
+#define USESLOG
 #ifdef USESLOG
 #define slog_none(...) \
     slog(SLOG_NONE, __func__, __VA_ARGS__);

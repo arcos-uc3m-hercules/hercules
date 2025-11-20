@@ -573,7 +573,6 @@ extern "C"
 			}
 			}
 
-			// aux = (char *)malloc(IMSS_DATA_BSIZE);
 			void *data = (void *)malloc(sizeof(struct stat) * sizeof(char) + 1);
 			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0, SYNC, NULL), "imss_open,get_ndata", int, 0);
 			if (ret < 0)
@@ -581,7 +580,8 @@ extern "C"
 				free(data);
 				perror("ERR_HERCULES_IMSS_OPEN_GET_DATA");
 				slog_error("ERR_HERCULES_IMSS_OPEN_GET_DATA");
-				return -1;
+				// return -1;
+				return -ENOENT;
 			}
 
 			slog_debug("ret=%d, file_desc=%d", ret, file_desc);
@@ -922,6 +922,7 @@ extern "C"
 			if (been_read != to_read)
 			{
 				slog_warn("Expecting to read %ld but %ld has been read.", to_read, been_read);
+				fprintf(stdout, "Expecting to read %ld but %ld has been read for %s.\n", to_read, been_read, path);
 			}
 
 			block_offset = 0;
