@@ -636,7 +636,7 @@ do
         # For example, if the header on the deployment script is "#SBATCH --cpus-per-task=36",
         # a valid entry here is "--cpus-per-task =18". This allows the execution of the next step 
         # "WaitForServers", which is being executed on the same node as the server task.
-        srun  -N 1 -n 1 --cpus-per-task=18 -w $node -- $COMMAND &
+        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- $COMMAND &
         set +x 
     fi
     i=$((i+1))
@@ -717,7 +717,7 @@ do
             echo "[+] Starting data server $i on $node..."
         fi
         #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
-        srun  -N 1 -n 1 --cpus-per-task=18 -w $node -- $COMMAND &
+        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- $COMMAND &
     fi
     i=$(($i+1))
 done

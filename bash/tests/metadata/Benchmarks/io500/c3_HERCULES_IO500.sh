@@ -3,32 +3,32 @@
 SBATCH_FLAGS="--partition=large -A uc3m_a0-sciot --exclusive" 
 SCRIPT_NAME="c3_io500_hercules_slurm.sh"
 # Minimal test.
-#IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks/io500/Configurations/config-hercules-minimal.ini"
+IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks/io500/Configurations/config-hercules-minimal.ini"
 # Full test.
-IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks/io500/Configurations/config-hercules-full.ini"
+#IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks/io500/Configurations/config-hercules-full.ini"
 #IO500_CONFFILE="/home/tester004/gesanche/io500/config-hercules-find.ini"
 
-ATTACHED=0
+ATTACHED=1
 
 TEMPLATE_CONFIG_PATH="/home/tester004/gesanche/hercules/conf/hercules-template.conf"
 HERCULES_PATH="/home/tester004/gesanche/hercules"
 HERCULES_CHECKPOINT_PATH=""
 DATA_HOSTFILE="${HERCULES_PATH}/tmp/data_hostfile"
 METADATA_HOSTFILE="${HERCULES_PATH}/tmp/meta_hostfile"
-DEBUG_LEVEL="none"
+DEBUG_LEVEL="all"
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="RR"
 
-NUM_DATA_SERVERS_RANGE=(16)
+NUM_DATA_SERVERS_RANGE=(10)
 #NUM_DATA_SERVERS_RANGE=( 1 2 4 8 16 )
 NUM_METADATA_SERVERS_RANGE=(1)
 #NUM_METADATA_SERVERS_RANGE=( 4 8 16 32 )
 NODES_FOR_CLIENTS_RANGE=(10)
 # NODES_FOR_CLIENTS_RANGE=(1 2 4 8 16)
 #CLIENTS_PER_NODE_RANGE=( 1 2 4 8 16 32 )
-CLIENTS_PER_NODE_RANGE=(1)
+CLIENTS_PER_NODE_RANGE=(36)
 BLOCK_SIZE_RANGE=(512)
-THREAD_POOL=1
+THREAD_POOL=8
 
 MAX_ITERATIONS=1
 
@@ -98,6 +98,7 @@ for test_number in $(seq 1 $MAX_ITERATIONS); do
 						sed -i "s|^HERCULES_CHECKPOINT_PATH = .*|HERCULES_CHECKPOINT_PATH = $HERCULES_CHECKPOINT_PATH|g" "$TEMPLATE_CONFIG_PATH"
 						sed -i "s|^HERCULES_SNAPSHOT_PATH = .*|HERCULES_SNAPSHOT_PATH = $HERCULES_SNAPSHOT_PATH|g" "$TEMPLATE_CONFIG_PATH"
 						sed -i "s|^DATA_HOSTFILE = .*|DATA_HOSTFILE = $DATA_HOSTFILE|g" "$TEMPLATE_CONFIG_PATH"
+						sed -i "s|^ALLOC_DATA_HOSTFILE = .*|ALLOC_DATA_HOSTFILE = $DATA_HOSTFILE|g" "$TEMPLATE_CONFIG_PATH"
 						sed -i "s|^METADATA_HOSTFILE = .*|METADATA_HOSTFILE = $METADATA_HOSTFILE|g" "$TEMPLATE_CONFIG_PATH"
 						sed -i "s|^DEBUG_LEVEL = .*|DEBUG_LEVEL = $DEBUG_LEVEL|g" "$TEMPLATE_CONFIG_PATH"
 						sed -i "s|^THREAD_POOL = .*|THREAD_POOL = $THREAD_POOL|g" "$TEMPLATE_CONFIG_PATH"

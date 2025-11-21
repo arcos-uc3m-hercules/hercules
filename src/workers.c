@@ -2063,6 +2063,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		//  search for the block to know if it was previously stored.
 		int ret = 0;
 		int is_block_zero = 0;
+		int32_t insert_successful = -1;
 		// Checks if it is data for the Snapshot operation or regular data.
 		if (snapshot_op)
 		{
@@ -2071,7 +2072,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		else
 		{
 			// ret = TIMING(map->get(key, &address_, &block_size_rtvd);, "Does it exist? map->get", int, arguments->thread_id);
-			pthread_mutex_lock(&memory_protect);
 			ret = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "Does it exist? map->get", int, arguments->thread_id);
 		}
 
@@ -2093,7 +2093,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			size_t msg_length = 0;
 			int size_asigned_to_block = 0;
 			int reused_memory = 1;
-			int32_t insert_successful = -1;
 			// If data is stored in shared memory due LOCAL policy, the server does not need to receive the data.
 			if (!is_shared_memory)
 			{ // Data is not in shared memory.
@@ -2168,8 +2167,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					return -1;
 				}
 			}
-			else // Data in shared memory.
-			{
+			else 
+			{ // Data in shared memory.
 				// get the content from the shared memory.
 				// SharedMemory *sh_memory_struct = getContentSM(shm_key, block_size_recv);
 				void *content = getContentSMByID(shm_key);
@@ -2233,22 +2232,32 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					return -1;
 				}
 
-				// INSERT THE ELEMENT TO FREE THE MEMORY PROTECT.
+				// copy from shared memory to private memory.
+				// copyContentSM(buffer, sh_memory_struct->content, sh_memory_struct->size);
+				// pthread_mutex_lock(&memory_protect);
+				copyContentSM((char *)buffer + block_offset, content, block_size_recv);
+				// pthread_mutex_unlock(&memory_protect);
+
+				// detach shared memory.
+				unlinkSM(content);
+				// Destroy the shared memory segment.
+				freeSM(shm_key);
+			}
+
+			// INSERT THE ELEMENT TO FREE THE MEMORY PROTECT.
+			pthread_mutex_lock(&memory_protect);
+			// Check if another thread has created this key.
+			int race_check = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "Race check", int, arguments->thread_id);
+			if (race_check == 0)
+			{ // key still does not exist.
 				// Include the new record in the tracking structure.
-				// tr = clock();
-				// fprintf(stderr,"[WRITE_OP] ****[PUT]********* key=%s\n",  key.c_str());
 				slog_debug("[WRITE_OP] ****[PUT, block_size_recv=%ld, BLOCK_SIZE=%lu, msg_length=%lu]********* key=%s", block_size_recv, BLOCK_SIZE, msg_length, key.c_str());
+
 				// TODO: should this be block_size_recv or a different size? block_size_recv might not be the full block size
 				if (snapshot_op)
 				{
 					// Get the origin data server id from the received key.
-					// int origin_server_id = 0;
-					// std::string data_uri;
-					// std::string file_name;
-					// getBlockInformation(key, &origin_server_id, &data_uri, &file_name);
-					// slog_debug("key: %s, origin_server_id: %d, data_uri: %s, file_name: %s", key.c_str(), origin_server_id, data_uri.c_str(), file_name.c_str());
 					// Fill buffer_broadcast with the data received from the other servers.
-					// buffer_broadcast[];
 					slog_debug("Snapshot operation, origin server=%s", key.c_str());
 					insert_successful = TIMING(map->put_broadcast(key, buffer, msg_length), " new block map-put_broadcast", int, arguments->thread_id);
 				}
@@ -2256,6 +2265,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				{
 					insert_successful = HierarchicalMapPut(hierarchical_map, key, buffer, size_asigned_to_block, reused_memory, NULL, is_block_zero);
 				}
+
 				slog_debug("[WRITE_OP] insert_successful=%d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
 
 				// Include the new record in the tracking structure.
@@ -2263,51 +2273,33 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				{
 					perror("HERCULES_ERR_WORKER_MAPPUT");
 					slog_error("HERCULES_ERR_WORKER_MAPPUT");
-					// free(buffer);
-					mem_type_free(buffer);
+					free(buffer);
 					pthread_mutex_unlock(&memory_protect);
 					return -1;
 				}
 				pthread_mutex_unlock(&memory_protect);
-				// END OF INSERTING THE BLOCK
-
-				// copy from shared memory to private memory.
-				// copyContentSM(buffer, sh_memory_struct->content, sh_memory_struct->size);
-				pthread_mutex_lock(&memory_protect);
-				copyContentSM((char *)buffer + block_offset, content, block_size_recv);
-				pthread_mutex_unlock(&memory_protect);
-
-				// detach shared memory.
-				// unlinkSM(sh_memory_struct->content);
-				unlinkSM(content);
-				// Destroy the shared memory segment.
-				// freeSM(sh_memory_struct->id);
-				freeSM(shm_key);
-				// free(sh_memory_struct);
 			}
-
-			// when snapshot is enabled we saved block 0.
-			if (!global_finish_snapshot)
+			else
 			{
-				std::size_t found = TIMING(key.find("$0"), "check if block 0", std::size_t, arguments->thread_id);
-				if (found != std::string::npos) // block 0.
-				{
-					insert_successful = TIMING(map->put_snapshot(key, -1), "map->put_snapshot", int, arguments->thread_id);
-					// Include the new record in the tracking structure.
-					if (insert_successful != 0)
-					{
-						perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-						slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-						pthread_mutex_unlock(&memory_protect);
-						return -1;
-					}
-				}
+				// Another thread has inserted the same key.
+				slog_debug("[WRITE_OP] Race lost! Key %s appeared while receiving data.", key.c_str());
+				// We copy the temporal buffer into the one that is already on the map.
+				memcpy((char *)address_ + block_offset, (char *)buffer + block_offset, msg_length);
+				pthread_mutex_unlock(&memory_protect);
+				// Cleaning of the temporary buffer that is no longer useful (because we copied or discarded)
+				// if (reused_memory)
+				// {
+				// 	// Return to pool if necessary, or ignore if address_ is the same pointer (rare).
+				// }
+				// else
+				// {
+				free(buffer);
+				// }
 			}
 		}
 		// if the block was already stored:
 		else
 		{
-			pthread_mutex_unlock(&memory_protect);
 			slog_debug("[WRITE_OP] Key find %s", key.c_str());
 			// Receive the block into the buffer.
 			// std::size_t found = key.find("$0");
@@ -2432,6 +2424,23 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					// 	// pthread_mutex_unlock(&memory_protect);
 					// 	return -1;
 					// }
+				}
+				// when snapshot is enabled we saved block 0.
+				if (!global_finish_snapshot)
+				{
+					std::size_t found = TIMING(key.find("$0"), "check if block 0", std::size_t, arguments->thread_id);
+					if (found != std::string::npos) // block 0.
+					{
+						insert_successful = TIMING(map->put_snapshot(key, -1), "map->put_snapshot", int, arguments->thread_id);
+						// Include the new record in the tracking structure.
+						if (insert_successful != 0)
+						{
+							perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+							slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+							pthread_mutex_unlock(&memory_protect);
+							return -1;
+						}
+					}
 				}
 			}
 			else
@@ -3016,8 +3025,10 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						// m.data = address_;
 						// m.size = block_size_rtvd;
 
+						#ifdef DPRINTF
 						slog_debug("Printing intervals of dataset.");
 						PrintIntervals((dataset_info *)address_);
+						#endif
 						// pthread_mutex_lock(&lock_network);
 						// err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
 						err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, address_, DATASET_INFO, arguments->worker_uid);
@@ -3098,23 +3109,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					response_msg = MSG_NODELETE_OP;
 				}
 				pthread_mutex_unlock(&memory_protect);
-
-				// char *buffer = NULL;
-				// int32_t numelems_indir = -1;
-				// fprintf(stdout, "Before getdir %s\n", key.c_str());
-				// buffer = GTree_getdir((char *)key.c_str(), &numelems_indir);
-				// fprintf(stdout, "After getdir %s, num elements %d\n", key.c_str(), numelems_indir);
-				// if (numelems_indir == -1)
-				// 	fprintf(stdout, "Entry already deleted: %s\n", key.c_str());
-
-				// if (ret_map > 0 && ret_tree == 1)
-				// {
-				// 	response_msg = MSG_DELETE_OP;
-				// }
-				// else
-				// {
-				// 	response_msg = MSG_NODELETE_OP;
-				// }
 
 				slog_debug("response_msg=%s", response_msg);
 				// pthread_mutex_lock(&lock_network);
@@ -3289,9 +3283,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				pthread_mutex_lock(&memory_protect);
 				dataset = (dataset_info *)address_;
 				// Checks if the clients wants to open the file.
-				// switch (operation)
-				// {
-				// case 1: // file opened.
 				slog_debug("Closing file, dataset->n_open=%d", dataset->n_open);
 				if (dataset->n_open > 0)
 				{
@@ -3408,6 +3399,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		default:
 		{
 			slog_debug("[SET_OP] Creating dataset %s", key.c_str());
+			pthread_mutex_lock(&memory_protect);
 			// if (!TIMING(map->get(key, &address_, &block_size_rtvd), "map->get", int32_t, arguments->thread_id))
 			if (!TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id))
 			{ // If the record was not already stored, add the block.
@@ -3423,13 +3415,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{
 					perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
 					slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
-					// pthread_mutex_unlock(&lock_network);
+					pthread_mutex_unlock(&memory_protect);
 					return -1;
 				}
 				// Receive the block into the buffer.
-
 				void *buffer = NULL;
-
 				if (operation == IMSS_INFO)
 				{ // Hercules instance case.
 					buffer = (void *)TIMING(malloc(length * sizeof(char)), "malloc buffer for imss info", void *, arguments->thread_id);
@@ -3449,14 +3439,43 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// }
 					// buffer = calloc(1, sizeof(dataset_info));
 					buffer = calloc(1, length);
-
 					if (buffer == NULL)
 					{
 						perror("HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC");
 						slog_error("HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC");
+						pthread_mutex_lock(&memory_protect);
 						return -1;
 					}
 				}
+				// INSERT THE ELEMENT IN THE MAP.
+				int32_t insert_successful = -1;
+				// Insert the received uri into the directory tree.
+				// slog_debug("Inserting %s into directory tree", key.c_str());
+				GNode *new_node = NULL;
+				insert_successful = TIMING(GTree_insert((char *)key_for_tree.c_str(), &new_node), "*GTree_insert", int32_t, arguments->thread_id);
+				slog_debug("insert_successful=%d, new node add=%p", insert_successful, new_node);
+				if (insert_successful == -1)
+				{
+					slog_error("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
+					perror("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
+					free(buffer);
+					pthread_mutex_unlock(&memory_protect);
+					return -1;
+				}
+
+				// insert_successful = TIMING(map->put(key, buffer, length, reused_memory, new_node), "map->put", int32_t, arguments->thread_id);
+				insert_successful = TIMING(HierarchicalMapPut(hierarchical_map, key, buffer, length, reused_memory, new_node, 1), "HierarchicalMapPut", int, arguments->thread_id);
+				slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);
+
+				if (insert_successful != 0)
+				{
+					slog_error("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
+					perror("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
+					free(buffer);
+					pthread_mutex_unlock(&memory_protect);
+					return -1;
+				}
+				pthread_mutex_unlock(&memory_protect);
 				if (operation == IMSS_INFO)
 				{ // Hercules instance case.
 					ret = TIMING(recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, IMSS_INFO, arguments->worker_uid, length), "recv_dynamic_stream IMSS_INFO", int32_t, arguments->thread_id);
@@ -3482,34 +3501,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					return -1;
 				}
 
-				int32_t insert_successful = -1;
-				// Insert the received uri into the directory tree.
-				// slog_debug("Inserting %s into directory tree", key.c_str());
-				GNode *new_node = NULL;
-				insert_successful = TIMING(GTree_insert((char *)key_for_tree.c_str(), &new_node), "*GTree_insert", int32_t, arguments->thread_id);
-				slog_debug("insert_successful=%d, new node add=%p", insert_successful, new_node);
-				if (insert_successful == -1)
-				{
-					slog_error("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
-					perror("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
-					free(buffer);
-					// pthread_mutex_unlock(&memory_protect);
-					return -1;
-				}
-
-				// insert_successful = TIMING(map->put(key, buffer, length, reused_memory, new_node), "map->put", int32_t, arguments->thread_id);
-				insert_successful = TIMING(HierarchicalMapPut(hierarchical_map, key, buffer, length, reused_memory, new_node, 1), "HierarchicalMapPut", int, arguments->thread_id);
-				slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);
-
-				if (insert_successful != 0)
-				{
-					slog_error("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
-					perror("HERCULES_ERR_METADATA_WORKER_MAPPUT_SET_OP");
-					free(buffer);
-					// pthread_mutex_unlock(&memory_protect);
-					return -1;
-				}
-
 				// Update the pointer.
 				// arguments->pt += block_size_recv;
 				slog_debug("Dataset %s has been created.", key.c_str());
@@ -3518,7 +3509,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			else
 			{
 				// fprintf(stderr, "%s found", key.c_str());
-				pthread_mutex_lock(&memory_protect);
+				// pthread_mutex_lock(&memory_protect);
 				dataset = (dataset_info *)address_;
 				if (!strncmp(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY)))
 				{ // dataset is dirty. We will delete from the garbage collector.
@@ -3617,7 +3608,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					if (req[num_characters_read] != '\0')
 					{
 						slog_live("Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
-						// fprintf(stderr, "Extra characters found after expected input: '%s'\n", &req[num_characters_read]);
 						// get the server status to be set.
 						sscanf(&req[num_characters_read], "%d", &new_server_status);
 						flag = 1;
@@ -3625,7 +3615,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					else
 					{
 						slog_live("No extra characters found.\n");
-						// fprintf(stderr, "No extra characters found.\n");
 					}
 					break;
 				default:
@@ -3713,12 +3702,16 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 					// prev. dataset.
 					slog_debug("Updating dataset,\n printing intervals of prev. dataset.");
+					#ifdef DPRINTF
 					PrintIntervals(dataset);
+					#endif
 
 					dataset_info *received_struct = (dataset_info *)buffer;
 
 					slog_debug("printing intervals of received dataset.");
+					#ifdef DPRINTF
 					PrintIntervals(received_struct);
+					#endif
 
 					// check if the received interval is highest that the prev. one.
 					// first check who has most intervals.
@@ -3747,7 +3740,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						pthread_mutex_unlock(&memory_protect);
 
 						slog_debug("Printing intervals of the updated dataset.");
+						#ifdef DPRINTF
 						PrintIntervals((dataset_info *)dataset);
+						#endif
 
 						// memcpy((dataset_info *)address_, (dataset_info *)buffer, sizeof(dataset_info));
 						// memcpy(dataset->intervals, ((dataset_info *)buffer)->intervals, sizeof(dataset->intervals) * dataset->num_intervals);
@@ -3769,8 +3764,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 				slog_debug("[STAT_WORKER] End Updating existing dataset %s.", key.c_str());
 				break;
-				// }
-				// }
 			}
 			// pthread_mutex_unlock(&memory_protect);
 		}

@@ -331,7 +331,8 @@ int32_t find_server(
 	case ZCOPY_:
 	{
 		slog_debug("op_type=%d", op_type);
-		next_server = matching_node_socket;
+		// next_server = matching_node_socket;
+		next_server = RoundRobin(n_servers, n_msg, fname);
 		break;
 		// Operate in relation to the type of operation.
 		// FIXME: improve the following case!

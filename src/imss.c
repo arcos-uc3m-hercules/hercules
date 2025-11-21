@@ -980,7 +980,6 @@ int32_t stat_release()
 		{
 			slog_error("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
 			perror("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
-			// pthread_mutex_unlock(&lock_network);
 			continue;
 		}
 		// close_ucx_endpoint(ucp_worker_meta, ep);
@@ -1707,6 +1706,7 @@ int32_t release_network_resources(const char *imss_uri, int is_parent, int proce
 	{
 		perror("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_FIND_IMSS");
 		slog_error("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_FIND_IMSS");
+		pthread_mutex_unlock(&lock_network);
 		return -1;
 	}
 
@@ -1765,7 +1765,6 @@ int32_t release_network_resources(const char *imss_uri, int is_parent, int proce
 			{
 				slog_error("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
 				perror("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
-				// pthread_mutex_unlock(&lock_network);
 				continue;
 			}
 		}
@@ -4451,7 +4450,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	for (int32_t i = 0; i < replication_factor; i++)
 	{
 		server_id = repl_servers[i];
-		use_local = ((session_policy == LOCAL_ || session_policy == ZCOPY_));
+		// use_local = ((session_policy == LOCAL_ || session_policy == ZCOPY_) && server_id == matching_server_id);
+		use_local = ((session_policy == LOCAL_ || session_policy == ZCOPY_) && server_id == matching_server_id);
 		//  Key related to the requested data element.
 		if (use_local)
 		{
@@ -4585,7 +4585,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		{ // key not avaiable on the remote server.
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
 			sprintf(err_msg, "HERCULES_ERR_GET_NDATA_NO_KEY_AVAIL (%s), %s to server %d (%s), curr_imss_storages=%d", response_buffer, key_, server_id, curr_imss.info.ips[i], curr_imss_storages);
-			fprintf(stderr, "%s\n", err_msg);
+			// fprintf(stderr, "%s\n", err_msg);
 			slog_error("%s", err_msg);
 			errno = ENOENT;
 			// free(response_buffer);
@@ -5202,12 +5202,17 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	}
 
 	char *node_hostname = NULL;
+	int use_local = 0;
+	int server_id = 0;
 	// Send the data block to every server implementing redundancy.
 	for (int32_t i = 0; i < curr_dataset->repl_factor; i++)
 	{
 		ucp_ep_h ep;
+		server_id = i;
 		// Server receiving the current data block.
 		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
+		use_local = ((session_policy == LOCAL_ || session_policy == ZCOPY_) && server_id == matching_server_id);
+
 
 		if (data_id == 0)
 			size = sizeof(struct stat);
@@ -5215,7 +5220,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			size = curr_dataset->data_entity_size;
 
 		// when "LOCAL" or "ZCOPY_" is in use, we copy the data to shared memory.
-		if (session_policy == LOCAL_ || session_policy == ZCOPY_)
+		if (use_local)
 		{
 			// Get the shared memory key and tries to create the shared memory region (pool).
 			key_t shm_key = getKeySMByBlock(dataset_uri, data_id);
@@ -5226,6 +5231,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				fprintf(stderr, "Cannot generated a valid id for file %s$%d key %d with size %d\n", dataset_uri, data_id, shm_key, size);
 				perror("HERCULES_ERR_SET_DATA_GET_IDENTIFIER_INVALID_SHM_ID");
 				slog_error("HERCULES_ERR_SET_DATA_GET_IDENTIFIER_INVALID_SHM_ID");
+				pthread_mutex_unlock(&lock_network);
 				exit(-1);
 			}
 
@@ -5389,7 +5395,6 @@ int32_t set_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, char *
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE];
 	int32_t curr_imss_storages = curr_imss.info.num_storages;
-
 	// Send the data block to every server implementing redundancy.
 	for (int32_t i = 0; i < curr_dataset->repl_factor; i++)
 	{

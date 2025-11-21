@@ -2,9 +2,9 @@
 #SBATCH --job-name=hercules    # Job name
 #SBATCH --output=logs/hercules/%j-io500.log   # Standard output and error log
 #SBATCH --time=8:00:00               # Time limit hrs:min:sec
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=8
 #SBATCH --partition=large
-#SBATCH --ntasks-per-node=100 # fix the mpirun error: "There are not enough slots available in the system.."
+#SBATCH --ntasks-per-node=16 # fix the mpirun error: "There are not enough slots available in the system."
 #SBATCH --exclude=srvgpu[01-05],srv103,srv108
 ##SBATCH --nodefile=/home/tester004/gesanche/hercules/tmp/hostfile_3419
 ## I am passing a nodefile to use the same nodes for all tests, because some 
@@ -97,12 +97,13 @@ module load hpcx
 #export UCX_RNDV_SCHEME=put_zcopy
 # export UCX_NET_DEVICES=ibs1 # Slow!
 # spack load /sxjvb77
-##export UCX_TLS=ib
+#export UCX_TLS=ib
 #set -x
 #export UCX_NET_DEVICES="opap6s0:1"
 #export UCX_NET_DEVICES=all
 #export UCX_IB_RCACHE_MAX_REGIONS="100"
-export UCX_NET_DEVICES="ib0"
+export UCX_NET_DEVICES="ib0" # this works but shows some UCX warnings.
+#export UCX_NET_DEVICES=bond0,ib0,mlx5_0:1,lo
 #export UCX_NET_DEVICES="mlx5_0"
 
 # mpiexec -env UCX_NET_DEVICES "opap6s0:1" -n=1 ucx_info -T
