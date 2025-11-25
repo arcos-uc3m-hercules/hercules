@@ -3,32 +3,32 @@
 SBATCH_FLAGS="--partition=large -A uc3m_a0-sciot --exclusive" 
 SCRIPT_NAME="c3_io500_hercules_slurm.sh"
 # Minimal test.
-IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks/io500/Configurations/config-hercules-minimal.ini"
+#IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks/io500/Configurations/config-hercules-minimal.ini"
 # Full test.
-#IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks/io500/Configurations/config-hercules-full.ini"
+IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks/io500/Configurations/config-hercules-full.ini"
 #IO500_CONFFILE="/home/tester004/gesanche/io500/config-hercules-find.ini"
 
-ATTACHED=1
+ATTACHED=0
 
 TEMPLATE_CONFIG_PATH="/home/tester004/gesanche/hercules/conf/hercules-template.conf"
 HERCULES_PATH="/home/tester004/gesanche/hercules"
 HERCULES_CHECKPOINT_PATH=""
 DATA_HOSTFILE="${HERCULES_PATH}/tmp/data_hostfile"
 METADATA_HOSTFILE="${HERCULES_PATH}/tmp/meta_hostfile"
-DEBUG_LEVEL="all"
+DEBUG_LEVEL="none"
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="RR"
 
-NUM_DATA_SERVERS_RANGE=(10)
+NUM_DATA_SERVERS_RANGE=(20)
 #NUM_DATA_SERVERS_RANGE=( 1 2 4 8 16 )
 NUM_METADATA_SERVERS_RANGE=(1)
 #NUM_METADATA_SERVERS_RANGE=( 4 8 16 32 )
 NODES_FOR_CLIENTS_RANGE=(10)
 # NODES_FOR_CLIENTS_RANGE=(1 2 4 8 16)
 #CLIENTS_PER_NODE_RANGE=( 1 2 4 8 16 32 )
-CLIENTS_PER_NODE_RANGE=(36)
+CLIENTS_PER_NODE_RANGE=(32)
 BLOCK_SIZE_RANGE=(512)
-THREAD_POOL=8
+THREAD_POOL=1
 
 MAX_ITERATIONS=1
 

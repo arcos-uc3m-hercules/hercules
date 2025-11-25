@@ -104,6 +104,20 @@ extern "C"
 		// ucp_context_query(ucp_context, &attr);
 		// fprintf(stderr, "ucx thread_mode=%d, %d\n", attr.thread_mode, UCS_THREAD_MODE_SERIALIZED);
 
+		ucp_worker_attr_t check_attr;
+		check_attr.field_mask = UCP_WORKER_ATTR_FIELD_THREAD_MODE;
+		ucp_worker_query(*ucp_worker, &check_attr);
+
+		if (check_attr.thread_mode != UCS_THREAD_MODE_MULTI)
+		{
+			fprintf(stderr, "CRITICAL WARNING: UCX downgraded thread mode to %d! Multi-threaded access will crash.\n", check_attr.thread_mode);
+			// This confirms why you needed the manual mutex.
+		}
+		else
+		{
+			fprintf(stderr, "Worker is running in UCS_THREAD_MODE_MULTI.\n");
+		}
+
 		// slog_debug("[COMM] Inicializated worker result: %d", ret);
 		return ret;
 	}
@@ -138,9 +152,8 @@ extern "C"
 		ucp_params.request_size = sizeof(struct ucx_context);
 		ucp_params.request_init = request_init;
 		ucp_params.name = "hercules";
-		ucp_params.mt_workers_shared = UCS_THREAD_MODE_MULTI;
-		// ucp_params.mt_workers_shared = UCS_THREAD_MODE_SERIALIZED;
-		// ucp_params.mt_workers_shared = UCS_THREAD_MODE_SINGLE;
+		// ucp_params.mt_workers_shared = UCS_THREAD_MODE_MULTI;
+		ucp_params.mt_workers_shared = 1; // UCS_THREAD_MODE_SERIALIZED;
 		// slog_info("Before ucp_init");
 		// status = ucp_init(&ucp_params, config, ucp_context);
 
@@ -542,17 +555,17 @@ extern "C"
 		// }
 		// else
 		// { // synchronous request
-			request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
-			// wait for the request to be completed.
-			status = ucx_wait(ucp_worker, request, "recv", "data");
-			if (status != UCS_OK)
-			{
-				slog_error("[COMM] HERCULES_RECV_DATA_ERR, msg_length=%lu", msg_length);
-				fprintf(stderr, "HERCULES_ERR_RECV_DATA\n");
-				return 0;
-			}
-			// request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
-			// memcpy(msg, recv_buffer, msg_length);
+		request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, msg, msg_length, dest, tag_mask, &recv_param);
+		// wait for the request to be completed.
+		status = ucx_wait(ucp_worker, request, "recv", "data");
+		if (status != UCS_OK)
+		{
+			slog_error("[COMM] HERCULES_RECV_DATA_ERR, msg_length=%lu", msg_length);
+			fprintf(stderr, "HERCULES_ERR_RECV_DATA\n");
+			return 0;
+		}
+		// request = (struct ucx_context *)ucp_tag_recv_nbx(ucp_worker, recv_buffer, msg_length, dest, tag_mask, &recv_param);
+		// memcpy(msg, recv_buffer, msg_length);
 		// }
 
 		return msg_length;
@@ -854,6 +867,8 @@ extern "C"
 			fprintf(stderr, "[0x%x] failure handler called with status %d (%s)\n", (unsigned int)pthread_self(), status, ucs_status_string(status));
 		}
 
+		ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
+
 		*arg_status = status;
 	}
 
@@ -950,8 +965,8 @@ extern "C"
 		status = ucp_ep_create(worker, &ep_params, ep);
 		if (status != UCS_OK)
 		{
-			fprintf(stderr, "failed to create an endpoint on the server: (%s)\n", ucs_status_string(status));
-			slog_error("failed to create an endpoint on the server: (%s)", ucs_status_string(status));
+			fprintf(stderr, "failed to create an endpoint on the data server: (%s)\n", ucs_status_string(status));
+			slog_error("failed to create an endpoint on the data server: (%s)", ucs_status_string(status));
 		}
 
 		slog_debug("[COMM] Created client endpoint");
@@ -984,7 +999,8 @@ extern "C"
 		status = ucp_ep_create(worker, &ep_params, ep);
 		if (status != UCS_OK)
 		{
-			fprintf(stderr, "failed to create an endpoint on the server: (%s)", ucs_status_string(status));
+			fprintf(stderr, "failed to create an endpoint on the metadata server: (%s)\n", ucs_status_string(status));
+			slog_error("failed to create an endpoint on the data metadata server: (%s)", ucs_status_string(status));
 		}
 
 		slog_debug("[COMM] Created client endpoint");

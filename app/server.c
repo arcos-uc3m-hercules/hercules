@@ -64,7 +64,6 @@ extern pthread_mutex_t mutex_garbage;
 extern char *IMSS_ROOT;
 extern size_t IMSS_ROOT_LEN;
 
-
 // Malleability decomissioning.
 // int waiting_clients = 0;
 // pthread_mutex_t mutex_malleability = PTHREAD_MUTEX_INITIALIZER;
@@ -119,7 +118,6 @@ int32_t main(int32_t argc, char **argv)
 	pthread_cond_init(&global_run_malleability_cond, NULL);
 	pthread_cond_init(&global_run_shutdown_cond, NULL);
 	// sem_init(&mutex_malleability, 1, 0);
-
 
 	/* UCP objects */
 	ucp_context_h ucp_context = NULL;
@@ -238,9 +236,9 @@ int32_t main(int32_t argc, char **argv)
 		{
 			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
 			fprintf(stderr, "Number of hosts in %s are %d\n", args.alloc_data_hostfile, number_of_hosts);
-		} 
+		}
 		// TODO: put the following message on the workers.c, where malleability is applied.
-		// else 
+		// else
 		// {
 		// 	fprintf(stderr,"ERROR: alloc_data_hostfile has not ben set. HERCULES_ALLOC_DATA_HOSTFILE = hostfile_path\n");
 		// }
@@ -453,7 +451,7 @@ int32_t main(int32_t argc, char **argv)
 					return -1;
 				}
 				// Receive the associated structure.
-				imss_info *imss_info_ = (imss_info *)malloc(sizeof(imss_info));//malloc(sizeof(imss_info) * length);
+				imss_info *imss_info_ = (imss_info *)malloc(sizeof(imss_info)); // malloc(sizeof(imss_info) * length);
 				ret = recv_dynamic_stream(ucp_worker, metadata_endpoints[i], imss_info_, IMSS_INFO, attr.worker_uid, length);
 				// If another data server has taken the URI, this HERCULES configuration should not be deployed.
 				// Two HERCULES configurations cannot have the same URI.
@@ -622,6 +620,29 @@ int32_t main(int32_t argc, char **argv)
 	p_argv arguments[total_threads];
 
 	ucp_worker_threads = (ucp_worker_h *)malloc(hercules_thread_pool_size * sizeof(ucp_worker_h));
+	// ucp_worker_h shared_worker;
+	// ret = init_worker(ucp_context, &shared_worker);
+	// if (ret != 0)
+	// {
+	// 	perror("HERCULES_ERR_INIT_SHARED_WORKER");
+	// 	return -1;
+	// }
+
+	// ucp_worker_attr_t worker_attr;
+	// memset(&worker_attr, 0, sizeof(worker_attr));
+	// worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
+
+	// status = ucp_worker_query(shared_worker, &worker_attr);
+	// if (status != UCS_OK)
+    // {
+    //     ready(tmp_file_path, "ERROR");
+    //     slog_error("HERCULES_ERR_UCP_WORKER_QUERY: %s", ucs_status_string(status));
+    //     perror("HERCULES_ERR_UCP_WORKER_QUERY");
+    //     ucp_worker_destroy(shared_worker);
+    //     ucp_cleanup(ucp_context);
+    //     return -1;
+    // }
+
 	local_addr = (ucp_address_t **)malloc(hercules_thread_pool_size * sizeof(ucp_address_t *));
 	local_addr_len = (size_t *)malloc(hercules_thread_pool_size * sizeof(size_t));
 
@@ -700,12 +721,14 @@ int32_t main(int32_t argc, char **argv)
 			}
 
 			arguments[i].ucp_worker = ucp_worker_threads[aux_idx];
+			// arguments[i].ucp_worker = shared_worker;
 
 			ucp_worker_attr_t worker_attr;
 			memset(&worker_attr, 0, sizeof(worker_attr));
 
 			worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
 			status = ucp_worker_query(ucp_worker_threads[aux_idx], &worker_attr);
+			// status = ucp_worker_query(shared_worker, &worker_attr);
 			if (status != UCS_OK)
 			{
 				ready(tmp_file_path, "ERROR");
@@ -756,7 +779,7 @@ int32_t main(int32_t argc, char **argv)
 		my_imss.ips = (char **)calloc(num_servers, sizeof(char *));
 		my_imss.status = (int *)malloc(num_servers * sizeof(int));
 		my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int));
-		my_imss.num_storages = 0;// This value is increase on ReadHostfile.  num_servers; 
+		my_imss.num_storages = 0; // This value is increase on ReadHostfile.  num_servers;
 		my_imss.num_active_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important

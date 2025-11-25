@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=hercules    # Job name
 #SBATCH --output=logs/hercules/%j-io500.log   # Standard output and error log
-#SBATCH --time=8:00:00               # Time limit hrs:min:sec
+#SBATCH --time=1:00:00               # Time limit hrs:min:sec
 #SBATCH --cpus-per-task=8
 #SBATCH --partition=large
 #SBATCH --ntasks-per-node=16 # fix the mpirun error: "There are not enough slots available in the system."
@@ -102,7 +102,7 @@ module load hpcx
 #export UCX_NET_DEVICES="opap6s0:1"
 #export UCX_NET_DEVICES=all
 #export UCX_IB_RCACHE_MAX_REGIONS="100"
-export UCX_NET_DEVICES="ib0" # this works but shows some UCX warnings.
+#export UCX_NET_DEVICES="ib0" # this works but shows some UCX warnings.
 #export UCX_NET_DEVICES=bond0,ib0,mlx5_0:1,lo
 #export UCX_NET_DEVICES="mlx5_0"
 

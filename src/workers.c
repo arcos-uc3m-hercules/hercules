@@ -23,7 +23,7 @@
 #include "policies.h"
 #include "shared_memory.h"
 
-void *map_server_eps = NULL;
+// void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
 imss_info imss_copy = {0};
 imss_info *curr_global_imss = NULL;
@@ -34,6 +34,7 @@ pthread_mutex_t mutex_snapshot = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_checkpoint = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t memory_protect = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutext_malleability = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutext_progress = PTHREAD_MUTEX_INITIALIZER;
 // if malleability_on = 1, new requests will be not handled and server will
 // respond with a "malleability" string.
 int malleability_on = 0;
@@ -987,6 +988,33 @@ void *Malleability(void *th_argv)
 	return NULL;
 }
 
+int check_endpoint(ucp_ep_h ep, uint64_t worker_uid, ucp_worker_h ucp_worker, void *map_server_eps)
+{
+	int ret = 0;
+	ucs_status_ptr_t flush_req = ucp_ep_flush_nb(ep, 0, NULL);
+	if (UCS_PTR_IS_ERR(flush_req))
+	{
+		// The Endpoint is dead (Timeout/Disconnected)
+		slog_error("Cached Endpoint is dead: %s", ucs_status_string(UCS_PTR_STATUS(flush_req)));
+		fprintf(stderr, "Cached Endpoint is dead: %s\n", ucs_status_string(UCS_PTR_STATUS(flush_req)));
+
+		// REMOVE FROM MAP IMMEDIATELY
+		// map_server_eps_remove(map_server_eps, attr.worker_uid);
+		map_server_eps_erase(map_server_eps, worker_uid, ucp_worker);
+		ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
+
+		ret = -1;
+	}
+	else if (UCS_PTR_IS_PTR(flush_req))
+	{
+		// Flush is happening in background. You can wait for it,
+		// or just proceed hoping it completes.
+		// For stability, it is better to wait or use a callback.
+		ucp_request_free(flush_req);
+	}
+	return ret;
+}
+
 void *hercules_ucx_server(void *th_argv)
 {
 	// Enable thread cancellation
@@ -1002,6 +1030,16 @@ void *hercules_ucx_server(void *th_argv)
 	// Map that stores server side endpoints
 	char server_name[PATH_MAX] = {0};
 	char server_tag[PATH_MAX] = {0};
+
+	if (arguments->ucp_worker == NULL)
+	{
+		slog_fatal("Thread %d has a NULL worker pointer!", arguments->thread_id);
+		fprintf(stderr, "Thread %d has a NULL worker pointer!\n", arguments->thread_id);
+		pthread_exit(NULL);
+	}
+
+	fprintf(stderr, "Thread %d using worker at address %p\n", arguments->thread_id, (void *)arguments->ucp_worker);
+
 	// calculates the minimun performance threshold in megabytes.
 	// MINIMUM_PERFORMANCE_THRESHOLD *= MB;
 	// set the initial value to the global "active number of servers".
@@ -1026,10 +1064,11 @@ void *hercules_ucx_server(void *th_argv)
 	}
 
 	// if (!arguments->thread_id) // thread 0.
-	{
-		map_server_eps = map_server_eps_create();
-		BLOCK_SIZE = arguments->blocksize * 1024;
-	}
+	// {
+	void *map_server_eps = NULL;
+	map_server_eps = map_server_eps_create();
+	BLOCK_SIZE = arguments->blocksize * 1024;
+	// }
 
 	for (;;)
 	{
@@ -1111,6 +1150,16 @@ void *hercules_ucx_server(void *th_argv)
 
 		//  look for this peer_addr in the map and get the ep
 		ret = map_server_eps_search(map_server_eps, attr.worker_uid, &ep);
+
+		if (ret > 0)
+		{
+			int check = check_endpoint(ep, attr.worker_uid, arguments->ucp_worker, map_server_eps);
+			if (check < 0)
+			{
+				ret = -1;
+			}
+		}
+
 		// ret = -1;
 		// create ep if it's not in the map
 		if (ret < 0)
@@ -1173,7 +1222,7 @@ void *hercules_ucx_server(void *th_argv)
 
 		t = clock() - t;
 
-		fflush(stdout);
+		// fflush(stdout);
 
 		time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 		slog_info("Serving time %f s\n", time_taken);
@@ -2167,7 +2216,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					return -1;
 				}
 			}
-			else 
+			else
 			{ // Data in shared memory.
 				// get the content from the shared memory.
 				// SharedMemory *sh_memory_struct = getContentSM(shm_key, block_size_recv);
@@ -2265,6 +2314,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				{
 					insert_successful = HierarchicalMapPut(hierarchical_map, key, buffer, size_asigned_to_block, reused_memory, NULL, is_block_zero);
 				}
+				pthread_mutex_unlock(&memory_protect);
 
 				slog_debug("[WRITE_OP] insert_successful=%d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
 
@@ -2274,10 +2324,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					perror("HERCULES_ERR_WORKER_MAPPUT");
 					slog_error("HERCULES_ERR_WORKER_MAPPUT");
 					free(buffer);
-					pthread_mutex_unlock(&memory_protect);
+					// pthread_mutex_unlock(&memory_protect);
 					return -1;
 				}
-				pthread_mutex_unlock(&memory_protect);
 			}
 			else
 			{
@@ -2320,10 +2369,10 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// If data is stored in shared memory due LOCAL policy, the server does not need to receive the data.
 				if (!is_shared_memory)
 				{ // non shared memory method.
-					ucp_tag_recv_info_t info_tag;
-					ucp_tag_message_h msg_tag = NULL;
-					//  msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-					msg_length = TIMING(get_recv_data_length_2(arguments->ucp_worker, arguments->worker_uid, &info_tag, &msg_tag), "[write] get_recv_data_length_2", size_t, arguments->thread_id);
+				  // ucp_tag_recv_info_t info_tag;
+				  // ucp_tag_message_h msg_tag = NULL;
+					msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+					// msg_length = TIMING(get_recv_data_length_2(arguments->ucp_worker, arguments->worker_uid, &info_tag, &msg_tag), "[write] get_recv_data_length_2", size_t, arguments->thread_id);
 					if (msg_length == 0)
 					{
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
@@ -2342,8 +2391,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						return -1;
 					}
 
-					//  msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buffer, msg_length, arguments->worker_uid, 0);
-					msg_length = TIMING(recv_data_2(arguments->ucp_worker, arguments->server_ep, (char *)buffer, msg_length, arguments->worker_uid, 0, info_tag, msg_tag), "[write] recv_data_2", size_t, arguments->thread_id);
+					msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buffer, msg_length, arguments->worker_uid, 0);
+					// msg_length = TIMING(recv_data_2(arguments->ucp_worker, arguments->server_ep, (char *)buffer, msg_length, arguments->worker_uid, 0, info_tag, msg_tag), "[write] recv_data_2", size_t, arguments->thread_id);
 					if (msg_length == 0)
 					{
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
@@ -2426,22 +2475,23 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					// }
 				}
 				// when snapshot is enabled we saved block 0.
-				if (!global_finish_snapshot)
-				{
-					std::size_t found = TIMING(key.find("$0"), "check if block 0", std::size_t, arguments->thread_id);
-					if (found != std::string::npos) // block 0.
-					{
-						insert_successful = TIMING(map->put_snapshot(key, -1), "map->put_snapshot", int, arguments->thread_id);
-						// Include the new record in the tracking structure.
-						if (insert_successful != 0)
-						{
-							perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-							slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-							pthread_mutex_unlock(&memory_protect);
-							return -1;
-						}
-					}
-				}
+				// TODO: fix this.
+				// if (!global_finish_snapshot)
+				// {
+				// 	std::size_t found = TIMING(key.find("$0"), "check if block 0", std::size_t, arguments->thread_id);
+				// 	if (found != std::string::npos) // block 0.
+				// 	{
+				// 		insert_successful = TIMING(map->put_snapshot(key, -1), "map->put_snapshot", int, arguments->thread_id);
+				// 		// Include the new record in the tracking structure.
+				// 		if (insert_successful != 0)
+				// 		{
+				// 			perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+				// 			slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
+				// 			pthread_mutex_unlock(&memory_protect);
+				// 			return -1;
+				// 		}
+				// 	}
+				// }
 			}
 			else
 			{ // non block 0.
@@ -3025,10 +3075,10 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						// m.data = address_;
 						// m.size = block_size_rtvd;
 
-						#ifdef DPRINTF
+#ifdef DPRINTF
 						slog_debug("Printing intervals of dataset.");
 						PrintIntervals((dataset_info *)address_);
-						#endif
+#endif
 						// pthread_mutex_lock(&lock_network);
 						// err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, (char *)&m, MSG, arguments->worker_uid);
 						err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, address_, DATASET_INFO, arguments->worker_uid);
@@ -3702,16 +3752,16 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 					// prev. dataset.
 					slog_debug("Updating dataset,\n printing intervals of prev. dataset.");
-					#ifdef DPRINTF
+#ifdef DPRINTF
 					PrintIntervals(dataset);
-					#endif
+#endif
 
 					dataset_info *received_struct = (dataset_info *)buffer;
 
 					slog_debug("printing intervals of received dataset.");
-					#ifdef DPRINTF
+#ifdef DPRINTF
 					PrintIntervals(received_struct);
-					#endif
+#endif
 
 					// check if the received interval is highest that the prev. one.
 					// first check who has most intervals.
@@ -3740,9 +3790,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						pthread_mutex_unlock(&memory_protect);
 
 						slog_debug("Printing intervals of the updated dataset.");
-						#ifdef DPRINTF
+#ifdef DPRINTF
 						PrintIntervals((dataset_info *)dataset);
-						#endif
+#endif
 
 						// memcpy((dataset_info *)address_, (dataset_info *)buffer, sizeof(dataset_info));
 						// memcpy(dataset->intervals, ((dataset_info *)buffer)->intervals, sizeof(dataset->intervals) * dataset->num_intervals);

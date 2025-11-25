@@ -67,7 +67,7 @@ int32_t found_in; // Variable storing the position where a certain structure was
 
 extern uint16_t connection_port; // FIXME
 
-// char att_deployment[URI_] = {0}; 
+// char att_deployment[URI_] = {0};
 
 uint64_t BLOCK_SIZE = 0;
 // int32_t IMSS_DEBUG = 0;
@@ -81,9 +81,9 @@ ucp_address_t **stat_addr = NULL;
 ucp_ep_h *stat_eps;
 
 /* TCP variables. */
-char client_node[512];	 // Node name where the client is running.
-int32_t len_client_node; // Length of the previous node name.
-char client_ip[16];		 // IP number of the node where the client is taking execution.
+char client_node[512] = {0}; // Node name where the client is running.
+int32_t len_client_node;	 // Length of the previous node name.
+char client_ip[16] = {0};	 // IP number of the node where the client is taking execution.
 int matching_server_id = -1;
 
 static ucp_address_t *local_addr_meta;
@@ -1377,17 +1377,19 @@ int32_t open_imss(char *imss_uri)
 		}
 
 		new_imss.conns.id[i] = i;
-		// Save the current socket value when the IMSS ip matches the clients' one.
-		if (!strncmp((new_imss.info.ips)[i], client_node, len_client_node) || !strncmp((new_imss.info.ips)[i], client_ip, strlen(new_imss.info.ips[i])))
-		{
-			new_imss.conns.matching_server = i;
-			// strcpy(att_deployment, imss_uri);
-		}
-
 		// client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], &new_imss.info.status[i]);
 		client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], NULL);
 		slog_debug("[IMSS] Created endpoint with %s", (new_imss.info.ips)[i]);
 		// fprintf(stderr, "[IMSS] Created endpoint with %s\n", (new_imss.info.ips)[i]);
+		// Save the current socket value when the IMSS ip matches the clients' one.
+		slog_debug("ips=%s, client_node=%s, client_ip=%s", (new_imss.info.ips)[i], client_node, client_ip);
+		if (!strncmp((new_imss.info.ips)[i], client_node, len_client_node) || !strncmp((new_imss.info.ips)[i], client_ip, strlen(new_imss.info.ips[i])))
+		{
+			new_imss.conns.matching_server = i;
+			// fprintf(stderr, "Attach deployment found in %s\n", client_node);
+			matching_server_id = i;
+			// strcpy(att_deployment, imss_uri);
+		}
 	}
 
 	// new_imss.info.num_storages -= num_down_storages;
@@ -1570,6 +1572,7 @@ int32_t AddBackEndServer2Imss(char *imss_uri)
 
 	curr_imss.conns.id[i] = i;
 	// Save the current socket value when the IMSS ip matches the clients' one.
+	slog_debug("ips=%s, client_node=%s, client_ip=%s", (curr_imss.info.ips)[i], client_node, client_ip);
 	if (!strncmp((curr_imss.info.ips)[i], client_node, len_client_node) || !strncmp((curr_imss.info.ips)[i], client_ip, strlen(curr_imss.info.ips[i])))
 	{
 		slog_debug("This process is attached to the server %s:%d", curr_imss.info.ips[i], i);
@@ -3444,6 +3447,12 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int 
 
 	// Receive the associated structure.
 	void *data = malloc(msg_len * sizeof(char));
+	if (data == NULL)
+	{
+		perror("HERCULES_ERR_STAT_DATASET_ERR_MALLOC");
+		return -2;
+	}
+	
 	ret = recv_dynamic_stream(ucp_worker_meta, ep, data, DATASET_INFO, local_meta_uid, msg_len);
 	if (ret < 0)
 	{
@@ -4523,6 +4532,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		if (async == ASYNC)
 		{
 			slog_debug("async process");
+			fprintf(stderr, "async process\n");
 			// async get.
 			async_data_worker_progress(curr_imss_storages);
 			// ServerSendRequest *new_send = new ServerSendRequest();
@@ -4569,15 +4579,17 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		slog_info("[IMSS] After recv_data, size_received_data=%lu", size_received_data);
 		if (size_received_data == 0)
 		{
-			if (errno != EAGAIN)
+			// if (errno != EAGAIN)
 			{
-				slog_error("ERR_HERCULES_GETDATA_RECV");
-				perror("ERR_HERCULES_GETDATA_RECV");
+				char err_msg[MAX_ERR_MSG_LEN] = {0};
+				sprintf(err_msg, "ERR_HERCULES_GETDATA_RECV: %s", key_);
+				perror(err_msg);
+				slog_error("%s", err_msg);
 				pthread_mutex_unlock(&lock_network);
 				return -2;
 			}
-			else
-				break;
+			// else
+			// 	break;
 		}
 
 		// Check if the requested key was correctly retrieved.
@@ -4585,7 +4597,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		{ // key not avaiable on the remote server.
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
 			sprintf(err_msg, "HERCULES_ERR_GET_NDATA_NO_KEY_AVAIL (%s), %s to server %d (%s), curr_imss_storages=%d", response_buffer, key_, server_id, curr_imss.info.ips[i], curr_imss_storages);
-			// fprintf(stderr, "%s\n", err_msg);
+			fprintf(stderr, "%s\n", err_msg);
 			slog_error("%s", err_msg);
 			errno = ENOENT;
 			// free(response_buffer);
@@ -4655,6 +4667,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		}
 	}
 	pthread_mutex_unlock(&lock_network);
+	fprintf(stderr, "[get_ndata] Unkown error\n");
+	slog_error("[get_ndata] Unkown error");
 	return -1;
 }
 
@@ -4815,8 +4829,8 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		{
 			if (errno != EAGAIN)
 			{
-				slog_error("ERR_HERCULES_GETDATA_RECV");
-				perror("ERR_HERCULES_GETDATA_RECV");
+				slog_error("ERR_HERCULES_GETDATA_RECV_PREFETCH");
+				perror("ERR_HERCULES_GETDATA_RECV_PREFETCH");
 				pthread_mutex_unlock(&lock_network);
 				free(*buffer_prefetch);
 				*buffer_prefetch = NULL;
@@ -5212,7 +5226,6 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		// Server receiving the current data block.
 		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
 		use_local = ((session_policy == LOCAL_ || session_policy == ZCOPY_) && server_id == matching_server_id);
-
 
 		if (data_id == 0)
 			size = sizeof(struct stat);

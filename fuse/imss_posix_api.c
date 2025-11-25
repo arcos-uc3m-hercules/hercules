@@ -578,8 +578,10 @@ extern "C"
 			if (ret < 0)
 			{
 				free(data);
-				perror("ERR_HERCULES_IMSS_OPEN_GET_DATA");
-				slog_error("ERR_HERCULES_IMSS_OPEN_GET_DATA");
+				char err_msg[MAX_ERR_MSG_LEN] = {0};
+				sprintf(err_msg, "ERR_HERCULES_IMSS_OPEN_GET_DATA: %s, ret=%d", imss_path, ret);
+				perror(err_msg);
+				slog_error("%s", err_msg);
 				// return -1;
 				return -ENOENT;
 			}

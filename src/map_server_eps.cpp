@@ -79,7 +79,7 @@ int map_server_eps_search(void *map, uint64_t uuid, ucp_ep_h *ep)
 {
 	map_server_eps_t *m = reinterpret_cast<map_server_eps_t *>(map);
 	// slog_debug("Locking");
-	// std::unique_lock<std::mutex> lock(mut_eps);
+	std::unique_lock<std::mutex> lock(mut_eps);
 	// slog_debug("Unlocking");
 
 	auto search = m->find(uuid);
