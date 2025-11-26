@@ -14,8 +14,6 @@
 #include "policies.h"
 #include "utils.h"
 
-extern int number_of_hosts;
-extern imss_info imss_copy;
 extern int SERVER_ID;
 // Pointer to the tree's root node.
 extern GNode *tree_root;
@@ -24,6 +22,7 @@ extern pthread_mutex_t tree_mut;
 extern imss curr_imss;
 
 // Initial buffer address.
+// extern char *buffer_address;
 // Set of locks dealing with the memory buffer access.
 extern pthread_mutex_t *region_locks;
 // Segment size (amount of memory assigned to each thread).
@@ -35,8 +34,8 @@ extern ucp_address_t **local_addr;
 extern size_t *local_addr_len;
 extern StsHeader *mem_pool;
 
-extern struct arguments args;
-// std::shared_ptr<map_records> g_map;
+// struct arguments args;
+std::shared_ptr<map_records> g_map;
 // uint64_t max_storage_size = 0;
 
 /* UCP objects */
@@ -46,7 +45,7 @@ ucp_ep_h *metadata_endpoints = NULL;
 // ucp_ep_h data_endpoints[100];
 size_t req_addr_len = 0;
 
-// unsigned long number_active_storage_serversX = 0; // stores the current number of active storage servers.
+unsigned long number_active_storage_serversX = 0; // stores the current number of active storage servers.
 pthread_t *threads;
 
 // global variables usted to finish threads.
@@ -64,14 +63,6 @@ extern pthread_mutex_t mutex_garbage;
 extern char *IMSS_ROOT;
 extern size_t IMSS_ROOT_LEN;
 
-
-// Malleability decomissioning.
-// int waiting_clients = 0;
-// pthread_mutex_t mutex_malleability = PTHREAD_MUTEX_INITIALIZER;
-extern sem_t mutex_malleability;
-extern pthread_cond_t global_run_malleability_cond;
-extern pthread_cond_t global_run_shutdown_cond;
-
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
 /**
@@ -79,7 +70,7 @@ extern pthread_cond_t global_run_shutdown_cond;
  * following the distribution policy choose by the user.
  * @return 0 on success, on error -1 is returned.
  */
-// int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri, std::shared_ptr<map_records> map);
+int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri, std::shared_ptr<map_records> map);
 
 /**
  * @brief Comunicates data servers to metadata servers to
@@ -87,7 +78,7 @@ extern pthread_cond_t global_run_shutdown_cond;
  * status of this data server (non active).
  * @return 0 on success, on error -1 is returned.
  */
-// int stop_server();
+int stop_server();
 
 /**
  * @brief Comunicates data servers to metadata servers to
@@ -95,7 +86,7 @@ extern pthread_cond_t global_run_shutdown_cond;
  * status of this data server (active).
  * @return 0 on success, on error -1 is returned.
  */
-// int wakeup_server();
+int wakeup_server();
 
 /**
  * @brief Defines the actions to be doing when the
@@ -112,14 +103,8 @@ int32_t main(int32_t argc, char **argv)
 	signal(SIGUSR1, handle_signal_server);
 	signal(SIGUSR2, handle_signal_server);
 
-	// Initializate mutex, semaphores and conditional variables.
 	pthread_cond_init(&global_run_snapshot_cond, NULL);
 	pthread_cond_init(&global_finish_cond, NULL);
-	pthread_cond_init(&global_run_garbage_collector_cond, NULL);
-	pthread_cond_init(&global_run_malleability_cond, NULL);
-	pthread_cond_init(&global_run_shutdown_cond, NULL);
-	// sem_init(&mutex_malleability, 1, 0);
-
 
 	/* UCP objects */
 	ucp_context_h ucp_context = NULL;
@@ -203,7 +188,7 @@ int32_t main(int32_t argc, char **argv)
 	// char *workdir = getenv("PWD");
 	slog_debug("Server type=%c\n", args.type);
 	struct tm tm = *localtime(&t);
-	sprintf(log_path, "%c-%s-server-%d.%02d-%02d-%02d", args.type, args.data_hostname, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
+	sprintf(log_path, "%c-server-%d.%02d-%02d-%02d", args.type, args.id, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
 	// Initializate logger.
 	slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, args.id);
@@ -221,6 +206,7 @@ int32_t main(int32_t argc, char **argv)
 	{
 		// args.stat_host = argv[3];
 		slog_debug("imss_uri = %s, stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
+		// fprintf(stderr, "imss_uri = %s stat-host = %s stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "\n", args.imss_uri, args.stat_host, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
 		// bind port number.
 		bind_port = args.data_port;
 		init_number_of_server = atoi(argv[3]);
@@ -233,17 +219,6 @@ int32_t main(int32_t argc, char **argv)
 		// slog_debug("stat-logfile = %s", args.stat_logfile);
 		// bind port number.
 		bind_port = args.stat_port;
-
-		if (strlen(args.alloc_data_hostfile) != 0 && args.malleability > 0)
-		{
-			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
-			fprintf(stderr, "Number of hosts in %s are %d\n", args.alloc_data_hostfile, number_of_hosts);
-		} 
-		// TODO: put the following message on the workers.c, where malleability is applied.
-		// else 
-		// {
-		// 	fprintf(stderr,"ERROR: alloc_data_hostfile has not ben set. HERCULES_ALLOC_DATA_HOSTFILE = hostfile_path\n");
-		// }
 	}
 
 	// buffer size provided.
@@ -310,7 +285,7 @@ int32_t main(int32_t argc, char **argv)
 		// number of servers conforming the HERCULES deployment.
 		num_servers = args.num_data_servers;
 		// Dynamic number of servers conforming the HERCULES deployment used by malleability.
-		// number_active_storage_serversX = num_servers;
+		number_active_storage_serversX = num_servers;
 		// HERCULES' MPI deployment file.
 		deployfile = args.data_hostfile;
 		// data block size
@@ -344,7 +319,7 @@ int32_t main(int32_t argc, char **argv)
 		if ((metadata_nodes_fd = fopen(args.meta_hostfile, "r+")) == NULL)
 		{
 			char err_msg[MAX_ERR_MSG_LEN];
-			sprintf(err_msg, "HERCULES_ERR_METADATA_DEPLOYFILE_OPEN:%s", args.meta_hostfile);
+			sprintf(err_msg, "HERCULES_ERR_DEPLOYFILE_OPEN:%s", deployfile);
 			perror(err_msg);
 			slog_fatal("%s", err_msg);
 			return -1;
@@ -453,7 +428,7 @@ int32_t main(int32_t argc, char **argv)
 					return -1;
 				}
 				// Receive the associated structure.
-				imss_info *imss_info_ = (imss_info *)malloc(sizeof(imss_info));//malloc(sizeof(imss_info) * length);
+				imss_info *imss_info_ = (imss_info *)malloc(sizeof(imss_info) * length);
 				ret = recv_dynamic_stream(ucp_worker, metadata_endpoints[i], imss_info_, IMSS_INFO, attr.worker_uid, length);
 				// If another data server has taken the URI, this HERCULES configuration should not be deployed.
 				// Two HERCULES configurations cannot have the same URI.
@@ -494,50 +469,47 @@ int32_t main(int32_t argc, char **argv)
 				// return 0;
 			}
 
-			// // When LOCAL policy is used, the server creates a shared memory region.
-			// if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
-			// {
-			// 	// Get the shared memory key and tries to create the shared memory region (pool).
-			// 	key_t key = getKeySM();
-			// 	slog_info("Generated Key = %d\n", key);
+			// When LOCAL policy is used, the server creates a shared memory region.
+			if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
+			{
+				// Get the shared memory key and tries to create the shared memory region (pool).
+				key_t key = getKeySM();
+				slog_info("Generated Key = %d\n", key);
 
-			// 	shm_data_id = getIdentifierSM(key, SHM_SIZE);
-			// 	if (shm_data_id == -1)
-			// 	{
-			// 		perror("ERR_HERCULES_GET_SM_IDENTIFIER");
-			// 		// Do not stop the process.
-			// 	}
-			// 	else
-			// 	{
-			// 		void *pool_memory = createSM(shm_data_id);
-			// 		if (pool_memory == NULL)
-			// 		{ // error creating the shared memory region.
-			// 			perror("HERCULES_ERR_CREATE_SM");
-			// 			slog_error("HERCULES_ERR_CREATE_SM");
-			// 			ready(tmp_file_path, "ERROR");
-			// 			exit(0);
-			// 		}
-			// 		else
-			// 		{
-			// 			// Shared memory has been created.
-			// 			args.pool_memory = pool_memory;
-			// 			// Becasue the shared memory was successfully created, we
-			// 			// initializate a semaphore to sincronize block 0.
-			// 			sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1);
-			// 			if (sem_shared_memory == SEM_FAILED)
-			// 			{
-			// 				perror("HERCULES_ERR_SHM_SEM_OPEN");
-			// 				exit(-1);
-			// 			}
-			// 			// Close the semaphore. The semaphore will remain and can
-			// 			// be used by the front-end until unlink is called.
-			// 			sem_close(sem_shared_memory);
-
-			// 			// Initializate the shared memory manager.
-			// 			// memory_manager_init(&g_shm_manager, SHM_SIZE);
-			// 		}
-			// 	}
-			// }
+				shm_data_id = getIdentifierSM(key, SHM_SIZE);
+				if (shm_data_id == -1)
+				{
+					perror("ERR_HERCULES_GET_SM_IDENTIFIER");
+					// Do not stop the process.
+				}
+				else
+				{
+					void *pool_memory = createSM(shm_data_id);
+					if (pool_memory == NULL)
+					{ // error creating the shared memory region.
+						perror("HERCULES_ERR_CREATE_SM");
+						slog_error("HERCULES_ERR_CREATE_SM");
+						ready(tmp_file_path, "ERROR");
+						exit(0);
+					}
+					else
+					{
+						// Shared memory has been created.
+						args.pool_memory = pool_memory;
+						// Becasue the shared memory was successfully created, we
+						// initializate a semaphore to sincronize block 0.
+						sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1);
+						if (sem_shared_memory == SEM_FAILED)
+						{
+							perror("HERCULES_ERR_SHM_SEM_OPEN");
+							exit(-1);
+						}
+						// Close the semaphore. The semaphore will remain and can
+						// be used by the front-end until unlink is called.
+						sem_close(sem_shared_memory);
+					}
+				}
+			}
 		}
 
 		// Close the file.
@@ -571,13 +543,12 @@ int32_t main(int32_t argc, char **argv)
 	IMSS_ROOT = args.imss_uri;
 	IMSS_ROOT_LEN = strlen(IMSS_ROOT);
 	SERVER_ID = args.id;
-	BLOCK_SIZE = args.block_size * 1024;
 
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));
 	hierarchical_map = HierarchicalMapCreate(std::string(args.imss_uri));
 	// copy the reference to a global map.
-	// g_map = map;
+	g_map = map;
 
 	int64_t data_reserved = 0;
 	// Pointer to the allocated buffer memory.
@@ -636,7 +607,6 @@ int32_t main(int32_t argc, char **argv)
 		arguments[i].port = bind_port;
 		arguments[i].tmp_file_path = tmp_file_path;
 		arguments[i].hercules_thread_pool_size = hercules_thread_pool_size;
-		arguments[i].hercules_info_struct = NULL;
 
 		// Add the instance URI to the thread arguments.
 		strcpy(arguments[i].my_uri, args.imss_uri);
@@ -750,19 +720,68 @@ int32_t main(int32_t argc, char **argv)
 		// }
 
 		// Metadata structure containing the novel HERCULES info.
-		imss_info my_imss = {0};
+		imss_info my_imss;
 
 		strcpy(my_imss.uri_, args.imss_uri);
 		my_imss.ips = (char **)calloc(num_servers, sizeof(char *));
 		my_imss.status = (int *)malloc(num_servers * sizeof(int));
 		my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int));
-		my_imss.num_storages = 0;// This value is increase on ReadHostfile.  num_servers; 
+		my_imss.num_storages = num_servers;
 		my_imss.num_active_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important
-		ReadHostfile(deployfile, &my_imss);
+		// FILE entity managing the HERCULES deployfile.
+		FILE *svr_nodes;
 
-		my_imss.num_storages = 0;
+		if ((svr_nodes = fopen(deployfile, "r+")) == NULL)
+		{
+			char err_msg[MAX_ERR_MSG_LEN];
+			sprintf(err_msg, "HERCULES_ERR_DEPLOYFILE_OPEN:%s", deployfile);
+			perror(err_msg);
+			slog_fatal("%s", err_msg);
+			return -1;
+		}
+
+		// Number of characters successfully read from the line.
+		int32_t n_chars;
+		int init_server_status = 1;
+		// int num_active_data_servers = 0;
+		for (int32_t i = 0; i < num_servers; i++)
+		{
+			// Allocate resources in the metadata structure so as to store the current HERCULES's IP.
+			(my_imss.ips)[i] = (char *)calloc(LINE_LENGTH, sizeof(char));
+			size_t l_size = LINE_LENGTH;
+
+			// Save HERCULES metadata deployment.
+			n_chars = getline(&((my_imss.ips)[i]), &l_size, svr_nodes);
+
+			// Erase the new line character ('') from the string.
+			if (((my_imss.ips)[i])[n_chars - 1] == '\n')
+			{
+				((my_imss.ips)[i])[n_chars - 1] = '\0';
+			}
+
+			if (i < init_number_of_server)
+			{
+				// fprintf(stderr, "Server %d is active\n", i);
+				init_server_status = 1;
+			}
+			else
+			{
+				// fprintf(stderr, "Server %d is inactive\n", i);
+				init_server_status = 0;
+			}
+			my_imss.status[i] = init_server_status;
+			my_imss.arr_num_active_storages[i] = init_number_of_server;
+		}
+
+		// Close the file.
+		if (fclose(svr_nodes) != 0)
+		{
+			perror("HERCULES_ERR_DEPLOYFILE_CLOSE");
+			slog_fatal("HERCULES_ERR_DEPLOYFILE_CLOSE");
+			return -1;
+		}
 
 		char key_plus_size[REQUEST_SIZE] = {0};
 		// Send the created structure to the metadata server.
@@ -831,12 +850,13 @@ int32_t main(int32_t argc, char **argv)
 
 		for (int i = 0; i < args.num_metadata_servers; i++)
 		{
+
 			ucp_worker_attr_t worker_attr;
 			ucs_status_t status;
 			worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
 			status = ucp_worker_query(ucp_worker_meta, &worker_attr);
 			char request[REQUEST_SIZE] = {0};
-			sprintf(request, "%d SETSERVER %s %s", args.id, client_ip, args.data_hostname);
+			sprintf(request, "%d SETSERVER %s", args.id, client_ip);
 			slog_debug("[main] Request - %s", request);
 			if (send_req(ucp_worker_meta, stat_eps[i], worker_attr.address, worker_attr.address_length, request) == 0)
 			{
@@ -844,7 +864,7 @@ int32_t main(int32_t argc, char **argv)
 				slog_fatal("HERCULES_ERR_SEND_REQ_SET_STR");
 				return -1;
 			}
-			// fprintf(stderr, "Message sent\n");
+			fprintf(stderr, "Message sent\n");
 		}
 	}
 	// if (args.type == TYPE_DATA_SERVER)
@@ -943,10 +963,10 @@ int32_t main(int32_t argc, char **argv)
 	}
 	else
 	{
-		// // Destroy the shared memory segment.
-		// freeSM(shm_data_id);
-		// // Remove the named semaphore.
-		// sem_unlink("/hercules_shm_sem");
+		// Destroy the shared memory segment.
+		freeSM(shm_data_id);
+		// Remove the named semaphore.
+		sem_unlink("/hercules_shm_sem");
 
 		free(region_locks);
 	}
@@ -973,108 +993,108 @@ int32_t main(int32_t argc, char **argv)
 	return 0;
 }
 
-// int stop_server()
-// {
-// 	// Get the current number of active nodes.
-// 	number_active_storage_serversX = get_number_of_active_nodes(args.hercules_path);
+int stop_server()
+{
+	// Get the current number of active nodes.
+	number_active_storage_serversX = get_number_of_active_nodes(args.hercules_path);
 
-// 	if (number_active_storage_serversX < 0)
-// 	{
-// 		return -1;
-// 	}
+	if (number_active_storage_serversX < 0)
+	{
+		return -1;
+	}
 
-// 	// Tell metadata server to reduce number of servers.
-// 	char key_plus_size[REQUEST_SIZE] = {0};
-// 	// Send the created structure to the metadata server.
-// 	// last "0" is the server status to be set.
-// 	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_serversX, args.imss_uri, 0);
-// 	slog_debug("[main] Request - %s", key_plus_size);
-// 	// TODO: locate the metadata server.
-// 	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
-// 	{
-// 		perror("HERCULES_ERR_STOP_SERVER_SEND_REQ");
-// 		return -1;
-// 	}
+	// Tell metadata server to reduce number of servers.
+	char key_plus_size[REQUEST_SIZE] = {0};
+	// Send the created structure to the metadata server.
+	// last "0" is the server status to be set.
+	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_serversX, args.imss_uri, 0);
+	slog_debug("[main] Request - %s", key_plus_size);
+	// TODO: locate the metadata server.
+	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
+	{
+		perror("HERCULES_ERR_STOP_SERVER_SEND_REQ");
+		return -1;
+	}
 
-// 	return 0;
-// }
+	return 0;
+}
 
-// int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri, std::shared_ptr<map_records> map)
-// {
-// 	// Creates endpoints to all data servers. It is use in case of
-// 	// malleability to move blocks between data servers.
-// 	slog_debug("Connecting to data servers\n");
-// 	open_imss(imss_uri);
-// 	if (number_active_storage_serversX < 0)
-// 	{
-// 		slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-// 		return -1;
-// 	}
+int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri, std::shared_ptr<map_records> map)
+{
+	// Creates endpoints to all data servers. It is use in case of
+	// malleability to move blocks between data servers.
+	slog_debug("Connecting to data servers\n");
+	open_imss(imss_uri);
+	if (number_active_storage_serversX < 0)
+	{
+		slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+		return -1;
+	}
 
-// 	// Here data server should to move the datablocks.
-// 	// print all key/value elements.
-// 	double time_taken;
-// 	time_t t = clock();
-// 	void *address_ = NULL;
-// 	uint64_t block_size = -1;
-// 	int curr_map_size = 0;
-// 	const char *uri_ = NULL;
-// 	size_t size = 0;
-// 	char key_[REQUEST_SIZE] = {0};
-// 	// Get the number of blocks stored by this data server.
-// 	int number_of_blocks_2_move = map->size();
+	// Here data server should to move the datablocks.
+	// print all key/value elements.
+	double time_taken;
+	time_t t = clock();
+	void *address_ = NULL;
+	uint64_t block_size = -1;
+	int curr_map_size = 0;
+	const char *uri_ = NULL;
+	size_t size = 0;
+	char key_[REQUEST_SIZE] = {0};
+	// Get the number of blocks stored by this data server.
+	int number_of_blocks_2_move = map->size();
 
-// 	slog_info("Server %d, has %d blocks, active storage servers=%lu", args.id, map->size(), number_active_storage_serversX);
-// 	while ((curr_map_size = map->size()) > 0 && number_active_storage_serversX > 0)
-// 	{
-// 		std::string key;
-// 		// get next key (block identifier) with the format <block_name>$<block_number>
-// 		// for example "myfile$199", where block_name = myfile, and block_number = 199.
-// 		key = map->get_head_element();
+	slog_info("Server %d, has %d blocks, active storage servers=%lu", args.id, map->size(), number_active_storage_serversX);
+	while ((curr_map_size = map->size()) > 0 && number_active_storage_serversX > 0)
+	{
+		std::string key;
+		// get next key (block identifier) with the format <block_name>$<block_number>
+		// for example "myfile$199", where block_name = myfile, and block_number = 199.
+		key = map->get_head_element();
 
-// 		// get the element data and store it in "address_".
-// 		map->get(key, &address_, &block_size);
-// 		// fprintf(stderr, "**** curr_map_size=%d, head element=%s, block_size=%ld\n", curr_map_size, key.c_str(), block_size);
-// 		slog_debug("**** curr_map_size=%d, head element=%s, block_size=%ld\n", curr_map_size, key.c_str(), block_size);
+		// get the element data and store it in "address_".
+		map->get(key, &address_, &block_size);
+		// fprintf(stderr, "**** curr_map_size=%d, head element=%s, block_size=%ld\n", curr_map_size, key.c_str(), block_size);
+		slog_debug("**** curr_map_size=%d, head element=%s, block_size=%ld\n", curr_map_size, key.c_str(), block_size);
 
-// 		int pos = key.find('$') + 1;						   // +1 to skip '$' on the block number.
-// 		std::string block = key.substr(pos, key.length() + 1); // substract the block number from the key.
-// 		int block_number = stoi(block, 0, 10);				   //  string to number.
-// 		pos -= 1;											   // -1 to skip '$' on the data uri.
-// 		std::string data_uri = key.substr(0, pos);			   // substract the data uri from the key.
-// 		slog_debug("key='%s',\turi='%s',\tblock='%s'\n", key.c_str(), data_uri.c_str(), block.c_str());
-// 		int next_server = find_server(number_active_storage_serversX, block_number, data_uri.c_str(), 0, args.type, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
+		int pos = key.find('$') + 1;						   // +1 to skip '$' on the block number.
+		std::string block = key.substr(pos, key.length() + 1); // substract the block number from the key.
+		int block_number = stoi(block, 0, 10);				   //  string to number.
+		pos -= 1;											   // -1 to skip '$' on the data uri.
+		std::string data_uri = key.substr(0, pos);			   // substract the data uri from the key.
+		slog_debug("key='%s',\turi='%s',\tblock='%s'\n", key.c_str(), data_uri.c_str(), block.c_str());
+		int next_server = find_server(number_active_storage_serversX, block_number, data_uri.c_str(), 0, args.type, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
 
-// 		slog_info("key='%s',\turi='%s%s',\tfrom server %d to server %d,\tactive servers=%lu\n", key.c_str(), data_uri.c_str(), block.c_str(), server_id, next_server, number_active_storage_serversX);
-// 		slog_debug("new server=%d, curr_server=%d\n", next_server, server_id);
+		slog_info("key='%s',\turi='%s%s',\tfrom server %d to server %d,\tactive servers=%lu\n", key.c_str(), data_uri.c_str(), block.c_str(), server_id, next_server, number_active_storage_serversX);
+		slog_debug("new server=%d, curr_server=%d\n", next_server, server_id);
 
-// 		// here we can send key.c_str() directly to reduce the number of operations.
-// 		if (set_data_server(data_uri.c_str(), block_number, address_, block_size, 0, next_server) < 0)
-// 		{
-// 			slog_error("ERR_HERCULES_SET_DATA_IN_SERVER\n");
-// 			perror("ERR_HERCULES_SET_DATA_IN_SERVER");
-// 			return -1;
-// 		}
+		// here we can send key.c_str() directly to reduce the number of operations.
+		if (set_data_server(data_uri.c_str(), block_number, address_, block_size, 0, next_server) < 0)
+		{
+			slog_error("ERR_HERCULES_SET_DATA_IN_SERVER\n");
+			perror("ERR_HERCULES_SET_DATA_IN_SERVER");
+			return -1;
+		}
 
-// 		// delete the element from the map.
-// 		map->erase_head_element();
-// 		// get new map size to print it.
-// 		curr_map_size = map->size();
-// 		// fprintf(stderr, "**** curr_map_size=%d\n", curr_map_size);
-// 		slog_debug("**** curr_map_size=%d\n", curr_map_size);
-// 	}
+		// delete the element from the map.
+		map->erase_head_element();
+		// get new map size to print it.
+		curr_map_size = map->size();
+		// fprintf(stderr, "**** curr_map_size=%d\n", curr_map_size);
+		slog_debug("**** curr_map_size=%d\n", curr_map_size);
+	}
 
-// 	t = clock() - t;
-// 	time_taken = ((double)t) / (CLOCKS_PER_SEC);
+	t = clock() - t;
+	time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
-// 	if (number_active_storage_serversX > 0)
-// 	{
-// 		// fprintf(stderr, "[HS] Data movement %d blocks %lu %f sec.\n", number_of_blocks_2_move, number_active_storage_serversX, time_taken);
-// 		fprintf(stderr, "\033[0;34m [HS] Server %d has moved %d blocks to %lu servers in %f sec. \033[0m\n", args.id, number_of_blocks_2_move, number_active_storage_serversX, time_taken);
-// 	}
+	if (number_active_storage_serversX > 0)
+	{
+		// fprintf(stderr, "[HS] Data movement %d blocks %lu %f sec.\n", number_of_blocks_2_move, number_active_storage_serversX, time_taken);
+		fprintf(stderr, "\033[0;34m [HS] Server %d has moved %d blocks to %lu servers in %f sec. \033[0m\n", args.id, number_of_blocks_2_move, number_active_storage_serversX, time_taken);
+	}
 
-// 	return 0;
-// }
+	return 0;
+}
 
 void handle_signal_server(int signal)
 {
@@ -1204,68 +1224,68 @@ void handle_signal_server(int signal)
 		}
 
 		// Data servers performs malleability operations if it is enabled.
-		// if (args.type == TYPE_DATA_SERVER && args.malleability == 1)
-		// {
-		// 	ret = stop_server();
-		// 	if (ret == 0) // success.
-		// 	{
-		// 		ret = move_blocks_2_server(args.stat_port, args.id, args.imss_uri, g_map);
-		// 		if (ret < 0) // error.
-		// 		{
-		// 			// TODO: if "move_blocks_2_server" fails, try again?
-		// 		}
-		// 	}
-		// }
+		if (args.type == TYPE_DATA_SERVER && args.malleability == 1)
+		{
+			ret = stop_server();
+			if (ret == 0) // success.
+			{
+				ret = move_blocks_2_server(args.stat_port, args.id, args.imss_uri, g_map);
+				if (ret < 0) // error.
+				{
+					// TODO: if "move_blocks_2_server" fails, try again?
+				}
+			}
+		}
 		// This file is readed by the hercules script to know if this server
 		// was correctly shutting down.
 		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
 		ready(tmp_file_path, "OK");
 	}
-	// if (signal == SIGUSR2) // wake up this server.
-	// {
-	// 	slog_info("SIGUSR2 received");
-	// 	if (args.type == TYPE_DATA_SERVER) // only data servers.
-	// 	{
-	// 		fprintf(stderr, " \033[0;32m Waking up server %d \033[0m\n", args.id);
-	// 		// Changes the number of active servers in the metadata server
-	// 		// and the status of this server.
-	// 		wakeup_server();
+	if (signal == SIGUSR2) // wake up this server.
+	{
+		slog_info("SIGUSR2 received");
+		if (args.type == TYPE_DATA_SERVER) // only data servers.
+		{
+			fprintf(stderr, " \033[0;32m Waking up server %d \033[0m\n", args.id);
+			// Changes the number of active servers in the metadata server
+			// and the status of this server.
+			wakeup_server();
 
-	// 		// This file is readed by the hercules script to know if this server
-	// 		// was correctly waking up.
-	// 		char tmp_file_path[PATH_MAX];
-	// 		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-up", args.hercules_path, args.type, args.id);
-	// 		fprintf(stderr, "Writting file %s\n", tmp_file_path);
-	// 		ready(tmp_file_path, "OK");
-	// 	}
-	// }
+			// This file is readed by the hercules script to know if this server
+			// was correctly waking up.
+			char tmp_file_path[PATH_MAX];
+			sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-up", args.hercules_path, args.type, args.id);
+			fprintf(stderr, "Writting file %s\n", tmp_file_path);
+			ready(tmp_file_path, "OK");
+		}
+	}
 }
 
-// int wakeup_server()
-// {
-// 	// Get the current number of active nodes.
-// 	number_active_storage_serversX = get_number_of_active_nodes(args.hercules_path);
+int wakeup_server()
+{
+	// Get the current number of active nodes.
+	number_active_storage_serversX = get_number_of_active_nodes(args.hercules_path);
 
-// 	if (number_active_storage_serversX < 0)
-// 	{
-// 		return -1;
-// 	}
+	if (number_active_storage_serversX < 0)
+	{
+		return -1;
+	}
 
-// 	// Tell metadata server to update (increase) the number of servers.
-// 	char key_plus_size[REQUEST_SIZE] = {0};
-// 	// Send the created structure to the metadata server.
-// 	// last "1" is the server status to be set.
-// 	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_serversX, args.imss_uri, 1);
-// 	// fprintf(stderr, "Request - %s\n", key_plus_size);
-// 	slog_debug("[main] Request - %s", key_plus_size);
-// 	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
-// 	{
-// 		perror("ERR_HERCULES_RLS_SERVER_SEND_REQ");
-// 		return -1;
-// 	}
+	// Tell metadata server to update (increase) the number of servers.
+	char key_plus_size[REQUEST_SIZE] = {0};
+	// Send the created structure to the metadata server.
+	// last "1" is the server status to be set.
+	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_serversX, args.imss_uri, 1);
+	// fprintf(stderr, "Request - %s\n", key_plus_size);
+	slog_debug("[main] Request - %s", key_plus_size);
+	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
+	{
+		perror("ERR_HERCULES_RLS_SERVER_SEND_REQ");
+		return -1;
+	}
 
-// 	return 0;
-// }
+	return 0;
+}
 
 void print_usage(const char *msg)
 {

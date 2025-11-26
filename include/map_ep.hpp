@@ -4,7 +4,10 @@
 #include <map>
 #include <ucp/api/ucp.h>
 #include "queue.h"
+#include <atomic>
 
+// TODO: move this to the correct header.
+extern std::atomic<size_t> outstanding_sends;
 
 typedef std::map<ucp_ep_h, StsHeader*> map_ep_t;
 

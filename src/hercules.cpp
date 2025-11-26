@@ -11,6 +11,7 @@
 #include "records.hpp"
 #include "comms.h"
 #include "utils.h"
+#include <cinttypes>
 
 /***************************************************************************
 *******************************  STRUCTURES  *******************************
@@ -19,7 +20,6 @@
 // Structure storing configuration info for the IMSS buffer servers.
 typedef struct
 {
-
 	// Port number that the server will be connecting to.
 	int32_t port;
 
@@ -77,12 +77,13 @@ uint64_t backend_buffer_size;
 pthread_mutex_t backend_buff_mut;
 
 // URI of the attached deployment.
-extern char att_imss_uri[URI_];
+// extern char att_imss_uri[URI_];
 
 uint16_t connection_port; // FIXME
 
 // Metadata deployment flag.
 uint32_t metadata_server_deployed;
+
 
 /***************************************************************************
 *******************************  FUNCTIONS  ********************************
@@ -132,7 +133,7 @@ void *imss_server(void *arg_)
 	arguments[0].port = (arg.port)++;
 
 	// Deploy a thread distributing incomming clients among all ports.
-	if (pthread_create(&threads[0], NULL, srv_attached_dispatcher, (void *)&arguments[0]) == -1)
+	if (pthread_create(&threads[0], NULL, hercules_ucx_server, (void *)&arguments[0]) == -1)
 	{
 		perror("HERCULES_ERR_SRVDISPATCHER_DEPLOY");
 		pthread_exit(NULL);
@@ -176,7 +177,7 @@ void *imss_server(void *arg_)
 		// Specify the address used by each thread to write inside the buffer.
 		arguments[i].pt = 0;
 		// URI of the corresponding IMSS instance.
-		strcpy(arguments[i].my_uri, att_imss_uri);
+		// strcpy(arguments[i].my_uri, att_imss_uri);
 
 		// Throw thread with the corresponding function and arguments.
 		if (pthread_create(&threads[i], NULL, hercules_ucx_server, (void *)&arguments[i]) == -1)
@@ -524,6 +525,10 @@ int getConfiguration(struct arguments *args)
 		{
 			fprintf(stderr, "%s has not been loaded\n", conf_path);
 		}
+		else
+		{
+			strcpy(args->configuration_file_path, conf_path);
+		}
 	}
 	else
 	{
@@ -563,9 +568,10 @@ int getConfiguration(struct arguments *args)
 		if (ret)
 		{
 			fprintf(stderr, "[HERCULES CLIENT] Configuration file '%s' not found\n", conf_path);
-			perror("ERRIMSS_CONF_NOT_FOUND");
+			perror("HERCULES_ERR_CONF_NOT_FOUND");
 			return -1;
 		}
+		strcpy(args->configuration_file_path, conf_path);
 		free(conf_path);
 	}
 
@@ -598,6 +604,8 @@ int getConfiguration(struct arguments *args)
 	else if (cfg_get(cfg, "BLOCK_SIZE"))
 		args->block_size = atol(cfg_get(cfg, "BLOCK_SIZE"));
 
+	BLOCK_SIZE = args->block_size * KB;
+
 	if (getenv("HERCULES_PATH") != NULL)
 		strcpy(args->hercules_path, getenv("HERCULES_PATH"));
 	else if (cfg_get(cfg, "HERCULES_PATH"))
@@ -623,6 +631,8 @@ int getConfiguration(struct arguments *args)
 	else if (cfg_get(cfg, "NUM_META_SERVERS"))
 		args->num_metadata_servers = atoi(cfg_get(cfg, "NUM_META_SERVERS"));
 
+	// Malleability configuration.
+	// 1 to enable malleability, 0 to disable it.
 	if (getenv("HERCULES_MALLEABILITY") != NULL)
 		args->malleability = atoi(getenv("HERCULES_MALLEABILITY"));
 	else if (cfg_get(cfg, "MALLEABILITY"))
@@ -630,21 +640,83 @@ int getConfiguration(struct arguments *args)
 	else
 		args->malleability = 0;
 
-	if (getenv("HERCULES_MALLEABILITY_TYPE") != NULL)
-		args->malleability_type = atoi(getenv("HERCULES_MALLEABILITY_TYPE"));
-	else if (cfg_get(cfg, "MALLEABILITY_TYPE"))
-		args->malleability_type = atoi(cfg_get(cfg, "MALLEABILITY_TYPE"));
+	if (args->malleability)
+	{
+		MALLEABILITY_ON = 1;
+		// tolerance for performing a malleability operation.
+		int32_t default_tolerance = 100;
+		if (getenv("HERCULES_MALLEABILITY_TOLERANCE") != NULL)
+			args->malleability_tolerance = atoi(getenv("HERCULES_MALLEABILITY_TOLERANCE"));
+		else if (cfg_get(cfg, "MALLEABILITY_TOLERANCE"))
+			args->malleability_tolerance = atoi(cfg_get(cfg, "MALLEABILITY_TOLERANCE"));
+		else
+			// default value.
+			args->malleability_tolerance = default_tolerance;
 
-	if (getenv("HERCULES_UPPER_BOUND_MALLEABILITY") != NULL)
-		args->upper_bound_servers = atoi(getenv("HERCULES_UPPER_BOUND_MALLEABILITY"));
-	else if (cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"))
-		args->upper_bound_servers = atoi(cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"));
+		if (args->malleability_tolerance < 0)
+		{
+			fprintf(stderr, "WARNING: Invalid performance windows size of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_tolerance, default_tolerance);
+			args->malleability_tolerance = default_tolerance;
+		}
 
-	if (getenv("HERCULES_LOWER_BOUND_MALLEABILITY") != NULL)
-		args->lower_bound_servers = atoi(getenv("HERCULES_LOWER_BOUND_MALLEABILITY"));
-	else if (cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"))
-		args->lower_bound_servers = atoi(cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"));
+		// windows size or how many records are used to check the performance status.
+		int32_t default_windows_size = 20;
+		if (getenv("HERCULES_MALLEABILITY_WSIZE") != NULL)
+			args->malleability_windows_size = atoi(getenv("HERCULES_MALLEABILITY_WSIZE"));
+		else if (cfg_get(cfg, "MALLEABILITY_WSIZE"))
+			args->malleability_windows_size = atoi(cfg_get(cfg, "MALLEABILITY_WSIZE"));
+		else
+			// default value.
+			args->malleability_windows_size = default_windows_size;
 
+		if (args->malleability_windows_size < 0)
+		{
+			fprintf(stderr, "WARNING: Invalid performance windows size of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_windows_size, default_windows_size);
+			args->malleability_windows_size = default_windows_size;
+		}
+
+		// performance threshold in MB/s.
+		double default_threshold = 5000.0;
+		if (getenv("HERCULES_MALLEABILITY_THRESHOLD") != NULL)
+			args->malleability_performance_threshold = atoi(getenv("HERCULES_MALLEABILITY_THRESHOLD"));
+		else if (cfg_get(cfg, "MALLEABILITY_THRESHOLD"))
+			args->malleability_performance_threshold = atoi(cfg_get(cfg, "MALLEABILITY_THRESHOLD"));
+		else
+			// default value.
+			args->malleability_performance_threshold = default_threshold;
+
+		if (args->malleability_performance_threshold < 0)
+		{
+			fprintf(stderr, "WARNING: Invalid performance threshold of %f MB, setting to %f MB\n", args->malleability_performance_threshold, default_threshold);
+			args->malleability_performance_threshold = default_threshold;
+		}
+		// Convert from MB to bytes.
+		args->malleability_performance_threshold *= MB;
+		fprintf(stderr, "Malleability is enabled.\n HERCULES_MALLEABILITY_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f\n",
+				args->malleability_tolerance,
+				args->malleability_windows_size,
+				args->malleability_performance_threshold);
+	}
+
+	// @deprecated
+	// if (getenv("HERCULES_MALLEABILITY_TYPE") != NULL)
+	// 	args->malleability_type = atoi(getenv("HERCULES_MALLEABILITY_TYPE"));
+	// else if (cfg_get(cfg, "MALLEABILITY_TYPE"))
+	// 	args->malleability_type = atoi(cfg_get(cfg, "MALLEABILITY_TYPE"));
+
+	// if (getenv("HERCULES_UPPER_BOUND_MALLEABILITY") != NULL)
+	// 	args->upper_bound_servers = atoi(getenv("HERCULES_UPPER_BOUND_MALLEABILITY"));
+	// else if (cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"))
+	// 	args->upper_bound_servers = atoi(cfg_get(cfg, "UPPER_BOUND_MALLEABILITY"));
+
+	// if (getenv("HERCULES_LOWER_BOUND_MALLEABILITY") != NULL)
+	// 	args->lower_bound_servers = atoi(getenv("HERCULES_LOWER_BOUND_MALLEABILITY"));
+	// else if (cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"))
+	// 	args->lower_bound_servers = atoi(cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"));
+
+	// End of Malleability configuration.
+
+	// Fault-tolerance.
 	if (getenv("HERCULES_REPL_FACTOR") != NULL)
 		args->repl_factor = atoi(getenv("HERCULES_REPL_FACTOR"));
 	else if (cfg_get(cfg, "REPL_FACTOR"))
@@ -658,6 +730,24 @@ int getConfiguration(struct arguments *args)
 		args->repl_type = atoi(cfg_get(cfg, "REPL_TYPE"));
 	else
 		args->repl_type = ASYNC;
+	// End of Fault-tolerance.
+
+	// Sync or Async I/O.
+	if (getenv("HERCULES_ASYNC_IO") != NULL)
+		args->async_io = atoi(getenv("HERCULES_ASYNC_IO"));
+	else if (cfg_get(cfg, "ASYNC_IO"))
+		args->async_io = atoi(cfg_get(cfg, "ASYNC_IO"));
+	else
+		args->async_io = SYNC; // by default we use sync calls.
+
+	if (args->async_io != SYNC && args->async_io != ASYNC)
+	{
+		fprintf(stderr, "WARNING: Invalid async IO option: %" PRIu32 ", setting to %d (SYNCHRONOUS)", args->async_io, SYNC);
+		args->async_io = SYNC; // by default we use sync calls.
+	}
+	// fprintf(stderr,"Asynchronous IO: %" PRIu32 "\n", args->async_io);
+	ASYNC_IO = args->async_io;
+	// End of Sync or Async I/O.
 
 	if (getenv("HERCULES_BUFF_SIZE") != NULL)
 		args->bufsize = atol(getenv("HERCULES_BUFF_SIZE"));
@@ -671,6 +761,13 @@ int getConfiguration(struct arguments *args)
 		strcpy(args->data_hostfile, getenv("HERCULES_DATA_HOSTFILE"));
 	else if (cfg_get(cfg, "DATA_HOSTFILE"))
 		strcpy(args->data_hostfile, cfg_get(cfg, "DATA_HOSTFILE"));
+
+	if (getenv("HERCULES_ALLOC_DATA_HOSTFILE") != NULL)
+		strcpy(args->alloc_data_hostfile, getenv("HERCULES_ALLOC_DATA_HOSTFILE"));
+	else if (cfg_get(cfg, "ALLOC_DATA_HOSTFILE"))
+		strcpy(args->alloc_data_hostfile, cfg_get(cfg, "ALLOC_DATA_HOSTFILE"));
+	else
+		args->alloc_data_hostfile[0] = '\0';
 
 	if (getenv("HERCULES_THREAD_POOL") != NULL)
 		args->thread_pool = atol(getenv("HERCULES_THREAD_POOL"));
@@ -711,7 +808,7 @@ int getConfiguration(struct arguments *args)
 			args->logging.hercules_debug_file = 0;
 			args->logging.hercules_debug_screen = 0;
 			args->logging.hercules_debug_level = SLOG_NONE;
-			unsetenv("IMSS_DEBUG");
+			// unsetenv("IMSS_DEBUG");
 		}
 		else
 		{
@@ -726,6 +823,29 @@ int getConfiguration(struct arguments *args)
 		args->storage_size = atol(cfg_get(cfg, "STORAGE_SIZE"));
 	else
 		args->storage_size = 1;
+
+	// Get the prefetching size in MB.
+	if (getenv("HERCULES_PREFETCH_SIZE") != NULL)
+		args->prefetch_size = atol(getenv("HERCULES_PREFETCH_SIZE"));
+	else if (cfg_get(cfg, "PREFETCH_SIZE"))
+		args->prefetch_size = atol(cfg_get(cfg, "PREFETCH_SIZE"));
+	else
+	{
+		args->prefetch_size = 0;
+		printf("Prefetching is not enable.\n");
+	}
+
+	if (args->prefetch_size < 0)
+	{
+		fprintf(stderr, "WARNING: Invalid prefetch size of %" PRIu64 " MB, setting to 0 MB\n", args->prefetch_size);
+		args->prefetch_size = 0;
+	}
+	// Convert from GB to bytes.
+	if (args->prefetch_size > 0)
+	{
+		printf("Prefetching of %" PRIu64 " MB enable.\n", args->prefetch_size);
+		args->prefetch_size *= MB;
+	}
 
 	if (getenv("HERCULES_CHECKPOINT_PATH") != NULL)
 		strcpy(args->hercules_checkpoint_path, getenv("HERCULES_CHECKPOINT_PATH"));
@@ -790,8 +910,8 @@ void getBlockInformation(std::string key, int *block_number, std::string *data_u
 		fprintf(stderr, "Block number is missing in %s\n", key.c_str());
 		return;
 	}
-	*block_number = std::stoi(block, 0, 10);		  //  string to number.
-	pos -= 1;										  // -1 to skip '$' on the data uri.
+	*block_number = std::stoi(block, 0, 10); //  string to number.
+	pos -= 1;								 // -1 to skip '$' on the data uri.
 	// data_uri = (char *)key.substr(0, pos).c_str(); // substract the data uri from the key.
 	*data_uri = key.substr(0, pos);
 	// strcpy(data_uri, key.substr(0, pos).c_str());

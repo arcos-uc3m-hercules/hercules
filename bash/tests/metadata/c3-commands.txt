@@ -1,5 +1,9 @@
-UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=16 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server m 0
-UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=16 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server d 0 1
+UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=3 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server m 0
+UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=3 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server d 0 3
+
+# For malleability: 
+HERCULES_ALLOC_DATA_HOSTFILE=./alloc_data_hostfile
+for host in $(<alloc_data_hostfile); do ssh "$host" 'pkill hercules_server'; done
 
 ## IMPORTANT
 # add the following line in case of memory errors.
@@ -25,17 +29,21 @@ HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercul
 spack load mpich/kn7bnmv
 mpiexec -np=16 -env HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf -env LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so /home/tester004/gesanche/io500/bin/mdtest -n 3900 -i 5 -u -d /mnt/hercules/
 #MDTEST with Openmpi
-## mpiexec -np 16 -npernode 16 -x HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf  -x LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so /home/tester004/gesanche/io500/bin/mdtest -n 1000 -i 5 -u -d /mnt/hercules/
 mpiexec --oversubscribe -np 36 -x HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf  -x LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so -x UCX_NET_DEVICES=ib0 -x HERCULES_THREAD_POOL=16 /home/tester004/gesanche/io500/bin/mdtest -n 1000 -i 5 -u -d /mnt/hercules/
 
 HERCULES_DEBUG_LEVEL=none UCX_IB_GID_INDEX=0 /beegfs/home/javier.garciablas/spack/opt/spack/linux-ubuntu20.04-zen/gcc-9.4.0/mpich-3.2.1-5pgpbav7caqh5rwfpnrizu736maawpgc/bin/mpiexec -np=1 -env HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf -env LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so /home/tester004/gesanche/io500/bin/mdtest -n 4000 -i 5 -u -d /mnt/hercules/
 
 # IOR multi iterations
+## Mpich
 spack load mpich
-HERCULES_THREAD_POOL=1 HERCULES_DEBUG_LEVEL=none mpiexec -np=8 -ppn=8 -env HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf -env LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so /beegfs/home/javier.garciablas/gsanchez/ior/bin/ior -w -r -k -W -R -t 100M -b 100M -s 1 -i 100 -o /mnt/hercules/data.out
+HERCULES_THREAD_POOL=1  mpiexec --oversubscribe -np=8 -ppn=8 -x HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf -env HERCULES_DEBUG_LEVEL=none -env LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so ~/gesanche/io500/bin/ior -w -r -k -W -R -t 100M -b 100M -s 1 -i 100 -o /mnt/hercules/data.out
+## Openmpi (hpcx)
+mpiexec --oversubscribe -np 36 -x HERCULES_NUM_DATA_SERVERS=2 -x UCX_NET_DEVICES=ib0 -x HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf -x HERCULES_DEBUG_LEVEL=none -x HERCULES_THREAD_POOL=1 -x LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so ~/gesanche/io500/bin/ior -w -r -k -W -R -t 100M -b 100M -s 1 -i 100 -o /mnt/hercules/data.out
+
 
 # IOR 100 MB
-HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so ~/gsanchez/ior/bin/ior -t 100MB -b 100MB -o /mnt/hercules/file.out -k
+HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so ~/gesanche/io500/bin/ior -t 100MB -b 100MB -o /mnt/hercules/file.out -k
+
 
 ## IOR 100 MB with strace
 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so strace -k -v -o strace_hercules.out ~/gsanchez/ior/bin/ior -t 100MB -b 100MB -o /mnt/hercules/directory/file.out

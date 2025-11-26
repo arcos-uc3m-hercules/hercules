@@ -34,10 +34,11 @@ typedef struct
 } imss_info_;
 
 // Values needed by each record.
-struct BufferValue {
-    void *data;
-    uint64_t size;
-    GNode *gnode; // pointer to the sub-gtree where this record is stored.
+struct BufferValue
+{
+	void *data;
+	uint64_t size;
+	GNode *gnode; // pointer to the sub-gtree where this record is stored.
 };
 
 // In-memory structure storing key-address couples.
@@ -81,7 +82,7 @@ public:
 	int32_t get_snapshot(std::string key, int *to_copy);
 	int32_t get_broadcast(std::string key, void **add_, uint64_t *size_);
 
-	BufferValue* find(std::string key);
+	BufferValue *find(std::string key);
 
 	char *GetDataOfFile(std::string file_name, uint64_t *file_size_occupied);
 	char *MergeData(__off_t *size_of_data, uint32_t num_of_data_servers, __off_t file_size, uint64_t block_size);
@@ -120,8 +121,19 @@ public:
 	{
 		return buffer.begin();
 	}
+
+	std::map<std::string, BufferValue>::const_iterator begin() const
+	{
+		return buffer.begin();
+	}
+
 	// Method retrieving a reference to the end of the map.
 	std::map<std::string, BufferValue>::iterator end()
+	{
+		return buffer.end();
+	}
+
+	std::map<std::string, BufferValue>::const_iterator end() const
 	{
 		return buffer.end();
 	}

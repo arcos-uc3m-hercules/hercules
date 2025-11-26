@@ -84,17 +84,17 @@ uint32_t get_policy_number(const char *policy_string)
 	return session_policy;
 }
 
-int32_t set_policy_dataset(dataset_info *dataset)
+int32_t set_policy_dataset(dataset_info **dataset)
 {
 	// Save the connection to the imss server running in the same node.
-	matching_node_socket = dataset->local_conn;
+	matching_node_socket = (*dataset)->local_conn;
 	slog_info("matching_node_socket = %d", matching_node_socket);
-	dataset->session_plcy = get_policy_number(dataset->policy);
-	if (dataset->session_plcy < 0)
+	(*dataset)->session_plcy = get_policy_number((*dataset)->policy);
+	if ((*dataset)->session_plcy < 0)
 	{
 		return -1;
 	}
-	return dataset->session_plcy;
+	return (*dataset)->session_plcy;
 }
 
 // int32_t set_policy_metadata(imss_info *hercules_info)
@@ -122,7 +122,7 @@ int32_t RoundRobin(int32_t n_servers, int32_t n_msg, const char *fname)
 	slog_debug("fname=%s, strlen(fname)=%d, next_server=%d, crc_=%d, n_servers=%d", fname, strlen(fname), next_server, crc_, n_servers);
 	// fprintf(stderr, "fname=%s, strlen(fname)=%lu, next_server=%d, crc_=%d, n_servers=%d\n", fname, strlen(fname), next_server, crc_, n_servers);
 
-	// slog_debug("fname=%s, new_dataset.original_name=%s, stat_dataset_res=%ld, next_server=%d, crc_=%d, n_servers=%d", fname, new_dataset.original_name, stat_dataset_res, next_server, crc_, n_servers);
+	// slog_debug("fname=%s, new_dataset->original_name=%s, stat_dataset_res=%ld, next_server=%d, crc_=%d, n_servers=%d", fname, new_dataset->original_name, stat_dataset_res, next_server, crc_, n_servers);
 
 	// Next server receiving the following block.
 	next_server = (next_server + n_msg) % n_servers;
@@ -214,7 +214,7 @@ int32_t CRC(int32_t n_servers, const char *fname, int32_t bytes_)
 void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
 {
 	// Dataset metadata request.
-	dataset_info new_dataset;
+	dataset_info *new_dataset;
 	int32_t stat_dataset_res = -2;
 	if (server_type == TYPE_DATA_SERVER)
 	{
@@ -227,7 +227,7 @@ void FindNameForPolicy(const char *fname, char *passed_name, char server_type)
 	}
 	else
 	{ // original name is used in case the file was renamed.
-		tmp = new_dataset.original_name;
+		tmp = new_dataset->original_name;
 	}
 	snprintf(passed_name, PATH_MAX, "%s", tmp);
 	// slog_debug("fnameadd=%p, passed_nameadd=%p", fname, passed_name);

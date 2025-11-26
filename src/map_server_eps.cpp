@@ -19,12 +19,12 @@ void *map_server_eps_create()
 }
 
 void map_server_eps_destroy(void *map)
+{
+	if (map)
 	{
-		if (map)
-		{
-			delete reinterpret_cast<map_server_eps_t *>(map);
-		}
+		delete reinterpret_cast<map_server_eps_t *>(map);
 	}
+}
 
 void map_server_eps_put(void *map, uint64_t uuid, ucp_ep_h ep)
 {
@@ -40,30 +40,37 @@ void map_server_eps_put(void *map, uint64_t uuid, ucp_ep_h ep)
 void map_server_eps_erase(void *map, uint64_t uuid, ucp_worker_h ucp_worker)
 {
 	map_server_eps_t *m = reinterpret_cast<map_server_eps_t *>(map);
+	ucp_ep_h ep_to_close = NULL;
 	// Count the number of elements in the map
 	// size_t prev_elements = m->size();
-	std::unique_lock<std::mutex> lock(mut_eps);
-
-	auto search = m->find(uuid);
-
-	// TODO
-	//  close ep if found
-	if (search != m->end())
 	{
-		// ucp_ep_flush(search->second);
-		// ucp_ep_close_nb(search->second, UCP_EP_CLOSE_MODE_FLUSH);
+		std::unique_lock<std::mutex> lock(mut_eps);
+		auto search = m->find(uuid);
+		// fprintf(stdout, "Before closing the number of conextions are %d\n", m->size());
+		//  close ep if found
+		if (search != m->end())
+		{
+			// ucp_ep_flush(search->second);
+			// ucp_ep_close_nb(search->second, UCP_EP_CLOSE_MODE_FLUSH);
 
-		// * ucp_ep_h ep;
-		// * ep = search->second;
-		// * ucp_worker_progress(ucp_worker);
-		// * ep_close(ucp_worker, ep, UCP_EP_CLOSE_MODE_FLUSH);
-		// * ucp_ep_destroy(search->second);
-		// fprintf(stdout,"Deleting ep %p\n", search->second);
-		close_ucx_endpoint(ucp_worker, search->second);
+			// * ucp_ep_h ep;
+			// * ep = search->second;
+			// * ucp_worker_progress(ucp_worker);
+			// * ep_close(ucp_worker, ep, UCP_EP_CLOSE_MODE_FLUSH);
+			// * ucp_ep_destroy(search->second);
+			// fprintf(stdout,"Deleting ep %p\n", search->second);
+			// close_ucx_endpoint(ucp_worker, search->second);
+			ep_to_close = search->second;
+			m->erase(uuid);
+		}
 	}
-	m->erase(uuid);
+	if (ep_to_close != NULL)
+	{
+		// fprintf(stdout, "Deleting ep %p for uuid %" PRIu64 ", number of conextion %d\n", ep_to_close, uuid, m->size());
+		// Ahora es seguro llamar a progress sin bloquear a otros hilos
+		close_ucx_endpoint(ucp_worker, ep_to_close);
+	}
 	// size_t after_elements = m->size();
-
 	// slog_debug("\t[map_server_eps]['%" PRIu64 "'] Deleting connection, from %ld to %ld", uuid, prev_elements, after_elements);
 	// fprintf(stderr, "\t[%c]['%" PRIu64 "'] Deleting connection, from %ld to %ld\n", server_type, uuid, prev_elements, after_elements);
 }
@@ -86,4 +93,9 @@ int map_server_eps_search(void *map, uint64_t uuid, ucp_ep_h *ep)
 	{
 		return -1;
 	}
+}
+
+size_t map_server_eps_get_size(void *map)
+{
+	return reinterpret_cast<map_server_eps_t *>(map)->size();
 }

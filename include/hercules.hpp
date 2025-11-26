@@ -1,8 +1,9 @@
 #ifndef HERCULES_INMEMORY
 #define HERCULES_INMEMORY
 
-#define KB 1024
-#define GB 1073741824
+#define KB 1024L
+#define MB 1048576L
+#define GB 1073741824UL
 
 #include <string>
 // #include <cstring>
@@ -12,7 +13,8 @@
 // #include "hercules.hpp"
 
 static u_int16_t HERCULES_THREAD_POOL_SIZE = 1;
-
+static u_int16_t ASYNC_IO = 1;
+static u_int16_t MALLEABILITY_ON = 0;
 // using std::string;
 
 #ifdef __cplusplus

@@ -98,6 +98,12 @@ char *strclr(const char *clr, char *str, ...)
  */
 void slog_to_file(char *out, const char *fname, SlogDate *sdate)
 {
+    if (!init_slog)
+    {
+        return;
+    }
+    
+
     char filename[PATH_MAX] = {0};
 
     // Getting current directory.
@@ -480,6 +486,8 @@ void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int 
             slg.td_safe = 0;
         }
     }
+
+    init_slog = 1;
 
     // /* Parse config file. */
     // if (conf != NULL)

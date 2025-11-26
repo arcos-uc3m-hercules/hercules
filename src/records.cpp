@@ -44,7 +44,6 @@ extern uint64_t max_storage_size;
 // to protect the amount of memory used.
 pthread_mutex_t mutex_quantity_occupied = PTHREAD_MUTEX_INITIALIZER;
 
-
 map_records::map_records(const int64_t nsize)
 {
 	total_size = nsize;
@@ -129,7 +128,7 @@ int map_records::DecreaseMemoryOccupied(int64_t freed_space)
 	else
 	{
 		quantity_occupied = quantity_occupied - freed_space;
-		slog_debug("memory occupied=%lu GB, freed_space=%lu", quantity_occupied/GB, freed_space);
+		slog_debug("memory occupied=%lu GB, freed_space=%lu", quantity_occupied / GB, freed_space);
 	}
 	pthread_mutex_unlock(&mutex_quantity_occupied);
 	return ret;
@@ -277,7 +276,9 @@ int32_t map_records::put(std::string key, void *address, uint64_t length, int re
 		// unlock garbage collector.
 		pthread_mutex_lock(&mutex_garbage);
 		slog_debug("garbage collector mutex adquire");
+#ifdef DPRINTF
 		fprintf(stderr, "Sending signal to gargabe collector.\n");
+#endif
 		// Unlock the garbage collector.
 		pthread_cond_signal(&global_run_garbage_collector_cond);
 		pthread_mutex_unlock(&mutex_garbage);
@@ -357,7 +358,7 @@ int32_t map_records::put_broadcast(std::string key, void *address, uint64_t leng
 }
 
 // Method retrieving the address associated to a certain record.
-BufferValue* map_records::find(std::string key)
+BufferValue *map_records::find(std::string key)
 {
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);

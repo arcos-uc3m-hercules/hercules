@@ -7,6 +7,7 @@
 #include "comms.h"
 // to manage logs.
 #include "slog.h"
+#include "performance_records.hpp"
 
 // Maximum number of bytes assigned to a dataset or IMSS URI.
 #define URI_ 256
@@ -43,21 +44,36 @@
 #define NO_LINK NULL
 
 extern int32_t IMSS_DEBUG;
-static uint64_t BLOCK_SIZE;
+extern uint64_t BLOCK_SIZE; // TODO: there are multiple definitions for BLOCK SIZE on the front and back end. IMSS_DATA_BSIZE on the fron end.
+
+/* UCP objects */
+extern ucp_context_h ucp_context_client; // = (ucp_context_h)NULL;
+extern ucp_worker_h ucp_worker_meta;	 // = (ucp_worker_h)NULL;
+extern ucp_worker_h ucp_worker_data;	 // = (ucp_worker_h)NULL;
+extern ucp_address_t **stat_addr;
+extern ucp_ep_h *stat_eps;
+
+/* TCP variables. */
+extern char client_node[512];	// Node name where the client is running.
+extern int32_t len_client_node; // Length of the previous node name.
+extern char client_ip[16];		// IP number of the node where the client is taking execution.
+
+// /* Hercules objects */
+// extern imss curr_imss;
 
 #ifndef MAX
 #define MAX(x, y) ((x > y) ? x : y)
 #endif
 
-#ifdef __DEBUG__
-#define DPRINT(...)                   \
-	if (IMSS_DEBUG)                   \
-	{                                 \
-		fprintf(stderr, __VA_ARGS__); \
-	}
-#else
-#define DPRINT(...)
-#endif
+// #ifdef __DEBUG__
+// #define DPRINT(...)                   \
+// 	if (IMSS_DEBUG)                   \
+// 	{                                 \
+// 		fprintf(stderr, __VA_ARGS__); \
+// 	}
+// #else
+// #define DPRINT(...)
+// #endif
 
 // GHashMap functions.
 // int replace_dataset_entry_key(const char *old_uri, const char *new_uri);
@@ -78,7 +94,6 @@ int32_t get_data_location(int32_t, int32_t, int32_t);
 // recalculate the msg_size in case you add a list of pointers.
 typedef struct
 {
-
 	// IMSS URI.
 	char uri_[URI_];
 	// Byte specifying the type of structure.
@@ -117,15 +132,23 @@ typedef struct
 	imss_conn conns;
 } imss;
 
+// Key-value struct to store "interval" entries on dataset_info.
+static int MAX_NUM_INTERVALS = 100;
+typedef struct
+{
+	int value;
+	int left_interval;
+	int right_interval;
+} IntervalEntry;
+
 // Structure storing all information related to a certain dataset.
 typedef struct
 {
-
 	// URI identifying a certain dataset.
 	char uri_[URI_];
 	// Byte specifying the type of structure.
 	// R = Regular file, D = Directory, I = Hercules instance.
-	char type; 
+	char type;
 	// Policy that was followed in order to write the dataset.
 	char policy[MAX_POLICY_LEN];
 	// Original name when the data was created for the first time, need it for policy CRC16_ in distributed operation rename
@@ -153,11 +176,11 @@ typedef struct
 	/*************** USED EXCLUSIVELY BY LOCAL DATASETS ***************/
 
 	// Vector of characters specifying the position of each data element.
-	uint16_t *data_locations;
+	// uint16_t *data_locations;
 	// Number of blocks written by the client in the current session.
-	uint64_t *num_blocks_written;
+	// uint64_t *num_blocks_written;
 	// Actual blocks written by the client.
-	uint32_t *blocks_written;
+	// uint32_t *blocks_written;
 
 	char link[256];
 	int is_link;
@@ -165,12 +188,17 @@ typedef struct
 	int n_open;						// how many process has the file open.
 	char status[128];				// delete the dataset when "dest" is set.
 	int32_t n_servers_when_created; // Number of active servers when this dataset is created.
+	// GHashTable *intervals = NULL;
+	int num_intervals = 0;
+	int capacity = 0;
+	int32_t first_block_id = -1;
+	int32_t last_block_id = -1;
+	IntervalEntry **intervals;
 } dataset_info;
 
 //[SPLIT READV] Set of arguments passed to each server thread.
 typedef struct
 {
-
 	int32_t n_server;
 	const char *path;
 	char *msg;
@@ -186,6 +214,13 @@ typedef struct
 extern "C"
 {
 #endif
+
+	int GetValueFromInterval(dataset_info *curr_dataset, int data_id);
+	void PrintIntervals(dataset_info *curr_dataset);
+	IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval, int right_interval);
+	void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int right_interval);
+	void ClearIntervalsStructure(dataset_info *curr_dataset);
+	int compare_intervals(const void *a, const void *b);
 
 	/****************************************************************************************************************************/
 	/****************************************** METADATA SERVICE MANAGEMENT FUNCTIONS  ******************************************/
@@ -208,6 +243,7 @@ RETURNS:	 0 - Release operations were successfully performed.
 -1 - In case of error.
 	 */
 	int32_t stat_release();
+	int32_t StatACK(char *message, int server_id);
 
 	/* Method retrieving the whole set of elements contained by a specific URI.
 
@@ -240,15 +276,8 @@ RETURNS:	 0 - Initialization procedure was successfully performed.
 	 */
 	// int32_t init_imss(char *imss_uri, char *hostfile, char *meta_hostfile, int32_t n_servers, uint16_t conn_port, uint64_t buff_size, uint32_t deployment, const char *binary_path, uint16_t meta_port);
 
-	/* Method initializing the required resources to make use of an existing IMSS.
-
-RECEIVES:	imss_uri - URI assigned to the IMSS instance that the client desires to connect.
-
-RETURNS:	 0 - Resources successfully initialized. Communication channels created.
--1 - In case of error.
--2 - The imss instance has been already opened or created.
-	 */
 	int32_t open_imss(char *imss_uri);
+	int32_t AddBackEndServer2Imss(char *imss_uri);
 
 	/* Method releasing client-side and/or server-side resources related to a certain IMSS instance.
 
@@ -281,6 +310,7 @@ The following function must be called over the provided imss_info structure once
 free_imss(imss_info_);
 	 */
 	int32_t stat_imss(char *imss_uri, imss_info *imss_info_);
+	int32_t stat_imss_info();
 
 	/* Method providing the URI of the attached IMSS instance.
 
@@ -353,6 +383,8 @@ RETURNS:	 0 - Release operation took place successfully.
 
 	int32_t clear_dataset(const char *dataset_uri);
 
+	int32_t update_dataset(char *dataset_uri, int32_t dataset_id);
+
 	/*Method writev various datasets.
 
 RETURNS:	 0 - Release operation took place successfully.
@@ -401,19 +433,18 @@ RETURNS:	 0 - Release operation took place successfully.
 	// int32_t release_dataset(int32_t dataset_id);
 	int32_t release_dataset(const char *dataset_uri);
 
-	/* Method retrieving information related to a certain dataset.
-
-RECEIVES:	dataset_uri   - Dataset URI that the client is interested in.
-dataset_info_ - Reference to a dataset_info variable where the requested information will be stored.
-
-RETURNS:	 0 - No dataset was found with the provided URI.
-1 - The information was successfully retrieved from the metadata server.
-2 - The information was successfully retrieved from a local storage (the dataset must have been already created or opened).
--1 - In case of error.
-
-The current function does not allocate memory.
+	/**
+	 * @brief Method retrieving information related to a certain dataset from the metadata server.
+	 * It search first if the dataset has been stored on the local map "datasetd" to avoid extra calls.
+	 * The file information is supposed to be stored on this map if it was stated previously.
+	 * @param dataset_uri Path of the dataset.
+	 * @param dataset_info Pointer to the struct where the dataset information will be stored.
+	 * @param opened "1" indicates to the remote metadata server if the file is being to be opened by the current process
+	 * or "0" if it is a simple request. If "0", the counter of how many process has the file opened will not be increased.
+	 * @return if the dataset is on the local map "datasetd", the index is returned, -3 if the info was retreived from the remote metadata
+	 * server, -2 if the dataset does not exist, or -1 on error.
 	 */
-	int32_t stat_dataset(const char *dataset_uri, dataset_info *dataset_info_, int opened);
+	int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int opened);
 
 	////Method retrieving a whole dataset parallelizing the procedure.
 	// unsigned char * get_dataset(char * dataset_uri, uint64_t * buff_length);
@@ -449,7 +480,10 @@ The current function does not allocate memory.
 	 * requested block was not find in the remote server, or -2 in case of
 	 * error.
 	 */
-	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
+	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request);
+	ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_id, void **buffer_prefetch, size_t total_read_size, size_t num_blocks_to_read);
+
+	ssize_t start_block_request(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
 
 	/**
 	 * @brief Method used during malleability to retrieving a data element
@@ -478,7 +512,7 @@ offset     - Offset within the block.
 RETURNS:	 0 - The requested block was successfully stored.
 -1 - In case of error.
 	 */
-	int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset);
+	int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int async);
 
 	int32_t set_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
 
@@ -513,12 +547,7 @@ char ** locations = get_dataloc(datasetd, data_id, &num_storages);
 	free(locations);
 	 */
 
-	int32_t
-	set_ndata(char *dataset_uri,
-			  int32_t dataset_id,
-			  int32_t data_id,
-			  char *buffer,
-			  uint32_t size);
+	int32_t set_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, char *buffer, uint32_t size);
 
 	char **get_dataloc(const char *dataset, int32_t data_id, int32_t *num_storages);
 
@@ -584,8 +613,11 @@ RETURNS:	0 - Resources were released successfully.
 
 	int32_t imss_comm_cleanup();
 
+	void async_data_worker_progress(int umbral);
+
 	int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root);
 	int32_t release_network_resources(const char *imss_uri, int is_parent, int process_rank);
+	int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_parent, int server_id_to_remove, int current_number_of_servers);
 
 	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
 	int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir);
@@ -593,7 +625,6 @@ RETURNS:	0 - Resources were released successfully.
 	int ConcatLastSlashC(char *pathname);
 	int RemoveLastSlash(std::string &pathname);
 	int RemoveLastSlashC(char *pathname);
-
 
 	/**
 	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.

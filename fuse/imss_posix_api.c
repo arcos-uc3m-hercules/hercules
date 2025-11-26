@@ -1,15 +1,5 @@
-/*
-FUSE: Filesystem in Userspace
-Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
-
-This program can be distributed under the terms of the GNU GPL.
-See the file COPYING.
-
-gcc -Wall imss.c `pkg-config fuse --cflags --libs` -o imss
- */
-
-#define FUSE_USE_VERSION 26
-// #include "map.hpp"
+// #define FUSE_USE_VERSION 26
+//  #include "map.hpp"
 #include "hierarchical_map.hpp"
 #include "mapprefetch.hpp"
 #include "hercules.hpp"
@@ -27,8 +17,6 @@ gcc -Wall imss.c `pkg-config fuse --cflags --libs` -o imss
 #include <sys/time.h>
 #include <libgen.h>
 
-#define KB 1024
-#define GB 1073741824
 #define HEADER sizeof(uint32_t)
 
 /*
@@ -74,7 +62,7 @@ extern pthread_mutex_t mutex_prefetch;
 extern pthread_mutex_t lock;
 pthread_mutex_t lock_file = PTHREAD_MUTEX_INITIALIZER;
 
-extern int32_t IMSS_DEBUG;
+// extern int32_t IMSS_DEBUG;
 
 // to simulate maliability.
 int32_t ior_operation_number;
@@ -84,6 +72,11 @@ int32_t MALLEABILITY;
 int32_t MALLEABILITY_TYPE;
 int32_t UPPER_BOUND_SERVERS;
 int32_t LOWER_BOUND_SERVERS;
+
+extern char *META_HOSTFILE;
+extern uint64_t METADATA_PORT; // Not default, 1 will fail
+extern int32_t N_META_SERVERS;
+extern uint32_t rank;
 
 #ifdef __cplusplus
 extern "C"
@@ -265,7 +258,7 @@ extern "C"
 		}
 
 		// get block 0 from data server.
-		ret = TIMING(get_ndata(imss_path, ds, 0, aux, 0, 0);, "get_ndata0,imss_refresh", int32_t, 0);
+		ret = TIMING(get_ndata(imss_path, ds, 0, aux, 0, 0, SYNC, NULL), "get_ndata0,imss_refresh", int32_t, 0);
 		if (ret < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN];
@@ -398,7 +391,7 @@ extern "C"
 
 				//  "data" is filled in "get data".
 				// get block 0.
-				ret = get_ndata((char *)imss_path, ds, 0, data, 0, 0);
+				ret = get_ndata((char *)imss_path, ds, 0, data, 0, 0, SYNC, NULL);
 				if (ret < 0)
 				{
 					slog_error("Error getting data: %s", imss_path);
@@ -424,7 +417,7 @@ extern "C"
 					return -ENOMEM;
 				}
 				//  data is filled in "get data".
-				ret = get_ndata((char *)imss_path, ds, 0, data, 0, 0);
+				ret = get_ndata((char *)imss_path, ds, 0, data, 0, 0, SYNC, NULL);
 				if (ret < 0)
 				{
 					slog_error("Error getting data: %s", imss_path);
@@ -543,7 +536,7 @@ extern "C"
 		if (fd >= 0)
 		{
 			print_file_type(stats, imss_path);
-			ret = TIMING(open_local_dataset(imss_path, 1);, "imss_open,open_local_dataset", int32_t, 0);
+			ret = TIMING(open_local_dataset(imss_path, 1), "imss_open,open_local_dataset", int32_t, 0);
 			file_desc = fd;
 			slog_debug("[FUSE]open_local_dataset, ret=%d, file_desc=%d, nlink=%lu", ret, file_desc, stats.st_nlink);
 		}
@@ -553,7 +546,7 @@ extern "C"
 		}
 		else
 		{
-			file_desc = TIMING(open_dataset((char *)imss_path, 1);,"imss_open,open_dataset", int32_t, 0);
+			file_desc = TIMING(open_dataset((char *)imss_path, 1), "imss_open,open_dataset", int32_t, 0);
 			switch (file_desc)
 			{
 			case -EEXIST: // file already exists case.
@@ -580,15 +573,15 @@ extern "C"
 			}
 			}
 
-			// aux = (char *)malloc(IMSS_DATA_BSIZE);
 			void *data = (void *)malloc(sizeof(struct stat) * sizeof(char) + 1);
-			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0);,"imss_open,get_ndata", int, 0);
+			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0, SYNC, NULL), "imss_open,get_ndata", int, 0);
 			if (ret < 0)
 			{
 				free(data);
 				perror("ERR_HERCULES_IMSS_OPEN_GET_DATA");
 				slog_error("ERR_HERCULES_IMSS_OPEN_GET_DATA");
-				return -1;
+				// return -1;
+				return -ENOENT;
 			}
 
 			slog_debug("ret=%d, file_desc=%d", ret, file_desc);
@@ -596,7 +589,7 @@ extern "C"
 			// pthread_mutex_lock(&lock_file);
 			// storing block 0 on the local map.
 			// map_put(map, imss_path, file_desc, stats, (char *)data);
-			TIMING_NO_RETURN(HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data);,"imss_open,HierarchicalMapPut",0) ;
+			TIMING_NO_RETURN(HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data), "imss_open,HierarchicalMapPut", 0);
 			print_file_type(stats, imss_path);
 			// if (PREFETCH != 0)
 			// {
@@ -622,8 +615,176 @@ extern "C"
 		return 0;
 	}
 
-	int performance = 0;
-	ssize_t total_amount_read = 0;
+	void parse_prefetch_buffer(void *received_buffer, size_t received_length, std::map<uint32_t, void *> &block_map)
+	{
+		const uint32_t BLOCK_ID_SIZE = sizeof(uint32_t);
+		const size_t BLOCK_DATA_SIZE = IMSS_DATA_BSIZE;
+		const size_t RECORD_SIZE = BLOCK_ID_SIZE + BLOCK_DATA_SIZE;
+
+		slog_debug("BLOCK_ID_SIZE=%lu, BLOCK_DATA_SIZE=%lu, RECORD_SIZE=%lu", BLOCK_ID_SIZE, BLOCK_DATA_SIZE, RECORD_SIZE);
+
+		char *current_ptr = (char *)received_buffer;
+		char *end_ptr = current_ptr + received_length;
+
+		// block_map.clear();
+		uint32_t block_id = 0;
+		void *data_ptr = 0;
+		while (current_ptr + RECORD_SIZE <= end_ptr)
+		{
+			// get the block id.
+			block_id = *(uint32_t *)current_ptr;
+
+			// get the pointer to the data.
+			data_ptr = current_ptr + BLOCK_ID_SIZE;
+
+			block_map[block_id] = data_ptr;
+			// move to the next record.
+			current_ptr += RECORD_SIZE;
+		}
+	}
+
+	int find_data_on_prefetch(void *destination_buf, size_t curr_blk, ssize_t to_read, size_t offset_in_block, std::map<uint32_t, void *> &block_map)
+	{
+		// search the block on the block map.
+		auto it = block_map.find(curr_blk);
+		if (it != block_map.end())
+		{
+			void *data = it->second;
+			slog_debug("Block %d found, reading %lu bytes", curr_blk, to_read);
+			memcpy(destination_buf, (char *)data + offset_in_block, to_read);
+			return 1;
+		}
+		else
+		{
+			slog_warn("Block %u is not in the prefetch.", curr_blk);
+			return 0;
+		}
+	}
+
+	ssize_t imss_sread_prefetch_v2(const char *path, void *buf, size_t size, off_t offset)
+	{
+		int eof_found = 0;
+		const char *rpath = path; // this pointer should not be free.
+
+		// Needed variables
+		ssize_t been_read = 0;
+		size_t total_bytes_scheduled = 0;
+		int fd = -1;
+		struct stat stats;
+		char *aux;
+		fd_lookup((char *)path, &fd, &stats, &aux);
+
+		if (fd < 0)
+			return -ENOENT;
+		int ds = fd; // Use dataset handle
+
+		// Handle edge case: read request starts at or after the end of the file.
+		if (offset >= stats.st_size)
+		{
+			return 0;
+		}
+
+		// If the user requests 0 bytes, we are done.
+		if (size == 0)
+		{
+			return 0;
+		}
+
+		/*
+		No data transfer shall occur past the current end-of-file. If the starting position is at or after the end-of-file, 0 shall be returned. If the file refers to a device special file, the result of subsequent read() requests is implementation-defined.
+		ref: https://linux.die.net/man/3/read
+		*/
+		if (offset + size > stats.st_size)
+		{
+			return 0;
+		}
+
+		size_t blocks_launched = 0;
+		size_t start_blk = offset / IMSS_DATA_BSIZE + 1;
+		size_t end_blk = (offset + size + IMSS_DATA_BSIZE - 1) / IMSS_DATA_BSIZE;
+		size_t num_blocks_to_read = end_blk - start_blk + 1;
+
+		slog_debug("TotalSizeToRead=%ld (%ld kb), start_offset=%ld, start_blk=%ld, end_blk=%ld, num_of_blks=%ld, offset=%ld, IMSS_DATA_BSIZE=%ld, stats.st_size=%ld", size, size / 1024, offset, start_blk, end_blk, num_blocks_to_read, offset, IMSS_DATA_BSIZE, stats.st_size);
+
+		std::map<uint32_t, void *> block_map;
+		std::vector<void *> prefetch_buffers_to_free;
+		slog_debug("blocks_launched=%d, num_blocks_to_read=%d", blocks_launched, num_blocks_to_read);
+		size_t current_block_id = 0;
+		size_t offset_in_block = 0;
+		size_t max_read_for_block = 0;
+		size_t remaining_bytes_in_request = 0;
+		size_t bytes_to_read_in_block = 0;
+		int found = 0;
+		while (blocks_launched < num_blocks_to_read)
+		{
+			current_block_id = start_blk + blocks_launched;
+			// Calculate read size and offset for this specific block
+			offset_in_block = 0;
+			if (blocks_launched == 0)
+			{ // First block has a specific offset
+				offset_in_block = offset % IMSS_DATA_BSIZE;
+			}
+
+			max_read_for_block = IMSS_DATA_BSIZE - offset_in_block;
+			remaining_bytes_in_request = size - total_bytes_scheduled;
+			bytes_to_read_in_block = std::min(max_read_for_block, remaining_bytes_in_request);
+
+			// check the prefetch before requesting new nada.
+			slog_debug("block %ld, reading %lu bytes, offset(byte_count)=%lu", current_block_id, bytes_to_read_in_block, total_bytes_scheduled);
+			found = find_data_on_prefetch((char *)buf + total_bytes_scheduled, current_block_id, bytes_to_read_in_block, offset_in_block, block_map);
+			if (!found)
+			{
+				void *prefetch_buffer_block = NULL;
+				// TODO: get ndata prefetch can be called asynchronous or in a thread to retrieve more data during the current blocks are processing.
+				been_read = get_ndata_prefetch((char *)path, ds, current_block_id, &prefetch_buffer_block, size, num_blocks_to_read);
+				if (been_read > 0 && prefetch_buffer_block != NULL)
+				{
+					prefetch_buffers_to_free.push_back(prefetch_buffer_block);
+					parse_prefetch_buffer(prefetch_buffer_block, been_read, block_map);
+					slog_debug("Prefetch buffer contains %lu blocks.", block_map.size());
+					// get the current expected block.
+					found = find_data_on_prefetch((char *)buf + total_bytes_scheduled, current_block_id, bytes_to_read_in_block, offset_in_block, block_map);
+					if (!found)
+					{
+						// fatal error. error is not on the back-end.
+						fprintf(stderr, "Fatal: Block %lu not found even after prefetch.\n", current_block_id);
+						slog_error("Fatal: Block %lu not found even after prefetch.", current_block_id);
+						eof_found = 1;
+					}
+				}
+				else
+				{
+					eof_found = 1;
+				}
+			}
+
+			total_bytes_scheduled += bytes_to_read_in_block;
+			blocks_launched++;
+			// If eof was found, we end the while bucle to avoid trying to read
+			// additional blocks.
+			if (eof_found)
+			{
+				break;
+			}
+		}
+
+		if (MALLEABILITY_ON == 1)
+		{
+			update_dataset((char *)path, ds);			
+		}
+		
+
+		// total_amount_read += byte_count;
+		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, total_bytes_scheduled);
+
+		// clean the memory of all prefetch buffers.
+		slog_debug("Cleaning up %lu prefetch buffers.", prefetch_buffers_to_free.size());
+		for (void *buffer : prefetch_buffers_to_free)
+		{
+			free(buffer);
+		}
+		return total_bytes_scheduled;
+	}
 
 	ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 	{
@@ -643,8 +804,8 @@ extern "C"
 
 		// Needed variables
 		ssize_t to_read = 0;
+		ssize_t been_read = 0;
 		ssize_t byte_count = 0;
-		int64_t rbytes;
 
 		int fd = -1;
 		struct stat stats;
@@ -677,7 +838,6 @@ extern "C"
 
 		if (start_offset >= stats.st_size)
 		{
-
 			slog_warn("[imss_read] returning EOF");
 			return 0;
 		}
@@ -751,24 +911,18 @@ extern "C"
 			}
 
 			// get data from the data server.
-			// if (MALLEABILITY)
-			// {
-			// 	int32_t num_storages = 0;
-			// 	num_storages = get_number_of_data_servers(i_blk, num_of_blk);
-			// 	slog_debug("[imss_read] i_blk=%ld, num_storages=%ld, N_SERVERS=%ld", i_blk, num_storages, N_SERVERS);
-
-			// 	to_read = get_data_mall(ds, curr_blk, buf + byte_count, to_read, block_offset, num_storages);
-			// 	i_blk++;
-			// }
-			// else
-			{
-				to_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset), "get_ndata", ssize_t, -1);
-			}
+			been_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset, SYNC, NULL), "get_ndata", ssize_t, -1);
 			// Error handling when get_ndata does not found the request data.
-			// if (to_read == -1)
-			if (to_read < 0)
+
+			if (been_read < 0)
 			{
-				return to_read;
+				return been_read;
+			}
+
+			if (been_read != to_read)
+			{
+				slog_warn("Expecting to read %ld but %ld has been read.", to_read, been_read);
+				fprintf(stdout, "Expecting to read %ld but %ld has been read for %s.\n", to_read, been_read, path);
 			}
 
 			block_offset = 0;
@@ -783,13 +937,188 @@ extern "C"
 			}
 		}
 
-		total_amount_read += byte_count;
-		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B, total_amount_read=%d", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, byte_count, total_amount_read);
+		if (MALLEABILITY_ON == 1)
+		{
+			update_dataset((char *)path, ds);
+		}
+		async_data_worker_progress(0);
+
+		// total_amount_read += byte_count;
+		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, byte_count);
 
 		// performance =
 
 		// free(rpath);
 		return byte_count;
+	}
+
+	ssize_t imss_read_async(const char *path, void *buf, size_t size, off_t offset)
+	{
+		// Look up file metadata.
+		int fd = -1;
+		struct stat stats;
+		char *aux;
+		fd_lookup((char *)path, &fd, &stats, &aux);
+
+		if (fd < 0)
+			return -ENOENT;
+		int ds = fd; // Use dataset handle
+
+		// Handle edge case: read request starts at or after the end of the file.
+		if (offset >= stats.st_size)
+		{
+			return 0;
+		}
+
+		// If the user requests 0 bytes, we are done.
+		if (size == 0)
+		{
+			return 0;
+		}
+
+		/*
+		No data transfer shall occur past the current end-of-file. If the starting position is at or after the end-of-file, 0 shall be returned.
+		If the file refers to a device special file, the result of subsequent read() requests is implementation-defined.
+		ref: https://linux.die.net/man/3/read
+		*/
+		if (offset + size > stats.st_size)
+		{
+			return 0;
+		}
+
+		size_t start_blk = offset / IMSS_DATA_BSIZE + 1;
+		size_t end_blk = (offset + size + IMSS_DATA_BSIZE - 1) / IMSS_DATA_BSIZE;
+		size_t num_blocks_to_read = end_blk - start_blk + 1;
+		const int MAX_CONCURRENT_REQUESTS = 100;
+
+		// Struct to manage all information for a single in-flight request.
+		struct RequestInfo
+		{
+			void *ucx_handle;
+			char *temp_buffer;
+			size_t final_offset_in_buf;
+			size_t bytes_to_read_in_req;
+			size_t current_block_id;
+			bool in_use;
+		};
+
+		RequestInfo requests[MAX_CONCURRENT_REQUESTS];
+		for (int i = 0; i < MAX_CONCURRENT_REQUESTS; ++i)
+		{
+			requests[i].in_use = false;
+			requests[i].temp_buffer = (char *)malloc(IMSS_DATA_BSIZE);
+			if (requests[i].temp_buffer == NULL)
+			{
+				// Clean up already allocated buffers on failure
+				for (int j = 0; j < i; ++j)
+					free(requests[j].temp_buffer);
+				slog_error("Failed to allocate temporary buffers for async read.");
+				return -ENOMEM;
+			}
+		}
+
+		size_t blocks_launched = 0;
+		size_t blocks_completed = 0;
+		size_t total_bytes_scheduled = 0;
+		ssize_t total_bytes_completed = 0;
+
+		// The loop continues until all required blocks have been successfully received.
+		while (blocks_completed < num_blocks_to_read)
+		{
+
+			// Issue new requests into any available slots.
+			if (blocks_launched < num_blocks_to_read)
+			{
+				for (int i = 0; i < MAX_CONCURRENT_REQUESTS; ++i)
+				{
+					if (!requests[i].in_use)
+					{
+						// Stop if we have launched all necessary blocks
+						if (blocks_launched >= num_blocks_to_read)
+							break;
+
+						size_t current_block_id = start_blk + blocks_launched;
+
+						// Calculate read size and offset for this specific block
+						size_t offset_in_block = 0;
+						if (blocks_launched == 0)
+						{ // First block has a specific offset
+							offset_in_block = offset % IMSS_DATA_BSIZE;
+						}
+
+						size_t max_read_for_block = IMSS_DATA_BSIZE - offset_in_block;
+						size_t remaining_bytes_in_request = size - total_bytes_scheduled;
+						size_t bytes_to_read_in_block = std::min(max_read_for_block, remaining_bytes_in_request);
+
+						if (bytes_to_read_in_block == 0)
+							continue;
+
+						// The final destination for this data is at the end of what's already been scheduled.
+						requests[i].final_offset_in_buf = total_bytes_scheduled;
+
+						ssize_t ret = TIMING(get_ndata((char *)path, ds, current_block_id, requests[i].temp_buffer, bytes_to_read_in_block, offset_in_block, ASYNC, &requests[i].ucx_handle), "get_ndata", ssize_t, -1);
+
+						if (ret >= 0)
+						{
+							requests[i].in_use = true;
+							requests[i].bytes_to_read_in_req = bytes_to_read_in_block;
+							requests[i].current_block_id = current_block_id;
+							slog_debug("block %lu requested", requests[i].current_block_id);
+							total_bytes_scheduled += bytes_to_read_in_block;
+							blocks_launched++;
+						}
+					}
+				}
+			}
+
+			// Check for and process completed requests.
+			for (int i = 0; i < MAX_CONCURRENT_REQUESTS; ++i)
+			{
+				if (requests[i].in_use)
+				{
+					bool is_complete = false;
+					if (requests[i].ucx_handle == NULL)
+					{ // Request completed immediately
+						slog_debug("block %d complete immediately", requests[i].current_block_id);
+						is_complete = true;
+					}
+					else
+					{ // Check status of pending request
+						ucs_status_t status = ucp_request_check_status(requests[i].ucx_handle);
+						if (status == UCS_OK)
+						{
+							is_complete = true;
+							slog_debug("block %d complete", requests[i].current_block_id);
+							ucp_request_free(requests[i].ucx_handle);
+						}
+					}
+
+					if (is_complete)
+					{
+						// Copy data from its temporary buffer to the correct final destination
+						memcpy((char *)buf + requests[i].final_offset_in_buf,
+							   requests[i].temp_buffer,
+							   requests[i].bytes_to_read_in_req);
+
+						total_bytes_completed += requests[i].bytes_to_read_in_req;
+						requests[i].in_use = false;
+						blocks_completed++;
+					}
+				}
+			}
+
+			// Progress the UCX worker to ensure communication continues
+			ucp_worker_progress(ucp_worker_data);
+		}
+
+		async_data_worker_progress(0);
+
+		for (int i = 0; i < MAX_CONCURRENT_REQUESTS; ++i)
+		{
+			free(requests[i].temp_buffer);
+		}
+
+		return total_bytes_completed;
 	}
 
 	int imss_vread_prefetch(const char *path, char *buf, size_t size, off_t offset)
@@ -1418,8 +1747,6 @@ extern "C"
 			return ret;
 		}
 
-		// char *aux_block = NULL;
-
 		// Compute offsets to write
 		int64_t curr_blk, end_blk, start_offset, end_offset, block_offset, i_blk, num_of_blk;
 		int64_t start_blk = off / IMSS_DATA_BSIZE + 1; // Add one to skip block 0
@@ -1512,35 +1839,31 @@ extern "C"
 			slog_debug("writting %" PRIu64 " kilobytes (%" PRIu64 " bytes) with an offset of %" PRIu64 " kilobytes (%" PRIu64 " bytes)", bytes_to_copy / 1024, bytes_to_copy, block_offset / 1024, block_offset);
 
 			// Send data to data server.
-			// if (MALLEABILITY)
-			// {
-
-			// 	int32_t num_storages = 0;
-			// 	num_storages = get_number_of_data_servers(i_blk, num_of_blk);
-			// 	slog_debug("[imss_write] i_blk=%ld, num_storages=%ld, N_SERVERS=%ld", i_blk, num_storages, N_SERVERS);
-			// 	if (set_data_mall(ds, curr_blk, data_pointer, bytes_to_copy, block_offset, num_storages) < 0)
-			// 	{
-			// 		slog_error("[IMSS-FUSE]	Error writing to imss.\n");
-			// 		error_print = -ENOENT;
-			// 		return -ENOENT;
-			// 	}
-			// 	i_blk++;
-			// }
-			// else
+			if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO), "set_data", int32_t, -1) < 0)
 			{
-				if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset), "set_data", int32_t, -1) < 0)
-				{
-					slog_error("[imss_write] Error writing to Hercules.\n");
-					error_print = -ENOENT;
-					return -ENOENT;
-				}
+				slog_error("[imss_write] Error writing to Hercules.\n");
+				error_print = -ENOENT;
+				return -ENOENT;
 			}
 
 			bytes_stored += bytes_to_copy;
 			data_pointer = (char *)data_pointer + bytes_to_copy;
 			block_offset = 0; // first block has been stored, next blocks don't have an offset
 			++curr_blk;
+			ucp_worker_progress(ucp_worker_data);
 		}
+
+		if (ASYNC_IO == ASYNC)
+		{
+			async_data_worker_progress(0);
+		}
+		
+		// updates intervals on the back-end.
+		if (MALLEABILITY_ON == 1)
+		{
+			update_dataset((char *)path, ds);
+		}
+		
 
 		// Update header count if the file has become bigger.
 		if (size + off > stats.st_size)
@@ -2018,12 +2341,11 @@ extern "C"
 		stats.st_ctim = spec;
 
 		// write metadata
-		slog_debug("stats.st_nlink=%lu", stats.st_nlink);
+		slog_debug("stats.st_nlink=%lu, file size=%lu", stats.st_nlink, stats.st_size);
 		// memcpy(head, &stats, sizeof(struct stat));
 
 		// Updates the size of the file in the block 0.
-		// if (set_data(ds, 0, head, 0, 0) < 0)
-		if (set_data((char *)path, ds, 0, (char *)&stats, 0, 0) < 0)
+		if (set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC) < 0)
 		{
 			perror("HERCULES_ERR_WRITTING_BLOCK");
 			slog_error("HERCULES_ERR_WRITTING_BLOCK");
@@ -2048,14 +2370,20 @@ extern "C"
 		// slog_debug("Calling imss_flush_data");
 		// imss_flush_data();
 		// slog_debug("Ending imss_flush_data");
+
+		// Updates block 0 on the data server.
 		ds = imss_release(path);
 		slog_debug("Ending imss_release, ret=%d", ds);
-		ret = close_dataset(path, fd);
+		// Closes the dataset on the metadata servers.
+		ret = close_dataset(path, ds);
 		slog_debug("Ending close_dataset, ret=%d", ret);
 		if (ret)
 		{ // if the file was not deleted by the close we update the stat.
 			// imss_refresh is too slow.
 			// When we remove it pass from 3.45 sec to 0.008505 sec.
+			// TO CHECK: imss_refresh do same actions as like_release
+			// but it adds HierarchicalMapUpdate. Maybe imss_refresh
+			// could be removed if imss_release has HierarchicalMapUpdate.
 			imss_refresh(path);
 			slog_debug("Ending imss_refresh");
 		}
@@ -2065,6 +2393,8 @@ extern "C"
 			clear_dataset(path);
 			HierarchicalMapErase(hierarchical_map, path);
 		}
+
+		// Sends the performance metrics to the metadata server.
 
 		// TODO: Tell data server the file is ready to be copied to disk.
 
@@ -2123,7 +2453,7 @@ extern "C"
 		pthread_mutex_lock(&lock); // lock.
 		// stores block 0.
 		// fprintf(stdout, "size of stat=%lu bytes\n", sizeof(struct stat));
-		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0);
+		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0, SYNC);
 		if (ret < 0)
 		{
 			slog_error("HERCULES_ERR_IMSS_CREATE_SET_DATA_0");
@@ -2249,7 +2579,7 @@ extern "C"
 		}
 
 		//  data is filled in "get data".
-		ret = get_ndata((char *)path, file_desc, 0, buff, 0, 0);
+		ret = get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
 		if (ret < 0)
 		{
 			perror("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
@@ -2269,8 +2599,8 @@ extern "C"
 
 		// Write initial block (0).
 		memcpy(buff, &header, sizeof(struct stat));
-		slog_debug("header.st_nlink=%lu", header.st_nlink);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0);
+		slog_debug("header.st_nlink=%lu, head.st_size=%lu", header.st_nlink, header.st_size);
+		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
 		// if it is the last link, the file is deleted (we also should to check if other process is open).
@@ -2353,7 +2683,7 @@ extern "C"
 		}
 
 		pthread_mutex_lock(&lock);
-		get_ndata((char *)path, file_desc, 0, buff, 0, 0);
+		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
 		pthread_mutex_unlock(&lock);
 
 		memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2364,7 +2694,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0);
+		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
 		// free(rpath);
@@ -2420,7 +2750,7 @@ extern "C"
 					return -1;
 				}
 				aux = (char *)malloc(sizeof(struct stat) + 1);
-				ret = get_ndata(new_path_1, file_desc, 0, aux, 0, 0);
+				ret = get_ndata(new_path_1, file_desc, 0, aux, 0, 0, SYNC, NULL);
 				memcpy(&stats, aux, sizeof(struct stat));
 				pthread_mutex_lock(&lock_file);
 				// map_put(map, new_path_1, file_desc, stats, aux);
@@ -2452,7 +2782,6 @@ extern "C"
 
 		if (res < 0)
 		{
-			// fprintf(stderr, "[imss_create]	Cannot create new dataset.\n");
 			slog_error("Cannot create new dataset.\n");
 			free(rpath1);
 			free(rpath2);
@@ -2511,7 +2840,7 @@ extern "C"
 		memcpy(buff, &stats, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		if (set_data((char *)path, file_desc, 0, (char *)buff, 0, 0) < 0)
+		if (set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC) < 0)
 		{
 			// fprintf(stderr, "[IMSS-FUSE]	Error writing to imss.\n");
 			slog_error("[IMSS-FUSE]	Error writing to imss.");
@@ -2557,7 +2886,7 @@ extern "C"
 		}
 
 		pthread_mutex_lock(&lock);
-		get_ndata((char *)path, file_desc, 0, buff, 0, 0);
+		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
 		pthread_mutex_unlock(&lock);
 
 		memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2572,7 +2901,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, buff, 0, 0);
+		set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
 		free(rpath);
@@ -2605,7 +2934,7 @@ extern "C"
 		}
 
 		pthread_mutex_lock(&lock);
-		get_ndata((char *)path, file_desc, 0, buff, 0, 0);
+		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
 		pthread_mutex_unlock(&lock);
 
 		memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2620,7 +2949,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0);
+		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 		free(rpath);
 		return 0;
