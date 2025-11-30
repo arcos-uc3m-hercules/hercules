@@ -19,7 +19,9 @@ extern "C"
 	void HierarchicalMapDestroy(void *map);
 	size_t HierarchicalMapGetSize(void *hierarchical_map);
 	int HierarchicalMapPut(void *hierarchical_map, std::string key, void *address, uint64_t length, int reused_buffer, GNode *gnode, int is_zero_block);
+	int32_t HierarchicalMapDeleteEntry(void *hierarchical_map, const std::string &key);
 	std::shared_ptr<map_records> HierarchicalMapGetDir(void *hierarchical_map, const char *k);
+	char *HierarchicalMapListDir(void *hierarchical_map, const char *desired_dir, int32_t *numdir_elems);
 	int HierarchicalMapRenameKey(void *hierarchical_map, const char *old_dir, const char *new_dir);
 	std::shared_ptr<map_records> HierarchicalMapGetChild(void *hierarchical_map, const char *k);
 	int32_t HierarchicalMapGetChildrenSerialized(void *hierarchical_map, std::string k, char **buffer, const int uri_size);

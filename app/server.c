@@ -36,8 +36,6 @@ extern size_t *local_addr_len;
 extern StsHeader *mem_pool;
 
 extern struct arguments args;
-// std::shared_ptr<map_records> g_map;
-// uint64_t max_storage_size = 0;
 
 /* UCP objects */
 ucp_worker_h ucp_worker = NULL;

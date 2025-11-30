@@ -786,7 +786,6 @@ int32_t stat_init(char *stat_hostfile,
 		return -1;
 	}
 
-	// stat_ids = (uint32_t *)malloc(n_stat_servers * sizeof(uint32_t));
 	stat_ids = (uint32_t *)calloc(n_stat_servers, sizeof(uint32_t));
 	if (stat_ids == NULL)
 	{
@@ -824,6 +823,8 @@ int32_t stat_init(char *stat_hostfile,
 	ucp_worker_address_query(local_addr_meta, &attr);
 	local_meta_uid = attr.worker_uid;
 
+	pthread_mutex_lock(&lock_network);
+
 	size_t l_size = LINE_LENGTH;
 	int oob_sock = -1;
 	for (int i = 0; i < n_stat_servers; i++)
@@ -850,6 +851,7 @@ int32_t stat_init(char *stat_hostfile,
 			sprintf(err_msg, "HERCULES_ERR_CONNECT-%s:%ld", stat_node, port);
 			perror(err_msg);
 			free(stat_addr);
+			pthread_mutex_unlock(&lock_network);
 			return -1;
 		}
 
@@ -863,6 +865,7 @@ int32_t stat_init(char *stat_hostfile,
 			free(stat_ids);
 			free(stat_eps);
 			free(stat_node);
+			pthread_mutex_unlock(&lock_network);
 			return -1;
 		}
 
@@ -874,6 +877,7 @@ int32_t stat_init(char *stat_hostfile,
 			free(stat_ids);
 			free(stat_eps);
 			free(stat_node);
+			pthread_mutex_unlock(&lock_network);
 			return -1;
 		}
 
@@ -885,6 +889,7 @@ int32_t stat_init(char *stat_hostfile,
 			free(stat_ids);
 			free(stat_eps);
 			free(stat_node);
+			pthread_mutex_unlock(&lock_network);
 			exit(-1);
 		}
 		ret = recv(oob_sock, stat_addr[i], addr_len, MSG_WAITALL);
@@ -895,6 +900,7 @@ int32_t stat_init(char *stat_hostfile,
 			free(stat_ids);
 			free(stat_eps);
 			free(stat_node);
+			pthread_mutex_unlock(&lock_network);
 			return -1;
 		}
 		// slog_debug("[IMSS] stat_addr=%s, len=%d", stat_addr[i], addr_len);
@@ -919,9 +925,11 @@ int32_t stat_init(char *stat_hostfile,
 		free(stat_ids);
 		free(stat_eps);
 		free(stat_node);
+		pthread_mutex_unlock(&lock_network);
 		return -1;
 	}
 
+	pthread_mutex_unlock(&lock_network);
 	// TO CHECK: free memory.
 	return 0;
 }
@@ -2127,9 +2135,7 @@ int32_t create_dataset(char *dataset_uri,
 {
 	int ret = 0;
 	ucp_ep_h ep;
-
 	// curr_imss = g_array_index(imssd, imss, curr_dataset->imss_d);
-
 	// slog_live("dataset_create: starting, imss_d=%d, num_storages=%d, num_active_storages=%d", curr_dataset->imss_d, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
 
 	if ((dataset_uri == NULL) || (policy == NULL) || !num_data_elem || !data_elem_size)
@@ -2188,38 +2194,38 @@ int32_t create_dataset(char *dataset_uri,
 	 */
 	// "offset" can be 0 when the dataset is on the HERCULES root,
 	// for example, imss://myfile.txt = /mnt/hercules/myfile.txt.
-	// if (offset > 0)
-	// { // "dataset_uri" is not on the HERCULES root.
-	// 	// strncpy(parent_dir, dataset_uri, offset);
-	// 	slog_live("dataset_uri=%s, parent directory = %s", dataset_uri, parent_dir);
-	// 	dataset_info parent_dataset; // TODO: change to dynamic memory.
-	// 	slog_debug("Checking if parent dir of %s exists", dataset_uri);
-	// 	ret = stat_dataset(parent_dir, &parent_dataset, 0);
-	// 	if (ret < 0 && ret != -3)
-	// 	{ // case where parent directory does not exists.
-	// 		/********** TO CHECK */
-	// 		char err_msg[MAX_ERR_MSG_LEN] = {0};
-	// 		sprintf(err_msg, "Parent directory %s does not exists", parent_dir);
-	// 		slog_error("%s", err_msg);
-	// 		perror(err_msg);
-	// 		return -ENOENT;
-	// 	}
-	// 	if (ret == -3)
-	// 	{ // if parent dir exists on the remote server, we added to the local pool of hash table.
-	// 		slog_debug("Inserting %s on the pool of hash maps.", parent_dir);
-	// 		// GHashTable *new_directory_children_table = g_hash_table_new(g_str_hash, g_str_equal);
-	// 		// if (!new_directory_children_table)
-	// 		// {
-	// 		// 	perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
-	// 		// 	slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
-	// 		// 	exit(-1);
-	// 		// }
-	// 		// // Insert the new directory's children hash table into 'pool_hash_tables_datasetd'.
-	// 		// // The key is a copy of the new directory's dataset_uri.
-	// 		// g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(parent_dir), new_directory_children_table);
-	// 		AddDirectoryToPool(parent_dir);
-	// 	}
-	// }
+	if (offset > 0)
+	{ // "dataset_uri" is not on the HERCULES root.
+		// strncpy(parent_dir, dataset_uri, offset);
+		slog_live("dataset_uri=%s, parent directory = %s", dataset_uri, parent_dir);
+		dataset_info *parent_dataset; // TODO: change to dynamic memory.
+		slog_debug("Checking if parent dir of %s exists", dataset_uri);
+		ret = stat_dataset(parent_dir, &parent_dataset, 0);
+		if (ret < 0 && ret != -3)
+		{ // case where parent directory does not exists.
+			/********** TO CHECK */
+			char err_msg[MAX_ERR_MSG_LEN] = {0};
+			sprintf(err_msg, "Parent directory %s does not exists", parent_dir);
+			slog_error("%s", err_msg);
+			perror(err_msg);
+			return -ENOENT;
+		}
+		if (ret == -3)
+		{ // if parent dir exists on the remote server, we added to the local pool of hash table.
+			slog_debug("Inserting %s on the pool of hash maps.", parent_dir);
+			// GHashTable *new_directory_children_table = g_hash_table_new(g_str_hash, g_str_equal);
+			// if (!new_directory_children_table)
+			// {
+			// 	perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+			// 	slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+			// 	exit(-1);
+			// }
+			// // Insert the new directory's children hash table into 'pool_hash_tables_datasetd'.
+			// // The key is a copy of the new directory's dataset_uri.
+			// g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(parent_dir), new_directory_children_table);
+			AddDirectoryToPool(parent_dir);
+		}
+	}
 
 	// Dataset metadata request. To know if the dataset already exists.
 	ret = stat_dataset(dataset_uri, &new_dataset, opened);
@@ -3449,10 +3455,11 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int 
 	void *data = malloc(msg_len * sizeof(char));
 	if (data == NULL)
 	{
+		pthread_mutex_unlock(&lock_network);
 		perror("HERCULES_ERR_STAT_DATASET_ERR_MALLOC");
 		return -2;
 	}
-	
+
 	ret = recv_dynamic_stream(ucp_worker_meta, ep, data, DATASET_INFO, local_meta_uid, msg_len);
 	if (ret < 0)
 	{

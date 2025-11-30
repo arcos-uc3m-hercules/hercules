@@ -79,6 +79,70 @@ extern "C"
 		return hiermap->size();
 	}
 
+	int InsertDirectory(HierarchicalMap *hiermap, std::string key)
+	{
+		const char *k = key.c_str();
+		std::string path_basename = key.substr(0, key.find("$"));
+		slog_debug("%s is a directory.", path_basename.c_str());
+		if (hiermap->find(path_basename) == hiermap->end())
+		{
+			// Map *new_directory_children_map = new Map();
+			std::shared_ptr<map_records> new_directory_children_map = std::make_shared<map_records>(max_storage_size);
+			(*hiermap)[path_basename] = new_directory_children_map;
+			slog_debug("Created children map for new directory: %s", k);
+		}
+		else
+		{
+			slog_debug("Children map for directory %s already exists", k);
+		}
+		return 1;
+	}
+
+	int CheckIfDirectory(HierarchicalMap *hiermap, std::string key, void *address)
+	{
+		const char *k = key.c_str();
+		// TODO: check this for data or metadata, data have stats in block 0, but metadata has
+		// a struct dataset only.
+		slog_debug("Server type=%c", SERVER_TYPE);
+		int is_directory = 0;
+		int ret = 0;
+		switch (SERVER_TYPE)
+		{
+		case TYPE_DATA_SERVER:
+		{
+			struct stat *stat_info;
+			stat_info = (struct stat *)address;
+			if (S_ISDIR(stat_info->st_mode))
+			{
+				is_directory = 1;
+			}
+		}
+		break;
+		case TYPE_METADATA_SERVER:
+		{
+			dataset_info *dataset;
+			dataset = (dataset_info *)address;
+			if (dataset->type == TYPE_DIRECTORY)
+			{
+				is_directory = 1;
+			}
+		}
+		break;
+		default:
+			fprintf(stderr, "HERCULES_ERR_HIERARCHICAL_MAP_PUT_INVALID_SERVER_TYPE: %c\n", SERVER_TYPE);
+			slog_error("HERCULES_ERR_HIERARCHICAL_MAP_PUT_INVALID_SERVER_TYPE: %c\n", SERVER_TYPE);
+			return -1;
+		}
+		slog_debug("is directory=%d", is_directory);
+		// If the newly added element is a directory, a new std::map for its children
+		// must also be created and stored in 'HierarchicalMap'.
+		if (is_directory)
+		{
+			ret = InsertDirectory(hiermap, key);
+		}
+		return ret;
+	}
+
 	int HierarchicalMapPut(void *hierarchical_map, std::string key, void *address, uint64_t length, int reused_buffer, GNode *gnode, int is_zero_block)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
@@ -89,76 +153,151 @@ extern "C"
 		char first_parent_dir[PATH_MAX] = {0};
 		find_last_parent_dir(k, first_parent_dir);
 
-		// Retrieve the map for the parent directory's children from 'hierarchical_map'.
+		// // Retrieve the map for the parent directory's children from 'hierarchical_map'.
+		// auto it = hiermap->find(first_parent_dir);
+		// std::shared_ptr<map_records> parent_map = nullptr;
+		// if (it == hiermap->end())
+		// { // parent map does not exists locally, we add it to the hierarchical map.
+		// 	slog_warn("Parent directory %s does not exist or has not been added as a directory element. Creating it.", first_parent_dir);
+		// 	parent_map = std::make_shared<map_records>(max_storage_size);
+		// 	(*hiermap)[first_parent_dir] = parent_map;
+		// }
+		// else
+		// { // parent map exists locally, we get the pointer.
+		// 	parent_map = it->second;
+		// }
+
+		// --- RECURSIVE PATH CREATION START ---
+
+		// Convert to string for easier manipulation
+		std::string current_path = first_parent_dir;
+		// std::shared_ptr<map_records> prev_map;
+		// std::string prev_path;
+
+		// Iterate upwards until we hit the root or a path that already exists
+		// > 7 to skip imss://
+		// while (current_path.length() > 7)
+		// {
+		// 	slog_debug("current_path=%s", current_path.c_str());
+		// 	auto it_check = hiermap->find(current_path);
+
+		// 	if (it_check == hiermap->end())
+		// 	{
+		// 		// The directory map does not exist, create it
+		// 		slog_warn("Ancestor directory %s does not exist. Recursively creating it.", current_path.c_str());
+		// 		std::shared_ptr<map_records> new_map = std::make_shared<map_records>(max_storage_size);
+		// 		(*hiermap)[current_path] = new_map;
+
+		// 		// Move up one level (find the previous slash)
+		// 		size_t last_slash = current_path.find_last_of('/');
+		// 		if (last_slash == std::string::npos || last_slash <= 6)
+		// 			break; // Safety break
+
+		// 		if (!prev_path.empty())
+		// 		{
+		// 			slog_debug("Element %s inserted on the directory map %s", prev_path.c_str(), current_path);
+		// 			new_map->put(prev_path, NULL, 0, 0, NULL);
+		// 		}
+		// 		// prev_map->put(current_path, );
+		// 		// prev_map = new_map;
+		// 		prev_path = current_path;
+		// 		current_path = current_path.substr(0, last_slash);
+		// 	}
+		// 	else
+		// 	{
+		// 		// OPTIMIZATION: If this level exists, we can assume all higher levels
+		// 		// also exist (assuming no broken states), so we stop the loop.
+		// 		break;
+		// 	}
+		// }
+		std::string target_path = first_parent_dir;
+		std::string root_prefix = "imss://";
+		// Only proceed if the target is deeper than the root
+		if (target_path.length() > root_prefix.length())
+		{
+			std::string current_check_path = root_prefix;
+			// Start searching for slashes after "imss://"
+			size_t pos = target_path.find('/', root_prefix.length());
+
+			while (pos != std::string::npos || current_check_path != target_path)
+			{
+
+				std::string parent_of_sub = current_check_path;
+
+				// Determine the sub-directory path we are currently checking
+				if (pos != std::string::npos)
+				{
+					current_check_path = target_path.substr(0, pos);
+				}
+				else
+				{
+					current_check_path = target_path; // Final segment (the first_parent_dir itself)
+				}
+
+				// Check if this sub-directory already has a map (meaning it exists)
+				if (hiermap->find(current_check_path) == hiermap->end())
+				{
+
+					slog_warn("Ancestor directory %s missing. Creating and linking to %s.", current_check_path.c_str(), parent_of_sub.c_str());
+
+					// Create the container map for this new directory
+					std::shared_ptr<map_records> new_dir_map = std::make_shared<map_records>(max_storage_size);
+					(*hiermap)[current_check_path] = new_dir_map;
+
+					// LINKING: Insert this new directory into its parent's map
+					// We must retrieve the parent map to insert the entry.
+					auto parent_it = hiermap->find(parent_of_sub);
+					if (parent_it != hiermap->end())
+					{
+						std::shared_ptr<map_records> prev_map = parent_it->second;
+
+						// FIXME: We are inserting a directory entry without valid metadata (stat/GNode).
+						// You may need to create a dummy 'stat' struct with S_ISDIR set,
+						// or pass specific flags if your 'put' implementation parses the address.
+						// Passing nullptr/0 for now to establish the link.
+						prev_map->put(current_check_path, nullptr, 0, 0, nullptr);
+
+						slog_debug("Linked %s into %s", current_check_path.c_str(), parent_of_sub.c_str());
+					}
+					else
+					{
+						slog_error("Critical: Root or Parent %s missing!", parent_of_sub.c_str());
+						return -1;
+					}
+				}
+
+				// Move to next slash
+				if (pos == std::string::npos)
+					break;
+				pos = target_path.find('/', pos + 1);
+			}
+		}
+
+		// --- RECURSIVE PATH CREATION END ---
+
+		// Now that we are sure the structure exists, retrieve the immediate parent map
 		auto it = hiermap->find(first_parent_dir);
 		std::shared_ptr<map_records> parent_map = nullptr;
-		if (it == hiermap->end())
-		{ // parent map does not exists locally, we add it to the hierarchical map.
-			slog_warn("Parent directory %s does not exist or has not been added as a directory element. Creating it.", first_parent_dir);
-			parent_map = std::make_shared<map_records>(max_storage_size);
-			(*hiermap)[first_parent_dir] = parent_map;
+
+		// We can directly access it->second because the loop above guaranteed its existence
+		if (it != hiermap->end())
+		{
+			parent_map = it->second;
 		}
 		else
-		{ // parent map exists locally, we get the pointer.
-			parent_map = it->second;
+		{
+			// This case should theoretically be unreachable now, but good for safety
+			slog_error("Critical Error: Parent dir %s missing after creation loop.", first_parent_dir);
+			return -1;
 		}
 
 		parent_map->put(key, address, length, reused_buffer, gnode);
-		slog_debug("Element %s inserted on the directory map %s", k, first_parent_dir);
+		slog_debug("Element %s inserted on the directory map %s", key.c_str(), first_parent_dir);
 
 		// if this is the zero block, check if the dataset is a directory.
 		if (is_zero_block)
 		{
-			// TODO: check this for data or metadata, data have stats in block 0, but metadata has
-			// a struct dataset only.
-			slog_debug("Server type=%c", SERVER_TYPE);
-			int is_directory = 0;
-			switch (SERVER_TYPE)
-			{
-			case TYPE_DATA_SERVER:
-			{
-				struct stat *stat_info;
-				stat_info = (struct stat *)address;
-				if (S_ISDIR(stat_info->st_mode))
-				{
-					is_directory = 1;
-				}
-			}
-			break;
-			case TYPE_METADATA_SERVER:
-			{
-				dataset_info *dataset;
-				dataset = (dataset_info *)address;
-				if (dataset->type == TYPE_DIRECTORY)
-				{
-					is_directory = 1;
-				}
-			}
-			break;
-			default:
-				fprintf(stderr, "HERCULES_ERR_HIERARCHICAL_MAP_PUT_INVALID_SERVER_TYPE: %c\n", SERVER_TYPE);
-				slog_error("HERCULES_ERR_HIERARCHICAL_MAP_PUT_INVALID_SERVER_TYPE: %c\n", SERVER_TYPE);
-				return -1;
-			}
-			slog_debug("is directory=%d", is_directory);
-			// If the newly added element is a directory, a new std::map for its children
-			// must also be created and stored in 'HierarchicalMap'.
-			if (is_directory)
-			{
-				std::string path_basename = key.substr(0, key.find("$"));
-				slog_debug("%s is a directory.", path_basename.c_str());
-				if (hiermap->find(path_basename) == hiermap->end())
-				{
-					// Map *new_directory_children_map = new Map();
-					std::shared_ptr<map_records> new_directory_children_map = std::make_shared<map_records>(max_storage_size);
-					(*hiermap)[path_basename] = new_directory_children_map;
-					slog_debug("Created children map for new directory: %s", k);
-				}
-				else
-				{
-					slog_debug("Children map for directory %s already exists", k);
-				}
-			}
+			CheckIfDirectory(hiermap, key, address);
 		}
 
 		return 0;
@@ -171,6 +310,101 @@ extern "C"
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		return get_dir_unsafe(hiermap, k);
+	}
+
+	char *HierarchicalMapListDir(void *hierarchical_map, const char *desired_dir, int32_t *numdir_elems)
+	{
+		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+
+		slog_debug("Looking up directory %s in HierarchicalMap", desired_dir);
+		auto it = hiermap->find(desired_dir);
+
+		if (it == hiermap->end())
+		{
+			slog_debug("Directory %s not found in map", desired_dir);
+			*numdir_elems = -1;
+			return NULL;
+		}
+
+		// Get pointer to the children map (map_records)
+		std::shared_ptr<map_records> children_map = it->second;
+
+		if (children_map == nullptr)
+		{
+			// Should not happen if logic is consistent, but safety first
+			*numdir_elems = -1;
+			return NULL;
+		}
+
+		// total children including dirty/garbage ones.
+		uint32_t num_children = children_map->size();
+
+		slog_debug("Found directory. Total entries (including garbage): %d", num_children);
+
+		if (num_children <= 0)
+		{
+			*numdir_elems = 0;
+			return NULL;
+		}
+
+		char *dir_elements_buff = (char *)calloc(num_children + 1, URI_);
+		if (dir_elements_buff == NULL)
+		{
+			perror("HERCULES_ERR_GTREE_GETDIR_ALLOC_MEMORY");
+			slog_fatal("HERCULES_ERR_GTREE_GETDIR_ALLOC_MEMORY");
+			exit(-1);
+		}
+
+		char *aux_dir_elem = dir_elements_buff;
+		int32_t valid_elements_count = 0;
+		int32_t num_dirty_child = 0;
+
+		// Iterate, Check Garbage, and Serialize
+		// We iterate over the map_records.
+		for (auto const &[filename, record_value] : *children_map)
+		{
+			slog_debug("filename.c_str()=%s, desired_dir=%s", filename.c_str(), desired_dir);
+			if (filename == desired_dir)
+			{
+				continue;
+			}
+			// Lock garbage mutex before checking
+			// pthread_mutex_lock(&mutex_garbage);
+			// Note: Casting const char* to char* for legacy compatibility
+			// int found = HierarchicalMapSearchInGarbageCollector(hierarchical_map, (char *)filename.c_str());
+
+			// if (!found)
+			// {
+			// Not garbage: Add to buffer
+			// Ensure we don't overflow URI_ size, though URI_ implies fixed block size
+			memcpy(aux_dir_elem, filename.c_str(), filename.length()); // or URI_ if you want to zero-pad immediately
+			aux_dir_elem += URI_;
+			valid_elements_count++;
+			// }
+			// else
+			// {
+			// 	num_dirty_child++;
+			// }
+
+			// pthread_mutex_unlock(&mutex_garbage);
+		}
+
+		// Release the main map lock now that we are done reading
+		// lck.unlock();
+
+		slog_debug("Directory %s has %d total elements, %d valid, %d dirty",
+				   desired_dir, num_children, valid_elements_count, num_dirty_child);
+
+		*numdir_elems = valid_elements_count;
+
+		if (*numdir_elems == 0)
+		{
+			free(dir_elements_buff);
+			return NULL;
+		}
+
+		return dir_elements_buff;
 	}
 
 	int HierarchicalMapRenameKey(void *hierarchical_map, const char *old_dir, const char *new_dir)
@@ -238,7 +472,6 @@ extern "C"
 			return 0;
 		}
 	}
-
 
 	ssize_t HierarchicalMapGetPrefetch(void *hierarchical_map,
 									   const std::string &base_key,
@@ -358,14 +591,12 @@ extern "C"
 		// HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		// Find the hash map of this dir.
-		// std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, old_dir.c_str()), "BackEndHierarchicalMapRenameDirDir,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
 		std::shared_ptr<map_records> map = TIMING(get_dir_unsafe(hiermap, old_dir.c_str()), "BackEndHierarchicalMapRenameDirDir,get_dir_unsafe", std::shared_ptr<map_records>, 0);
 
 		// Look up the parent directory's children map in 'hierarchical_map'.
 		// Map *parent_children_map = HierarchicalMapGetChild(hierarchical_map, old_dir);
 		if (map != nullptr)
 		{
-
 			slog_debug("Renaming entries of %s to %s in %c", old_dir.c_str(), rdir_dest.c_str(), SERVER_TYPE);
 			int32_t ret = -1;
 			// Rename all entries on the old directory.
@@ -460,7 +691,6 @@ extern "C"
 		// Find the hash map of this dir.
 		char first_parent_dir[PATH_MAX] = {0};
 		find_last_parent_dir(key.c_str(), first_parent_dir);
-		// std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, first_parent_dir), "HierarchicalMapPutInGarbageCollector,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
 		std::shared_ptr<map_records> map = get_dir_unsafe(hiermap, first_parent_dir);
 		if (map != NULL)
 		{
@@ -468,11 +698,28 @@ extern "C"
 			// Add the key to the garbage collector map.
 			return map->put_garbage_collector(key);
 		}
-		// else
-		// {
 		slog_debug("%s not found in the map", key.c_str());
 		return -1;
-		// }
+	}
+
+	int32_t HierarchicalMapDeleteEntry(void *hierarchical_map, const std::string &key)
+	{
+		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+		// Find the hash map of this dir.
+		char first_parent_dir[PATH_MAX] = {0};
+		find_last_parent_dir(key.c_str(), first_parent_dir);
+		// std::shared_ptr<map_records> map = TIMING(HierarchicalMapGetDir(hierarchical_map, first_parent_dir), "HierarchicalMapPutInGarbageCollector,HierarchicalMapGetDir", std::shared_ptr<map_records>, 0);
+		std::shared_ptr<map_records> map = get_dir_unsafe(hiermap, first_parent_dir);
+		if (map != NULL)
+		{
+			// Pop the key from the garbage collector vector.
+			slog_debug("Deleting key %s from the metadata map of %s", key.c_str(), first_parent_dir);
+			return map->delete_metadata_stat_worker(key);
+		}
+		// key was not find in the hierarchical map.
+		slog_debug("%s not found in the map", key.c_str());
+		return -1;
 	}
 
 	/**
@@ -496,12 +743,9 @@ extern "C"
 			slog_debug("Pop %s from the garbage collector of %s", key.c_str(), first_parent_dir);
 			return map->garbage_collector_pop(key);
 		}
-		// else
-		// {
 		// key was not find in the hierarchical map.
 		slog_debug("%s not found in the map", key.c_str());
 		return -1;
-		// }
 	}
 
 	/**

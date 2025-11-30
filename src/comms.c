@@ -23,7 +23,6 @@ pthread_mutex_t lock_ucx_comm = PTHREAD_MUTEX_INITIALIZER;
 // void *send_buffer;
 // void *recv_buffer;
 
-int ep_timeout = 0;
 // int ep_err_detected = 0;
 
 #ifdef __cplusplus
@@ -110,13 +109,12 @@ extern "C"
 
 		if (check_attr.thread_mode != UCS_THREAD_MODE_MULTI)
 		{
-			fprintf(stderr, "CRITICAL WARNING: UCX downgraded thread mode to %d! Multi-threaded access will crash.\n", check_attr.thread_mode);
-			// This confirms why you needed the manual mutex.
+			// fprintf(stderr, "CRITICAL WARNING: UCX downgraded thread mode to %d! Multi-threaded access will crash.\n", check_attr.thread_mode);
 		}
-		else
-		{
-			fprintf(stderr, "Worker is running in UCS_THREAD_MODE_MULTI.\n");
-		}
+		// else
+		// {
+		// 	fprintf(stderr, "Worker is running in UCS_THREAD_MODE_MULTI.\n");
+		// }
 
 		// slog_debug("[COMM] Inicializated worker result: %d", ret);
 		return ret;
@@ -467,7 +465,7 @@ extern "C"
 		}
 		else
 		{
-			while (((status = ucp_request_check_status(request)) == UCS_INPROGRESS) && ep_timeout != 1)
+			while (((status = ucp_request_check_status(request)) == UCS_INPROGRESS))
 			{
 				ucp_worker_progress(ucp_worker);
 			}
@@ -477,7 +475,6 @@ extern "C"
 		if (status != UCS_OK)
 		{
 			// slog_error("Connection error\n");
-			ep_timeout = 0;
 			free(msg);
 			// 	ep_close(ucp_worker, ep, UCP_EP_CLOSE_FLAG_FORCE);
 			slog_fatal("[COMM][send_req] Connection error, request=%s", req);
@@ -837,11 +834,11 @@ extern "C"
 		// slog_error("[COMM] Client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
 		// fprintf(stderr, "client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
 		slog_error("failure handler called with status %d (%s)\n", status, ucs_status_string(status));
-		//		fprintf(stderr, "failure handler called with status %d (%s)\n", status, ucs_status_string(status));
-		// if(status == UCS_ERR_ENDPOINT_TIMEOUT) {
-		ep_timeout = 1;
-		// ep_err_detected = 1;
-		// }
+		fprintf(stderr, "failure handler called with status %d (%s)\n", status, ucs_status_string(status));
+		if (status == UCS_ERR_ENDPOINT_TIMEOUT)
+		{
+			// ep_err_detected = 1;
+		}
 		// *arg_status = status;
 	}
 

@@ -78,7 +78,6 @@ pid_t g_pid = -1;
 // prefech.
 char *buf_pref = NULL;
 
-
 // #ifdef __cplusplus
 // extern "C"
 // {
@@ -684,7 +683,8 @@ int close(int fd)
 		// Set offset to 0.
 		// map_fd_update_value(map_fd, pathname, fd, 0);
 		map_fd_erase(map_fd, fd);
-		if(real_close(fd) == -1){
+		if (real_close(fd) == -1)
+		{
 			fprintf(stderr, "Cannot close aux fd used by HERCULES %d\n", fd);
 		}
 		slog_live("[POSIX]. Ending Hercules 'close', pathname=%s, ret=%d\n", pathname, ret);
@@ -1127,8 +1127,32 @@ extern int statvfs(const char *__restrict __file, struct statvfs *__restrict __b
 	if (new_path != NULL)
 	{
 		slog_live("[POSIX]. Calling Hercules 'statvfs', path=%s", new_path);
-		__buf->f_bsize = IMSS_BLKSIZE * KB;
+		memset(__buf, 0, sizeof(struct statvfs));
+
+		// TODO: check the following. It is used to help benchmarks to show the correct FS information.
+		unsigned long block_size = IMSS_BLKSIZE * KB;
+		unsigned long total_size_bytes = 1024UL * 1024UL * 1024UL * 100UL; // Example: 100 GB fake capacity
+		unsigned long used_bytes = 0;									   // Replace with actual usage tracking if you have it
+
+		__buf->f_bsize = block_size;  // Filesystem block size
+		__buf->f_frsize = block_size; // Fragment size (CRITICAL: df/mdtest use this multiplier)
+
+		// Calculate blocks
+		__buf->f_blocks = total_size_bytes / __buf->f_frsize;				// Total data blocks
+		__buf->f_bfree = (total_size_bytes - used_bytes) / __buf->f_frsize; // Free blocks
+		__buf->f_bavail = __buf->f_bfree;									// Free blocks for unprivileged users
+
+		// Populate Inode Information (For Inode Usage)
+		// fake high numbers to avoid running out
+		__buf->f_files = 1000000;  // Total file nodes
+		__buf->f_ffree = 1000000;  // Free file nodes (sets usage to 0%)
+		__buf->f_favail = 1000000; // Free nodes for unprivileged users
+
+		// Standard constants
 		__buf->f_namemax = URI_;
+
+		// __buf->f_bsize = IMSS_BLKSIZE * KB;
+		// __buf->f_namemax = URI_;
 		slog_live("[POSIX]. End Hercules 'statvfs', path=%s, ret=%d\n", new_path, ret);
 		free(new_path);
 	}
@@ -2336,7 +2360,7 @@ ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size,
 	{
 		if (ds_stat_n.st_size + size > ds_stat_n.st_size)
 		{
-			slog_live("pathname=%s, updating , file size=%ld, current size=%ld, new local size=%d", pathname, ds_stat_n.st_size, size, ds_stat_n.st_size+size);
+			slog_live("pathname=%s, updating , file size=%ld, current size=%ld, new local size=%d", pathname, ds_stat_n.st_size, size, ds_stat_n.st_size + size);
 			map_fd_update_value(map_fd, pathname, fd, ds_stat_n.st_size + size);
 		}
 	}
@@ -4058,6 +4082,7 @@ struct dirent *readdir(DIR *dirp)
 		if (to_read)
 		{
 			n_ent = imss_readdir(pathname_obj, &ori_buf, OptFiller, 0);
+			fprintf(stderr, "%lu files will be listed\n", n_ent);
 			to_read = 0;
 			imss_path_len = pathname_obj.length();
 			if (pathname_obj[imss_path_len - 1] != '/')
@@ -4073,7 +4098,6 @@ struct dirent *readdir(DIR *dirp)
 
 		// int i = 0;
 		// slog_live("Init while, first token=%s, pos=%lu", token, pos);
-		// if (token != NULL)
 		if (pos < n_ent + 1) // +1 to add ".."
 		{
 			memset(&entry, 0, sizeof(struct dirent));
@@ -4127,14 +4151,20 @@ struct dirent *readdir(DIR *dirp)
 			// name of file
 			strncpy(entry.d_name, token, len);
 
-			// if (pos % 1000 == 0) // TODO: comments this lines, only for debug.
-			// {					 // print a message every 1000 files.
-			// 	t = clock() - t;
-			// 	double time_taken = 0.0;
-			// 	time_taken = ((double)t) / (CLOCKS_PER_SEC);
-			// 	printf("[%s][%f] Reading entry %s, %ld of  %" PRIu32 ", please wait.\n", pathname, time_taken, entry.d_name, pos, n_ent);
-			// 	init_loop_timer = 1;
+			// if (idx % 1000 == 0 || idx < 1000)
+			// {
+			// 	fprintf(stderr, "Loading %d/%lu files, please wait.\n", pos, n_ent);
 			// }
+
+			if (pos % 1000 == 0) // TODO: comments this lines, only for debug.
+			{					 // print a message every 1000 files.
+				t = clock() - t;
+				double time_taken = 0.0;
+				time_taken = ((double)t) / (CLOCKS_PER_SEC);
+				// printf("[%s][%f] Reading entry %s, %ld of  %" PRIu32 ", please wait.\n", pathname, time_taken, entry.d_name, pos, n_ent);
+				fprintf(stdout, "Loading %d/%lu files, please wait. Time taken to get %d/1000 files: %f\n", pos, n_ent, time_taken);
+				init_loop_timer = 1;
+			}
 			// printf("[%s] Reading entry %s, %" PRIu32 " of %u, please wait\n", pathname, entry.d_name,  pos, n_ent);
 
 			char path_search[PATH_MAX] = {0};
@@ -5628,8 +5658,6 @@ int utimensat(int dirfd, const char *pathname, const struct timespec times[_Null
 			slog_live("[POSIX] is absolute, 'utimensat', pathname=%s", pathname);
 
 			ret = generalOpen((char *)pathname, flags, new_mode, -1);
-			// ret = generalOpen(new_path, flags, mode);
-			// free(new_path);
 		}
 		else if (is_absolute_path == 0) // pathname is relative.
 		{

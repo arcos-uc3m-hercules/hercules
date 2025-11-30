@@ -56,6 +56,7 @@ public:
 	int DecreaseMemoryOccupied(int64_t freed_space);
 	double get_storage_usage_percentage();
 	void print_map();
+	// char *list();
 	void FreeMemory(std::map<std::string, BufferValue>::iterator item);
 	// const char *get_head_element();
 	std::string get_head_element();

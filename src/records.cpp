@@ -253,6 +253,7 @@ void map_records::print_map()
 	}
 }
 
+
 // Method storing a new record.
 int32_t map_records::put(std::string key, void *address, uint64_t length, int reused_buffer, GNode *gnode)
 {

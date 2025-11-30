@@ -65,9 +65,6 @@ pthread_mutex_t lock_file = PTHREAD_MUTEX_INITIALIZER;
 // extern int32_t IMSS_DEBUG;
 
 // to simulate maliability.
-int32_t ior_operation_number;
-int32_t mall_th_1 = 30;
-int32_t mall_th_2 = 60;
 int32_t MALLEABILITY;
 int32_t MALLEABILITY_TYPE;
 int32_t UPPER_BOUND_SERVERS;
@@ -520,11 +517,8 @@ extern "C"
 		int ret = -1;
 		// TODO -> Access control
 		// DEBUG
-		const char *imss_path = path; // (char *)calloc(MAX_PATH, sizeof(char));
+		const char *imss_path = path;
 		int32_t file_desc = -1;
-		// get_iuri(path, imss_path);
-
-		ior_operation_number = 0;
 
 		int fd = 0;
 		struct stat stats;
