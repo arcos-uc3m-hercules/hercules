@@ -360,7 +360,7 @@ extern "C"
 		int32_t valid_elements_count = 0;
 		int32_t num_dirty_child = 0;
 
-		// Iterate, Check Garbage, and Serialize
+		// Iterate and serialize
 		// We iterate over the map_records.
 		for (auto const &[filename, record_value] : *children_map)
 		{
@@ -371,7 +371,6 @@ extern "C"
 			}
 			// Lock garbage mutex before checking
 			// pthread_mutex_lock(&mutex_garbage);
-			// Note: Casting const char* to char* for legacy compatibility
 			// int found = HierarchicalMapSearchInGarbageCollector(hierarchical_map, (char *)filename.c_str());
 
 			// if (!found)

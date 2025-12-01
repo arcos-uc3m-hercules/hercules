@@ -1675,38 +1675,9 @@ size_t fwrite(const void *buf, size_t size, size_t count, FILE *fp)
 	{
 		const char *pathname = pathname_ob.c_str();
 		size_t to_write = size * count;
-		// size_t written = 0;
-
-		// while (to_write > 0)
-		// {
-		// 	size_t n = to_write;
-		// 	written += n;
-		// 	to_write -= n;
-
-		// }
 
 		unsigned long offset = -1;
 		slog_live("[POSIX]. Calling Hercules 'fwrite', pathname=%s, to_write=%ld, size=%ld, count=%ld", pathname, to_write, size, count);
-
-		// struct stat ds_stat_n;
-		// imss_getattr(pathname, &ds_stat_n);
-		// if (ret < 0)
-		// {
-		// 	errno = -ret;
-		// 	ret = -1;
-		// 	slog_error("[POSIX] Error Hercules 'write'	: %d:%s", errno, strerror(errno));
-		// 	return ret;
-		// }
-		// map_fd_search(map_fd, pathname, fp->_fileno, &offset);
-
-		// slog_live("[POSIX]. pathname=%s, size=%lu, current_file_size=%lu, offset=%d", pathname, to_write, ds_stat_n.st_size, offset);
-
-		// ret = imss_write(pathname, buf, to_write, offset);
-
-		// if (ds_stat_n.st_size + to_write > ds_stat_n.st_size)
-		// {
-		// 	map_fd_update_value(map_fd, pathname, fp->_fileno, ds_stat_n.st_size + to_write);
-		// }
 
 		ret = generalWrite(pathname, fd, buf, to_write, offset);
 
@@ -1856,8 +1827,6 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 		}
 
 		slog_live("[POSIX]. Calling Hercules 'writev', pathname=%s", pathname);
-		// map_fd_search(map_fd, pathname, fd, &p);
-		// ret = imss_write(pathname, buffer, bytes, p);
 		ret = generalWrite(pathname, fd, buffer, bytes, offset);
 		slog_live("[POSIX]. Ending Hercules 'writev', pathname=%s, ret=%ld, errno=%d:%s\n", pathname, ret, errno, strerror(errno));
 	}
@@ -1929,8 +1898,6 @@ ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 				break;
 		}
 
-		// map_fd_search(map_fd, pathname, fd, &p);
-		// ret = imss_write(pathname, buffer, bytes, offset);
 		ret = generalWrite(pathname, fd, buffer, bytes, offset);
 		slog_live("[POSIX]. Ending Hercules 'pwritev', pathname=%s, fd=%d, ret=%ld,  errno=%d:%s\n", pathname, fd, ret, errno, strerror(errno));
 	}
@@ -3432,11 +3399,11 @@ int unlink(const char *name)
 		{
 			if (S_ISDIR(ds_stat_n.st_mode))
 			{ // directory case.
-				ret = imss_rmdir(new_path);
+				ret = imss_rmdir(new_path, &ds_stat_n);
 			}
 			else
 			{ // regular file case.
-				ret = imss_unlink(new_path);
+				ret = imss_unlink(new_path, &ds_stat_n);
 			}
 		}
 
@@ -3496,7 +3463,7 @@ int rmdir(const char *path)
 	{
 
 		slog_live("[POSIX]. Calling Hercules 'rmdir', path=%s, new_path=%s", path, new_path);
-		ret = imss_rmdir(new_path);
+		ret = imss_rmdir(new_path, NULL);
 		if (ret < 0)
 		{
 			errno = -ret;
@@ -3512,7 +3479,7 @@ int rmdir(const char *path)
 	}
 	else if (!strncmp(path, "imss://", strlen("imss://"))) // TO REVIEW!
 	{
-		ret = imss_rmdir(path);
+		ret = imss_rmdir(path, NULL);
 	}
 	else
 	{
@@ -3549,12 +3516,12 @@ int remove(const char *name)
 			// {
 			// 	strcat(new_path, "/");
 			// }
-			ret = imss_rmdir(new_path);
+			ret = imss_rmdir(new_path, NULL);
 			break;
 		}
 		case TYPE_REGULAR_FILE: // is regular file.
 		{
-			ret = imss_unlink(new_path);
+			ret = imss_unlink(new_path, NULL);
 			break;
 		}
 		default:
@@ -4050,6 +4017,7 @@ uint32_t n_ent = 0;
 uint32_t imss_path_len = 0;
 clock_t t;
 int init_loop_timer = 1;
+int init_number = 0;
 struct dirent *readdir(DIR *dirp)
 {
 	if (!real_readdir)
@@ -4074,7 +4042,7 @@ struct dirent *readdir(DIR *dirp)
 		if (init_loop_timer)
 		{
 			t = clock();
-			init_loop_timer = 0;
+			init_loop_timer = 0;		
 		}
 
 		const char *token = NULL;
@@ -4151,19 +4119,16 @@ struct dirent *readdir(DIR *dirp)
 			// name of file
 			strncpy(entry.d_name, token, len);
 
-			// if (idx % 1000 == 0 || idx < 1000)
-			// {
-			// 	fprintf(stderr, "Loading %d/%lu files, please wait.\n", pos, n_ent);
-			// }
-
-			if (pos % 1000 == 0) // TODO: comments this lines, only for debug.
+			if (pos % 1000 == 0 || pos == n_ent ) // TODO: comments this lines, only for debug.
 			{					 // print a message every 1000 files.
 				t = clock() - t;
 				double time_taken = 0.0;
 				time_taken = ((double)t) / (CLOCKS_PER_SEC);
+				int diff = (pos == 0)? 1 : pos - init_number;
 				// printf("[%s][%f] Reading entry %s, %ld of  %" PRIu32 ", please wait.\n", pathname, time_taken, entry.d_name, pos, n_ent);
-				fprintf(stdout, "Loading %d/%lu files, please wait. Time taken to get %d/1000 files: %f\n", pos, n_ent, time_taken);
+				fprintf(stdout, "Loading %d/%lu files, please wait. Time taken to get %d/1000 files: %f\n", pos, n_ent, diff, time_taken);
 				init_loop_timer = 1;
+				init_number = pos;
 			}
 			// printf("[%s] Reading entry %s, %" PRIu32 " of %u, please wait\n", pathname, entry.d_name,  pos, n_ent);
 

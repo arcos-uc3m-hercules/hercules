@@ -177,12 +177,19 @@ extern "C"
 	void fd_lookup(char *path, int *fd, struct stat *s, char **aux)
 	{
 		*fd = -1;
+
+		// TODO: we can assume root always exist,
+		// so we can "return" here.
+		// if (!strcmp(path, IMSS_ROOT))
+		// {
+		// }
+
 		// Seek for the fd on the map.
-		// int found = map_search(map, path, fd, s, aux);
-		size_t hierarchical_map_size = HierarchicalMapGetSize(hierarchical_map);
-		char msg[PATH_MAX] = {0};
-		sprintf(msg, "HierarchicalMapSearch %lu", hierarchical_map_size);
-		int found = TIMING(HierarchicalMapSearch(hierarchical_map, path, fd, s, aux), msg, int, 0);
+		// size_t hierarchical_map_size = HierarchicalMapGetSize(hierarchical_map);
+		// char msg[PATH_MAX] = {0};
+		// sprintf(msg, "HierarchicalMapSearch %lu", hierarchical_map_size);
+		// int found = TIMING(HierarchicalMapSearch(hierarchical_map, path, fd, s, aux), msg, int, 0);
+		int found = HierarchicalMapSearch(hierarchical_map, path, fd, s, aux);
 
 		if (found == -1)
 		{
@@ -345,27 +352,9 @@ extern "C"
 			return 0;
 		}
 
-		// 	// free(refs);
-		// 	return 0;
-		// 	break;
-		// }
-		// case TYPE_DIRECTORY:
-		// {
-		// 	// ConcatLastSlashC((char *)path);
-		// 	break;
-		// }
-		// case TYPE_REGULAR_FILE: // Case file
-		// {
-		// 	break;
-		// }
-		// default:
-		// 	slog_error("Unkown type", type);
-		// 	return -ENOENT; // to check!
-		// }
-
+		slog_debug("Caliing fd loopkup");
 		// Seek for the dataset on the local map. If it not found,
 		// we open it.
-
 		TIMING_NO_RETURN(fd_lookup((char *)imss_path, &fd, &stats, &aux), "fd_lookup", 0);
 		if (fd < 0)
 		{ // not found.
@@ -456,28 +445,6 @@ extern "C"
 			// break;
 		}
 
-		// switch (type)
-		// {
-		// case TYPE_DIRECTORY:
-		// 	if ((n_ent = get_dir(imss_path, &refs)) != -1)
-		// 	{
-		// 		stbuf->st_size = 4;
-		// 		slog_debug("is a directy, setting st_nlink to 1");
-		// 		stbuf->st_nlink = 1;
-		// 		stbuf->st_mode = S_IFDIR | 0775;
-		// 		// free all memory in refs.
-		// 		free_entries(&refs, n_ent);
-		// 	}
-		// case TYPE_REGULAR_FILE:
-		// 	stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0);
-		// 	break;
-		// default:
-		// 	slog_error("Unkown type", type);
-		// 	return -ENOENT; // to check!
-		// }
-
-		// pthread_mutex_unlock(&lock_file);
-		// free(aux);
 		return 0;
 	}
 
@@ -766,9 +733,8 @@ extern "C"
 
 		if (MALLEABILITY_ON == 1)
 		{
-			update_dataset((char *)path, ds);			
+			update_dataset((char *)path, ds);
 		}
-		
 
 		// total_amount_read += byte_count;
 		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, total_bytes_scheduled);
@@ -1853,13 +1819,12 @@ extern "C"
 		{
 			async_data_worker_progress(0);
 		}
-		
+
 		// updates intervals on the back-end.
 		if (MALLEABILITY_ON == 1)
 		{
 			update_dataset((char *)path, ds);
 		}
-		
 
 		// Update header count if the file has become bigger.
 		if (size + off > stats.st_size)
@@ -2496,7 +2461,7 @@ extern "C"
 	 * https://man7.org/linux/man-pages/man2/rmdir.2.html
 	 * @return 0 on success. On error, the value of errno is returned.
 	 */
-	int imss_rmdir(const char *imss_path)
+	int imss_rmdir(const char *imss_path, struct stat *stats)
 	{
 
 		// Needed variables for the call
@@ -2520,31 +2485,36 @@ extern "C"
 			// free(imss_path);
 			return -ENOENT;
 		}
-		imss_unlink(imss_path);
+		imss_unlink(imss_path, stats);
 		// free(imss_path);
 		return 0;
 	}
 
-	int imss_unlink(const char *path)
+	int imss_unlink(const char *path, struct stat *stats)
 	{
 		const char *imss_path = path; // this pointer should not be free.
 		slog_info("path=%s, imss_path=%s", path, imss_path);
 
 		uint32_t ds = -1;
 		int fd = 0;
-		struct stat stats;
+		struct stat aux_stats;
 		char *buff = NULL;
 		int ret = 0;
 		pthread_mutex_lock(&lock);
-		fd_lookup((char *)imss_path, &fd, &stats, &buff);
-		// if (fd >= 0)
-		// 	ds = fd;
-		// else
-		// {
-		// 	slog_debug("%s not found in lookup", imss_path);
-		// 	pthread_mutex_unlock(&lock);
-		// 	return -ENOENT;
-		// }
+		if (!stats)
+		{
+			stats = &aux_stats;
+			// if we pass the stat, we skip this.
+			slog_debug("Calling fd_lookup");
+			fd_lookup((char *)imss_path, &fd, stats, &buff);
+		}
+		else 
+		{
+			slog_debug("stat has been passed");
+			buff = (char *)stats;
+		}
+
+		
 		int file_desc = 0;
 		if (fd >= 0)
 			file_desc = fd;
@@ -2566,11 +2536,12 @@ extern "C"
 			{
 				perror("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
 				slog_error("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
+				pthread_mutex_unlock(&lock);
 				return -ENOMEM;
 			}
-			memcpy(&stats, data, sizeof(struct stat));
-			// map_put(map, imss_path, file_desc, stats, (char *)data);
-			HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data);
+			// memcpy(stats, data, sizeof(struct stat));
+			// HierarchicalMapPut(hierarchical_map, imss_path, file_desc, *stats, (char *)data);
+			HierarchicalMapPut(hierarchical_map, imss_path, file_desc, *((struct stat *)data), (char *)data);
 			buff = data;
 		}
 
@@ -2585,26 +2556,26 @@ extern "C"
 		}
 		// pthread_mutex_lock(&lock);
 		// Read header.
-		struct stat header;
-		memcpy(&header, buff, sizeof(struct stat));
-
-		if (header.st_nlink > 0)
+		struct stat *header = (struct stat *)buff;
+		// memcpy(&header, buff, sizeof(struct stat));
+		
+		if (header->st_nlink > 0)
 		{
-			header.st_nlink = header.st_nlink - 1;
+			header->st_nlink = header->st_nlink - 1;
 		}
 
 		// Write initial block (0).
-		memcpy(buff, &header, sizeof(struct stat));
-		slog_debug("header.st_nlink=%lu, head.st_size=%lu", header.st_nlink, header.st_size);
+		// memcpy(buff, &header, sizeof(struct stat));
+		slog_debug("header.st_nlink=%lu, head.st_size=%lu", header->st_nlink, header->st_size);
 		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
 		// if it is the last link, the file is deleted (we also should to check if other process is open).
-		if (header.st_nlink == 0)
+		if (header->st_nlink == 0)
 		{
 			// Those operations must be performed by the server itself when it knows no more process are using the file.
 			// Erase metadata in the backend.
-			ret = delete_dataset(imss_path, file_desc, S_ISDIR(header.st_mode));
+			ret = delete_dataset(imss_path, file_desc, S_ISDIR(header->st_mode));
 			slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
 
 			switch (ret)
@@ -3607,7 +3578,7 @@ extern "C"
 
 			// deletes the destionation path because it is a file that will be overwritten.
 			// this also can be done on the server side.
-			imss_unlink(destination_path);
+			imss_unlink(destination_path, NULL);
 
 			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
 			ret = rename_dataset_metadata(old_path, destination_path);
@@ -3632,7 +3603,7 @@ extern "C"
 			// TODO: check flags.
 			slog_debug("Moving Hercules regular file %s to Hercules regular file %s", old_path, new_path);
 
-			imss_unlink(new_path);
+			imss_unlink(new_path, NULL);
 
 			// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
 			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);

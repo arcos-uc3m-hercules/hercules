@@ -2974,22 +2974,12 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id, int is_dir)
 	int32_t ret = -1;
 
 	// Discover the metadata server that handles the dataset.
-	// uint32_t m_srv = discover_stat_srv((char *)dataset_uri);
-	// uint32_t m_srv = find_server(n_stat_servers, 0, (char *)dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
 	char first_parent_dir[URI_] = {0};
 	uint32_t m_srv = 0;
-	// int number_data_servers = 0;
 	int first_parent_offset = find_first_parent_dir((char *)dataset_uri, first_parent_dir);
 	slog_debug("dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", dataset_uri, first_parent_dir, first_parent_offset);
-	// if (first_parent_offset > 0)
-	// {
+
 	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-	// number_data_servers = 1;
-	// }
-	// else
-	// {
-	// number_data_servers = n_stat_servers;
-	// }
 
 	ep = stat_eps[m_srv];
 
@@ -3071,7 +3061,6 @@ int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id, int is_dir)
 	// free the message received from the metadata server.
 	free(result);
 
-	// return 0;
 	return ret;
 }
 
@@ -4805,8 +4794,8 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		// void *response_buffer = &(*buffer_prefetch);
 		if (*buffer_prefetch == NULL)
 		{
-			perror("HERCULES_ERR_GET_NDATA_MEMORY_ALLOCATION");
-			slog_error("HERCULES_ERR_GET_NDATA_MEMORY_ALLOCATION");
+			perror("HERCULES_ERR_GET_NDATA_PREFETCH_MEMORY_ALLOCATION");
+			slog_error("HERCULES_ERR_GET_NDATA_PREFETCH_MEMORY_ALLOCATION");
 			pthread_mutex_unlock(&lock_network);
 			return -2;
 		}
@@ -5267,7 +5256,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			// sprintf(key_, "LOCALSETBLOCK %lu %ld %d %s$%d", size, offset, shm_key, curr_dataset->uri_, data_id);
 			// sprintf(key_, "LOCALSETBLOCK %lu %ld %d %s$%d", size, offset, sh_memory_struct->id, curr_dataset->uri_, data_id);
 			sprintf(key_, "LOCALSETBLOCK %lu %ld %d %s$%d", size, offset, shm_id, curr_dataset->uri_, data_id);
-			slog_info("BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%d)", data_id, n_server_, node_hostname, key_, size);
+			slog_info("BLOCK %d SENT TO DATA SERVER %d (%s) with Request: %s (%d)", data_id, n_server_, node_hostname, key_, size);
 			// fprintf(stderr, "BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%d)\n", data_id, n_server_, node_hostname, key_, size);
 
 			// send the request to the data server, indicating we will perform a local write operation (LOCALSETBLOCK).
@@ -5302,8 +5291,8 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			void *response_buffer = (void *)malloc(msg_length * sizeof(char));
 			if (response_buffer == NULL)
 			{
-				perror("HERCULES_ERR_GET_NDATA_MEMORY_ALLOCATION");
-				slog_error("HERCULES_ERR_GET_NDATA_MEMORY_ALLOCATION");
+				perror("HERCULES_ERR_SET_NDATA_MEMORY_ALLOCATION");
+				slog_error("HERCULES_ERR_SET_NDATA_MEMORY_ALLOCATION");
 				pthread_mutex_unlock(&lock_network);
 				return -2;
 			}

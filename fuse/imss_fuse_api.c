@@ -78,7 +78,7 @@ int imss_fuse_rmdir(const char * path){
 }
 
 int imss_fuse_unlink(const char * path){
-	return imss_unlink(path);
+	return imss_unlink(path, NULL);
 }
 
 int imss_fuse_utimens(const char * path, const struct timespec tv[2]){

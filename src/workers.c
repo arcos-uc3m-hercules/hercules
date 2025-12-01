@@ -2957,7 +2957,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			// pthread_mutex_lock(&tree_mut);
 
 			// directories always must to have the last slash.
-			ConcatLastSlash(key_for_tree);
+			// ConcatLastSlash(key_for_tree);
 
 			// slog_info("Calling GTree_getdir, key=%s", key_for_tree.c_str());
 			// // buffer = GTree_getdir((char *)key_for_tree.c_str(), &numelems_indir, map);
@@ -3105,7 +3105,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		case DELETE_OP:
 		{
 			slog_debug("DELETE_OP");
-			// int err = map->get(key, &address_, &block_size_rtvd);
 			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "DELETE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
@@ -3454,7 +3453,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			slog_debug("[SET_OP] Creating dataset %s", key.c_str());
 			pthread_mutex_lock(&memory_protect);
-			// if (!TIMING(map->get(key, &address_, &block_size_rtvd), "map->get", int32_t, arguments->thread_id))
 			// if (!TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id))
 			if (!TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id))
 			{ // If the record was not already stored, add the block.
@@ -3494,13 +3492,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// }
 					// buffer = calloc(1, sizeof(dataset_info));
 					buffer = calloc(1, length);
-					if (buffer == NULL)
-					{
-						perror("HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC");
-						slog_error("HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC");
-						pthread_mutex_lock(&memory_protect);
-						return -1;
-					}
+				}
+				if (buffer == NULL)
+				{
+					char err_msg[MAX_ERR_MSG_LEN] = {0};
+					sprintf(err_msg, "HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC: %s", key.c_str());
+					perror(err_msg);
+					slog_error("%s", err_msg);
+					pthread_mutex_lock(&memory_protect);
+					return -1;
 				}
 				// INSERT THE ELEMENT IN THE MAP.
 				int32_t insert_successful = -1;
@@ -3533,7 +3533,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					slog_debug("END Recv dynamic, n_server_when_created=%d", ((dataset_info *)buffer)->n_servers_when_created);
 				}
 
-				// insert_successful = TIMING(map->put(key, buffer, length, reused_memory, new_node), "map->put", int32_t, arguments->thread_id);
 				// insert_successful = TIMING(HierarchicalMapPut(hierarchical_map, key, buffer, length, reused_memory, new_node, 1), "HierarchicalMapPut", int, arguments->thread_id);
 				insert_successful = TIMING(HierarchicalMapPut(hierarchical_map, key, buffer, length, reused_memory, NULL, 1), "HierarchicalMapPut", int, arguments->thread_id);
 				slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);

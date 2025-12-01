@@ -74,8 +74,8 @@ extern "C"
 
 	int imss_symlinkat(char *new_path_1, char *new_path_2, int _case);
 
-	int imss_rmdir(const char *path);
-	int imss_unlink(const char *path);
+	int imss_rmdir(const char *path, struct stat *stats);
+	int imss_unlink(const char *path, struct stat *stats);
 	int imss_utimens(const char *path, const struct timespec tv[2]);
 	int imss_mkdir(const char *path, mode_t mode);
 	int imss_getxattr(const char *path, const char *attr, char *value, size_t s);
