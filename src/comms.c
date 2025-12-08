@@ -109,7 +109,7 @@ extern "C"
 
 		if (check_attr.thread_mode != UCS_THREAD_MODE_MULTI)
 		{
-			// fprintf(stderr, "CRITICAL WARNING: UCX downgraded thread mode to %d! Multi-threaded access will crash.\n", check_attr.thread_mode);
+			fprintf(stderr, "CRITICAL WARNING: UCX downgraded thread mode to %d! Multi-threaded access will crash.\n", check_attr.thread_mode);
 		}
 		// else
 		// {
@@ -493,6 +493,7 @@ extern "C"
 		ucp_tag_recv_info_t info_tag;
 		ucp_tag_message_h msg_tag;
 		// TODO: Check why this function is too slow in read operations.
+		slog_debug("waiting for a message");
 		do
 		{
 			/* Progressing before probe to update the state */
@@ -500,6 +501,7 @@ extern "C"
 			/* Probing incoming events in non-block mode */
 			msg_tag = ucp_tag_probe_nb(ucp_worker, dest, tag_mask, 0, &info_tag);
 		} while (msg_tag == NULL);
+		slog_debug("message of size %ld is coming", info_tag.length);
 
 		return info_tag.length;
 	}
@@ -532,8 +534,6 @@ extern "C"
 		ucp_request_param_t recv_param;
 		struct ucx_context *request;
 		ucs_status_t status;
-
-		// async = 1;
 
 		// recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
 		// 						  UCP_OP_ATTR_FIELD_CALLBACK |
@@ -833,10 +833,11 @@ extern "C"
 		// }
 		// slog_error("[COMM] Client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
 		// fprintf(stderr, "client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
-		slog_error("failure handler called with status %d (%s)\n", status, ucs_status_string(status));
-		fprintf(stderr, "failure handler called with status %d (%s)\n", status, ucs_status_string(status));
+		slog_error("[err_cb_client] failure handler called with status %d (%s)\n", status, ucs_status_string(status));
+		fprintf(stderr, "[err_cb_client] failure handler called with status %d (%s)\n", status, ucs_status_string(status));
 		if (status == UCS_ERR_ENDPOINT_TIMEOUT)
 		{
+			fprintf(stderr, "[err_cb_client] endpoint timeout error.");
 			// ep_err_detected = 1;
 		}
 		// *arg_status = status;
@@ -861,7 +862,7 @@ extern "C"
 
 		if (status != UCS_ERR_CONNECTION_RESET && status != UCS_ERR_ENDPOINT_TIMEOUT)
 		{
-			fprintf(stderr, "[0x%x] failure handler called with status %d (%s)\n", (unsigned int)pthread_self(), status, ucs_status_string(status));
+			fprintf(stderr, "[0x%x][failure_handler] failure handler called with status %d (%s)\n", (unsigned int)pthread_self(), status, ucs_status_string(status));
 		}
 
 		ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
@@ -935,7 +936,8 @@ extern "C"
 		return status;
 	}
 
-	ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, int *server_status)
+	// ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, int *server_status)
+	ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr)
 	{
 		ucp_ep_params_t ep_params;
 		ucs_status_t status;
@@ -1023,7 +1025,8 @@ extern "C"
 
 			// Calculate the total size of the buffer storing the structure.
 			// ips + status list + arr num active storages list.
-			msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages) + (sizeof(int) * struct_->num_storages) + (sizeof(int) * struct_->num_storages);
+			// msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages) + (sizeof(int) * struct_->num_storages) + (sizeof(int) * struct_->num_storages);
+			msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages);
 
 			// Reserve the corresponding amount of memory for the previous buffer.
 			info_buffer = (char *)malloc(msg_size * sizeof(char));
@@ -1054,10 +1057,15 @@ extern "C"
 				offset_pt += LINE_LENGTH;
 			}
 
-			memcpy(offset_pt, struct_->status, sizeof(int) * struct_->num_storages);
+			slog_debug("DEBUG: num_storages = %d\n", struct_->num_storages);
+			// slog_debug("DEBUG: struct_->status = %p\n", struct_->status);
+			slog_debug("DEBUG: Copy Size = %zu\n", sizeof(int) * struct_->num_storages);
+			// slog_debug("struct_->arr_num_active_storages=%d", struct_->arr_num_active_storages);
 
-			offset_pt += (sizeof(int) * struct_->num_storages);
-			memcpy(offset_pt, struct_->arr_num_active_storages, sizeof(int) * struct_->num_storages);
+			// memcpy(offset_pt, struct_->status, sizeof(int) * struct_->num_storages);
+
+			// offset_pt += (sizeof(int) * struct_->num_storages);
+			// memcpy(offset_pt, struct_->arr_num_active_storages, sizeof(int) * struct_->num_storages);
 
 			// slog_debug("pointer address = %p", &offset_pt);
 			break;
@@ -1206,14 +1214,7 @@ extern "C"
 			memcpy(struct_, msg_data, sizeof(imss_info));
 
 			slog_info(" \t\t msg_data=%s", msg_data);
-
-			// if (!strncmp("$ERRIMSS_NO_KEY_AVAIL$", struct_->uri_, 22))
-			// {
-			// 	slog_error("[COMM] recv_dynamic_stream end  with error, length=%lu", length);
-			// 	// return length;
-			// 	free(result);
-			// 	return -1;
-			// }
+			slog_info(" \t\t struct_->num_storages=%d", struct_->num_storages);
 
 			msg_data += sizeof(imss_info);
 
@@ -1228,12 +1229,12 @@ extern "C"
 				msg_data += LINE_LENGTH;
 			}
 
-			struct_->status = (int *)malloc(struct_->num_storages * sizeof(int));
-			memcpy(struct_->status, msg_data, struct_->num_storages * sizeof(int));
+			// struct_->status = (int *)malloc(struct_->num_storages * sizeof(int));
+			// memcpy(struct_->status, msg_data, struct_->num_storages * sizeof(int));
 
-			msg_data += (struct_->num_storages * sizeof(int));
-			struct_->arr_num_active_storages = (int *)malloc(struct_->num_storages * sizeof(int));
-			memcpy(struct_->arr_num_active_storages, msg_data, struct_->num_storages * sizeof(int));
+			// msg_data += (struct_->num_storages * sizeof(int));
+			// struct_->arr_num_active_storages = (int *)malloc(struct_->num_storages * sizeof(int));
+			// memcpy(struct_->arr_num_active_storages, msg_data, struct_->num_storages * sizeof(int));
 			break;
 		}
 

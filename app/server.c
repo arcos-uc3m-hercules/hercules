@@ -145,7 +145,6 @@ int32_t main(int32_t argc, char **argv)
 	ucp_worker_address_attr_t attr;
 
 	uint64_t max_system_ram_allowed = 0;
-	// uint64_t max_storage_size = 0; // memory pool size
 	uint32_t num_blocks = 0;
 	u_int16_t hercules_thread_pool_size = 0;
 
@@ -189,10 +188,8 @@ int32_t main(int32_t argc, char **argv)
 
 	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-start", args.hercules_path, args.type, args.id);
 
-	// args.logging.hercules_debug_level = SLOG_NONE;
 	hercules_thread_pool_size = args.thread_pool;
 	fprintf(stderr, "Number of threads=%d\n", hercules_thread_pool_size);
-	// POLICY = args.policy;
 	strncpy(POLICY, args.policy, sizeof(POLICY));
 
 	char log_path[PATH_MAX] = {0};
@@ -292,9 +289,10 @@ int32_t main(int32_t argc, char **argv)
 	// 	StsQueue.push(mem_pool, buffer);
 	// }
 
-	/* CHECK THIS OUT!
+	/* 
 	 ***************************************************
-	 In relation to the type argument provided, an HERCULES or a metadata server will be deployed. */
+	 In relation to the type argument provided, an HERCULES or a metadata server will be deployed. 
+	 */
 
 	// HERCULES server.
 	if (args.type == TYPE_DATA_SERVER)
@@ -775,20 +773,21 @@ int32_t main(int32_t argc, char **argv)
 
 		strcpy(my_imss.uri_, args.imss_uri);
 		my_imss.ips = (char **)calloc(num_servers, sizeof(char *));
-		my_imss.status = (int *)malloc(num_servers * sizeof(int));
-		my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int));
+		// my_imss.status = (int *)malloc(num_servers * sizeof(int));
+		// my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int));
 		my_imss.num_storages = 0; // This value is increase on ReadHostfile.  num_servers;
 		my_imss.num_active_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important
 		ReadHostfile(deployfile, &my_imss);
 
-		my_imss.num_storages = 0;
+		// my_imss.num_storages = 0;
 
 		char key_plus_size[REQUEST_SIZE] = {0};
 		// Send the created structure to the metadata server.
-		sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", IMSS_INFO, (sizeof(imss_info) + my_imss.num_storages * LINE_LENGTH + my_imss.num_storages * sizeof(int) + my_imss.num_storages * sizeof(int)), my_imss.uri_);
-		slog_debug("[main] Request to metadata - %s", key_plus_size);
+		sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", IMSS_INFO, (sizeof(imss_info) + my_imss.num_active_storages * LINE_LENGTH + my_imss.num_active_storages * sizeof(int) + my_imss.num_active_storages * sizeof(int)), my_imss.uri_);
+		// sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", IMSS_INFO, (sizeof(imss_info) + my_imss.num_active_storages * LINE_LENGTH + my_imss.num_active_storages * sizeof(int) + my_imss.num_active_storages * sizeof(int)), my_imss.uri_);
+		slog_debug("[main] Request to metadata - %s, num_active_storages=%d", key_plus_size, my_imss.num_active_storages);
 		for (size_t j = 0; j < args.num_metadata_servers; j++)
 		{
 			// if (send_req(ucp_worker, metadata_endpoints[j], req_addr, req_addr_len, key_plus_size) == 0)
@@ -817,7 +816,6 @@ int32_t main(int32_t argc, char **argv)
 
 			slog_debug("[SERVER] Creating IMSS_INFO at metadata server. ");
 			// Send the new HERCULES metadata structure to the metadata server entity.
-			// TODO: Check how this msg is received on the worker. We need to split between IMSS_INFO and DATASET_INFO.
 			if (send_dynamic_stream(ucp_worker, metadata_endpoints[j], (void *)&my_imss, IMSS_INFO, attr.worker_uid) == -1)
 			{
 				return -1;
@@ -828,8 +826,8 @@ int32_t main(int32_t argc, char **argv)
 		{
 			free(my_imss.ips[i]);
 		}
-		free((void *)my_imss.status);
-		free((void *)my_imss.arr_num_active_storages);
+		// free((void *)my_imss.status);
+		// free((void *)my_imss.arr_num_active_storages);
 		free(my_imss.ips);
 	}
 

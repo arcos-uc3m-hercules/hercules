@@ -512,6 +512,9 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_live(" -- REPL_FACTOR: %d", REPL_FACTOR);
 	slog_live(" -- REPL_TYPE: %d", REPL_TYPE);
 	slog_live(" -- POLICY: %s", POLICY);
+	slog_live(" -- SYNC: %d", ASYNC_IO);
+	fprintf(stderr, "ASYNC IO %d\n", ASYNC_IO);
+
 
 	// Metadata server
 	if (TIMING(stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank), "stat init", int32_t, rank) == -1)
@@ -3087,24 +3090,6 @@ ssize_t write(int fd, const void *buf, size_t size)
 		unsigned long offset = -1;
 		slog_live("[POSIX]. Calling Hercules 'write', pathname=%s, size=%lu, fd=%d", pathname, size, fd);
 
-		// struct stat ds_stat_n;
-		// imss_getattr(pathname, &ds_stat_n);
-		// if (ret < 0)
-		// {
-		// 	errno = -ret;
-		// 	ret = -1;
-		// 	slog_error("[POSIX] Error Hercules 'write'	: %d:%s", errno, strerror(errno));
-		// 	return ret;
-		// }
-		// map_fd_search(map_fd, pathname, fd, &offset);
-		// slog_live("[POSIX]. pathname=%s, size=%lu, current_file_size=%lu, offset=%d", pathname, size, ds_stat_n.st_size, offset);
-
-		// ret = TIMING(imss_write(pathname, buf, size, offset), "imss_write", int);
-
-		// if (ds_stat_n.st_size + size > ds_stat_n.st_size)
-		// {
-		// 	map_fd_update_value(map_fd, pathname, fd, ds_stat_n.st_size + size);
-		// }
 		ret = TIMING(generalWrite(pathname, fd, buf, size, offset), "generalWrite", ssize_t, rank);
 
 		slog_live("[POSIX]. Ending Hercules 'write', pathname=%s, size=%lu, ret=%ld, fd=%d\n", pathname, size, ret, fd);

@@ -1835,7 +1835,6 @@ extern "C"
 			slog_debug("[imss_write] Updating stat, st_size=%ld, st_nlink=%lu", stats.st_size, stats.st_nlink);
 			HierarchicalMapUpdate(hierarchical_map, rpath, ds, stats);
 		}
-		// free(rpath);
 
 		t = clock() - t;
 		double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
@@ -2500,122 +2499,127 @@ extern "C"
 		struct stat aux_stats;
 		char *buff = NULL;
 		int ret = 0;
-		pthread_mutex_lock(&lock);
-		if (!stats)
-		{
-			stats = &aux_stats;
-			// if we pass the stat, we skip this.
-			slog_debug("Calling fd_lookup");
-			fd_lookup((char *)imss_path, &fd, stats, &buff);
-		}
-		else 
-		{
-			slog_debug("stat has been passed");
-			buff = (char *)stats;
-		}
-
-		
-		int file_desc = 0;
-		if (fd >= 0)
-			file_desc = fd;
-		else if (fd == -2)
-			return -ENOENT;
-		else
-		{
-			// If not in the local map, open de dataset.
-			file_desc = open_dataset((char *)imss_path, 0);
-			if (file_desc < 0)
-			{ // files does not exist.
-				return -ENOENT;
-			}
-
-			// Get initial block (0).
-			char *data = NULL;
-			data = (char *)malloc(sizeof(struct stat) * sizeof(char) + 1);
-			if (data == NULL)
-			{
-				perror("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
-				slog_error("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
-				pthread_mutex_unlock(&lock);
-				return -ENOMEM;
-			}
-			// memcpy(stats, data, sizeof(struct stat));
-			// HierarchicalMapPut(hierarchical_map, imss_path, file_desc, *stats, (char *)data);
-			HierarchicalMapPut(hierarchical_map, imss_path, file_desc, *((struct stat *)data), (char *)data);
-			buff = data;
-		}
-
-		//  data is filled in "get data".
-		ret = get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
-		if (ret < 0)
-		{
-			perror("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
-			slog_error("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
-			pthread_mutex_unlock(&lock);
-			return -1;
-		}
 		// pthread_mutex_lock(&lock);
-		// Read header.
-		struct stat *header = (struct stat *)buff;
-		// memcpy(&header, buff, sizeof(struct stat));
-		
-		if (header->st_nlink > 0)
-		{
-			header->st_nlink = header->st_nlink - 1;
+		// if (!stats)
+		// {
+		// 	stats = &aux_stats;
+		// 	// if we pass the stat, we skip this.
+		// 	slog_debug("Calling fd_lookup");
+		// 	fd_lookup((char *)imss_path, &fd, stats, &buff);
+		// }
+		// else
+		// {
+		// 	slog_debug("stat has been passed");
+		// 	buff = (char *)stats;
+		// }
+
+		int file_desc = 0;
+		// if (fd >= 0)
+		// 	file_desc = fd;
+		// else if (fd == -2)
+		// 	return -ENOENT;
+		// else
+		// {
+		// 	// If not in the local map, open de dataset.
+		// 	file_desc = open_dataset((char *)imss_path, 0);
+		// 	if (file_desc < 0)
+		// 	{ // files does not exist.
+		// 		return -ENOENT;
+		// 	}
+
+		// 	// Get initial block (0).
+		// 	char *data = NULL;
+		// 	data = (char *)malloc(sizeof(struct stat) * sizeof(char) + 1);
+		// 	if (data == NULL)
+		// 	{
+		// 		perror("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
+		// 		slog_error("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
+		// 		pthread_mutex_unlock(&lock);
+		// 		return -ENOMEM;
+		// 	}
+		// 	// memcpy(stats, data, sizeof(struct stat));
+		// 	// HierarchicalMapPut(hierarchical_map, imss_path, file_desc, *stats, (char *)data);
+		// 	HierarchicalMapPut(hierarchical_map, imss_path, file_desc, *((struct stat *)data), (char *)data);
+		// 	buff = data;
+		// }
+
+		// //  data is filled in "get data".
+		// ret = get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
+		// if (ret < 0)
+		// {
+		// 	perror("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
+		// 	slog_error("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
+		// 	pthread_mutex_unlock(&lock);
+		// 	return -1;
+		// }
+		// // pthread_mutex_lock(&lock);
+		// // Read header.
+		// struct stat *header = (struct stat *)buff;
+		// // memcpy(&header, buff, sizeof(struct stat));
+
+		// if (header->st_nlink > 0)
+		// {
+		// 	header->st_nlink = header->st_nlink - 1;
+		// }
+
+		// // Write initial block (0).
+		// // memcpy(buff, &header, sizeof(struct stat));
+		// slog_debug("header.st_nlink=%lu, head.st_size=%lu", header->st_nlink, header->st_size);
+		// set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		// pthread_mutex_unlock(&lock);
+
+		// // if it is the last link, the file is deleted (we also should to check if other process is open).
+		// if (header->st_nlink == 0)
+		// {
+		// Those operations must be performed by the server itself when it knows no more process are using the file.
+		// To erase the data in the backend.
+		// ret = unlink_dataset(imss_path, file_desc, S_ISDIR(stats->st_mode));
+
+		// to erase metadata in the backend.
+		ret = delete_dataset(imss_path, file_desc, 0);
+		if (ret == 0)
+		{ // dataset has been delete on the metadata backend.
+			// to erase data in the backend.
+			ret = unlink_dataset(imss_path, file_desc);
 		}
 
-		// Write initial block (0).
-		// memcpy(buff, &header, sizeof(struct stat));
-		slog_debug("header.st_nlink=%lu, head.st_size=%lu", header->st_nlink, header->st_size);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
-		pthread_mutex_unlock(&lock);
+		slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
 
-		// if it is the last link, the file is deleted (we also should to check if other process is open).
-		if (header->st_nlink == 0)
+		switch (ret)
 		{
-			// Those operations must be performed by the server itself when it knows no more process are using the file.
-			// Erase metadata in the backend.
-			ret = delete_dataset(imss_path, file_desc, S_ISDIR(header->st_mode));
-			slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
-
-			switch (ret)
-			{
-			case 1: // datasate was not delete.
-			{
-				break;
-			}
-			case 0: // dataset was delete.
-			{
-				// ******************************* TO CHECK!
-				// pthread_mutex_lock(&lock_file);
-				HierarchicalMapErase(hierarchical_map, imss_path);
-				// pthread_mutex_unlock(&lock_file);
-
-				// slog_debug("Calling map_release_prefetch %s", path);
-				// map_release_prefetch(map_prefetch, imss_path);
-				// slog_debug("Finish map_release_prefetch %s", path);
-				// *******************************
-				// ret = release_dataset(file_desc);
-				ret = release_dataset(imss_path);
-				slog_debug("relese_dataset ret=%d", ret);
-				if (ret < 0)
-				{
-					slog_error("HERCULES_ERR_RELEASE_DATASET");
-				}
-
-				ret = 3;
-				break;
-			}
-			default: // error deleting the dataset.
-				slog_error("ERR_HERCULES_DELETE_DATASET");
-				ret = -1;
-				break;
-			}
-			// **************************
-		}
-		else
+		case 1: // datasate was not delete.
 		{
 			ret = 1; // file was not deleted.
+			break;
+		}
+		case 0: // dataset was delete.
+		{
+			// ******************************* TO CHECK!
+			// pthread_mutex_lock(&lock_file);
+			HierarchicalMapErase(hierarchical_map, imss_path);
+			// pthread_mutex_unlock(&lock_file);
+
+			// slog_debug("Calling map_release_prefetch %s", path);
+			// map_release_prefetch(map_prefetch, imss_path);
+			// slog_debug("Finish map_release_prefetch %s", path);
+			// *******************************
+			// ret = release_dataset(file_desc);
+			ret = release_dataset(imss_path);
+			slog_debug("relese_dataset ret=%d", ret);
+			if (ret < 0)
+			{
+				perror("HERCULES_ERR_UNLINK_RELEASE_DATASET");
+				slog_error("HERCULES_ERR_UNLINK_RELEASE_DATASET");
+			}
+
+			ret = 3;
+			break;
+		}
+		default: // error deleting the dataset.
+			perror("ERR_HERCULES_UNLINK_DATASET");
+			slog_error("ERR_HERCULES_UNLINK_DATASET");
+			ret = -1;
+			break;
 		}
 
 		return ret;

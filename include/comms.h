@@ -228,7 +228,8 @@ extern "C"
     // void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
     // ucs_status_t ep_flush(ucp_ep_h ep, ucp_worker_h worker);
     ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr);
-    ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, int *);
+    // ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, int *);
+	ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr);
     void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
     void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
     // Method sending a data structure with dynamic memory allocation fields.

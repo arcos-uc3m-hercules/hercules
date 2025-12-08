@@ -21,6 +21,7 @@
 #define CLOSE_OP 7
 #define OPEN_OP 8
 #define READV2_OP 11 
+#define UNLINK_OP 12 
 // #define STATFS			  7
 // #define DATASET_OP 8
 #define INSTANCE_OP 9

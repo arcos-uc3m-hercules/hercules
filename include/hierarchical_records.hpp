@@ -36,6 +36,11 @@ extern "C"
 	int32_t HierarchicalMapPopFromGarbageCollector(void *hierarchical_map, const std::string &key);
 	int32_t HierarchicalMapSearchInGarbageCollector(void *hierarchical_map, const std::string &key);
 	int32_t HierarchicalMapCleanGarbageCollector(void *hierarchical_map);
+	// Memory usage.
+	double get_storage_usage_percentage();
+	int DecreaseMemoryOccupied(int64_t freed_space);
+	int CheckForMemorySpace(int64_t required_space);
+	int64_t get_size();
 
 #ifdef __cplusplus
 }

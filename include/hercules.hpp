@@ -10,11 +10,10 @@
 #include "imss.h"
 #include "arg_parser.h"
 #include "cfg_parse.h"
-// #include "hercules.hpp"
 
 static u_int16_t HERCULES_THREAD_POOL_SIZE = 1;
-static u_int16_t ASYNC_IO = 1;
 static u_int16_t MALLEABILITY_ON = 0;
+extern u_int16_t ASYNC_IO;
 // using std::string;
 
 #ifdef __cplusplus

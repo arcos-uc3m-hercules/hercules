@@ -51,13 +51,13 @@ public:
 	~map_records();
 	void set_size(const int64_t nsize);
 	int64_t get_size();
-	int CheckForMemorySpace(int64_t required_space);
-	int IncreaseMemoryOccupied(int64_t required_space);
+	// int CheckForMemorySpace(int64_t required_space);
+	// int IncreaseMemoryOccupied(int64_t required_space);
 	int DecreaseMemoryOccupied(int64_t freed_space);
-	double get_storage_usage_percentage();
+	// double get_storage_usage_percentage();
 	void print_map();
 	// char *list();
-	void FreeMemory(std::map<std::string, BufferValue>::iterator item);
+	uint64_t FreeMemory(std::map<std::string, BufferValue>::iterator item);
 	// const char *get_head_element();
 	std::string get_head_element();
 	int32_t erase_head_element();
@@ -104,7 +104,7 @@ public:
 	// Used in str_worker threads
 	// Method deleting the address associated to a certain record.
 	int32_t cleaning(char server_type);
-	int32_t cleaning_specific(std::string new_key);
+	int64_t cleaning_specific(std::string new_key);
 	int32_t freeAllMemory();
 	int32_t erase_broadcast_element(std::string key);
 	int32_t erase_snapshot_element(std::string key);

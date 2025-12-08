@@ -42,6 +42,8 @@ typedef struct
 ****************************  GLOBAL VARIABLES  ****************************
 ***************************************************************************/
 
+u_int16_t ASYNC_IO;
+
 // IMSS server thread.
 pthread_t server_th;
 // IMSS metadata server thread.
@@ -745,8 +747,13 @@ int getConfiguration(struct arguments *args)
 		fprintf(stderr, "WARNING: Invalid async IO option: %" PRIu32 ", setting to %d (SYNCHRONOUS)", args->async_io, SYNC);
 		args->async_io = SYNC; // by default we use sync calls.
 	}
-	// fprintf(stderr,"Asynchronous IO: %" PRIu32 "\n", args->async_io);
+	if (args->async_io == ASYNC)
+	{
+		fprintf(stderr,"Asynchronous IO: %" PRIu32 "\n", args->async_io);
+	}
+	
 	ASYNC_IO = args->async_io;
+	fprintf(stderr, "ASYNC IO %d\n", ASYNC_IO);
 	// End of Sync or Async I/O.
 
 	if (getenv("HERCULES_BUFF_SIZE") != NULL)

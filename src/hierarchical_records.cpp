@@ -5,11 +5,14 @@
 // to manage logs.
 #include "slog.h"
 
-// using std::string;
-
+int SERVER_ID;
 // for sincronization in the map.
 std::mutex hierarchical_map_lock;
-// std::mutex hierarchical_map_lock_aux;
+// for garbage collector.
+extern pthread_mutex_t mutex_garbage;
+extern pthread_cond_t global_run_garbage_collector_cond;
+extern pthread_cond_t global_free_space_cond;
+pthread_mutex_t mutex_quantity_occupied = PTHREAD_MUTEX_INITIALIZER;
 
 // Non-blocking functions.
 static std::shared_ptr<map_records> get_child_unsafe(HierarchicalMap *hiermap, const char *k)
@@ -27,6 +30,7 @@ static std::shared_ptr<map_records> get_child_unsafe(HierarchicalMap *hiermap, c
 	else
 	{
 		slog_debug("Parent map %s of %s not found.", first_parent_dir, k);
+		fprintf(stderr, "Parent map %s of %s not found.\n", first_parent_dir, k);
 		return nullptr;
 	}
 }
@@ -52,8 +56,89 @@ static std::shared_ptr<map_records> get_dir_unsafe(HierarchicalMap *hiermap, con
 extern "C"
 {
 	char SERVER_TYPE;
-	uint64_t max_storage_size;
-	int64_t quantity_occupied;
+	uint64_t max_storage_size = 0;
+	int64_t quantity_occupied = 0;
+
+	int64_t get_size()
+	{
+		return max_storage_size;
+	}
+
+	/**
+	 * @brief Checks if there are enough memory for "required space".
+	 * @param required_space Requested memory.
+	 * @return 1 if there are enough memory, 0 on other case.
+	 */
+	int CheckForMemorySpace(int64_t required_space)
+	{
+		int ret = 1;
+		pthread_mutex_lock(&mutex_quantity_occupied);
+		if (quantity_occupied + required_space > max_storage_size)
+		{
+			ret = 0;
+		}
+		pthread_mutex_unlock(&mutex_quantity_occupied);
+		return ret;
+	}
+
+	/**
+	 * @brief Increase the counter of how much memory is in use.
+	 * Also checks if there are enough memory to alloc the "required space".
+	 * @param required_space Space to be used by the new block.
+	 * @return 1 if there are enough memory, 0 on other case.
+	 */
+	int IncreaseMemoryOccupied(int64_t required_space)
+	{
+		int ret = 1;
+		pthread_mutex_lock(&mutex_quantity_occupied);
+		if (quantity_occupied + required_space > max_storage_size)
+		{
+			slog_warn("memory occupied=%ld/%ld, required_space=%lu", quantity_occupied, max_storage_size, required_space);
+			ret = 0;
+		}
+		else
+		{
+			quantity_occupied = quantity_occupied + required_space;
+			slog_debug("memory occupied=%ld/%ld, required_space=%lu", quantity_occupied, max_storage_size, required_space);
+		}
+		pthread_mutex_unlock(&mutex_quantity_occupied);
+		return ret;
+	}
+
+	/**
+	 * @brief Decrease the counter of how much memory is in use.
+	 * @param freed_space Size of the memory freed.
+	 * @return 1 if the counter was correctly decreased, 0 in other case,
+	 * for example, if the counter is below of 0.
+	 */
+	int DecreaseMemoryOccupied(int64_t freed_space)
+	{
+		int ret = 1;
+		pthread_mutex_lock(&mutex_quantity_occupied);
+		if (quantity_occupied - freed_space < 0)
+		{
+			perror("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_INCONSISTENCY");
+			slog_error("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_INCONSISTENCY: memory usage cannot be less than 0: %ld, memory occupied=%lu, freed_space=%lu", quantity_occupied - freed_space, quantity_occupied, freed_space);
+			ret = 0;
+		}
+		else
+		{
+			quantity_occupied = quantity_occupied - freed_space;
+			slog_debug("memory occupied=%lu GB, freed_space=%lu", quantity_occupied / GB, freed_space);
+		}
+		pthread_mutex_unlock(&mutex_quantity_occupied);
+		return ret;
+	}
+
+	double get_storage_usage_percentage()
+	{
+		if (max_storage_size == 0)
+		{ // to avoid division by zero.
+			return 0.0;
+		}
+
+		return static_cast<double>(quantity_occupied) * 100.0 / max_storage_size;
+	}
 
 	void *HierarchicalMapCreate(std::string root)
 	{
@@ -145,32 +230,61 @@ extern "C"
 
 	int HierarchicalMapPut(void *hierarchical_map, std::string key, void *address, uint64_t length, int reused_buffer, GNode *gnode, int is_zero_block)
 	{
+
+		// check if there are space to alloc this block.
+		double hercules_usage_percentage = get_storage_usage_percentage();
+		// fprintf(stderr, "Memory used: %.2f%%\n", hercules_usage_percentage);
+		slog_debug("Memory used: %.2f%%, reused_buffer=%d", hercules_usage_percentage, reused_buffer);
+		if (hercules_usage_percentage >= 80.0)
+		{
+			pthread_mutex_lock(&mutex_garbage);
+			fprintf(stderr, "[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
+			slog_debug("[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
+			// unlock garbage collector.
+			// pthread_mutex_lock(&mutex_garbage);
+			slog_debug("garbage collector mutex adquire");
+#ifdef DPRINTF
+			fprintf(stderr, "Sending signal to gargabe collector.\n");
+#endif
+			// Unlock the garbage collector.
+			pthread_cond_signal(&global_run_garbage_collector_cond);
+			// Simulated full capacity reached.
+			// return 2;
+			pthread_mutex_unlock(&mutex_garbage);
+		}
+
+		if (!reused_buffer)
+		{
+			// Increase only when a malloc was perform.
+			IncreaseMemoryOccupied(length);
+		}
+
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
-		// std::pair<std::map<std::string, BufferValue>::iterator, bool> ret;
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 		const char *k = key.c_str();
 		slog_debug("Putting %s on the hierarchical map.", k);
 		char first_parent_dir[PATH_MAX] = {0};
 		find_last_parent_dir(k, first_parent_dir);
+		// fprintf(stderr, "Putting %s on the hierarchical map %s.\n", k, first_parent_dir);
 
 		// // Retrieve the map for the parent directory's children from 'hierarchical_map'.
-		// auto it = hiermap->find(first_parent_dir);
-		// std::shared_ptr<map_records> parent_map = nullptr;
-		// if (it == hiermap->end())
-		// { // parent map does not exists locally, we add it to the hierarchical map.
-		// 	slog_warn("Parent directory %s does not exist or has not been added as a directory element. Creating it.", first_parent_dir);
-		// 	parent_map = std::make_shared<map_records>(max_storage_size);
-		// 	(*hiermap)[first_parent_dir] = parent_map;
-		// }
-		// else
-		// { // parent map exists locally, we get the pointer.
-		// 	parent_map = it->second;
-		// }
+		auto it = hiermap->find(first_parent_dir);
+		std::shared_ptr<map_records> parent_map = nullptr;
+		if (it == hiermap->end())
+		{ // parent map does not exists locally, we add it to the hierarchical map.
+			slog_warn("Parent directory %s does not exist or has not been added as a directory element. Creating it.", first_parent_dir);
+			parent_map = std::make_shared<map_records>(max_storage_size);
+			(*hiermap)[first_parent_dir] = parent_map;
+		}
+		else
+		{ // parent map exists locally, we get the pointer.
+			parent_map = it->second;
+		}
 
 		// --- RECURSIVE PATH CREATION START ---
 
 		// Convert to string for easier manipulation
-		std::string current_path = first_parent_dir;
+		// std::string current_path = first_parent_dir;
 		// std::shared_ptr<map_records> prev_map;
 		// std::string prev_path;
 
@@ -210,88 +324,87 @@ extern "C"
 		// 		break;
 		// 	}
 		// }
-		std::string target_path = first_parent_dir;
-		std::string root_prefix = "imss://";
-		// Only proceed if the target is deeper than the root
-		if (target_path.length() > root_prefix.length())
-		{
-			std::string current_check_path = root_prefix;
-			// Start searching for slashes after "imss://"
-			size_t pos = target_path.find('/', root_prefix.length());
+		// std::string target_path = first_parent_dir;
+		// std::string root_prefix = "imss://";
+		// // Only proceed if the target is deeper than the root
+		// if (target_path.length() > root_prefix.length())
+		// {
+		// 	std::string current_check_path = root_prefix;
+		// 	// Start searching for slashes after "imss://"
+		// 	size_t pos = target_path.find('/', root_prefix.length());
 
-			while (pos != std::string::npos || current_check_path != target_path)
-			{
+		// 	while (pos != std::string::npos || current_check_path != target_path)
+		// 	{
 
-				std::string parent_of_sub = current_check_path;
+		// 		std::string parent_of_sub = current_check_path;
 
-				// Determine the sub-directory path we are currently checking
-				if (pos != std::string::npos)
-				{
-					current_check_path = target_path.substr(0, pos);
-				}
-				else
-				{
-					current_check_path = target_path; // Final segment (the first_parent_dir itself)
-				}
+		// 		// Determine the sub-directory path we are currently checking
+		// 		if (pos != std::string::npos)
+		// 		{
+		// 			current_check_path = target_path.substr(0, pos);
+		// 		}
+		// 		else
+		// 		{
+		// 			current_check_path = target_path; // Final segment (the first_parent_dir itself)
+		// 		}
 
-				// Check if this sub-directory already has a map (meaning it exists)
-				if (hiermap->find(current_check_path) == hiermap->end())
-				{
+		// 		// Check if this sub-directory already has a map (meaning it exists)
+		// 		if (hiermap->find(current_check_path) == hiermap->end())
+		// 		{
 
-					slog_warn("Ancestor directory %s missing. Creating and linking to %s.", current_check_path.c_str(), parent_of_sub.c_str());
+		// 			slog_warn("Ancestor directory %s missing. Creating and linking to %s.", current_check_path.c_str(), parent_of_sub.c_str());
 
-					// Create the container map for this new directory
-					std::shared_ptr<map_records> new_dir_map = std::make_shared<map_records>(max_storage_size);
-					(*hiermap)[current_check_path] = new_dir_map;
+		// 			// Create the container map for this new directory
+		// 			std::shared_ptr<map_records> new_dir_map = std::make_shared<map_records>(max_storage_size);
+		// 			(*hiermap)[current_check_path] = new_dir_map;
 
-					// LINKING: Insert this new directory into its parent's map
-					// We must retrieve the parent map to insert the entry.
-					auto parent_it = hiermap->find(parent_of_sub);
-					if (parent_it != hiermap->end())
-					{
-						std::shared_ptr<map_records> prev_map = parent_it->second;
+		// 			// LINKING: Insert this new directory into its parent's map
+		// 			// We must retrieve the parent map to insert the entry.
+		// 			auto parent_it = hiermap->find(parent_of_sub);
+		// 			if (parent_it != hiermap->end())
+		// 			{
+		// 				std::shared_ptr<map_records> prev_map = parent_it->second;
 
-						// FIXME: We are inserting a directory entry without valid metadata (stat/GNode).
-						// You may need to create a dummy 'stat' struct with S_ISDIR set,
-						// or pass specific flags if your 'put' implementation parses the address.
-						// Passing nullptr/0 for now to establish the link.
-						prev_map->put(current_check_path, nullptr, 0, 0, nullptr);
+		// 				// FIXME: We are inserting a directory entry without valid metadata (stat/GNode).
+		// 				// You may need to create a dummy 'stat' struct with S_ISDIR set,
+		// 				// or pass specific flags if your 'put' implementation parses the address.
+		// 				// Passing nullptr/0 for now to establish the link.
+		// 				prev_map->put(current_check_path, nullptr, 0, 0, nullptr);
 
-						slog_debug("Linked %s into %s", current_check_path.c_str(), parent_of_sub.c_str());
-					}
-					else
-					{
-						slog_error("Critical: Root or Parent %s missing!", parent_of_sub.c_str());
-						return -1;
-					}
-				}
+		// 				slog_debug("Linked %s into %s", current_check_path.c_str(), parent_of_sub.c_str());
+		// 			}
+		// 			else
+		// 			{
+		// 				slog_error("Critical: Root or Parent %s missing!", parent_of_sub.c_str());
+		// 				return -1;
+		// 			}
+		// 		}
 
-				// Move to next slash
-				if (pos == std::string::npos)
-					break;
-				pos = target_path.find('/', pos + 1);
-			}
-		}
-
-		// --- RECURSIVE PATH CREATION END ---
+		// 		// Move to next slash
+		// 		if (pos == std::string::npos)
+		// 			break;
+		// 		pos = target_path.find('/', pos + 1);
+		// 	}
+		// }
 
 		// Now that we are sure the structure exists, retrieve the immediate parent map
-		auto it = hiermap->find(first_parent_dir);
-		std::shared_ptr<map_records> parent_map = nullptr;
+		// auto it = hiermap->find(first_parent_dir);
+		// std::shared_ptr<map_records> parent_map = nullptr;
 
-		// We can directly access it->second because the loop above guaranteed its existence
-		if (it != hiermap->end())
-		{
-			parent_map = it->second;
-		}
-		else
-		{
-			// This case should theoretically be unreachable now, but good for safety
-			slog_error("Critical Error: Parent dir %s missing after creation loop.", first_parent_dir);
-			return -1;
-		}
+		// // We can directly access it->second because the loop above guaranteed its existence
+		// if (it != hiermap->end())
+		// {
+		// 	parent_map = it->second;
+		// }
+		// else
+		// {
+		// 	// This case should theoretically be unreachable now, but good for safety
+		// 	slog_error("Critical Error: Parent dir %s missing after creation loop.", first_parent_dir);
+		// 	return -1;
+		// }
+		// --- RECURSIVE PATH CREATION END ---
 
-		parent_map->put(key, address, length, reused_buffer, gnode);
+		int ret = parent_map->put(key, address, length, reused_buffer, gnode);
 		slog_debug("Element %s inserted on the directory map %s", key.c_str(), first_parent_dir);
 
 		// if this is the zero block, check if the dataset is a directory.
@@ -300,6 +413,7 @@ extern "C"
 			CheckIfDirectory(hiermap, key, address);
 		}
 
+		// return ret;
 		return 0;
 	}
 
@@ -457,7 +571,6 @@ extern "C"
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 		// Look up the parent directory's children map in 'hierarchical_map'.
-		// std::shared_ptr<map_records> parent_children_map = HierarchicalMapGetChild(hierarchical_map, k.c_str());
 		std::shared_ptr<map_records> parent_children_map = get_child_unsafe(hiermap, k.c_str());
 		if (parent_children_map != nullptr)
 		{ // Parent Map found.
@@ -768,12 +881,9 @@ extern "C"
 			slog_debug("Searching %s on the garbage collector of %s", key.c_str(), first_parent_dir);
 			return map->garbage_collector_search(key);
 		}
-		// else
-		// {
 		// key was not find in the hierarchical map.
 		slog_debug("%s not found in the map", key.c_str());
 		return -1;
-		// }
 	}
 
 	int32_t HierarchicalMapCleanGarbageCollector(void *hierarchical_map)
@@ -782,15 +892,23 @@ extern "C"
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 		slog_debug("Running HierarchicalMapCleanGarbageCollector");
+		fprintf(stderr, "Running HierarchicalMapCleanGarbageCollector\n");
+		double old_hercules_usage_percentage = get_storage_usage_percentage();
+		uint64_t total_freed_memory = 0;
 		for (const auto &pair : *hiermap)
 		{
 			const std::string &key = pair.first;
 			slog_debug("Running garbage collector for %s", key.c_str());
+			fprintf(stderr, "Running garbage collector for %s\n", key.c_str());
 			const std::shared_ptr<map_records> &map = pair.second;
 			// std::cout << "Key: " << key << ", Value Data: " << record_ptr->data << std::endl;
-			map->cleaning(SERVER_TYPE);
+			total_freed_memory += map->cleaning(SERVER_TYPE);
 			slog_debug("---\n");
 		}
+		fprintf(stderr, "[HierarchicalMapCleanGarbageCollector] Freed memory: %lu bytes (%lu MB)\n", total_freed_memory, total_freed_memory/MB);
+		DecreaseMemoryOccupied(total_freed_memory);
+		double new_hercules_usage_percentage = get_storage_usage_percentage();
+		fprintf(stderr, "Memory freed: %.2f%%\n", new_hercules_usage_percentage - old_hercules_usage_percentage);
 		return 0;
 	}
 

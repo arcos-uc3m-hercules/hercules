@@ -80,7 +80,7 @@ extern char client_ip[16];		// IP number of the node where the client is taking 
 gboolean replace_uri_base_path_dir(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
 gboolean replace_uri_base_path_regular_file(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
 
-int32_t get_data_location(int32_t, int32_t, int32_t);
+int32_t get_data_location(char *, int32_t, int32_t, int32_t);
 
 // typedef enum {
 //     CLIENT_SERVER_SEND_RECV_STREAM  = UCS_BIT(0),
@@ -101,9 +101,9 @@ typedef struct
 	// Set of ips comforming the IMSS.
 	char **ips;
 	// List of data server status.
-	int *status;
+	// int *status;
 	// List used to indicate how many data servers was active in the moment of a server "n" was down.
-	int *arr_num_active_storages;
+	// int *arr_num_active_storages;
 	// Number of active data servers.
 	int num_active_storages;
 	// Number of IMSS servers.
@@ -377,6 +377,7 @@ RETURNS:	> 0 - Number identifying the retrieved dataset among the client's sessi
 
 RETURNS:	 0 - Release operation took place successfully.
 -1 - In case of error.*/
+	int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id);
 	int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id, int is_dir);
 
 	int32_t close_dataset(const char *dataset_uri, int fd);
