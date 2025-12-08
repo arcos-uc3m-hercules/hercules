@@ -69,6 +69,11 @@ IOR_PATH=/home/tester004/gesanche/io500/
 source "/home/tester004/load-local-spack.sh"
 source "/home/tester004/gesanche/hercules/stuff/c3-spack-modules.sh"
 module load hpcx
+## To use the manual installation of UCX.
+export HOME_UCX=$HOME/bin/ucx
+export LD_LIBRARY_PATH=$HOME_UCX/lib:$LD_LIBRARY_PATH
+export PATH=$HOME_UCX/bin:$PATH
+
 #whereis mpiexec
 # spack load \
 #    cmake@3.24.3%gcc@9.4.0 arch=linux-ubuntu20.04-broadwell \
