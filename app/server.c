@@ -10,7 +10,7 @@
 #include "map_ep.hpp"
 #include "memalloc.h"
 #include "metadata_stat.h"
-#include "directory.h"
+// #include "directory.h"
 #include "policies.h"
 #include "utils.h"
 
@@ -18,8 +18,8 @@ extern int number_of_hosts;
 extern imss_info imss_copy;
 extern int SERVER_ID;
 // Pointer to the tree's root node.
-extern GNode *tree_root;
-extern pthread_mutex_t tree_mut;
+// extern GNode *tree_root;
+// extern pthread_mutex_t tree_mut;
 // extern int32_t __thread current_dataset;   // Dataset whose policy has been set last.
 extern imss curr_imss;
 
@@ -548,15 +548,15 @@ int32_t main(int32_t argc, char **argv)
 		// data_endpoints = (ucp_ep_h *)malloc(args.num_data_servers * sizeof(ucp_ep_h));
 
 		// Create the tree_root node.
-		char *root_data = (char *)calloc(URI_, sizeof(char));
-		strncpy(root_data, args.imss_uri, URI_);
-		tree_root = g_node_new((void *)root_data);
-		if (pthread_mutex_init(&tree_mut, NULL) != 0)
-		{
-			perror("HERCULES_ERR_TREE_MUT_INIT");
-			slog_fatal("HERCULES_ERR_TREE_MUT_INIT");
-			exit(1);
-		}
+		// char *root_data = (char *)calloc(URI_, sizeof(char));
+		// strncpy(root_data, args.imss_uri, URI_);
+		// tree_root = g_node_new((void *)root_data);
+		// if (pthread_mutex_init(&tree_mut, NULL) != 0)
+		// {
+		// 	perror("HERCULES_ERR_TREE_MUT_INIT");
+		// 	slog_fatal("HERCULES_ERR_TREE_MUT_INIT");
+		// 	exit(1);
+		// }
 	}
 
 	/***************************************************************/
@@ -569,7 +569,8 @@ int32_t main(int32_t argc, char **argv)
 
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));
-	hierarchical_map = HierarchicalMapCreate(std::string(args.imss_uri));
+	hierarchical_map = new HierarchicalRecords(std::string(args.imss_uri));
+	
 	// copy the reference to a global map.
 	// g_map = map;
 
@@ -951,13 +952,13 @@ int32_t main(int32_t argc, char **argv)
 		// Send a message to all data servers to shutdown.
 
 		// Freeing all resources of the tree structure.
-		g_node_traverse(tree_root, G_PRE_ORDER, G_TRAVERSE_ALL, -1, gnodetraverse, NULL);
+		// g_node_traverse(tree_root, G_PRE_ORDER, G_TRAVERSE_ALL, -1, gnodetraverse, NULL);
 
-		if (pthread_mutex_destroy(&tree_mut) != 0)
-		{
-			perror("HERCULES_ERR_TREE_MUT_DESTROY");
-			pthread_exit(NULL);
-		}
+		// if (pthread_mutex_destroy(&tree_mut) != 0)
+		// {
+		// 	perror("HERCULES_ERR_TREE_MUT_DESTROY");
+		// 	pthread_exit(NULL);
+		// }
 		// fprintf(stderr, "Ending metadata server.\n");
 	}
 	else
@@ -969,6 +970,11 @@ int32_t main(int32_t argc, char **argv)
 
 		free(region_locks);
 	}
+
+	if (hierarchical_map != nullptr) {
+        delete hierarchical_map; 
+        hierarchical_map = nullptr;
+    }
 
 	// Close publisher socket.
 	ucp_worker_flush(ucp_worker);

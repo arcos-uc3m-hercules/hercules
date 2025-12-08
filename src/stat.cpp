@@ -1,3 +1,13 @@
+/**
+ * @deprecated
+ * @file stat.cpp
+ * @brief 
+ * @version 0.1
+ * @date 2025-12-08
+ * 
+ * @copyright Copyright (c) 2025
+ * 
+ */
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>

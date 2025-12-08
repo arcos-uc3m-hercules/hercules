@@ -10,7 +10,7 @@
 
 // #define KB 1024
 // #define GB 1073741824
-uint32_t DEPLOYMENT = 2; // Default 1=ATACHED, 0=DETACHED ONLY METADATA SERVER 2=DETACHED METADATA AND DATA SERVERS
+// uint32_t DEPLOYMENT = 2; // Default 1=ATACHED, 0=DETACHED ONLY METADATA SERVER 2=DETACHED METADATA AND DATA SERVERS
 char POLICY[MAX_POLICY_LEN];
 uint64_t IMSS_SRV_PORT = 1; // Not default, 1 will fail
 uint64_t METADATA_PORT = 1; // Not default, 1 will fail
@@ -504,7 +504,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_live(" -- HERCULES_BLKSIZE: %ld kB", IMSS_BLKSIZE);
 	slog_live(" -- HERCULES_STORAGE_SIZE: %ld GB", STORAGE_SIZE);
 	slog_live(" -- HERCULES_METADATA_FILE: %s", METADATA_FILE);
-	slog_live(" -- HERCULES_DEPLOYMENT: %d", DEPLOYMENT);
+	// slog_live(" -- HERCULES_DEPLOYMENT: %d", DEPLOYMENT);
 	slog_live(" -- HERCULES_MALLEABILITY: %d", MALLEABILITY);
 	// slog_live(" -- HERCULES_MALLEABILITY_TYPE: %d", MALLEABILITY_TYPE);
 	slog_live(" -- UPPER_BOUND_SERVERS: %d", UPPER_BOUND_SERVERS);
@@ -513,7 +513,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_live(" -- REPL_TYPE: %d", REPL_TYPE);
 	slog_live(" -- POLICY: %s", POLICY);
 	slog_live(" -- SYNC: %d", ASYNC_IO);
-	fprintf(stderr, "ASYNC IO %d\n", ASYNC_IO);
+	// fprintf(stderr, "ASYNC IO %d\n", ASYNC_IO);
 
 
 	// Metadata server
@@ -528,17 +528,17 @@ __attribute__((constructor)) void imss_posix_init(void)
 	int num_active_storages = 0;
 	// Hercules init -- Attached deploy
 	// default is 2.
-	if (DEPLOYMENT == 1)
-	{
-		// Hercules init -- Attached deploy
-		if (hercules_init(0, STORAGE_SIZE, IMSS_SRV_PORT, 1, METADATA_PORT, META_BUFFSIZE, METADATA_FILE) == -1)
-		{
-			// In case of error notify and exit
-			slog_fatal("[IMSS-FUSE]	Hercules init failed, cannot deploy IMSS.\n");
-		}
-	}
-	if (DEPLOYMENT == 2)
-	{
+	// if (DEPLOYMENT == 1)
+	// {
+	// 	// Hercules init -- Attached deploy
+	// 	if (hercules_init(0, STORAGE_SIZE, IMSS_SRV_PORT, 1, METADATA_PORT, META_BUFFSIZE, METADATA_FILE) == -1)
+	// 	{
+	// 		// In case of error notify and exit
+	// 		slog_fatal("[IMSS-FUSE]	Hercules init failed, cannot deploy IMSS.\n");
+	// 	}
+	// }
+	// if (DEPLOYMENT == 2)
+	// {
 		// Make the connection to all data servers.
 		num_active_storages = TIMING(open_imss(IMSS_ROOT), "open imss", int32_t, rank);
 		if (num_active_storages < 0)
@@ -555,7 +555,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 			slog_warn("Number of storage servers does not match from the values retrieved from the metadata server. Setting from %d to %d\n", N_SERVERS, num_active_storages);
 			N_SERVERS = num_active_storages;
 		}
-	}
+	// }
 
 	// if (DEPLOYMENT != 2)
 	// {

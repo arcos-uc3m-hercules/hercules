@@ -96,7 +96,8 @@ pthread_mutex_t mutex_malleability = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t global_run_malleability_cond;
 pthread_cond_t global_run_shutdown_cond;
 
-void *hierarchical_map;
+// void *hierarchical_map;
+HierarchicalRecords *hierarchical_map = nullptr;
 extern imss curr_imss;
 
 size_t global_offset = 0;
@@ -365,7 +366,8 @@ void *move_blocks_2_server(void *th_argv)
 
 	// Map to use.
 	// hierarchical_map
-	HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+	// HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
+	HierarchicalMap *hiermap = hierarchical_map->hiermap;
 
 	fprintf(stderr, "--- Root Map ---\n");
 	slog_debug("--- Root Map ---");
@@ -422,7 +424,7 @@ void *move_blocks_2_server(void *th_argv)
 					return NULL;
 				}
 
-				HierarchicalMapPutInGarbageCollector(hierarchical_map, inner_key.c_str());
+				hierarchical_map->HierarchicalMapPutInGarbageCollector(inner_key.c_str());
 				// HierarchicalMapDeleteEntry(hierarchical_map, inner_key); // TODO: check if this is required here.
 			}
 		}
@@ -870,7 +872,7 @@ void *Malleability(void *th_argv)
 	// if (arguments->hercules_info_struct == NULL || curr_global_imss == NULL)
 	if (curr_global_imss == NULL)
 	{
-		if (HierarchicalMapGet(hierarchical_map, arguments->args.imss_uri, &address_, &block_size_rtvd))
+		if (hierarchical_map->HierarchicalMapGet(arguments->args.imss_uri, &address_, &block_size_rtvd))
 		{
 			curr_global_imss = (imss_info *)address_;
 			// arguments->hercules_info_struct = (imss_info *)address_;
@@ -1273,7 +1275,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
-	void *hierarchical_map = arguments->hierarchical_map;
+	// void *hierarchical_map = arguments->hierarchical_map;
+	HierarchicalRecords *hierarchical_map = arguments->hierarchical_map;
 
 	// Resources specifying if the request set in the sender.
 	int64_t more = 0;
@@ -1448,7 +1451,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		{
 		case READ_OP:
 		{
-			int32_t ret = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id);
+			int32_t ret = TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id);
 			// fprintf(stderr, "%s returned %d\n", key.c_str(), ret);
 
 			// Check if there was an associated block to the key.
@@ -1660,8 +1663,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 			std::string base_key = key.substr(0, delimiter_pos);
 			uint32_t current_block_id = (uint32_t)std::stoul(key.substr(delimiter_pos + 1));
-			ssize_t buffer_offset = HierarchicalMapGetPrefetch(
-				hierarchical_map,
+			ssize_t buffer_offset = hierarchical_map->HierarchicalMapGetPrefetch(
 				base_key,
 				current_block_id,
 				arguments->args.num_data_servers,
@@ -1739,7 +1741,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// this operation was perform by the client by getting the block 0 and then decressing the link number.
 			// we are migrating that opearting here to avoid extra network operations.
 			// key must to be block 0 always.
-			int32_t ret = HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd);
+			int32_t ret = hierarchical_map->HierarchicalMapGet( key, &address_, &block_size_rtvd);
 			// Check if there was an associated block to the key.
 			if (ret == 0)
 			{ // block does not exist.
@@ -1760,7 +1762,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// if this is the last link, we put the file in the garbage collector.
 			if (header->st_nlink == 0 && num_opened == 0)
 			{
-				HierarchicalMapPutInGarbageCollector(hierarchical_map, key);
+				hierarchical_map->HierarchicalMapPutInGarbageCollector(key);
 				response_msg = MSG_DELETE_OP;
 			}
 			else
@@ -1785,7 +1787,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			const char *response_msg = NULL;
 			// for data server we need to look up for all the blocks.
 			// map->put_garbage_collector(key);
-			HierarchicalMapPutInGarbageCollector(hierarchical_map, key);
+			hierarchical_map->HierarchicalMapPutInGarbageCollector(key);
 
 			response_msg = MSG_OK_OP;
 
@@ -1824,7 +1826,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// if (ret == 0)
 				{
 					// ret = map->rename_data_srv_worker(old_key, new_key);
-					ret = HierarchicalMapRenameRegularFile(hierarchical_map, old_key, new_key);
+					ret = hierarchical_map->HierarchicalMapRenameRegularFile( old_key, new_key);
 				}
 			}
 			// else
@@ -1866,10 +1868,10 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// RENAME MAP
 				slog_debug("rename_data_dir_srv_worker, old_dir=%s, dest_dir=%s", old_dir.c_str(), rdir_dest.c_str());
 				// ret = TIMING(map->rename_data_dir_srv_worker(old_dir, rdir_dest);,"rename_data_dir_srv_worker,RENAME_DIR_DIR_OP", int32_t, arguments->thread_id);
-				ret = TIMING(BackEndHierarchicalMapRenameDirDir(hierarchical_map, old_dir, rdir_dest, NULL), "BackEndHierarchicalMapRenameDirDir,RENAME_DIR_DIR_OP", int32_t, arguments->thread_id);
+				ret = TIMING(hierarchical_map->BackEndHierarchicalMapRenameDirDir(old_dir, rdir_dest, NULL), "BackEndHierarchicalMapRenameDirDir,RENAME_DIR_DIR_OP", int32_t, arguments->thread_id);
 				// Rename the old directory on the hierarchical map.
 				slog_debug("Renaming %s to %s on the directory map", old_dir.c_str(), rdir_dest.c_str());
-				ret = HierarchicalMapRenameKey(hierarchical_map, old_dir.c_str(), rdir_dest.c_str());
+				ret = hierarchical_map->HierarchicalMapRenameKey(old_dir.c_str(), rdir_dest.c_str());
 				if (ret != 0)
 				{
 					slog_error("HERCULES_ERR_HIERARCHICAL_MAP_RENAMING_DATA_KEY");
@@ -2162,7 +2164,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		}
 		else
 		{
-			ret = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "Does it exist? map->get", int, arguments->thread_id);
+			ret = TIMING(hierarchical_map->HierarchicalMapGet( key, &address_, &block_size_rtvd), "Does it exist? map->get", int, arguments->thread_id);
 		}
 
 		std::size_t found = key.find("$0");
@@ -2336,7 +2338,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// INSERT THE ELEMENT TO FREE THE MEMORY PROTECT.
 			pthread_mutex_lock(&memory_protect);
 			// Check if another thread has created this key.
-			int race_check = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "Race check", int, arguments->thread_id);
+			int race_check = TIMING(hierarchical_map->HierarchicalMapGet( key, &address_, &block_size_rtvd), "Race check", int, arguments->thread_id);
 			if (race_check == 0)
 			{ // key still does not exist.
 				// Include the new record in the tracking structure.
@@ -2352,7 +2354,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				}
 				else
 				{
-					insert_successful = HierarchicalMapPut(hierarchical_map, key, buffer, size_asigned_to_block, reused_memory, NULL, is_block_zero);
+					insert_successful = hierarchical_map->HierarchicalMapPut( key, buffer, size_asigned_to_block, reused_memory, NULL, is_block_zero);
 				}
 				pthread_mutex_unlock(&memory_protect);
 
@@ -2402,7 +2404,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// check if it is in the garbage collector map.
 				// TODO: on DELETE_OP, we can remove the dataset from the main map and inserting it on the garbage collector.
 				// with that we can avoid searching for the dataset on the gargabe collector here.
-				int ret = HierarchicalMapPopFromGarbageCollector(hierarchical_map, key);
+				int ret = hierarchical_map->HierarchicalMapPopFromGarbageCollector(key);
 				if (ret == 0)
 				{
 					slog_debug("%s has not been found on the garbage collector map.", key.c_str());
@@ -2630,7 +2632,6 @@ void *GarbageCollector(void *th_argv)
 	// Obtain the current map class element from the set of arguments.
 	p_argv *arguments = (p_argv *)th_argv;
 	// std::shared_ptr<map_records> map = arguments->map;
-	// void *hierarchical_map = arguments->hierarchical_map;
 
 	pthread_cond_init(&global_run_garbage_collector_cond, NULL);
 	pthread_cond_init(&global_free_space_cond, NULL);
@@ -2652,7 +2653,7 @@ void *GarbageCollector(void *th_argv)
 		// TODO: removes the next "continue".
 		// pthread_mutex_unlock(&mutex_garbage);
 		// continue;
-		HierarchicalMapCleanGarbageCollector(hierarchical_map);
+		hierarchical_map->HierarchicalMapCleanGarbageCollector();
 		// Unlock all threads waiting for resources.
 		pthread_cond_broadcast(&global_free_space_cond);
 		pthread_mutex_unlock(&mutex_garbage);
@@ -2817,7 +2818,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
-	void *hierarchical_map = arguments->hierarchical_map;
+	// void *hierarchical_map = arguments->hierarchical_map;
+	HierarchicalRecords *hierarchical_map = arguments->hierarchical_map;
 
 	uint16_t current_offset = 0;
 
@@ -3007,7 +3009,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			// // buffer = GTree_getdir((char *)key_for_tree.c_str(), &numelems_indir, map);
 			// buffer = GTree_getdir((char *)key_for_tree.c_str(), &numelems_indir, hierarchical_map);
 			// slog_info("[workers] Ending GTree_getdir, key=%s, numelems_indir=%d", key_for_tree.c_str(), numelems_indir);
-			buffer = HierarchicalMapListDir(hierarchical_map, key.c_str(), &numelems_indir);
+			buffer = hierarchical_map->HierarchicalMapListDir( key.c_str(), &numelems_indir);
 
 			if (numelems_indir == -1)
 			{ // error case.
@@ -3061,7 +3063,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			slog_debug("[READ_OP]");
 			// Check if there was an associated block to the key.
 			std::unique_lock<std::mutex> lck(operation_lock);
-			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "READ_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
+			int err = TIMING(hierarchical_map->HierarchicalMapGet( key, &address_, &block_size_rtvd), "READ_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 			// fprintf(stderr, "%s returned %d\n", key.c_str(), ret);
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
@@ -3148,7 +3150,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			slog_debug("DELETE_OP");
 			std::unique_lock<std::mutex> lck(operation_lock);
-			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "DELETE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
+			int err = TIMING(hierarchical_map->HierarchicalMapGet( key, &address_, &block_size_rtvd), "DELETE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
@@ -3184,8 +3186,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// 	// TODO: before delete, it's better to check if the file is on the structures.
 					strncpy(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY) + 1);
 					slog_debug("Dataset mark as DIRTY:%s", dataset->status);
-					HierarchicalMapPutInGarbageCollector(hierarchical_map, key);
-					HierarchicalMapDeleteEntry(hierarchical_map, key);
+					hierarchical_map->HierarchicalMapPutInGarbageCollector(key);
+					hierarchical_map->HierarchicalMapDeleteEntry(key);
 					response_msg = MSG_DELETE_OP;
 				}
 				else
@@ -3229,15 +3231,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 				// RENAME MAP
 				std::unique_lock<std::mutex> lck(operation_lock);
-				ret = HierarchicalMapRenameRegularFile(hierarchical_map, old_key, new_key);
+				ret = hierarchical_map->HierarchicalMapRenameRegularFile(old_key, new_key);
 				slog_live("rename metadata stat worker=%d", ret);
 
 				// RENAME TREE
-				if (ret != -1)
-				{
-					ret = GTree_rename((char *)old_key_tree.c_str(), (char *)new_key_tree.c_str());
-					slog_debug("[RENAME] GTree_rename=%d", ret);
-				}
+				// if (ret != -1)
+				// {
+				// 	ret = GTree_rename((char *)old_key_tree.c_str(), (char *)new_key_tree.c_str());
+				// 	slog_debug("[RENAME] GTree_rename=%d", ret);
+				// }
 			}
 
 			if (ret == -1)
@@ -3281,11 +3283,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				GNode *gnode = NULL;
 				// RENAME MAP
 				std::unique_lock<std::mutex> lck(operation_lock);
-				ret = TIMING(BackEndHierarchicalMapRenameDirDir(hierarchical_map, old_key, new_key, &gnode), "RENAME_DIR_DIR_OP,BackEndHierarchicalMapRenameDirDir", int32_t, arguments->thread_id);
+				ret = TIMING(hierarchical_map->BackEndHierarchicalMapRenameDirDir(old_key, new_key, &gnode), "RENAME_DIR_DIR_OP,BackEndHierarchicalMapRenameDirDir", int32_t, arguments->thread_id);
 
 				// Rename the old directory on the hierarchical map.
 				slog_debug("Renaming %s to %s on the directory map", old_key.c_str(), new_key.c_str());
-				ret = TIMING(HierarchicalMapRenameKey(hierarchical_map, old_key.c_str(), new_key.c_str()), "RENAME_DIR_DIR_OP,HierarchicalMapRenameKey", int32_t, arguments->thread_id);
+				ret = TIMING(hierarchical_map->HierarchicalMapRenameKey(old_key.c_str(), new_key.c_str()), "RENAME_DIR_DIR_OP,HierarchicalMapRenameKey", int32_t, arguments->thread_id);
 				if (ret != 0)
 				{
 					slog_error("HERCULES_ERR_HIERARCHICAL_MAP_RENAMING_STAT_KEY");
@@ -3327,7 +3329,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			slog_debug("CLOSE_OP");
 			std::unique_lock<std::mutex> lck(operation_lock);
-			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "CLOSE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
+			int err = TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "CLOSE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
 			{
@@ -3361,8 +3363,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					strncpy(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY) + 1);
 					slog_debug("Dataset mark as %s", dataset->status);
 					// map->put_garbage_collector(key_for_tree);
-					HierarchicalMapPutInGarbageCollector(hierarchical_map, key);
-					HierarchicalMapDeleteEntry(hierarchical_map, key);
+					hierarchical_map->HierarchicalMapPutInGarbageCollector( key);
+					hierarchical_map->HierarchicalMapDeleteEntry(key);
 					response_msg = MSG_DELETE_OP;
 				}
 				else
@@ -3387,7 +3389,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			slog_debug("OPEN_OP");
 			std::unique_lock<std::mutex> lck(operation_lock);
-			int err = TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "OPEN_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
+			int err = TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "OPEN_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
@@ -3410,7 +3412,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{ // dataset is dirty. We will delete from the garbage collector vector.
 					slog_debug("Dirty dataset found %s on OPEN operation, recovering from the garbage collector.", key.c_str());
 					// int ret = map->garbage_collector_pop(key);
-					int ret = HierarchicalMapPopFromGarbageCollector(hierarchical_map, key);
+					int ret = hierarchical_map->HierarchicalMapPopFromGarbageCollector(key);
 					if (ret == 0)
 					{
 						slog_debug("%s has not been found on the garbage collector map, but it found as dirty.", key.c_str());
@@ -3468,7 +3470,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			std::unique_lock<std::mutex> lck(operation_lock);
 			pthread_mutex_lock(&memory_protect);
 			// if (!TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id))
-			if (!TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id))
+			if (!TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id))
 			{ // If the record was not already stored, add the block.
 				// fprintf(stderr, "%s not found", key.c_str());
 				slog_debug("Recv dynamic buffer size %ld", block_size_recv);
@@ -3548,7 +3550,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 
 				// insert_successful = TIMING(HierarchicalMapPut(hierarchical_map, key, buffer, length, reused_memory, new_node, 1), "HierarchicalMapPut", int, arguments->thread_id);
-				insert_successful = TIMING(HierarchicalMapPut(hierarchical_map, key, buffer, length, reused_memory, NULL, 1), "HierarchicalMapPut", int, arguments->thread_id);
+				insert_successful = TIMING(hierarchical_map->HierarchicalMapPut(key, buffer, length, reused_memory, NULL, 1), "HierarchicalMapPut", int, arguments->thread_id);
 				slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);
 
 				if (insert_successful != 0)
@@ -3584,7 +3586,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{ // dataset is dirty. We will delete from the garbage collector.
 					slog_debug("Dirty dataset found %s on SET operation, recovering from the garbage collector.", key.c_str());
 					// int ret = map->garbage_collector_pop(key);
-					int ret = HierarchicalMapPopFromGarbageCollector(hierarchical_map, key);
+					int ret = hierarchical_map->HierarchicalMapPopFromGarbageCollector( key);
 					if (ret == 0)
 					{
 						slog_debug("%s has not been found on the garbage collector map, but it found as dirty.", key.c_str());

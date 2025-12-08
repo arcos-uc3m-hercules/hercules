@@ -1,3 +1,12 @@
+/**
+ * @deprecated
+ * @file directory.h
+ * @brief 
+ * @version 0.1
+ * @date 2025-12-08
+ * 
+ * @copyright Copyright (c) 2025
+ */
 #ifndef IMSS_DIRECTORY
 #define IMSS_DIRECTORY
 

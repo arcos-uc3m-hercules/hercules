@@ -1,6 +1,6 @@
 
-set_source_files_properties(../src/utils.c ../src/comms.c ../src/crc.c ../src/directory.c ../src/imss.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX )
-set_source_files_properties(../src/memalloc.c ../src/policies.c ../src/stat.c ../src/workers.c ../src/arg_parser.c ../src/map_server_eps.cpp PROPERTIES LANGUAGE CXX )
+set_source_files_properties(../src/utils.c ../src/comms.c ../src/crc.c ../src/imss.c ../src/shared_memory.c PROPERTIES LANGUAGE CXX )
+set_source_files_properties(../src/memalloc.c ../src/policies.c ../src/workers.c ../src/arg_parser.c ../src/map_server_eps.cpp PROPERTIES LANGUAGE CXX )
 set_source_files_properties(./server.c ./release_imss.c PROPERTIES LANGUAGE CXX )
 #set_source_files_properties(./monitor.c ./release_imss.c PROPERTIES LANGUAGE CXX )
 
@@ -8,13 +8,11 @@ ADD_EXECUTABLE( hercules_server
 		./server.c
 		../src/utils.c
 		../src/map_ep.cpp
-		../src/stat.cpp
 		../src/comms.c
 		../src/queue.c
 		../src/workers.c
 		../src/memalloc.c
 		../src/memalloc.c
-		../src/directory.c
 		../src/records.cpp
 		../src/arg_parser.c
 		../src/slog.c
@@ -28,33 +26,8 @@ ADD_EXECUTABLE( hercules_server
 		../src/hierarchical_records.cpp
 )
 
-#ADD_EXECUTABLE( monitor
-#		./monitor.c
-#		../src/utils.c
-#		../src/map_ep.cpp
-#		../src/stat.cpp
-#		../src/comms.c
-#		../src/queue.c
-#		../src/workers.c
-#		../src/memalloc.c
-#		../src/memalloc.c
-#		../src/directory.c
-#		../src/records.cpp
-#		../src/arg_parser.c
-#		../src/slog.c
-#		../src/map_server_eps.cpp
-#		../src/cfg_parse.c
-#		../src/crc.c
-#		../src/imss.c
-#		../src/shared_memory.c
-#		../src/policies.c
-#		../src/hercules.cpp
-#		../src/hierarchical_records.cpp
-#)
-
 ADD_LIBRARY( imss_static STATIC
 		../src/crc.c
-		../src/stat.cpp
 		../src/imss.c
 		../src/comms.c
 		../src/workers.c
@@ -62,7 +35,6 @@ ADD_LIBRARY( imss_static STATIC
 		../src/utils.c
 		../src/hercules.cpp
 		../src/policies.c
-		../src/directory.c
 		../src/records.cpp
 		../src/map_ep.cpp
 		../src/slog.c
@@ -72,7 +44,6 @@ ADD_LIBRARY( imss_static STATIC
 
 ADD_LIBRARY( imss_shared SHARED
 		../src/crc.c
-		../src/stat.cpp
 		../src/imss.c
 		../src/comms.c
 		../src/queue.c
@@ -80,7 +51,6 @@ ADD_LIBRARY( imss_shared SHARED
 		../src/utils.c
 		../src/hercules.cpp
 		../src/policies.c
-		../src/directory.c
 		../src/records.cpp
 		../src/map_ep.cpp
 		../src/slog.c
