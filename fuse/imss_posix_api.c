@@ -3005,7 +3005,7 @@ extern "C"
 
 			// Get the file/directory status.
 			// if (stat(full_path, &stat_buf) == -1)
-			if (__fxstat(1, fd, &stat_buf) < 0)
+			if (fstat(fd, &stat_buf) < 0)
 			{
 				perror("HERCULES_ERR_READ_DIRECTORY_STAT");
 				slog_error("HERCULES_ERR_READ_DIRECTORY_STAT: %s\n", full_path);
