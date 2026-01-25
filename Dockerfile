@@ -26,7 +26,7 @@ RUN mkdir /hercules
 
 ENV GIT_SSL_NO_VERIFY=1
 WORKDIR /hercules
-RUN git clone https://gitlab.arcos.inf.uc3m.es/admire/hercules.git code
+RUN git clone https://github.com/arcos-uc3m-hercules/hercules.git code
 WORKDIR /hercules/code
 RUN mkdir build
 WORKDIR /hercules/code/build
