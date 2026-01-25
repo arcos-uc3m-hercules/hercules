@@ -3097,7 +3097,7 @@ extern "C"
 		}
 
 		// get old file stat.
-		if (__fxstat(1, fd_old, &old_file_stat) < 0)
+		if (fstat(fd_old, &old_file_stat) < 0)
 		{
 			perror("HERCULES_ERR_MOVE_FILE_FROM_DISK_STAT_SYSTEM_FILE");
 			slog_error("HERCULES_ERR_MOVE_FILE_FROM_DISK_STAT_SYSTEM_FILE");
@@ -3184,7 +3184,7 @@ extern "C"
 		}
 
 		// get old file stat.
-		if (__fxstat(1, fd_old, &old_file_stat) < 0)
+		if (fstat(fd_old, &old_file_stat) < 0)
 		{
 			perror("HERCULES_ERR_MOVE_STAT_SYSTEM_FILE");
 			slog_error("HERCULES_ERR_MOVE_STAT_SYSTEM_FILE");
@@ -3228,7 +3228,7 @@ extern "C"
 		else
 		{
 			slog_debug("%s exists", given_new_pathname);
-			if (__fxstat(1, fd_new, &new_file_stat) < 0)
+			if (fstat(fd_new, &new_file_stat) < 0)
 			{
 				perror("HERCULES_ERR_MOVE_STAT_NEW_FILE");
 				slog_error("HERCULES_ERR_MOVE_STAT_NEW_FILE: %s", hercules_path);
