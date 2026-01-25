@@ -27,13 +27,13 @@ class Hercules(CMakePackage):
     """Hercules, a network portable ad-hoc file system"""
 
     # FIXME: Add a proper url for your package's homepage here.
-    homepage = "https://gitlab.arcos.inf.uc3m.es/admire/hercules.git"
-    git      = "https://gitlab.arcos.inf.uc3m.es/admire/hercules.git"
+    homepage = "https://arcos-uc3m-hercules.github.io/"
+    git      = "https://github.com/arcos-uc3m-hercules/hercules.git"
 
     # FIXME: Add a list of GitHub accounts to
     # notify when the package is updated.
     # maintainers = ['github_user1', 'github_user2']
-    maintainers = ['fjblas','gesanche']
+    maintainers = ['javiergarcia','gsanchezgallegos']
 
     version('latest', branch='master')
     version('debug', branch='Debug')
