@@ -1,5 +1,4 @@
 // #define FUSE_USE_VERSION 26
-//  #include "map.hpp"
 #include "hierarchical_map.hpp"
 #include "mapprefetch.hpp"
 #include "hercules.hpp"
@@ -543,7 +542,6 @@ extern "C"
 				sprintf(err_msg, "ERR_HERCULES_IMSS_OPEN_GET_DATA: %s, ret=%d", imss_path, ret);
 				perror(err_msg);
 				slog_error("%s", err_msg);
-				// return -1;
 				return -ENOENT;
 			}
 
@@ -566,7 +564,7 @@ extern "C"
 		// File does not exist
 		if (file_desc < 0)
 		{
-			slog_error("[FUSE]file descriptor: %d", file_desc);
+			slog_error("[FUSE] file descriptor: %d", file_desc);
 			return -1;
 		}
 
@@ -1801,11 +1799,13 @@ extern "C"
 			slog_debug("writting %" PRIu64 " kilobytes (%" PRIu64 " bytes) with an offset of %" PRIu64 " kilobytes (%" PRIu64 " bytes)", bytes_to_copy / 1024, bytes_to_copy, block_offset / 1024, block_offset);
 
 			// Send data to data server.
-			if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO), "set_data", int32_t, -1) < 0)
+			int32_t ret_set_data = TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO), "set_data", int32_t, -1);
+			if (ret_set_data < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
-				error_print = -ENOENT;
-				return -ENOENT;
+				fprintf(stderr, "[imss_write] Error writing to Hercules: %s\n", strerror(ret_set_data));
+				error_print = ret_set_data;
+				return ret_set_data;
 			}
 
 			bytes_stored += bytes_to_copy;
@@ -2305,15 +2305,14 @@ extern "C"
 		// memcpy(head, &stats, sizeof(struct stat));
 
 		// Updates the size of the file in the block 0.
-		if (set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC) < 0)
+		int32_t ret_set_data = set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC);
+		if (ret_set_data < 0)
 		{
 			perror("HERCULES_ERR_WRITTING_BLOCK");
 			slog_error("HERCULES_ERR_WRITTING_BLOCK");
-			// free(head);
-			return -ENOENT;
+			return ret_set_data;
 		}
 
-		// free(head);
 		return ds;
 	}
 
@@ -2414,11 +2413,13 @@ extern "C"
 		// stores block 0.
 		// fprintf(stdout, "size of stat=%lu bytes\n", sizeof(struct stat));
 		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0, SYNC);
+		pthread_mutex_unlock(&lock); // unlock.
 		if (ret < 0)
 		{
 			slog_error("HERCULES_ERR_IMSS_CREATE_SET_DATA_0");
+			fprintf(stderr, "HERCULES_ERR_IMSS_CREATE_SET_DATA_0\n");
+			return ret;
 		}
-		pthread_mutex_unlock(&lock); // unlock.
 
 		HierarchicalMapErase(hierarchical_map, rpath);
 		slog_debug("HierarchicalMapErase(hierarchical_map, rpath:%s)", rpath);
@@ -2633,7 +2634,7 @@ extern "C"
 		uint32_t file_desc;
 
 		char *rpath = (char *)calloc(MAX_PATH, sizeof(char));
-		get_iuri(path, rpath);
+		// get_iuri(path, rpath);
 
 		// Assing file handler and create dataset
 		int fd;
@@ -2665,12 +2666,10 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
-		// free(rpath);
-
-		return 0;
+		return ret_set_data;
 	}
 
 	/**
@@ -2783,8 +2782,7 @@ extern "C"
 		clock_gettime(CLOCK_REALTIME, &spec);
 		uint32_t file_desc;
 
-		char *rpath = (char *)calloc(MAX_PATH, sizeof(char));
-		get_iuri(path, rpath);
+		char *rpath = (char *)path;
 
 		// Assing file handler and create dataset
 		int fd;
@@ -2811,16 +2809,16 @@ extern "C"
 		memcpy(buff, &stats, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		if (set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC) < 0)
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		pthread_mutex_unlock(&lock);
+		if (ret_set_data < 0)
 		{
-			// fprintf(stderr, "[IMSS-FUSE]	Error writing to imss.\n");
-			slog_error("[IMSS-FUSE]	Error writing to imss.");
-			error_print = -ENOENT;
-			pthread_mutex_unlock(&lock);
-			return -ENOENT;
+			slog_error("Error writing to imss.");
+			fprintf(stderr, "Error writing to imss.\n");
+			error_print = ret_set_data;
+			return ret_set_data;
 		}
 
-		pthread_mutex_unlock(&lock);
 		free(rpath);
 		return 0;
 	}
@@ -2872,19 +2870,19 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
 		free(rpath);
-		return 0;
+		return ret_set_data;
 	}
 
 	int imss_chown(const char *path, uid_t uid, gid_t gid)
 	{
 		struct stat ds_stat;
 		uint32_t file_desc;
-		char *rpath = (char *)calloc(MAX_PATH, sizeof(char));
-		get_iuri(path, rpath);
+		char *rpath = (char *)path; // (char *)calloc(MAX_PATH, sizeof(char));
+		// get_iuri(path, rpath);
 
 		// Assing file handler and create dataset
 		int fd;
@@ -2920,10 +2918,10 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
-		free(rpath);
-		return 0;
+		// free(rpath);
+		return ret_set_data;
 	}
 
 	// Function to recursively read and print files and directories.

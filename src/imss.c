@@ -14,6 +14,7 @@
 #include <time.h>
 #include <inttypes.h>
 #include <ucp/api/ucp.h>
+#include <ifaddrs.h>
 #include "crc.h"
 #include "imss.h"
 #include "map_ep.hpp"
@@ -757,18 +758,76 @@ int32_t stat_init(char *stat_hostfile,
 	}
 	len_client_node = strlen(client_node);
 
-	struct hostent *host_entry = NULL;
-	// TO CHECK: The gethostbyname*(), gethostbyaddr*(), herror(), and hstrerror() functions are obsolete.
-	// https://www.man7.org/linux/man-pages/man3/gethostbyname.3.html
-	if ((host_entry = gethostbyname(client_node)) == NULL)
+	struct ifaddrs *ifaddr, *ifa;
+	int family, s;
+	char host[NI_MAXHOST];
+	int found_ip = 0;
+
+	// get the list of all interfaces.
+	if (getifaddrs(&ifaddr) == -1)
 	{
-		perror("HERCULES_ERR_GETHOSTBYNAME");
-		slog_error("HERCULES_ERR_GETHOSTBYNAME");
-		free(stat_addr);
+		perror("HERCULES_ERR_GETIFADDRS");
+		slog_error("HERCULES_ERR_GETIFADDRS");
 		return -1;
 	}
 
-	strcpy(client_ip, inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0])));
+	// find the correct interface ignoring the localhost.
+	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+	{
+		if (ifa->ifa_addr == NULL)
+			continue;
+
+		family = ifa->ifa_addr->sa_family;
+
+		// We only care about IPv4 (AF_INET)
+		if (family == AF_INET)
+		{
+			s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
+							host, NI_MAXHOST,
+							NULL, 0, NI_NUMERICHOST);
+			if (s != 0)
+			{
+				continue; // Error getting name, skip
+			}
+			slog_debug("name: %s, ip: %s", ifa->ifa_name, host);
+
+			// ignore 127.0.0.1 (Loopback) and idrac.
+			// if (!strcmp(host, "127.0.0.1") != 0 || !strcmp(ifa->ifa_name, "idrac") != 0)
+			if (!strcmp(ifa->ifa_name, "lo") != 0 || !strcmp(ifa->ifa_name, "idrac") != 0)
+			{
+				continue;
+			}
+			// ignore idrac
+			strncpy(client_ip, host, sizeof(client_ip) - 1);
+			client_ip[sizeof(client_ip) - 1] = '\0'; // Ensure null termination
+			found_ip = 1;
+			break; // Found a valid non-restricted IP, stop looking.
+		}
+	}
+
+	freeifaddrs(ifaddr);
+
+	if (!found_ip)
+	{
+		// Fallback if no external IP is found
+		// strcpy(client_ip, "127.0.0.1");
+		slog_error("HERCULES_ERR_GETIP");
+		fprintf(stderr, "HERCULES_ERR_GETIP\n");
+		return -1;
+	}
+
+	// struct hostent *host_entry = NULL;
+	// // TO CHECK: The gethostbyname*(), gethostbyaddr*(), herror(), and hstrerror() functions are obsolete.
+	// // https://www.man7.org/linux/man-pages/man3/gethostbyname.3.html
+	// if ((host_entry = gethostbyname(client_node)) == NULL)
+	// {
+	// 	perror("HERCULES_ERR_GETHOSTBYNAME");
+	// 	slog_error("HERCULES_ERR_GETHOSTBYNAME");
+	// 	free(stat_addr);
+	// 	return -1;
+	// }
+
+	// strcpy(client_ip, inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0])));
 
 	// FILE entity managing the IMSS metadata hostfile.
 	FILE *stat_nodes_struct = NULL;
@@ -910,7 +969,8 @@ int32_t stat_init(char *stat_hostfile,
 			slog_error("HERCULES_ERR_STAT_INIT_CLOSE_OOB_SOCK");
 		}
 
-		client_create_ep_metadata(ucp_worker_meta, &stat_eps[i], stat_addr[i]);
+		// client_create_ep_metadata(ucp_worker_meta, &stat_eps[i], stat_addr[i]);
+		client_create_ep_data(ucp_worker_meta, &stat_eps[i], stat_addr[i], metadata_err_call_arg);
 
 		slog_debug("created ep with %s:%ld", stat_node, port);
 	}
@@ -1386,7 +1446,7 @@ int32_t open_imss(char *imss_uri)
 
 		new_imss.conns.id[i] = i;
 		// client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], &new_imss.info.status[i]);
-		client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i]);
+		client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], client_err_call_arg);
 		slog_debug("[IMSS] Created endpoint with %s", (new_imss.info.ips)[i]);
 		// fprintf(stderr, "[IMSS] Created endpoint with %s\n", (new_imss.info.ips)[i]);
 		// Save the current socket value when the IMSS ip matches the clients' one.
@@ -1590,7 +1650,7 @@ int32_t AddBackEndServer2Imss(char *imss_uri)
 	}
 
 	// client_create_ep_data(ucp_worker_data, &curr_imss.conns.eps[i], curr_imss.conns.peer_addr[i], &curr_imss.info.status[i]);
-	client_create_ep_data(ucp_worker_data, &curr_imss.conns.eps[i], curr_imss.conns.peer_addr[i]);
+	client_create_ep_data(ucp_worker_data, &curr_imss.conns.eps[i], curr_imss.conns.peer_addr[i], add_server_err_call_arg);
 	slog_debug("[IMSS] Created endpoint with %s, curr_imss.info.num_storages=%d", (curr_imss.info.ips)[i], curr_imss.info.num_storages);
 	fprintf(stderr, "[IMSS] Created endpoint with %s, curr_imss.info.num_storages=%d\n", (curr_imss.info.ips)[i], curr_imss.info.num_storages);
 	// fprintf(stderr, "[IMSS] Created endpoint with %s\n", (curr_imss.info.ips)[i]);
@@ -5278,7 +5338,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	{
 		perror("HERCULES_ERR_GET_DATA_LOCATION");
 		slog_error("HERCULES_ERR_GET_DATA_LOCATION");
-		return -1;
+		return -ECANCELED;
 	}
 
 	int32_t session_policy = curr_dataset->session_plcy; // get_policy();
@@ -5331,20 +5391,17 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				perror("HERCULES_ERR_SET_DATA_GET_IDENTIFIER_INVALID_SHM_ID");
 				slog_error("HERCULES_ERR_SET_DATA_GET_IDENTIFIER_INVALID_SHM_ID");
 				pthread_mutex_unlock(&lock_network);
-				exit(-1);
+				// exit(-1);
+				return -ECANCELED;
 			}
 
 			slog_info("Generated id %d for  key %d", shm_id, shm_key);
 
-			// copyContentSM(pool_memory, buffer, size);
-			// SharedMemory *sh_memory_struct = setContentSM(shm_key, size, buffer);
 			void *content = setContentSMByID(shm_id, size, buffer);
 
 			// Send the request to the server to copy from the shared memory to the private memory.
 			ep = curr_imss.conns.eps[n_server_];
 			node_hostname = curr_imss.info.ips[n_server_];
-			// sprintf(key_, "LOCALSETBLOCK %lu %ld %d %s$%d", size, offset, shm_key, curr_dataset->uri_, data_id);
-			// sprintf(key_, "LOCALSETBLOCK %lu %ld %d %s$%d", size, offset, sh_memory_struct->id, curr_dataset->uri_, data_id);
 			sprintf(key_, "LOCALSETBLOCK %lu %ld %d %s$%d", size, offset, shm_id, curr_dataset->uri_, data_id);
 			slog_info("BLOCK %d SENT TO DATA SERVER %d (%s) with Request: %s (%d)", data_id, n_server_, node_hostname, key_, size);
 			// fprintf(stderr, "BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%d)\n", data_id, n_server_, node_hostname, key_, size);
@@ -5355,7 +5412,8 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				perror("ERR_HERCULES_LOCAL_SET_REQ_SEND_LOCAL_REQ");
 				slog_error("ERR_HERCULES_LOCAL_SET_REQ_SEND_LOCAL_REQ");
 				pthread_mutex_unlock(&lock_network);
-				exit(-1);
+				return -ECANCELED;
+				// exit(-1);
 			}
 
 			// confirmation from the server to detach the memory.
@@ -5375,7 +5433,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				perror("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
 				slog_error("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
 				pthread_mutex_unlock(&lock_network);
-				return -2;
+				return -ECANCELED;
 			}
 
 			void *response_buffer = (void *)malloc(msg_length * sizeof(char));
@@ -5384,7 +5442,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				perror("HERCULES_ERR_SET_NDATA_MEMORY_ALLOCATION");
 				slog_error("HERCULES_ERR_SET_NDATA_MEMORY_ALLOCATION");
 				pthread_mutex_unlock(&lock_network);
-				return -2;
+				return -ECANCELED;
 			}
 			size_t size_received_data = recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async);
 
@@ -5463,8 +5521,38 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 					perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
 					slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
 					pthread_mutex_unlock(&lock_network);
-					return -1;
+					return -ECANCELED;
 				}
+
+				// wait for response.
+				// ack from the server.
+				msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
+				slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
+				if (msg_length == 0)
+				{
+					perror("ERR_HERCULES_GET_DATA_ACK_INVALID_MSG_LENGTH");
+					slog_error("ERR_HERCULES_GET_DATA_ACK_INVALID_MSG_LENGTH");
+					pthread_mutex_unlock(&lock_network);
+					return -ECANCELED;
+				}
+
+				char *response_buffer = (char *)malloc(msg_length * sizeof(char));
+				if (response_buffer == NULL)
+				{
+					perror("ERR_HERCULES_GET_DATA_ACK_MEMORY_ALLOCATION");
+					slog_error("ERR_HERCULES_GET_DATA_ACK_MEMORY_ALLOCATION");
+					pthread_mutex_unlock(&lock_network);
+					return -ECANCELED;
+				}
+				size_t size_received_data = recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async);
+
+				if (!strncmp(response_buffer, MSG_SPACE_OP, strlen(response_buffer)))
+				{
+					free(response_buffer);
+					pthread_mutex_unlock(&lock_network);
+					return -EAGAIN;
+				}
+				free(response_buffer);
 			}
 
 			t = clock() - t;

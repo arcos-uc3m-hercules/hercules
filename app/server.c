@@ -71,6 +71,8 @@ extern pthread_cond_t global_run_shutdown_cond;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
+char main_err_call_arg[] = "main server";
+
 /**
  * @brief Re-distribute the blocks of this server to another servers
  * following the distribution policy choose by the user.
@@ -289,9 +291,9 @@ int32_t main(int32_t argc, char **argv)
 	// 	StsQueue.push(mem_pool, buffer);
 	// }
 
-	/* 
+	/*
 	 ***************************************************
-	 In relation to the type argument provided, an HERCULES or a metadata server will be deployed. 
+	 In relation to the type argument provided, an HERCULES or a metadata server will be deployed.
 	 */
 
 	// HERCULES server.
@@ -372,7 +374,7 @@ int32_t main(int32_t argc, char **argv)
 
 			char request[REQUEST_SIZE] = {0};
 			sprintf(request, "%" PRIu32 " GET %s", id, "MAIN!QUERRY");
-			slog_debug("Request - %s", request);
+			slog_debug("Request - %s to socket %d", request, oob_sock);
 			if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
 			{
 				perror("HERCULES_ERR_STAT_HELLO");
@@ -396,19 +398,20 @@ int32_t main(int32_t argc, char **argv)
 			free(stat_add);
 
 			/* Send client UCX address to server */
-			ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
-								   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
-								   UCP_EP_PARAM_FIELD_ERR_HANDLER |
-								   UCP_EP_PARAM_FIELD_USER_DATA;
-			ep_params.address = peer_addr;
-			ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
-			ep_params.err_handler.cb = err_cb_client;
-			ep_params.err_handler.arg = NULL;
-			ep_params.user_data = &ep_status;
-			slog_debug("Creating endpoint with the metadata server %d", i);
-			status = ucp_ep_create(ucp_worker, &ep_params, &metadata_endpoints[i]);
-			slog_debug("Endpoint with the metadata %d created", i);
+			// ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
+			// 					   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
+			// 					   UCP_EP_PARAM_FIELD_ERR_HANDLER |
+			// 					   UCP_EP_PARAM_FIELD_USER_DATA;
+			// ep_params.address = peer_addr;
+			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+			// // ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+			// ep_params.err_handler.cb = err_cb_client;
+			// // ep_params.err_handler.arg = (void *)main_err_call_arg;
+			// // ep_params.user_data = &ep_status;
+			// slog_debug("Creating endpoint with the metadata server %d", i);
+			// status = ucp_ep_create(ucp_worker, &ep_params, &metadata_endpoints[i]);
+			// slog_debug("Endpoint with the metadata %d created", i);
+			client_create_ep_data(ucp_worker, &metadata_endpoints[i], peer_addr, main_server_err_call_arg);
 			// status = ucp_worker_get_address(ucp_worker, &req_addr, &req_addr_len);
 
 			ucp_worker_attr_t worker_attr;
@@ -416,7 +419,6 @@ int32_t main(int32_t argc, char **argv)
 			status = ucp_worker_query(ucp_worker, &worker_attr);
 			req_addr_len = worker_attr.address_length;
 			req_addr = worker_attr.address;
-
 			attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
 			ucp_worker_address_query(req_addr, &attr);
 			slog_debug("[srv_worker_thread] Server UID %" PRIu64 ".", attr.worker_uid);
@@ -570,7 +572,8 @@ int32_t main(int32_t argc, char **argv)
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));
 	hierarchical_map = new HierarchicalRecords(std::string(args.imss_uri));
-	
+	garbage_collector_map = new HierarchicalRecords(std::string(args.imss_uri));
+
 	// copy the reference to a global map.
 	// g_map = map;
 
@@ -631,14 +634,14 @@ int32_t main(int32_t argc, char **argv)
 
 	// status = ucp_worker_query(shared_worker, &worker_attr);
 	// if (status != UCS_OK)
-    // {
-    //     ready(tmp_file_path, "ERROR");
-    //     slog_error("HERCULES_ERR_UCP_WORKER_QUERY: %s", ucs_status_string(status));
-    //     perror("HERCULES_ERR_UCP_WORKER_QUERY");
-    //     ucp_worker_destroy(shared_worker);
-    //     ucp_cleanup(ucp_context);
-    //     return -1;
-    // }
+	// {
+	//     ready(tmp_file_path, "ERROR");
+	//     slog_error("HERCULES_ERR_UCP_WORKER_QUERY: %s", ucs_status_string(status));
+	//     perror("HERCULES_ERR_UCP_WORKER_QUERY");
+	//     ucp_worker_destroy(shared_worker);
+	//     ucp_cleanup(ucp_context);
+	//     return -1;
+	// }
 
 	local_addr = (ucp_address_t **)malloc(hercules_thread_pool_size * sizeof(ucp_address_t *));
 	local_addr_len = (size_t *)malloc(hercules_thread_pool_size * sizeof(size_t));
@@ -971,10 +974,11 @@ int32_t main(int32_t argc, char **argv)
 		free(region_locks);
 	}
 
-	if (hierarchical_map != nullptr) {
-        delete hierarchical_map; 
-        hierarchical_map = nullptr;
-    }
+	if (hierarchical_map != nullptr)
+	{
+		delete hierarchical_map;
+		hierarchical_map = nullptr;
+	}
 
 	// Close publisher socket.
 	ucp_worker_flush(ucp_worker);

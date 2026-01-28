@@ -96,8 +96,8 @@ pthread_mutex_t mutex_malleability = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t global_run_malleability_cond;
 pthread_cond_t global_run_shutdown_cond;
 
-// void *hierarchical_map;
 HierarchicalRecords *hierarchical_map = nullptr;
+HierarchicalRecords *garbage_collector_map = nullptr;
 extern imss curr_imss;
 
 size_t global_offset = 0;
@@ -1170,33 +1170,34 @@ void *hercules_ucx_server(void *th_argv)
 		if (ret < 0)
 		{
 			// ucp_ep_h new_ep;
-			ucp_ep_params_t ep_params;
-			ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
-								   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
-								   UCP_EP_PARAM_FIELD_ERR_HANDLER |
-								   UCP_EP_PARAM_FIELD_USER_DATA;
-			ep_params.address = peer_addr;
-			ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
-			// ep_params.err_handler.cb = err_cb_server;
-			ep_params.err_handler.cb = failure_handler;
-			ep_params.err_handler.arg = NULL;
-			ep_params.user_data = &ep_status;
+			// ucp_ep_params_t ep_params;
+			// ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
+			// 					   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
+			// 					   UCP_EP_PARAM_FIELD_ERR_HANDLER |
+			// 					   UCP_EP_PARAM_FIELD_USER_DATA;
+			// ep_params.address = peer_addr;
+			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+			// // ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+			// // ep_params.err_handler.cb = err_cb_server;
+			// ep_params.err_handler.cb = failure_handler;
+			// ep_params.err_handler.arg = NULL;
+			// ep_params.user_data = &ep_status;
 
-			// struct worker_info *worker_info = (struct worker_info*)malloc(sizeof(struct worker_info));
-			// worker_info->worker_uid = attr.worker_uid;
-			// worker_info->server_type = 'd';
-			// ep_params.err_handler.arg = &worker_info;
-			// ep_params.err_handler.arg = &attr.worker_uid;
+			// // struct worker_info *worker_info = (struct worker_info*)malloc(sizeof(struct worker_info));
+			// // worker_info->worker_uid = attr.worker_uid;
+			// // worker_info->server_type = 'd';
+			// // ep_params.err_handler.arg = &worker_info;
+			// // ep_params.err_handler.arg = &attr.worker_uid;
 
-			status = ucp_ep_create(arguments->ucp_worker, &ep_params, &ep);
-			if (status != UCS_OK)
-			{ // ucp ep create error.
-				perror("HERCULES_ERR_UCX_SERVER_UCP_EP_CREATE");
-				slog_error("HERCULES_ERR_UCX_SERVER_UCP_EP_CREATE");
-				fprintf(stderr, "Failed to request: %s\n", req);
-				continue;
-			}
+			// status = ucp_ep_create(arguments->ucp_worker, &ep_params, &ep);
+			// if (status != UCS_OK)
+			// { // ucp ep create error.
+			// 	perror("HERCULES_ERR_UCX_SERVER_UCP_EP_CREATE");
+			// 	slog_error("HERCULES_ERR_UCX_SERVER_UCP_EP_CREATE");
+			// 	fprintf(stderr, "Failed to request: %s\n", req);
+			// 	continue;
+			// }
+			client_create_ep_data(arguments->ucp_worker, &ep, peer_addr, ucx_server_err_call_arg);
 			// add the new ep to the map
 			map_server_eps_put(map_server_eps, attr.worker_uid, ep);
 		}
@@ -1741,7 +1742,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// this operation was perform by the client by getting the block 0 and then decressing the link number.
 			// we are migrating that opearting here to avoid extra network operations.
 			// key must to be block 0 always.
-			int32_t ret = hierarchical_map->HierarchicalMapGet( key, &address_, &block_size_rtvd);
+			int32_t ret = hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd);
 			// Check if there was an associated block to the key.
 			if (ret == 0)
 			{ // block does not exist.
@@ -1826,7 +1827,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// if (ret == 0)
 				{
 					// ret = map->rename_data_srv_worker(old_key, new_key);
-					ret = hierarchical_map->HierarchicalMapRenameRegularFile( old_key, new_key);
+					ret = hierarchical_map->HierarchicalMapRenameRegularFile(old_key, new_key);
 				}
 			}
 			// else
@@ -2164,7 +2165,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		}
 		else
 		{
-			ret = TIMING(hierarchical_map->HierarchicalMapGet( key, &address_, &block_size_rtvd), "Does it exist? map->get", int, arguments->thread_id);
+			ret = TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "Does it exist? map->get", int, arguments->thread_id);
 		}
 
 		std::size_t found = key.find("$0");
@@ -2183,14 +2184,13 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			clock_t tr;
 			// get the buffer data length.
 			size_t msg_length = 0;
-			int size_asigned_to_block = 0;
+			size_t size_asigned_to_block = 0;
 			int reused_memory = 1;
 			// If data is stored in shared memory due LOCAL policy, the server does not need to receive the data.
 			if (!is_shared_memory)
 			{ // Data is not in shared memory.
 				slog_debug("[WRITE_OP] is_shared_memory=%d", is_shared_memory);
 				// Get the length of the data to be received.
-				// pthread_mutex_lock(&lock_network);
 				msg_length = TIMING(get_recv_data_length(arguments->ucp_worker, arguments->worker_uid), "[write] get_recv_data_length", size_t, arguments->thread_id);
 				// ucp_tag_recv_info_t info_tag;
 				// ucp_tag_message_h msg_tag;
@@ -2201,6 +2201,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
 					slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
 					// pthread_mutex_unlock(&memory_protect);
+					SendConfirmationMessage(arguments, MSG_ERROR_OP);
 					return -1;
 				}
 				slog_debug("[WRITE_OP] msg_length=%lu, is_block_zero=%d, snapshot_op=%d", msg_length, is_block_zero, snapshot_op);
@@ -2220,7 +2221,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					buffer = (void *)StsQueue.pop(mem_pool);
 					if (buffer == NULL)
 					{
-						// buffer = TIMING((void *)mem_type_malloc(BLOCK_SIZE * sizeof(char));, "[write] mem_type_malloc", void *, arguments->thread_id);
 						buffer = (void *)malloc(BLOCK_SIZE * sizeof(char));
 						reused_memory = 0;
 						slog_debug("Allocating buffer of size %lu", BLOCK_SIZE);
@@ -2243,19 +2243,18 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					perror("HERCULES_ERR_MEMORY_ALLOCATION");
 					slog_error("HERCULES_ERR_MEMORY_ALLOCATION");
 					// pthread_mutex_unlock(&memory_protect);
+					SendConfirmationMessage(arguments, MSG_ERROR_OP);
 					return -1;
 				}
 
 				// Receive the data from the front end.
 				// pthread_mutex_lock(&lock_network);
 				msg_length = NETWORK_TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1), "[write] recv_data", size_t);
-				// msg_length = TIMING(recv_data_2(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 0, info_tag, msg_tag), "[write] recv_data_2", size_t, arguments->thread_id);
-				// pthread_mutex_unlock(&lock_network);
 				if (msg_length == 0)
 				{
 					perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
 					slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
-					// pthread_mutex_unlock(&memory_protect);
+					SendConfirmationMessage(arguments, MSG_ERROR_OP);
 					return -1;
 				}
 			}
@@ -2338,7 +2337,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// INSERT THE ELEMENT TO FREE THE MEMORY PROTECT.
 			pthread_mutex_lock(&memory_protect);
 			// Check if another thread has created this key.
-			int race_check = TIMING(hierarchical_map->HierarchicalMapGet( key, &address_, &block_size_rtvd), "Race check", int, arguments->thread_id);
+			int race_check = TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "Race check", int, arguments->thread_id);
 			if (race_check == 0)
 			{ // key still does not exist.
 				// Include the new record in the tracking structure.
@@ -2354,17 +2353,23 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				}
 				else
 				{
-					insert_successful = hierarchical_map->HierarchicalMapPut( key, buffer, size_asigned_to_block, reused_memory, NULL, is_block_zero);
+					// fprintf(stderr, "Inserting buffer of size %lu/%lu\n", msg_length, size_asigned_to_block);
+					insert_successful = hierarchical_map->HierarchicalMapPut(key, buffer, size_asigned_to_block, reused_memory, NULL, is_block_zero);
 				}
 				pthread_mutex_unlock(&memory_protect);
 
-				slog_debug("[WRITE_OP] insert_successful=%d, key=%s, size_asigned_to_block=%d", insert_successful, key.c_str(), size_asigned_to_block);
+				slog_debug("[WRITE_OP] insert_successful=%d, key=%s, size_asigned_to_block=%lu", insert_successful, key.c_str(), size_asigned_to_block);
 
 				// Include the new record in the tracking structure.
 				if (insert_successful != 0)
 				{
 					if (insert_successful == 2)
 					{
+						SendConfirmationMessage(arguments, MSG_SPACE_OP);
+					}
+					else
+					{
+						SendConfirmationMessage(arguments, MSG_ERROR_OP);
 					}
 
 					perror("HERCULES_ERR_WORKER_MAPPUT");
@@ -2381,24 +2386,15 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// We copy the temporal buffer into the one that is already on the map.
 				memcpy((char *)address_ + block_offset, (char *)buffer + block_offset, msg_length);
 				pthread_mutex_unlock(&memory_protect);
-				// Cleaning of the temporary buffer that is no longer useful (because we copied or discarded)
-				// if (reused_memory)
-				// {
-				// 	// Return to pool if necessary, or ignore if address_ is the same pointer (rare).
-				// }
-				// else
-				// {
 				free(buffer);
-				// }
 			}
+			SendConfirmationMessage(arguments, MSG_OK_OP);
 		}
 		// if the block was already stored:
 		else
 		{
 			slog_debug("[WRITE_OP] Key find %s", key.c_str());
 			// Receive the block into the buffer.
-			// std::size_t found = key.find("$0");
-			// if (found != std::string::npos)
 			if (is_block_zero)
 			{ // block 0.
 				// check if it is in the garbage collector map.
@@ -2434,6 +2430,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					{
 						perror("HERCULES_ERR_SRV_WORKER_MEMORY_ALLOCATION");
 						slog_error("HERCULES_ERR_SRV_WORKER_MEMORY_ALLOCATION");
+						SendConfirmationMessage(arguments, MSG_ERROR_OP);
 						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
@@ -2445,6 +2442,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
 						free(buffer);
+						SendConfirmationMessage(arguments, MSG_ERROR_OP);
 						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
@@ -2546,28 +2544,26 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				size_t msg_length = 0;
 				if (!is_shared_memory)
 				{ // non shared memory.
-					// pthread_mutex_lock(&lock_network);
 					msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-					// pthread_mutex_unlock(&lock_network);
 					if (msg_length == 0)
 					{
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
+						SendConfirmationMessage(arguments, MSG_ERROR_OP);
 						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
 					// Verify if the new size (msg_length + block_offset) is greater than the old size (block_size_rtvd).
 					slog_debug("msg_length=%lu, block_offset=%d, msg_length=%d", msg_length, block_offset, msg_length);
-					// pthread_mutex_lock(&lock_network);
 					pthread_mutex_lock(&memory_protect);
 					msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, msg_length, arguments->worker_uid, 1);
 					pthread_mutex_unlock(&memory_protect);
-					// pthread_mutex_unlock(&lock_network);
 					//   msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, (char *)buffer + block_offset, msg_length, arguments->worker_uid, 1);
 					if (msg_length == 0)
 					{
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
+						SendConfirmationMessage(arguments, MSG_ERROR_OP);
 						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
@@ -2611,8 +2607,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					// free(sh_memory_struct);
 				}
 			}
+			SendConfirmationMessage(arguments, MSG_OK_OP);
 		}
-		// pthread_mutex_unlock(&memory_protect);
 		break;
 	}
 	default:
@@ -2885,10 +2881,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		// number  == client ip.
 		// uri_ == hostname.
 		char *added_hostname = uri_;
+		slog_debug("connecting to %s:8500",number);
 		oob_sock = connect_common(number, 85000, AF_INET);
 		if (oob_sock < 0)
 		{
-			char err_msg[MAX_ERR_MSG_LEN];
+			char err_msg[MAX_ERR_MSG_LEN] = {0};
 			sprintf(err_msg, "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%d - %s:%d", server_id_request, new_imss.info.ips[server_id_request], new_imss.info.conn_port);
 			slog_error("%s", err_msg);
 			perror(err_msg);
@@ -2940,7 +2937,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		// new_imss.conns.id[server_id_request] = server_id_request;
 
-		client_create_ep_data(arguments->ucp_worker, &data_endpoints[server_id_request], new_imss.conns.peer_addr[0]);
+		client_create_ep_data(arguments->ucp_worker, &data_endpoints[server_id_request], new_imss.conns.peer_addr[0], set_server_err_call_arg);
 
 		// finish malleability comissioning process.
 		// AttendPendingRequests();
@@ -3009,7 +3006,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			// // buffer = GTree_getdir((char *)key_for_tree.c_str(), &numelems_indir, map);
 			// buffer = GTree_getdir((char *)key_for_tree.c_str(), &numelems_indir, hierarchical_map);
 			// slog_info("[workers] Ending GTree_getdir, key=%s, numelems_indir=%d", key_for_tree.c_str(), numelems_indir);
-			buffer = hierarchical_map->HierarchicalMapListDir( key.c_str(), &numelems_indir);
+			buffer = hierarchical_map->HierarchicalMapListDir(key.c_str(), &numelems_indir);
 
 			if (numelems_indir == -1)
 			{ // error case.
@@ -3063,7 +3060,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			slog_debug("[READ_OP]");
 			// Check if there was an associated block to the key.
 			std::unique_lock<std::mutex> lck(operation_lock);
-			int err = TIMING(hierarchical_map->HierarchicalMapGet( key, &address_, &block_size_rtvd), "READ_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
+			int err = TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "READ_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 			// fprintf(stderr, "%s returned %d\n", key.c_str(), ret);
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
@@ -3150,7 +3147,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 			slog_debug("DELETE_OP");
 			std::unique_lock<std::mutex> lck(operation_lock);
-			int err = TIMING(hierarchical_map->HierarchicalMapGet( key, &address_, &block_size_rtvd), "DELETE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
+			int err = TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "DELETE_OP,HierarchicalMapGet", int32_t, arguments->thread_id);
 
 			slog_debug("map->get (key %s, block_size_rtvd %ld) get res %d", key.c_str(), block_size_rtvd, err);
 			if (err == 0)
@@ -3363,7 +3360,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					strncpy(dataset->status, STATUS_DIRTY, strlen(STATUS_DIRTY) + 1);
 					slog_debug("Dataset mark as %s", dataset->status);
 					// map->put_garbage_collector(key_for_tree);
-					hierarchical_map->HierarchicalMapPutInGarbageCollector( key);
+					hierarchical_map->HierarchicalMapPutInGarbageCollector(key);
 					hierarchical_map->HierarchicalMapDeleteEntry(key);
 					response_msg = MSG_DELETE_OP;
 				}
@@ -3549,7 +3546,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					slog_debug("END Recv dynamic, n_server_when_created=%d", ((dataset_info *)buffer)->n_servers_when_created);
 				}
 
-				// insert_successful = TIMING(HierarchicalMapPut(hierarchical_map, key, buffer, length, reused_memory, new_node, 1), "HierarchicalMapPut", int, arguments->thread_id);
 				insert_successful = TIMING(hierarchical_map->HierarchicalMapPut(key, buffer, length, reused_memory, NULL, 1), "HierarchicalMapPut", int, arguments->thread_id);
 				slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);
 
@@ -3586,7 +3582,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				{ // dataset is dirty. We will delete from the garbage collector.
 					slog_debug("Dirty dataset found %s on SET operation, recovering from the garbage collector.", key.c_str());
 					// int ret = map->garbage_collector_pop(key);
-					int ret = hierarchical_map->HierarchicalMapPopFromGarbageCollector( key);
+					int ret = hierarchical_map->HierarchicalMapPopFromGarbageCollector(key);
 					if (ret == 0)
 					{
 						slog_debug("%s has not been found on the garbage collector map, but it found as dirty.", key.c_str());
@@ -3879,7 +3875,7 @@ void *Dispatcher(void *th_argv)
 	int optval = 1;
 	char *tmp_file_path = arguments->tmp_file_path;
 	u_int16_t hercules_thread_pool_size = arguments->hercules_thread_pool_size;
-	fprintf(stderr, "Thread pool size=%d", hercules_thread_pool_size);
+	fprintf(stderr, "Thread pool size=%d\n", hercules_thread_pool_size);
 	int client_id_counter = 0;
 
 	// Get a socket file descriptor.
@@ -4030,11 +4026,13 @@ void *HandleClient(void *args)
 		ret = send(new_socket, &local_addr_len[resource_idx], sizeof(local_addr_len[resource_idx]), 0);
 		if (ret == -1)
 		{
+			perror("HERCULES_ERR_DISPATCHER_HELLO_SEND1");
 			slog_error("HERCULES_ERR_DISPATCHER_HELLO_SEND1 for client %u", current_client_id);
 		}
 		ret = send(new_socket, local_addr[resource_idx], local_addr_len[resource_idx], 0);
 		if (ret == -1)
 		{
+			perror("HERCULES_ERR_DISPATCHER_HELLO_SEND2");
 			slog_error("HERCULES_ERR_DISPATCHER_HELLO_SEND2 for client %u", current_client_id);
 		}
 		slog_debug("Replied client %u, hercules_thread_pool_size=%d, with resource_idx %u", current_client_id, hercules_thread_pool_size, resource_idx);
@@ -4045,14 +4043,16 @@ void *HandleClient(void *args)
 		ret = send(new_socket, &local_addr_len[resource_idx], sizeof(local_addr_len[resource_idx]), 0);
 		if (ret == -1)
 		{
+			perror("HERCULES_ERR_DISPATCHER_MAIN_SEND1");
 			slog_error("HERCULES_ERR_DISPATCHER_MAIN_SEND1 for client %u", current_client_id);
 		}
 		ret = send(new_socket, local_addr[resource_idx], local_addr_len[resource_idx], 0);
 		if (ret == -1)
 		{
+			perror("HERCULES_ERR_DISPATCHER_MAIN_SEND2");
 			slog_error("HERCULES_ERR_DISPATCHER_MAIN_SEND2 for client %u", current_client_id);
 		}
-		slog_debug("Client %u, sent address %lu (%lu) to the client %d", current_client_id, local_addr[resource_idx], local_addr_len[resource_idx]);
+		slog_debug("Client %u, sent address %lu (%lu) to the client %d", current_client_id, local_addr[resource_idx], local_addr_len[resource_idx], current_client_id);
 	}
 	// Check if someone is requesting identity resources.
 	else if (*((int32_t *)req) == WHO)
@@ -4072,6 +4072,7 @@ void *HandleClient(void *args)
 	else
 	{
 		slog_error("Client %u sent unknown request: %s", current_client_id, req);
+		fprintf(stderr, "Client %u sent unknown request: %s\n", current_client_id, req);
 	}
 
 	// slog_debug("\n");

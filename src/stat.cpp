@@ -18,7 +18,6 @@
 #include "imss.h"
 #include "directory.h"
 
-// extern int  HERCULES_THREAD_POOL_SIZE;
 
 // Method retrieving the set of dataset metadata structures stored in a metadata file.
 char *

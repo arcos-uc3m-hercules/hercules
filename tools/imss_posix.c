@@ -88,6 +88,7 @@ void SetErrno(int value)
 	if (value >= 0)
 	{
 		// expected negative errno value.
+		fprintf(stderr, "HERCULES_WARN_SET_ERRNO: Expected negative value for errno.\n");
 		return;
 	}
 	errno = -value;
@@ -2325,8 +2326,14 @@ ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size,
 	slog_live("[POSIX]. pathname=%s, size to write=%lu, offset=%lu", pathname, size, offset);
 
 	ret = TIMING(imss_write(pathname, buf, size, offset), "imss_write", ssize_t, rank);
+	if (ret < 0)
+	{
+		SetErrno(ret);
+		ret = -1;
+	}
+	
 
-	if (update_offset)
+	if (update_offset && ret >= 0)
 	{
 		if (ds_stat_n.st_size + size > ds_stat_n.st_size)
 		{

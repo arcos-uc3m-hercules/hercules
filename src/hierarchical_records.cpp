@@ -120,23 +120,25 @@ int HierarchicalRecords::HierarchicalMapPut(std::string key, void *address, uint
 	double hercules_usage_percentage = get_storage_usage_percentage();
 	// fprintf(stderr, "Memory used: %.2f%%\n", hercules_usage_percentage);
 	slog_debug("Memory used: %.2f%%, reused_buffer=%d", hercules_usage_percentage, reused_buffer);
-	if (hercules_usage_percentage >= 80.0)
-	{
-		pthread_mutex_lock(&mutex_garbage);
-		fprintf(stderr, "[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
-		slog_debug("[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
-		// unlock garbage collector.
-		// pthread_mutex_lock(&mutex_garbage);
-		slog_debug("garbage collector mutex adquire");
-#ifdef DPRINTF
-		fprintf(stderr, "Sending signal to gargabe collector.\n");
-#endif
-		// Unlock the garbage collector.
-		pthread_cond_signal(&global_run_garbage_collector_cond);
-		// Simulated full capacity reached.
-		// return 2;
-		pthread_mutex_unlock(&mutex_garbage);
-	}
+// 	if (hercules_usage_percentage >= 80.0)
+// 	{
+// 		pthread_mutex_lock(&mutex_garbage);
+// 		fprintf(stderr, "[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
+// 		slog_debug("[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
+// 		// unlock garbage collector.
+// 		// pthread_mutex_lock(&mutex_garbage);
+// 		slog_debug("garbage collector mutex adquire");
+// #ifdef DPRINTF
+// 		fprintf(stderr, "Sending signal to gargabe collector.\n");
+// #endif
+// 		// Unlock the garbage collector.
+// 		pthread_cond_signal(&global_run_garbage_collector_cond);
+// 		// Simulated full capacity reached.
+// 		// pthread_mutex_unlock(&mutex_garbage);
+// 		pthread_cond_wait(&global_free_space_cond, &mutex_garbage);
+// 		pthread_mutex_unlock(&mutex_garbage);
+// 		// return 2;
+// 	}
 
 	if (!reused_buffer)
 	{
@@ -665,7 +667,7 @@ std::shared_ptr<map_records> HierarchicalRecords::get_child_unsafe(const char *k
 	else
 	{
 		slog_debug("Parent map %s of %s not found.", first_parent_dir, k);
-		fprintf(stderr, "Parent map %s of %s not found.\n", first_parent_dir, k);
+		// fprintf(stderr, "Parent map %s of %s not found.\n", first_parent_dir, k);
 		return nullptr;
 	}
 }
