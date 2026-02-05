@@ -217,22 +217,37 @@ export LD_LIBRARY_PATH=${HOME}/hercules/install/lib:$LD_LIBRARY_PATH
 
 2.2 If **Slurm** was used, load the new temporal configuration file (the one created by the Hercules deployment script in the previous step).
 ```
- export HERCULES_CONF=<CONF_PATH>_<Slurm job ID>
+export HERCULES_CONF=<CONF_PATH>_<Slurm job ID>
 ```
 
-2.3 Run your command/application.
+2.3 Export the interceptation library.
 ```
-LD_PRELOAD=${HOME}/hercules/install/lib/libhercules_posix.so ls <hercules_mount_point>
+export LD_PRELOAD=${HOME}/hercules/install/lib/libhercules_posix.so
+```
+Note that at this point, the system calls of each command/application that you run will be intercepted by Hercules. To intercept a single command/application, it can be export on the same command line:
+```
+LD_PRELOAD=${HOME}/hercules/install/lib/libhercules_posix.so <command/application>
+```
+
+2.4 Run your command/application.
+```
+ls <hercules_mount_point>
 ```
 ```
-LD_PRELOAD=${HOME}/hercules/install/lib/libhercules_posix.so cp myfile <hercules_mount_point>/copied_file
+cp myfile <hercules_mount_point>/copied_file
 ```
 ```
-LD_PRELOAD=${HOME}/hercules/install/lib/libhercules_posix.so ./myapp
+./myapp
 ```
 where "hercules_mount_point" is the MOUNT_POINT defined in the configuration file (CONF_PATH).
 
-**Remember that the paths where "myapp" writes and reads have to point to the "hercules_mount_point".** In other case, they will not be intercepted.
+**Important: the paths where "myapp" writes and reads have to point to the "hercules_mount_point".** In other case, they will not be intercepted.
+
+2.5 Unload the interceptation library.
+```
+unset LD_LIBRARY_PATH
+```
+
 
 
 ### 3. Stopping Metadata and Data storage servers
