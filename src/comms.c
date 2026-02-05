@@ -113,10 +113,11 @@ extern "C"
 		check_attr.field_mask = UCP_WORKER_ATTR_FIELD_THREAD_MODE;
 		ucp_worker_query(*ucp_worker, &check_attr);
 
-		if (check_attr.thread_mode != UCS_THREAD_MODE_MULTI)
-		{
-			fprintf(stderr, "CRITICAL WARNING: UCX downgraded thread mode to %d! Multi-threaded access will crash.\n", check_attr.thread_mode);
-		}
+		// To check if UCX has multithreading support.
+		// if (check_attr.thread_mode != UCS_THREAD_MODE_MULTI)
+		// {
+		// 	fprintf(stderr, "CRITICAL WARNING: UCX downgraded thread mode to %d! Multi-threaded access will crash.\n", check_attr.thread_mode);
+		// }
 		// else
 		// {
 		// 	fprintf(stderr, "Worker is running in UCS_THREAD_MODE_MULTI.\n");

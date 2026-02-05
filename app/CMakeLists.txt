@@ -26,7 +26,7 @@ ADD_EXECUTABLE( hercules_server
 		../src/hierarchical_records.cpp
 )
 
-ADD_LIBRARY( imss_static STATIC
+ADD_LIBRARY( hercules_static STATIC
 		../src/crc.c
 		../src/imss.c
 		../src/comms.c
@@ -42,7 +42,7 @@ ADD_LIBRARY( imss_static STATIC
 		../src/shared_memory.c
 )
 
-ADD_LIBRARY( imss_shared SHARED
+ADD_LIBRARY( hercules_shared SHARED
 		../src/crc.c
 		../src/imss.c
 		../src/comms.c
@@ -60,22 +60,22 @@ ADD_LIBRARY( imss_shared SHARED
 )
 
 
-SET(IMSS_INC "-I${CMAKE_SOURCE_DIR}/include")
-SET(IMSS_LIB "-L${CMAKE_SOURCE_DIR}/build/app")
+SET(HERCULES_INC "-I${CMAKE_SOURCE_DIR}/include")
+SET(HERCULES_LIB "-L${CMAKE_SOURCE_DIR}/build/app")
 
 target_link_directories(hercules_server PUBLIC ${UCX_LIBRARIES})
 #target_link_directories(monitor PUBLIC ${UCX_LIBRARIES})
 
 
-TARGET_LINK_LIBRARIES(imss_static ${CMAKE_THREAD_LIBS_INIT} ${MPI_LIBRARIES} ${GLIB_LIBRARIES} ucx::ucp ucx::ucs ${JEMALLOC_LIBRARIES} )
-TARGET_LINK_LIBRARIES(imss_shared ${CMAKE_THREAD_LIBS_INIT}  ${MPI_LIBRARIES} ${GLIB_LIBRARIES} dl ucx::ucp ucx::ucs ${JEMALLOC_LIBRARIES} )
+TARGET_LINK_LIBRARIES(hercules_static ${CMAKE_THREAD_LIBS_INIT} ${MPI_LIBRARIES} ${GLIB_LIBRARIES} ucx::ucp ucx::ucs ${JEMALLOC_LIBRARIES} )
+TARGET_LINK_LIBRARIES(hercules_shared ${CMAKE_THREAD_LIBS_INIT}  ${MPI_LIBRARIES} ${GLIB_LIBRARIES} dl ucx::ucp ucx::ucs ${JEMALLOC_LIBRARIES} )
 TARGET_LINK_LIBRARIES(hercules_server ${CMAKE_THREAD_LIBS_INIT}  ${MPI_LIBRARIES} ${GLIB_LIBRARIES} ${PCRE_LIBRARY} ucx::ucp ucx::ucs ${JEMALLOC_LIBRARIES} )
 #TARGET_LINK_LIBRARIES(monitor ${CMAKE_THREAD_LIBS_INIT}  ${MPI_LIBRARIES} ${GLIB_LIBRARIES} ${PCRE_LIBRARY} ucx::ucp ucx::ucs ${JEMALLOC_LIBRARIES} )
 
 install(TARGETS hercules_server DESTINATION bin)
 #install(TARGETS monitor DESTINATION bin)
-install(TARGETS imss_static DESTINATION lib)
-install(TARGETS imss_shared DESTINATION lib)
+install(TARGETS hercules_static DESTINATION lib)
+install(TARGETS hercules_shared DESTINATION lib)
 
 install(FILES ../scripts/hercules DESTINATION bin
         PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ

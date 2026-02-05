@@ -18,6 +18,7 @@ tst/2_4_6_SERVERS_RESULTS.csv
 .aux
 kill_stat.sh
 build
+install
 TODO
 Makefile
 .hello_glib.c
