@@ -2,9 +2,10 @@
 #SBATCH --job-name=lustre-io500    # Job name
 #SBATCH --output=logs/lustre/%j.log   # Standard output and error log
 #SBATCH --time=24:00:00               # Time limit hrs:min:sec
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=8
+#SBATCH --ntasks-per-node=16
 #SBATCH --partition=large
-#SBATCH --exclude=srvgpu[01-05],srv103
+#SBATCH --exclude=srvgpu[01-05]
 
 ##SBATCH --nodefile=/home/tester004/gesanche/hercules/tmp/hostfile_3419
 
@@ -31,8 +32,9 @@ IOR_PATH=/home/tester004/gesanche/io500/
 #spack unload ucx openmpi
 ## C3 packages.
 source "/home/tester004/load-local-spack.sh"
-source "/home/tester004/gesanche/hercules/Stuff/c3-spack-modules.sh"
-module load hpcx
+source "/home/tester004/gesanche/hercules/stuff/c3-spack-modules.sh"
+# module load hpcx
+module load openmpi/5.0.7-ucx
 
 #exit 0
 
@@ -43,7 +45,7 @@ COMMAND="$IOR_PATH/io500"
 COMMAND="$COMMAND ${IO500_CONFFILE}"
 
 set -x
-mpiexec --oversubscribe -np ${TOTAL_NUMBER_OF_PROCESSES} -npernode ${PROCESSES_PER_NODE} \
+mpiexec -np ${TOTAL_NUMBER_OF_PROCESSES} -npernode ${PROCESSES_PER_NODE} \
    ${COMMAND}
 
 echo "done!"

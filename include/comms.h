@@ -68,16 +68,19 @@ static const char MSG_NODELETE_OP[] = "NODELETE";
 static const char MSG_CLOSE_OP[] = "CLOSE";
 static const char MSG_OPEN_OP[] = "OPEN";
 static const char MSG_UPDATED_OP[] = "UPDATED!";
+static const char MSG_SPACE_OP[] = "NO_SPACE_LEFT";
 
 static const char STATUS_ATACH[] = "ATTACH";
 static const char STATUS_DEST[] = "DEST";
 static const char STATUS_DIRTY[] = "DIRTY";
 
-// static const char *RESPONSES_MESSAGES[] = {
-//     "OK",
-//     "ERROR"
-// };
-// static char OK_OP_MSG[] = "ERROR";
+const static char metadata_err_call_arg[] = "metadata ep";
+const static char data_err_call_arg[] = "data ep";
+const static char client_err_call_arg[] = "imss created ep";
+const static char main_server_err_call_arg[] = "main server ep";
+const static char add_server_err_call_arg[] = "add backend server ep";
+const static char ucx_server_err_call_arg[] = "ucx server ep";
+const static char set_server_err_call_arg[] = "set server ep";
 
 // To synchronize network operations.
 static pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
@@ -149,17 +152,19 @@ struct ucx_context
 /**
  * @brief Manages the state of a single asynchronous send operation on the server.
  */
-struct ServerSendRequest {
-    void* ucx_handle; // The handle returned by ucp_tag_send_nbx
-    char* buffer_to_free;
+struct ServerSendRequest
+{
+    void *ucx_handle; // The handle returned by ucp_tag_send_nbx
+    char *buffer_to_free;
     ServerSendRequest() : buffer_to_free(nullptr) {}
 };
 
 /**
  * @brief Manages the state of a single asynchronous receive operation on the server.
- * 
+ *
  */
-struct ServerRecvRequest {
+struct ServerRecvRequest
+{
     // void *buffer_to_free;
     void *client_pointer;
 };
@@ -204,15 +209,15 @@ extern "C"
     size_t send_req(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len, char *request);
     size_t send_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
     size_t isend_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
-	void* isend_data2(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from, ServerSendRequest* tracking_struct);
+    void *isend_data2(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from, ServerSendRequest *tracking_struct);
     size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest);
     size_t get_recv_data_length_2(ucp_worker_h ucp_worker, uint64_t dest, ucp_tag_recv_info_t *info_tag, ucp_tag_message_h *msg_tag);
-	void* start_recv_data_async(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest);
+    void *start_recv_data_async(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest);
     size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async);
     size_t recv_data_2(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async, ucp_tag_recv_info_t info_tag, ucp_tag_message_h msg_tag);
     size_t recv_data_opt(ucp_worker_h ucp_worker, ucp_ep_h ep, void **msg, size_t msg_length, uint64_t dest, int async);
     // size_t recv_req(ucp_worker_h ucp_worker, ucp_ep_h ep, char *msg);
-	void *irecv_data(ucp_worker_h ucp_worker, void *allocated_buffer, size_t buffer_len, uint64_t tag, ServerRecvRequest *tracking_struct);
+    void *irecv_data(ucp_worker_h ucp_worker, void *allocated_buffer, size_t buffer_len, uint64_t tag, ServerRecvRequest *tracking_struct);
     ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request, send_req_t *ctx);
     void stream_recv_cb(void *request, ucs_status_t status, size_t length, void *user_data);
     void send_handler_data(void *request, ucs_status_t status, void *ctx);
@@ -221,14 +226,15 @@ extern "C"
     void recv_handler(void *request, ucs_status_t status, const ucp_tag_recv_info_t *info, void *user_data);
     void send_cb(void *request, ucs_status_t status, void *user_data);
     void err_cb_client(void *arg, ucp_ep_h ep, ucs_status_t status);
-    void err_cb_server(void *arg, ucp_ep_h ep, ucs_status_t status);
+    // void err_cb_server(void *arg, ucp_ep_h ep, ucs_status_t status);
     void common_cb(void *user_data, const char *type_str);
     // void server_conn_handle_cb(ucp_conn_request_h conn_request, void *arg);
-    ucs_status_t server_create_ep(ucp_worker_h data_worker, ucp_conn_request_h conn_request, ucp_ep_h *server_ep);
+    // ucs_status_t server_create_ep(ucp_worker_h data_worker, ucp_conn_request_h conn_request, ucp_ep_h *server_ep);
     // void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
     // ucs_status_t ep_flush(ucp_ep_h ep, ucp_worker_h worker);
-    ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr);
-    ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, int *);
+    // ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr);
+    // ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, int *);
+    ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, const char *user_data);
     void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
     void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
     // Method sending a data structure with dynamic memory allocation fields.

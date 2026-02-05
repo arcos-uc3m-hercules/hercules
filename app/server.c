@@ -10,7 +10,7 @@
 #include "map_ep.hpp"
 #include "memalloc.h"
 #include "metadata_stat.h"
-#include "directory.h"
+// #include "directory.h"
 #include "policies.h"
 #include "utils.h"
 
@@ -18,8 +18,8 @@ extern int number_of_hosts;
 extern imss_info imss_copy;
 extern int SERVER_ID;
 // Pointer to the tree's root node.
-extern GNode *tree_root;
-extern pthread_mutex_t tree_mut;
+// extern GNode *tree_root;
+// extern pthread_mutex_t tree_mut;
 // extern int32_t __thread current_dataset;   // Dataset whose policy has been set last.
 extern imss curr_imss;
 
@@ -36,8 +36,6 @@ extern size_t *local_addr_len;
 extern StsHeader *mem_pool;
 
 extern struct arguments args;
-// std::shared_ptr<map_records> g_map;
-// uint64_t max_storage_size = 0;
 
 /* UCP objects */
 ucp_worker_h ucp_worker = NULL;
@@ -64,7 +62,6 @@ extern pthread_mutex_t mutex_garbage;
 extern char *IMSS_ROOT;
 extern size_t IMSS_ROOT_LEN;
 
-
 // Malleability decomissioning.
 // int waiting_clients = 0;
 // pthread_mutex_t mutex_malleability = PTHREAD_MUTEX_INITIALIZER;
@@ -73,6 +70,8 @@ extern pthread_cond_t global_run_malleability_cond;
 extern pthread_cond_t global_run_shutdown_cond;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
+
+char main_err_call_arg[] = "main server";
 
 /**
  * @brief Re-distribute the blocks of this server to another servers
@@ -120,7 +119,6 @@ int32_t main(int32_t argc, char **argv)
 	pthread_cond_init(&global_run_shutdown_cond, NULL);
 	// sem_init(&mutex_malleability, 1, 0);
 
-
 	/* UCP objects */
 	ucp_context_h ucp_context = NULL;
 
@@ -149,7 +147,6 @@ int32_t main(int32_t argc, char **argv)
 	ucp_worker_address_attr_t attr;
 
 	uint64_t max_system_ram_allowed = 0;
-	// uint64_t max_storage_size = 0; // memory pool size
 	uint32_t num_blocks = 0;
 	u_int16_t hercules_thread_pool_size = 0;
 
@@ -193,10 +190,8 @@ int32_t main(int32_t argc, char **argv)
 
 	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-start", args.hercules_path, args.type, args.id);
 
-	// args.logging.hercules_debug_level = SLOG_NONE;
 	hercules_thread_pool_size = args.thread_pool;
 	fprintf(stderr, "Number of threads=%d\n", hercules_thread_pool_size);
-	// POLICY = args.policy;
 	strncpy(POLICY, args.policy, sizeof(POLICY));
 
 	char log_path[PATH_MAX] = {0};
@@ -238,9 +233,9 @@ int32_t main(int32_t argc, char **argv)
 		{
 			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
 			fprintf(stderr, "Number of hosts in %s are %d\n", args.alloc_data_hostfile, number_of_hosts);
-		} 
+		}
 		// TODO: put the following message on the workers.c, where malleability is applied.
-		// else 
+		// else
 		// {
 		// 	fprintf(stderr,"ERROR: alloc_data_hostfile has not ben set. HERCULES_ALLOC_DATA_HOSTFILE = hostfile_path\n");
 		// }
@@ -296,9 +291,10 @@ int32_t main(int32_t argc, char **argv)
 	// 	StsQueue.push(mem_pool, buffer);
 	// }
 
-	/* CHECK THIS OUT!
+	/*
 	 ***************************************************
-	 In relation to the type argument provided, an HERCULES or a metadata server will be deployed. */
+	 In relation to the type argument provided, an HERCULES or a metadata server will be deployed.
+	 */
 
 	// HERCULES server.
 	if (args.type == TYPE_DATA_SERVER)
@@ -378,7 +374,7 @@ int32_t main(int32_t argc, char **argv)
 
 			char request[REQUEST_SIZE] = {0};
 			sprintf(request, "%" PRIu32 " GET %s", id, "MAIN!QUERRY");
-			slog_debug("Request - %s", request);
+			slog_debug("Request - %s to socket %d", request, oob_sock);
 			if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
 			{
 				perror("HERCULES_ERR_STAT_HELLO");
@@ -402,19 +398,20 @@ int32_t main(int32_t argc, char **argv)
 			free(stat_add);
 
 			/* Send client UCX address to server */
-			ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
-								   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
-								   UCP_EP_PARAM_FIELD_ERR_HANDLER |
-								   UCP_EP_PARAM_FIELD_USER_DATA;
-			ep_params.address = peer_addr;
-			ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
-			ep_params.err_handler.cb = err_cb_client;
-			ep_params.err_handler.arg = NULL;
-			ep_params.user_data = &ep_status;
-			slog_debug("Creating endpoint with the metadata server %d", i);
-			status = ucp_ep_create(ucp_worker, &ep_params, &metadata_endpoints[i]);
-			slog_debug("Endpoint with the metadata %d created", i);
+			// ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
+			// 					   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
+			// 					   UCP_EP_PARAM_FIELD_ERR_HANDLER |
+			// 					   UCP_EP_PARAM_FIELD_USER_DATA;
+			// ep_params.address = peer_addr;
+			// ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+			// // ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+			// ep_params.err_handler.cb = err_cb_client;
+			// // ep_params.err_handler.arg = (void *)main_err_call_arg;
+			// // ep_params.user_data = &ep_status;
+			// slog_debug("Creating endpoint with the metadata server %d", i);
+			// status = ucp_ep_create(ucp_worker, &ep_params, &metadata_endpoints[i]);
+			// slog_debug("Endpoint with the metadata %d created", i);
+			client_create_ep_data(ucp_worker, &metadata_endpoints[i], peer_addr, main_server_err_call_arg);
 			// status = ucp_worker_get_address(ucp_worker, &req_addr, &req_addr_len);
 
 			ucp_worker_attr_t worker_attr;
@@ -422,7 +419,6 @@ int32_t main(int32_t argc, char **argv)
 			status = ucp_worker_query(ucp_worker, &worker_attr);
 			req_addr_len = worker_attr.address_length;
 			req_addr = worker_attr.address;
-
 			attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
 			ucp_worker_address_query(req_addr, &attr);
 			slog_debug("[srv_worker_thread] Server UID %" PRIu64 ".", attr.worker_uid);
@@ -453,7 +449,7 @@ int32_t main(int32_t argc, char **argv)
 					return -1;
 				}
 				// Receive the associated structure.
-				imss_info *imss_info_ = (imss_info *)malloc(sizeof(imss_info));//malloc(sizeof(imss_info) * length);
+				imss_info *imss_info_ = (imss_info *)malloc(sizeof(imss_info)); // malloc(sizeof(imss_info) * length);
 				ret = recv_dynamic_stream(ucp_worker, metadata_endpoints[i], imss_info_, IMSS_INFO, attr.worker_uid, length);
 				// If another data server has taken the URI, this HERCULES configuration should not be deployed.
 				// Two HERCULES configurations cannot have the same URI.
@@ -554,15 +550,15 @@ int32_t main(int32_t argc, char **argv)
 		// data_endpoints = (ucp_ep_h *)malloc(args.num_data_servers * sizeof(ucp_ep_h));
 
 		// Create the tree_root node.
-		char *root_data = (char *)calloc(URI_, sizeof(char));
-		strncpy(root_data, args.imss_uri, URI_);
-		tree_root = g_node_new((void *)root_data);
-		if (pthread_mutex_init(&tree_mut, NULL) != 0)
-		{
-			perror("HERCULES_ERR_TREE_MUT_INIT");
-			slog_fatal("HERCULES_ERR_TREE_MUT_INIT");
-			exit(1);
-		}
+		// char *root_data = (char *)calloc(URI_, sizeof(char));
+		// strncpy(root_data, args.imss_uri, URI_);
+		// tree_root = g_node_new((void *)root_data);
+		// if (pthread_mutex_init(&tree_mut, NULL) != 0)
+		// {
+		// 	perror("HERCULES_ERR_TREE_MUT_INIT");
+		// 	slog_fatal("HERCULES_ERR_TREE_MUT_INIT");
+		// 	exit(1);
+		// }
 	}
 
 	/***************************************************************/
@@ -575,7 +571,9 @@ int32_t main(int32_t argc, char **argv)
 
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));
-	hierarchical_map = HierarchicalMapCreate(std::string(args.imss_uri));
+	hierarchical_map = new HierarchicalRecords(std::string(args.imss_uri));
+	garbage_collector_map = new HierarchicalRecords(std::string(args.imss_uri));
+
 	// copy the reference to a global map.
 	// g_map = map;
 
@@ -622,6 +620,29 @@ int32_t main(int32_t argc, char **argv)
 	p_argv arguments[total_threads];
 
 	ucp_worker_threads = (ucp_worker_h *)malloc(hercules_thread_pool_size * sizeof(ucp_worker_h));
+	// ucp_worker_h shared_worker;
+	// ret = init_worker(ucp_context, &shared_worker);
+	// if (ret != 0)
+	// {
+	// 	perror("HERCULES_ERR_INIT_SHARED_WORKER");
+	// 	return -1;
+	// }
+
+	// ucp_worker_attr_t worker_attr;
+	// memset(&worker_attr, 0, sizeof(worker_attr));
+	// worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
+
+	// status = ucp_worker_query(shared_worker, &worker_attr);
+	// if (status != UCS_OK)
+	// {
+	//     ready(tmp_file_path, "ERROR");
+	//     slog_error("HERCULES_ERR_UCP_WORKER_QUERY: %s", ucs_status_string(status));
+	//     perror("HERCULES_ERR_UCP_WORKER_QUERY");
+	//     ucp_worker_destroy(shared_worker);
+	//     ucp_cleanup(ucp_context);
+	//     return -1;
+	// }
+
 	local_addr = (ucp_address_t **)malloc(hercules_thread_pool_size * sizeof(ucp_address_t *));
 	local_addr_len = (size_t *)malloc(hercules_thread_pool_size * sizeof(size_t));
 
@@ -700,12 +721,14 @@ int32_t main(int32_t argc, char **argv)
 			}
 
 			arguments[i].ucp_worker = ucp_worker_threads[aux_idx];
+			// arguments[i].ucp_worker = shared_worker;
 
 			ucp_worker_attr_t worker_attr;
 			memset(&worker_attr, 0, sizeof(worker_attr));
 
 			worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
 			status = ucp_worker_query(ucp_worker_threads[aux_idx], &worker_attr);
+			// status = ucp_worker_query(shared_worker, &worker_attr);
 			if (status != UCS_OK)
 			{
 				ready(tmp_file_path, "ERROR");
@@ -754,20 +777,21 @@ int32_t main(int32_t argc, char **argv)
 
 		strcpy(my_imss.uri_, args.imss_uri);
 		my_imss.ips = (char **)calloc(num_servers, sizeof(char *));
-		my_imss.status = (int *)malloc(num_servers * sizeof(int));
-		my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int));
-		my_imss.num_storages = 0;// This value is increase on ReadHostfile.  num_servers; 
+		// my_imss.status = (int *)malloc(num_servers * sizeof(int));
+		// my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int));
+		my_imss.num_storages = 0; // This value is increase on ReadHostfile.  num_servers;
 		my_imss.num_active_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important
 		ReadHostfile(deployfile, &my_imss);
 
-		my_imss.num_storages = 0;
+		// my_imss.num_storages = 0;
 
 		char key_plus_size[REQUEST_SIZE] = {0};
 		// Send the created structure to the metadata server.
-		sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", IMSS_INFO, (sizeof(imss_info) + my_imss.num_storages * LINE_LENGTH + my_imss.num_storages * sizeof(int) + my_imss.num_storages * sizeof(int)), my_imss.uri_);
-		slog_debug("[main] Request to metadata - %s", key_plus_size);
+		sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", IMSS_INFO, (sizeof(imss_info) + my_imss.num_active_storages * LINE_LENGTH + my_imss.num_active_storages * sizeof(int) + my_imss.num_active_storages * sizeof(int)), my_imss.uri_);
+		// sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", IMSS_INFO, (sizeof(imss_info) + my_imss.num_active_storages * LINE_LENGTH + my_imss.num_active_storages * sizeof(int) + my_imss.num_active_storages * sizeof(int)), my_imss.uri_);
+		slog_debug("[main] Request to metadata - %s, num_active_storages=%d", key_plus_size, my_imss.num_active_storages);
 		for (size_t j = 0; j < args.num_metadata_servers; j++)
 		{
 			// if (send_req(ucp_worker, metadata_endpoints[j], req_addr, req_addr_len, key_plus_size) == 0)
@@ -796,7 +820,6 @@ int32_t main(int32_t argc, char **argv)
 
 			slog_debug("[SERVER] Creating IMSS_INFO at metadata server. ");
 			// Send the new HERCULES metadata structure to the metadata server entity.
-			// TODO: Check how this msg is received on the worker. We need to split between IMSS_INFO and DATASET_INFO.
 			if (send_dynamic_stream(ucp_worker, metadata_endpoints[j], (void *)&my_imss, IMSS_INFO, attr.worker_uid) == -1)
 			{
 				return -1;
@@ -807,8 +830,8 @@ int32_t main(int32_t argc, char **argv)
 		{
 			free(my_imss.ips[i]);
 		}
-		free((void *)my_imss.status);
-		free((void *)my_imss.arr_num_active_storages);
+		// free((void *)my_imss.status);
+		// free((void *)my_imss.arr_num_active_storages);
 		free(my_imss.ips);
 	}
 
@@ -932,13 +955,13 @@ int32_t main(int32_t argc, char **argv)
 		// Send a message to all data servers to shutdown.
 
 		// Freeing all resources of the tree structure.
-		g_node_traverse(tree_root, G_PRE_ORDER, G_TRAVERSE_ALL, -1, gnodetraverse, NULL);
+		// g_node_traverse(tree_root, G_PRE_ORDER, G_TRAVERSE_ALL, -1, gnodetraverse, NULL);
 
-		if (pthread_mutex_destroy(&tree_mut) != 0)
-		{
-			perror("HERCULES_ERR_TREE_MUT_DESTROY");
-			pthread_exit(NULL);
-		}
+		// if (pthread_mutex_destroy(&tree_mut) != 0)
+		// {
+		// 	perror("HERCULES_ERR_TREE_MUT_DESTROY");
+		// 	pthread_exit(NULL);
+		// }
 		// fprintf(stderr, "Ending metadata server.\n");
 	}
 	else
@@ -949,6 +972,12 @@ int32_t main(int32_t argc, char **argv)
 		// sem_unlink("/hercules_shm_sem");
 
 		free(region_locks);
+	}
+
+	if (hierarchical_map != nullptr)
+	{
+		delete hierarchical_map;
+		hierarchical_map = nullptr;
 	}
 
 	// Close publisher socket.

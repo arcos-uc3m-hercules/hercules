@@ -347,6 +347,7 @@ if [[ "$SLURM" -eq "1" ]]; then
     CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
     cp "${FILE}" "${CURR_HERCULES_CONF_FILE}"
 else 
+    echo "[+] Slurm is not active."
     CURR_HERCULES_CONF_FILE="${FILE}"
 fi
 
@@ -490,7 +491,7 @@ fi
 # set -x
 ## If not empty, the field "METADATA_HOSTFILE" and "DATA_HOSTFILE" field was set on the configuration file.
 if [ ! -z "$HERCULES_METADATA_HOSTFILE" ]; then
-    echo "${HERCULES_METADATA_HOSTFILE} exists"
+    # echo "${HERCULES_METADATA_HOSTFILE} was set"
     if [[ "$SLURM" -eq "1" ]]; then
         # If slurm is enabled, we added the slurm job id to the meta hostfile.
         METADATA_HOSTFILE_BASENAME=$(basename "${HERCULES_METADATA_HOSTFILE}")
@@ -587,6 +588,7 @@ then
         ## then we create a file which contains the hostnames of the nodes that
         ## will be used to deploy the determinate set of metadata servers.
         #readarray -t meta_hosts < <(head -n $HERCULES_NUM_METADATA hostfile)
+        echo "Making metadata hostfile in ${HERCULES_METADATA_HOSTFILE}"
         head -n "${HERCULES_NUM_METADATA}" "${FULL_HOSTFILE}" > "${HERCULES_METADATA_HOSTFILE}"
     fi
     ## To create an array with the meta nodes.
@@ -636,7 +638,7 @@ do
         # For example, if the header on the deployment script is "#SBATCH --cpus-per-task=36",
         # a valid entry here is "--cpus-per-task =18". This allows the execution of the next step 
         # "WaitForServers", which is being executed on the same node as the server task.
-        srun  -N 1 -n 1 --cpus-per-task=18 -w $node -- $COMMAND &
+        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- $COMMAND &
         set +x 
     fi
     i=$((i+1))
@@ -672,8 +674,26 @@ then
         ## If a data file was not defined and we have slurm's nodes allocated,
         ## then we create a file which contains the hostnames of the nodes that
         ## will be used to deploy the determinate set of data servers.
+        # echo ${FULL_HOSTFILE}
+        # echo ${HERCULES_ALLOC_DATA_HOSTFILE}
+        # echo ${MALLEABILITY}
         tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${HERCULES_NUM_DATA}" > "${HERCULES_DATA_HOSTFILE}"
-        tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${UPPER_BOUND_MALLEABILITY}" > "${HERCULES_ALLOC_DATA_HOSTFILE}"
+
+        if [[ "$MALLEABILITY" -eq 1 ]]; then
+            if [[ -z "${HERCULES_ALLOC_DATA_HOSTFILE}" ]]; then
+                echo "Error: ALLOC_DATA_HOSTFILE was not defined and it is required when MALLEABILITY=1."
+                echo "Be sure you defined ALLOC_DATA_HOSTFILE on the configuration file: ${FILE}"
+                exit 1
+            fi
+            ## makes the data hostfile containing all the allocated nodes for data servers, this
+            ## nodes can be used on malleability extending operations.
+            tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${UPPER_BOUND_MALLEABILITY}" > "${HERCULES_ALLOC_DATA_HOSTFILE}"
+            if [[ $? -ne 0 ]]; then
+                echo "Error: Failed to create ${HERCULES_ALLOC_DATA_HOSTFILE}"
+                exit 1
+            fi  
+        fi
+        
     fi
     ## To create an array with the data nodes.
     readarray -t data_hosts < "${HERCULES_DATA_HOSTFILE}"
@@ -717,7 +737,7 @@ do
             echo "[+] Starting data server $i on $node..."
         fi
         #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
-        srun  -N 1 -n 1 --cpus-per-task=18 -w $node -- $COMMAND &
+        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- $COMMAND &
     fi
     i=$(($i+1))
 done

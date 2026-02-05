@@ -1,5 +1,6 @@
 #!/bin/bash
 
+SBATCH_FLAGS="--partition=large -A uc3m_a0-sciot" #--exclusive" 
 SCRIPT_NAME="c3_io500_lustre_slurm.sh"
 # Minimal test.
 #IO500_CONFFILE="/home/tester004/gesanche/io500/Configurations/config-lustre-minimal.ini"
@@ -8,9 +9,9 @@ IO500_CONFFILE="/home/tester004/gesanche/hercules/bash/tests/metadata/Benchmarks
 
 
 NODES_FOR_CLIENTS_RANGE=(10)
-CLIENTS_PER_NODE_RANGE=(1)
+CLIENTS_PER_NODE_RANGE=(16)
 
-MAX_ITERATIONS=5
+MAX_ITERATIONS=1
 
 # set -o xtrace
 #set -x
@@ -30,7 +31,7 @@ for test_number in $(seq 1 $MAX_ITERATIONS); do
 			TOTAL_NUMBER_OF_CLIENTS=$((NODES_FOR_CLIENTS * CLIENTS_PER_NODE))
 			set -x
 			## The first job does not have dependencie (do not wait for another job to end).
-			jid=$(sbatch --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME ${TOTAL_NUMBER_OF_CLIENTS} ${CLIENTS_PER_NODE} "${IO500_CONFFILE}" | cut -d ' ' -f4)
+			jid=$(sbatch ${SBATCH_FLAGS} --dependency=afterany:"${jid}" -N $NUMBER_OF_NODES $SCRIPT_NAME ${TOTAL_NUMBER_OF_CLIENTS} ${CLIENTS_PER_NODE} "${IO500_CONFFILE}" | cut -d ' ' -f4)
 			echo $jid
 			set +x
 		done

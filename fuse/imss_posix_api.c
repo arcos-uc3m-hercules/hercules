@@ -1,5 +1,4 @@
 // #define FUSE_USE_VERSION 26
-//  #include "map.hpp"
 #include "hierarchical_map.hpp"
 #include "mapprefetch.hpp"
 #include "hercules.hpp"
@@ -65,9 +64,6 @@ pthread_mutex_t lock_file = PTHREAD_MUTEX_INITIALIZER;
 // extern int32_t IMSS_DEBUG;
 
 // to simulate maliability.
-int32_t ior_operation_number;
-int32_t mall_th_1 = 30;
-int32_t mall_th_2 = 60;
 int32_t MALLEABILITY;
 int32_t MALLEABILITY_TYPE;
 int32_t UPPER_BOUND_SERVERS;
@@ -180,12 +176,19 @@ extern "C"
 	void fd_lookup(char *path, int *fd, struct stat *s, char **aux)
 	{
 		*fd = -1;
+
+		// TODO: we can assume root always exist,
+		// so we can "return" here.
+		// if (!strcmp(path, IMSS_ROOT))
+		// {
+		// }
+
 		// Seek for the fd on the map.
-		// int found = map_search(map, path, fd, s, aux);
-		size_t hierarchical_map_size = HierarchicalMapGetSize(hierarchical_map);
-		char msg[PATH_MAX] = {0};
-		sprintf(msg, "HierarchicalMapSearch %lu", hierarchical_map_size);
-		int found = TIMING(HierarchicalMapSearch(hierarchical_map, path, fd, s, aux), msg, int, 0);
+		// size_t hierarchical_map_size = HierarchicalMapGetSize(hierarchical_map);
+		// char msg[PATH_MAX] = {0};
+		// sprintf(msg, "HierarchicalMapSearch %lu", hierarchical_map_size);
+		// int found = TIMING(HierarchicalMapSearch(hierarchical_map, path, fd, s, aux), msg, int, 0);
+		int found = HierarchicalMapSearch(hierarchical_map, path, fd, s, aux);
 
 		if (found == -1)
 		{
@@ -348,27 +351,9 @@ extern "C"
 			return 0;
 		}
 
-		// 	// free(refs);
-		// 	return 0;
-		// 	break;
-		// }
-		// case TYPE_DIRECTORY:
-		// {
-		// 	// ConcatLastSlashC((char *)path);
-		// 	break;
-		// }
-		// case TYPE_REGULAR_FILE: // Case file
-		// {
-		// 	break;
-		// }
-		// default:
-		// 	slog_error("Unkown type", type);
-		// 	return -ENOENT; // to check!
-		// }
-
+		slog_debug("Caliing fd loopkup");
 		// Seek for the dataset on the local map. If it not found,
 		// we open it.
-
 		TIMING_NO_RETURN(fd_lookup((char *)imss_path, &fd, &stats, &aux), "fd_lookup", 0);
 		if (fd < 0)
 		{ // not found.
@@ -459,28 +444,6 @@ extern "C"
 			// break;
 		}
 
-		// switch (type)
-		// {
-		// case TYPE_DIRECTORY:
-		// 	if ((n_ent = get_dir(imss_path, &refs)) != -1)
-		// 	{
-		// 		stbuf->st_size = 4;
-		// 		slog_debug("is a directy, setting st_nlink to 1");
-		// 		stbuf->st_nlink = 1;
-		// 		stbuf->st_mode = S_IFDIR | 0775;
-		// 		// free all memory in refs.
-		// 		free_entries(&refs, n_ent);
-		// 	}
-		// case TYPE_REGULAR_FILE:
-		// 	stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0);
-		// 	break;
-		// default:
-		// 	slog_error("Unkown type", type);
-		// 	return -ENOENT; // to check!
-		// }
-
-		// pthread_mutex_unlock(&lock_file);
-		// free(aux);
 		return 0;
 	}
 
@@ -520,11 +483,8 @@ extern "C"
 		int ret = -1;
 		// TODO -> Access control
 		// DEBUG
-		const char *imss_path = path; // (char *)calloc(MAX_PATH, sizeof(char));
+		const char *imss_path = path;
 		int32_t file_desc = -1;
-		// get_iuri(path, imss_path);
-
-		ior_operation_number = 0;
 
 		int fd = 0;
 		struct stat stats;
@@ -578,9 +538,10 @@ extern "C"
 			if (ret < 0)
 			{
 				free(data);
-				perror("ERR_HERCULES_IMSS_OPEN_GET_DATA");
-				slog_error("ERR_HERCULES_IMSS_OPEN_GET_DATA");
-				// return -1;
+				char err_msg[MAX_ERR_MSG_LEN] = {0};
+				sprintf(err_msg, "ERR_HERCULES_IMSS_OPEN_GET_DATA: %s, ret=%d", imss_path, ret);
+				perror(err_msg);
+				slog_error("%s", err_msg);
 				return -ENOENT;
 			}
 
@@ -603,7 +564,7 @@ extern "C"
 		// File does not exist
 		if (file_desc < 0)
 		{
-			slog_error("[FUSE]file descriptor: %d", file_desc);
+			slog_error("[FUSE] file descriptor: %d", file_desc);
 			return -1;
 		}
 
@@ -770,9 +731,8 @@ extern "C"
 
 		if (MALLEABILITY_ON == 1)
 		{
-			update_dataset((char *)path, ds);			
+			update_dataset((char *)path, ds);
 		}
-		
 
 		// total_amount_read += byte_count;
 		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, total_bytes_scheduled);
@@ -1839,11 +1799,13 @@ extern "C"
 			slog_debug("writting %" PRIu64 " kilobytes (%" PRIu64 " bytes) with an offset of %" PRIu64 " kilobytes (%" PRIu64 " bytes)", bytes_to_copy / 1024, bytes_to_copy, block_offset / 1024, block_offset);
 
 			// Send data to data server.
-			if (TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO), "set_data", int32_t, -1) < 0)
+			int32_t ret_set_data = TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO), "set_data", int32_t, -1);
+			if (ret_set_data < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
-				error_print = -ENOENT;
-				return -ENOENT;
+				fprintf(stderr, "[imss_write] Error writing to Hercules: %s\n", strerror(ret_set_data));
+				error_print = ret_set_data;
+				return ret_set_data;
 			}
 
 			bytes_stored += bytes_to_copy;
@@ -1857,13 +1819,12 @@ extern "C"
 		{
 			async_data_worker_progress(0);
 		}
-		
+
 		// updates intervals on the back-end.
 		if (MALLEABILITY_ON == 1)
 		{
 			update_dataset((char *)path, ds);
 		}
-		
 
 		// Update header count if the file has become bigger.
 		if (size + off > stats.st_size)
@@ -1874,7 +1835,6 @@ extern "C"
 			slog_debug("[imss_write] Updating stat, st_size=%ld, st_nlink=%lu", stats.st_size, stats.st_nlink);
 			HierarchicalMapUpdate(hierarchical_map, rpath, ds, stats);
 		}
-		// free(rpath);
 
 		t = clock() - t;
 		double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
@@ -2345,15 +2305,14 @@ extern "C"
 		// memcpy(head, &stats, sizeof(struct stat));
 
 		// Updates the size of the file in the block 0.
-		if (set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC) < 0)
+		int32_t ret_set_data = set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC);
+		if (ret_set_data < 0)
 		{
 			perror("HERCULES_ERR_WRITTING_BLOCK");
 			slog_error("HERCULES_ERR_WRITTING_BLOCK");
-			// free(head);
-			return -ENOENT;
+			return ret_set_data;
 		}
 
-		// free(head);
 		return ds;
 	}
 
@@ -2454,11 +2413,13 @@ extern "C"
 		// stores block 0.
 		// fprintf(stdout, "size of stat=%lu bytes\n", sizeof(struct stat));
 		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0, SYNC);
+		pthread_mutex_unlock(&lock); // unlock.
 		if (ret < 0)
 		{
 			slog_error("HERCULES_ERR_IMSS_CREATE_SET_DATA_0");
+			fprintf(stderr, "HERCULES_ERR_IMSS_CREATE_SET_DATA_0\n");
+			return ret;
 		}
-		pthread_mutex_unlock(&lock); // unlock.
 
 		HierarchicalMapErase(hierarchical_map, rpath);
 		slog_debug("HierarchicalMapErase(hierarchical_map, rpath:%s)", rpath);
@@ -2500,7 +2461,7 @@ extern "C"
 	 * https://man7.org/linux/man-pages/man2/rmdir.2.html
 	 * @return 0 on success. On error, the value of errno is returned.
 	 */
-	int imss_rmdir(const char *imss_path)
+	int imss_rmdir(const char *imss_path, struct stat *stats)
 	{
 
 		// Needed variables for the call
@@ -2524,131 +2485,142 @@ extern "C"
 			// free(imss_path);
 			return -ENOENT;
 		}
-		imss_unlink(imss_path);
+		imss_unlink(imss_path, stats);
 		// free(imss_path);
 		return 0;
 	}
 
-	int imss_unlink(const char *path)
+	int imss_unlink(const char *path, struct stat *stats)
 	{
 		const char *imss_path = path; // this pointer should not be free.
 		slog_info("path=%s, imss_path=%s", path, imss_path);
 
 		uint32_t ds = -1;
 		int fd = 0;
-		struct stat stats;
+		struct stat aux_stats;
 		char *buff = NULL;
 		int ret = 0;
-		pthread_mutex_lock(&lock);
-		fd_lookup((char *)imss_path, &fd, &stats, &buff);
-		// if (fd >= 0)
-		// 	ds = fd;
+		// pthread_mutex_lock(&lock);
+		// if (!stats)
+		// {
+		// 	stats = &aux_stats;
+		// 	// if we pass the stat, we skip this.
+		// 	slog_debug("Calling fd_lookup");
+		// 	fd_lookup((char *)imss_path, &fd, stats, &buff);
+		// }
 		// else
 		// {
-		// 	slog_debug("%s not found in lookup", imss_path);
-		// 	pthread_mutex_unlock(&lock);
-		// 	return -ENOENT;
+		// 	slog_debug("stat has been passed");
+		// 	buff = (char *)stats;
 		// }
+
 		int file_desc = 0;
-		if (fd >= 0)
-			file_desc = fd;
-		else if (fd == -2)
-			return -ENOENT;
-		else
-		{
-			// If not in the local map, open de dataset.
-			file_desc = open_dataset((char *)imss_path, 0);
-			if (file_desc < 0)
-			{ // files does not exist.
-				return -ENOENT;
-			}
+		// if (fd >= 0)
+		// 	file_desc = fd;
+		// else if (fd == -2)
+		// 	return -ENOENT;
+		// else
+		// {
+		// 	// If not in the local map, open de dataset.
+		// 	file_desc = open_dataset((char *)imss_path, 0);
+		// 	if (file_desc < 0)
+		// 	{ // files does not exist.
+		// 		return -ENOENT;
+		// 	}
 
-			// Get initial block (0).
-			char *data = NULL;
-			data = (char *)malloc(sizeof(struct stat) * sizeof(char) + 1);
-			if (data == NULL)
-			{
-				perror("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
-				slog_error("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
-				return -ENOMEM;
-			}
-			memcpy(&stats, data, sizeof(struct stat));
-			// map_put(map, imss_path, file_desc, stats, (char *)data);
-			HierarchicalMapPut(hierarchical_map, imss_path, file_desc, stats, (char *)data);
-			buff = data;
+		// 	// Get initial block (0).
+		// 	char *data = NULL;
+		// 	data = (char *)malloc(sizeof(struct stat) * sizeof(char) + 1);
+		// 	if (data == NULL)
+		// 	{
+		// 		perror("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
+		// 		slog_error("HERCULES_ERR_IMSS_UNLINK_MEMORY_ALLOC");
+		// 		pthread_mutex_unlock(&lock);
+		// 		return -ENOMEM;
+		// 	}
+		// 	// memcpy(stats, data, sizeof(struct stat));
+		// 	// HierarchicalMapPut(hierarchical_map, imss_path, file_desc, *stats, (char *)data);
+		// 	HierarchicalMapPut(hierarchical_map, imss_path, file_desc, *((struct stat *)data), (char *)data);
+		// 	buff = data;
+		// }
+
+		// //  data is filled in "get data".
+		// ret = get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
+		// if (ret < 0)
+		// {
+		// 	perror("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
+		// 	slog_error("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
+		// 	pthread_mutex_unlock(&lock);
+		// 	return -1;
+		// }
+		// // pthread_mutex_lock(&lock);
+		// // Read header.
+		// struct stat *header = (struct stat *)buff;
+		// // memcpy(&header, buff, sizeof(struct stat));
+
+		// if (header->st_nlink > 0)
+		// {
+		// 	header->st_nlink = header->st_nlink - 1;
+		// }
+
+		// // Write initial block (0).
+		// // memcpy(buff, &header, sizeof(struct stat));
+		// slog_debug("header.st_nlink=%lu, head.st_size=%lu", header->st_nlink, header->st_size);
+		// set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		// pthread_mutex_unlock(&lock);
+
+		// // if it is the last link, the file is deleted (we also should to check if other process is open).
+		// if (header->st_nlink == 0)
+		// {
+		// Those operations must be performed by the server itself when it knows no more process are using the file.
+		// To erase the data in the backend.
+		// ret = unlink_dataset(imss_path, file_desc, S_ISDIR(stats->st_mode));
+
+		// to erase metadata in the backend.
+		ret = delete_dataset(imss_path, file_desc, 0);
+		if (ret == 0)
+		{ // dataset has been delete on the metadata backend.
+			// to erase data in the backend.
+			ret = unlink_dataset(imss_path, file_desc);
 		}
 
-		//  data is filled in "get data".
-		ret = get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
-		if (ret < 0)
+		slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
+
+		switch (ret)
 		{
-			perror("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
-			slog_error("HERCULES_ERR_IMSS_UNLINK_GET_DATA");
-			pthread_mutex_unlock(&lock);
-			return -1;
-		}
-		// pthread_mutex_lock(&lock);
-		// Read header.
-		struct stat header;
-		memcpy(&header, buff, sizeof(struct stat));
-
-		if (header.st_nlink > 0)
-		{
-			header.st_nlink = header.st_nlink - 1;
-		}
-
-		// Write initial block (0).
-		memcpy(buff, &header, sizeof(struct stat));
-		slog_debug("header.st_nlink=%lu, head.st_size=%lu", header.st_nlink, header.st_size);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
-		pthread_mutex_unlock(&lock);
-
-		// if it is the last link, the file is deleted (we also should to check if other process is open).
-		if (header.st_nlink == 0)
-		{
-			// Those operations must be performed by the server itself when it knows no more process are using the file.
-			// Erase metadata in the backend.
-			ret = delete_dataset(imss_path, file_desc, S_ISDIR(header.st_mode));
-			slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
-
-			switch (ret)
-			{
-			case 1: // datasate was not delete.
-			{
-				break;
-			}
-			case 0: // dataset was delete.
-			{
-				// ******************************* TO CHECK!
-				// pthread_mutex_lock(&lock_file);
-				HierarchicalMapErase(hierarchical_map, imss_path);
-				// pthread_mutex_unlock(&lock_file);
-
-				// slog_debug("Calling map_release_prefetch %s", path);
-				// map_release_prefetch(map_prefetch, imss_path);
-				// slog_debug("Finish map_release_prefetch %s", path);
-				// *******************************
-				// ret = release_dataset(file_desc);
-				ret = release_dataset(imss_path);
-				slog_debug("relese_dataset ret=%d", ret);
-				if (ret < 0)
-				{
-					slog_error("HERCULES_ERR_RELEASE_DATASET");
-				}
-
-				ret = 3;
-				break;
-			}
-			default: // error deleting the dataset.
-				slog_error("ERR_HERCULES_DELETE_DATASET");
-				ret = -1;
-				break;
-			}
-			// **************************
-		}
-		else
+		case 1: // datasate was not delete.
 		{
 			ret = 1; // file was not deleted.
+			break;
+		}
+		case 0: // dataset was delete.
+		{
+			// ******************************* TO CHECK!
+			// pthread_mutex_lock(&lock_file);
+			HierarchicalMapErase(hierarchical_map, imss_path);
+			// pthread_mutex_unlock(&lock_file);
+
+			// slog_debug("Calling map_release_prefetch %s", path);
+			// map_release_prefetch(map_prefetch, imss_path);
+			// slog_debug("Finish map_release_prefetch %s", path);
+			// *******************************
+			// ret = release_dataset(file_desc);
+			ret = release_dataset(imss_path);
+			slog_debug("relese_dataset ret=%d", ret);
+			if (ret < 0)
+			{
+				perror("HERCULES_ERR_UNLINK_RELEASE_DATASET");
+				slog_error("HERCULES_ERR_UNLINK_RELEASE_DATASET");
+			}
+
+			ret = 3;
+			break;
+		}
+		default: // error deleting the dataset.
+			perror("ERR_HERCULES_UNLINK_DATASET");
+			slog_error("ERR_HERCULES_UNLINK_DATASET");
+			ret = -1;
+			break;
 		}
 
 		return ret;
@@ -2662,7 +2634,7 @@ extern "C"
 		uint32_t file_desc;
 
 		char *rpath = (char *)calloc(MAX_PATH, sizeof(char));
-		get_iuri(path, rpath);
+		// get_iuri(path, rpath);
 
 		// Assing file handler and create dataset
 		int fd;
@@ -2694,12 +2666,10 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
-		// free(rpath);
-
-		return 0;
+		return ret_set_data;
 	}
 
 	/**
@@ -2812,8 +2782,7 @@ extern "C"
 		clock_gettime(CLOCK_REALTIME, &spec);
 		uint32_t file_desc;
 
-		char *rpath = (char *)calloc(MAX_PATH, sizeof(char));
-		get_iuri(path, rpath);
+		char *rpath = (char *)path;
 
 		// Assing file handler and create dataset
 		int fd;
@@ -2840,16 +2809,16 @@ extern "C"
 		memcpy(buff, &stats, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		if (set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC) < 0)
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		pthread_mutex_unlock(&lock);
+		if (ret_set_data < 0)
 		{
-			// fprintf(stderr, "[IMSS-FUSE]	Error writing to imss.\n");
-			slog_error("[IMSS-FUSE]	Error writing to imss.");
-			error_print = -ENOENT;
-			pthread_mutex_unlock(&lock);
-			return -ENOENT;
+			slog_error("Error writing to imss.");
+			fprintf(stderr, "Error writing to imss.\n");
+			error_print = ret_set_data;
+			return ret_set_data;
 		}
 
-		pthread_mutex_unlock(&lock);
 		free(rpath);
 		return 0;
 	}
@@ -2901,19 +2870,19 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
 
 		free(rpath);
-		return 0;
+		return ret_set_data;
 	}
 
 	int imss_chown(const char *path, uid_t uid, gid_t gid)
 	{
 		struct stat ds_stat;
 		uint32_t file_desc;
-		char *rpath = (char *)calloc(MAX_PATH, sizeof(char));
-		get_iuri(path, rpath);
+		char *rpath = (char *)path; // (char *)calloc(MAX_PATH, sizeof(char));
+		// get_iuri(path, rpath);
 
 		// Assing file handler and create dataset
 		int fd;
@@ -2949,10 +2918,10 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
-		free(rpath);
-		return 0;
+		// free(rpath);
+		return ret_set_data;
 	}
 
 	// Function to recursively read and print files and directories.
@@ -3611,7 +3580,7 @@ extern "C"
 
 			// deletes the destionation path because it is a file that will be overwritten.
 			// this also can be done on the server side.
-			imss_unlink(destination_path);
+			imss_unlink(destination_path, NULL);
 
 			// RENAME LOCAL_IMSS(GARRAY), SRV_STAT(MAP & TREE)
 			ret = rename_dataset_metadata(old_path, destination_path);
@@ -3636,7 +3605,7 @@ extern "C"
 			// TODO: check flags.
 			slog_debug("Moving Hercules regular file %s to Hercules regular file %s", old_path, new_path);
 
-			imss_unlink(new_path);
+			imss_unlink(new_path, NULL);
 
 			// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
 			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);

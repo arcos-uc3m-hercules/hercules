@@ -21,6 +21,7 @@
 #define CLOSE_OP 7
 #define OPEN_OP 8
 #define READV2_OP 11 
+#define UNLINK_OP 12 
 // #define STATFS			  7
 // #define DATASET_OP 8
 #define INSTANCE_OP 9
@@ -37,20 +38,16 @@
 
 #define LOCAL_DATASET_UPDATE 0
 
-// #define KB 1024
-// #define MB 1048576
-// #define GB 1073741824UL
-
-
-// #define MAX_THREAD_POOL_SIZE 16
-extern void *hierarchical_map;
+extern HierarchicalRecords *hierarchical_map;
+extern HierarchicalRecords *garbage_collector_map;
 
 // Set of arguments passed to each server thread.
 typedef struct
 {
 	// Pointer to the corresponding type storing key-address couples.
 	std::shared_ptr<map_records> map = NULL;
-	void *hierarchical_map;
+	HierarchicalRecords *hierarchical_map;
+	HierarchicalRecords *garbage_collector_map;
 	// Pointer to the corresponding buffer region assigned to a thread.
 	char *pt;
 	// Integer specifying the port that a certain thread will listen to.
