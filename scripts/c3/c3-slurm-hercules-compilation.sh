@@ -11,7 +11,7 @@ cmake --preset default
 cmake --build --preset default --target install
 
 # Important: run the following command before running an Hercules deployment.
-# export LD_LIBRARY_PATH=${PWD}/install/lib:$LD_LIBRARY_PATH
+# export LD_LIBRARY_PATH=${HOME}/hercules/install/lib:$LD_LIBRARY_PATH
 
 echo "+ done"
 

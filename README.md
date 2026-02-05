@@ -108,6 +108,8 @@ As a result the project generates the following outputs:
 - install/lib/libhercules_shared.so: dynamic library of Hercules's API.
 - install/lib/libhercules_static.a: static library of Hercules's API.
 <!-- - imfssfs: application for mounting Hercules at user space by using FUSE engine. -->
+
+Note that the installation path (install/) can be changed, we use the same project directory by default.
     
 ## Method 2: Spack module
 
@@ -204,19 +206,29 @@ This will perform the following actions:
 
 
 ### 2. Intercepting I/O calls 
-Hercules can override I/O calls of your application by using the LD_PRELOAD environment variable. Both data and metadata calls are currently intercepted by the implemented dynamic library. As example:
+Hercules can override I/O calls of your application by using the LD_PRELOAD environment variable. Both data and metadata calls are currently intercepted by the implemented dynamic library. 
 
+>The following examples can be part of a Slurm script or can be used directly from the terminal. 
+
+2.1 Load the dynamic library to LD_LIBRARY_PATH enviroment variable (remember to check that the installation path is correct):
 ```
-export HERCULES_CONF=<CONF_PATH> 
+export LD_LIBRARY_PATH=${HOME}/hercules/install/lib:$LD_LIBRARY_PATH
+```
+
+2.2 If **Slurm** was used, load the new temporal configuration file (the one created by the Hercules deployment script in the previous step).
+```
+ export HERCULES_CONF=<CONF_PATH>_<Slurm job ID>
+```
+
+2.3 Run your command/application.
+```
+LD_PRELOAD=${HOME}/hercules/install/lib/libhercules_posix.so ls <hercules_mount_point>
 ```
 ```
-LD_PRELOAD=install/lib/libhercules_posix.so ls <hercules_mount_point>
+LD_PRELOAD=${HOME}/hercules/install/lib/libhercules_posix.so cp myfile <hercules_mount_point>/copied_file
 ```
 ```
-LD_PRELOAD=install/lib/libhercules_posix.so cp myfile <hercules_mount_point>/copied_file
-```
-```
-LD_PRELOAD=install/lib/libhercules_posix.so ./myapp
+LD_PRELOAD=${HOME}/hercules/install/lib/libhercules_posix.so ./myapp
 ```
 where "hercules_mount_point" is the MOUNT_POINT defined in the configuration file (CONF_PATH).
 
