@@ -30,8 +30,8 @@ echo "------------------"
 
 ## Uncomment when working in C3.
 ## C3 packages.
-source "/home/tester004/load-local-spack.sh"
-source "/home/tester004/gesanche/hercules/Stuff/c3-spack-modules.sh"
+# source "/home/tester004/load-local-spack.sh"
+source "/home/gesanche/hercules/stuff/c3-spack-modules.sh"
 module load hpcx
 
 export UCX_NET_DEVICES="ib0"
@@ -44,7 +44,7 @@ if [ -z "$CONFIG_PATH" ]; then
 else
    echo "Configuration file pass $CONFIG_PATH"
 #   export HERCULES_DEBUG_LEVEL=none
-   source /home/tester004/gesanche/hercules/scripts/hercules start \
+   source /home/gesanche/hercules/scripts/hercules start \
    -f "$CONFIG_PATH" 
    unset HERCULES_DEBUG_LEVEL
 fi
@@ -58,7 +58,7 @@ echo "Running clients"
 # ---------------------------------------------------------------
 
 ##  Add the program.
-COMMAND="/lustre/tester004/apps/wacomm-kernel/m_wacomm1_mpi/m_wacomm1_mpi-disk"
+COMMAND="${HOME_LUSTRE}/apps/wacomm-kernel/m_wacomm1_mpi/m_wacomm1_mpi-disk"
 
 ## Output directory.
 #export PARTICLE_OUTPUT_DIR=/lustre/tester004/apps/wacomm-kernel/m_wacomm1_mpi/output-files/

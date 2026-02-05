@@ -1,13 +1,13 @@
 #!/bin/bash
 
-SBATCH_FLAGS="--partition=large -A uc3m_a0-sciot" # -- exclusiv # -- exclusive
+SBATCH_FLAGS="--partition=large -A ${SLURM_ACC}" # -- exclusiv # -- exclusive
 SCRIPT_NAME="c3_hercules_wacomm_slurm.sh"
 
 ATTACHED=0
 
 #TEST_TYPE="weak"
 TEST_TYPE="strong"
-HERCULES_PATH="/home/tester004/gesanche/hercules"
+HERCULES_PATH="/home/gesanche/hercules"
 TEMPLATE_CONFIG_PATH="${HERCULES_PATH}/conf/hercules-template.conf"
 HERCULES_CHECKPOINT_PATH=""
 #HERCULES_SNAPSHOT_PATH="${HERCULES_PATH}/bash/tests/disk/HerculesSnapshot"

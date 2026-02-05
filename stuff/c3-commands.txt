@@ -1,6 +1,6 @@
 #UCX_NET_DEVICES=ib0 
-HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server m 0
-HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/gesanche/hercules/build/hercules_server d 0 1
+HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/hercules/build/hercules_server m 0
+HERCULES_THREAD_POOL=1 HERCULES_NUM_DATA_SERVERS=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf ~/hercules/build/hercules_server d 0 1
 
  valgrind --leak-check=full  --track-origins=yes --trace-children=yes --fair-sched=yes
 
@@ -87,9 +87,9 @@ spack load valgrind
 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so valgrind --leak-check=full --track-origins=yes --show-leak-kinds=all  ~/gesanche/io500/bin/ior -i 5 -t 100MB -b 100MB -o /mnt/hercules/file.out -k > run_output_full 2>&1
 
 # List directory.
-HERCULES_THREAD_LEVEL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so ls -l /mnt/hercules/
+HERCULES_THREAD_LEVEL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf LD_PRELOAD=/home/gesanche/hercules/build/tools/libhercules_posix.so ls -l /mnt/hercules/
 
-HERCULES_THREAD_LEVEL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf LD_PRELOAD=/home/tester004/gesanche/hercules/build/tools/libhercules_posix.so valgrind --leak-check=full ls -l /mnt/hercules/ > valgrind.out 2>&1
+HERCULES_THREAD_LEVEL=1 HERCULES_DEBUG_LEVEL=none HERCULES_CONF=${PWD}/configurations_hercules/c3-hercules.conf LD_PRELOAD=/home/gesanche/hercules/build/tools/libhercules_posix.so valgrind --leak-check=full ls -l /mnt/hercules/ > valgrind.out 2>&1
 
 # Stop all
 ~/hercules/scripts/hercules stop -f ${PWD}/configurations_hercules/c3-hercules.conf
