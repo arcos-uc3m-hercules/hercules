@@ -43,6 +43,10 @@
 
 #define NO_LINK NULL
 
+#define RUNNING_SERVER_STATUS 0
+#define FINISH_SERVER_STATUS 1
+#define FINISH_SYSTEM_STATUS 2
+
 extern int32_t IMSS_DEBUG;
 extern uint64_t BLOCK_SIZE; // TODO: there are multiple definitions for BLOCK SIZE on the front and back end. IMSS_DATA_BSIZE on the fron end.
 

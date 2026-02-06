@@ -48,6 +48,7 @@ size_t req_addr_len = 0;
 pthread_t *threads;
 
 // global variables usted to finish threads.
+extern int global_finish_dispatcher;
 extern int global_finish_threads;
 extern int global_finish_checkpoint;
 extern int global_finish_snapshot;
@@ -65,13 +66,15 @@ extern size_t IMSS_ROOT_LEN;
 // Malleability decomissioning.
 // int waiting_clients = 0;
 // pthread_mutex_t mutex_malleability = PTHREAD_MUTEX_INITIALIZER;
-extern sem_t mutex_malleability;
+extern pthread_mutex_t mutex_malleability;
+extern pthread_mutex_t mutext_malleability;
 extern pthread_cond_t global_run_malleability_cond;
 extern pthread_cond_t global_run_shutdown_cond;
 
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
 char main_err_call_arg[] = "main server";
+char action[20];
 
 /**
  * @brief Re-distribute the blocks of this server to another servers
@@ -991,8 +994,10 @@ int32_t main(int32_t argc, char **argv)
 	ucp_worker_destroy(ucp_worker);
 	ucp_cleanup(ucp_context);
 
-	// sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-stop", args.hercules_path, args.type, args.id);
-	// ready(tmp_file_path, "OK");
+
+	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
+	fprintf(stderr, "Creating the file %s", tmp_file_path);
+	ready(tmp_file_path, "OK");
 
 	// Free the publisher release address.
 	fprintf(stderr, "Ending %c server\n", args.type);
@@ -1112,7 +1117,7 @@ void handle_signal_server(int signal)
 		slog_info("SIGUSR1 received");
 		fprintf(stderr, "SIGUSR1 received\n");
 		int pkill_operation = 0, ret = 0;
-		char buf[10] = {0}, action[20], temporal_path[PATH_MAX];
+		char buf[10] = {0}, temporal_path[PATH_MAX];
 		char tmp_file_path[PATH_MAX];
 
 		sprintf(temporal_path, "%s/tmp/hercules_pkill_operation", args.hercules_path);
@@ -1194,6 +1199,7 @@ void handle_signal_server(int signal)
 					fprintf(stderr, "Waiting for global_finish_cond\n");
 					pthread_cond_wait(&global_finish_cond, &global_finish_mut);
 					fprintf(stderr, "Waiting for snapshot in server %d\n", args.id);
+					pthread_mutex_unlock(&global_finish_mut);
 				}
 				if (global_finish_checkpoint != 1)
 				{ // Checkpointing still running.
@@ -1205,24 +1211,39 @@ void handle_signal_server(int signal)
 					fprintf(stderr, "Waiting for global_finish_cond\n");
 					pthread_cond_wait(&global_finish_cond, &global_finish_mut);
 					fprintf(stderr, "Waiting for checkpointing in server %d\n", args.id);
+					pthread_mutex_unlock(&global_finish_mut);
 				}
+
+				fprintf(stderr, "Locking mutext_malleability\n");
+				pthread_mutex_lock(&mutext_malleability);
+				fprintf(stderr, "Sending broadcast mutext_malleability\n");
+				pthread_cond_broadcast(&global_run_malleability_cond); // Wake up everyone
+				pthread_mutex_unlock(&mutext_malleability);
+				fprintf(stderr, "Unlock mutext_malleability\n");
 
 				// This file is readed by the hercules script to know if this server
 				// was correctly shutting down.
 				sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
 				ready(tmp_file_path, "LOCKED");
-
-				pthread_mutex_unlock(&global_finish_mut);
 				fprintf(stderr, "Server %d has been unlocked\n", args.id);
 				global_finish_threads = 1;
 			}
 
 			// Shutdown or close the socket used by the dispatcher pointed
 			// by the file descriptor "global_server_fd_thread".
-			if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
-			{
-				perror("ERR_HERCULES_SHUTDOWN_SERVER_FD\n");
+			fprintf(stderr, "global_server_fd_thread=%d\n", global_server_fd_thread);
+			slog_info("global_server_fd_thread=%d", global_server_fd_thread);
+			if (global_server_fd_thread > 0) {
+				slog_info("calling shutdown in accept call");
+				global_finish_dispatcher = FINISH_SYSTEM_STATUS;
+				if (shutdown(global_server_fd_thread, SHUT_RD) == -1) // Breaks the accept() call
+				{
+					perror("ERR_HERCULES_SHUTDOWN_SERVER_FD\n");
+				}
+				close(global_server_fd_thread);
 			}
+			
+			// global_finish_threads = 1;
 			break;
 		default: // suspend the data server.
 			sprintf(action, "remove");
@@ -1247,8 +1268,8 @@ void handle_signal_server(int signal)
 		// }
 		// This file is readed by the hercules script to know if this server
 		// was correctly shutting down.
-		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
-		ready(tmp_file_path, "OK");
+		// sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
+		// ready(tmp_file_path, "OK");
 	}
 	// if (signal == SIGUSR2) // wake up this server.
 	// {
@@ -1268,6 +1289,7 @@ void handle_signal_server(int signal)
 	// 		ready(tmp_file_path, "OK");
 	// 	}
 	// }
+	slog_info("Ending handle signal server");
 }
 
 // int wakeup_server()

@@ -1,6 +1,6 @@
 #!/bin/bash
 ## Hercules ad hoc file system deployment script.
-## Last modification: 14/05/2025
+## Last modification: 05/02/2026
 ## Genaro Sanchez-Gallegos
 ## Javier Garcia-Blas
 ## Jesus Carretero
@@ -21,6 +21,12 @@ StopServers() {
  
     unset LD_PRELOAD
 
+    if [ "$NAME" == "metadata" ]; then
+        SERVER_TYPE="m"
+    else
+        SERVER_TYPE="d"
+    fi
+
     echo "# Hercules: Stopping $NAME servers in ${hosts[@]}"
     if [[ "${VERBOSE}" -eq "1" ]]; then
         echo "# Operation = ${OPERATION}"
@@ -33,7 +39,7 @@ StopServers() {
     # Sends the pkill operation to each server.
     for node in "${hosts[@]}"
     do
-        RM="rm ${HERCULES_TEMPORAL_PATH}/d-hercules-$i-stop"
+        RM="rm ${HERCULES_TEMPORAL_PATH}/${SERVER_TYPE}-hercules-${i}-stop"
         # Set the action to be doing by the servers when they received the pkill signal.
         # ( ssh $node  "echo $OPERATION > ./tmp/hercules_pkill_operation" )
         # Kill threads and finish the server.
@@ -101,19 +107,25 @@ WaitForServers() {
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "Running ssh $node -- $COMMAND"
             fi
-            ret=$(ssh $node -- "$COMMAND")
+            output=$(ssh $node -- "$COMMAND")
+            status=$?
             if [[ "${VERBOSE}" -eq "1" ]]; then
-                echo "Return code $ret"
+                echo "Command Output: $output"
+                echo "Return code $status"
             fi
         else # if slurm is available.
-        set -x
+            set -x
             #ret=$(srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
-            ret=$(srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
+            output=$(srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w ${node} -- ${COMMAND})
+            status=$?
         fi
-        ret=$?
+        echo "command ${COMMAND} running on the remote node."
+        # ret=$?
         
-        if [ "$ret" -gt 0 ]; then
-            echo "[Error: $ret] It has not been possible to "${ACTION}" a ${SERVER_NAME} server on ${node}, please verify the configuration file and logs."
+        # To check the exit code
+        if [ "$status" -gt 0 ]; then
+            echo "[Error: $status] It has not been possible to "${ACTION}" a ${SERVER_NAME} server on ${node}, please verify the configuration file and logs."
+            echo "Command output: $output"
             exit 1
         fi
         
@@ -309,6 +321,7 @@ else
     HERCULES_BUILD_PATH=$HERCULES_PATH/build
     HERCULES_BASH_PATH=$HERCULES_PATH/scripts
     HERCULES_POSIX_PRELOAD="$HERCULES_PATH/build/tools/libhercules_posix.so"
+    HERCULES_LIB_PATH=$HERCULES_PATH/install/lib
 fi
 
 export HERCULES_PATH=$HERCULES_PATH
@@ -351,14 +364,6 @@ else
     CURR_HERCULES_CONF_FILE="${FILE}"
 fi
 
-export HERCULES_CONF="${CURR_HERCULES_CONF_FILE}"
-echo "Temporal configuration file ${CURR_HERCULES_CONF_FILE}"
-# exit 0
-
-# echo "+ + + Initial number of data nodes is $INIT_HERCULES_NUM_DATA/$HERCULES_NUM_DATA"
-export HERCULES_INIT_NUM_DATA="${INIT_HERCULES_NUM_DATA}"
-
-## \< \> to match exact word.
 
 ## Checks if the user wants to stop the services.
 if [[ "${STATUS}" = "stop" ]];
@@ -429,6 +434,15 @@ then
     exit 0
 fi
 
+export HERCULES_CONF="${CURR_HERCULES_CONF_FILE}"
+echo "Temporal configuration file ${CURR_HERCULES_CONF_FILE}"
+# exit 0
+
+# echo "+ + + Initial number of data nodes is $INIT_HERCULES_NUM_DATA/$HERCULES_NUM_DATA"
+export HERCULES_INIT_NUM_DATA="${INIT_HERCULES_NUM_DATA}"
+
+## \< \> to match exact word.
+
 ## Checks if the user wants to add more servers.
 if [[ "${STATUS}" = "add" ]];
 then
@@ -497,14 +511,8 @@ if [ ! -z "$HERCULES_METADATA_HOSTFILE" ]; then
         METADATA_HOSTFILE_BASENAME=$(basename "${HERCULES_METADATA_HOSTFILE}")
         HERCULES_METADATA_HOSTFILE="${HERCULES_TEMPORAL_PATH}/${METADATA_HOSTFILE_BASENAME}"
         HERCULES_METADATA_HOSTFILE+="_"$SLURM_JOB_ID
-        ## Replace all "/" with "\/" because "/" is an special character for the sed command.
-        #ESCAPED_HERCULES_METADATA_HOSTFILE="${HERCULES_METADATA_HOSTFILE//\//\\/}"
         ## Replace the old metadata hostfile name with the new one containing the job id.
-        #sed -i "s/^METADATA_HOSTFILE = .*/METADATA_HOSTFILE = ${ESCAPED_HERCULES_METADATA_HOSTFILE}/g"  "${CURR_HERCULES_CONF_FILE}"
-        #echo sed -i "s/^METADATA_HOSTFILE = .*/METADATA_HOSTFILE = ${ESCAPED_HERCULES_METADATA_HOSTFILE}/g"  "${CURR_HERCULES_CONF_FILE}"
 		sed -i "s|^METADATA_HOSTFILE = .*|METADATA_HOSTFILE = $HERCULES_METADATA_HOSTFILE|g" "$CURR_HERCULES_CONF_FILE"
-        #echo "HERCULES_METADATA_HOSTFILE=${HERCULES_METADATA_HOSTFILE}"
-        #echo "ESCAPED_HERCULES_METADATA_HOSTFILE=${ESCAPED_HERCULES_METADATA_HOSTFILE}"
     fi
 fi
 
@@ -823,8 +831,9 @@ export HERCULES_CONF=$CURR_HERCULES_CONF_FILE
     #############################################################################"
 
     echo -e "#############################################################################
-    [!] 2. To load the client library:
+    [!] 2. To load the libraries:
     ${GREEN}
+export LD_LIBRARY_PATH=${HERCULES_LIB_PATH}:\$LD_LIBRARY_PATH
 export LD_PRELOAD=$HERCULES_POSIX_PRELOAD
     ${NC}
     #############################################################################"

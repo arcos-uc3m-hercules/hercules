@@ -2,6 +2,7 @@
 
 CheckForStatusFile() {
     FILE="${HERCULES_PATH}/tmp/$SERVER_TYPE-hercules-$SERVER_NUMBER-$ACTION"
+    echo "Waiting for file ${FILE}"
     #rm ${FILE} 2> /dev/null
     ## Checks if the file exists.
     until [ -f "$FILE" ]; do
@@ -39,9 +40,10 @@ if [ ! -d "${HERCULES_PATH}/tmp" ]; then
     exit 1
 fi
 
-
+echo "Running check servers script"
 echo ${HERCULES_PATH}
 CheckForStatusFile
+# echo $STATUS > file-status.out
 #echo "STATUS=$STATUS" >> ${HERCULES_PATH}/tmp/$SERVER_TYPE-hercules-$SERVER_NUMBER-$ACTION
 # If the server is locked we will wait until it is unlocked.
 until [ "$STATUS" != "LOCKED" ]; do

@@ -76,6 +76,7 @@ size_t *local_addr_len;
 int global_finish_threads = 0;
 int global_finish_checkpoint = 1; // TODO: change to 0 when finish the implementation.
 int global_finish_snapshot = 1;
+// int global_finish_malleability = 1;
 int global_finish_garbage_collector = 0;
 int global_server_fd_thread = -1;
 int global_finish_dispatcher = 0;
@@ -293,6 +294,12 @@ void AttendPendingRequests()
 int ShutdownServer()
 {
 
+	if (global_finish_dispatcher == FINISH_SYSTEM_STATUS)
+	{ // the entire system is being shutting down. We do not need to wait for pending requests.
+		return 0;
+	}
+	
+
 	sleep(3);
 	while (1)
 	{
@@ -301,6 +308,7 @@ int ShutdownServer()
 		// pthread_cond_broadcast(&global_run_malleability_cond);
 		// pthread_cond_wait(&global_run_shutdown_cond, &mutex_malleability);
 		fprintf(stderr, "[Shutdown] There are %d pending requests\n", pending_requests.size());
+		slog_info("malleability_on=%d", malleability_on);
 		if (malleability_on == 2)
 		{
 			pthread_mutex_lock(&mutex_malleability);
@@ -1383,7 +1391,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		// After moving all data, delete this server.
 		// Shutdown or close the socket used by the dispatcher pointed
 		// by the file descriptor "global_server_fd_thread".
-		global_finish_dispatcher = 1;
+		global_finish_dispatcher = FINISH_SERVER_STATUS;
 		if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
 		{
 			perror("HERCULES_ERR_SRV_WORKER_SHUTDOWN_SERVER_FD\n");
@@ -3921,6 +3929,8 @@ void *Dispatcher(void *th_argv)
 		pthread_exit(NULL);
 	}
 
+	slog_info("global_server_fd_thread=%d", global_server_fd_thread);
+
 	/* Accept next connection */
 	int new_socket = -1;
 	while (1)
@@ -3930,10 +3940,12 @@ void *Dispatcher(void *th_argv)
 		// fprintf(stderr, "[DISPATCHER] Waiting for connection requests.\n");
 		new_socket = accept(global_server_fd_thread, (struct sockaddr *)&server_addr, &addrlen);
 
-		if (global_finish_dispatcher == 1)
+		if (global_finish_dispatcher != RUNNING_SERVER_STATUS)
 		{ // This server is shutting down. No more connections are allowed.
+			slog_info("Shutdown received on dispatcher thread.");
 			ShutdownServer();
 			fprintf(stderr, "Ending dispatcher thread.\n");
+			slog_info("Ending dispatcher thread.");
 			pthread_exit(NULL);
 		}
 
