@@ -980,7 +980,10 @@ extern "C"
 		ep_params.user_data = (void *)user_data_args;
 
 		// ucp_worker_print_info(worker, stderr);
+		slog_debug("calling ucp_ep_create");
+		print_worker_pointer(worker);
 		status = ucp_ep_create(worker, &ep_params, ep);
+		slog_debug("ucp_ep_create passed");
 		if (status != UCS_OK)
 		{
 			fprintf(stderr, "failed to create an endpoint on the data server: (%s)\n", ucs_status_string(status));
@@ -1045,6 +1048,7 @@ extern "C"
 			// Calculate the total size of the buffer storing the structure.
 			// ips + status list + arr num active storages list.
 			// msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages) + (sizeof(int) * struct_->num_storages) + (sizeof(int) * struct_->num_storages);
+			slog_debug("struct_->num_storages=%d", struct_->num_storages);
 			msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages);
 
 			// Reserve the corresponding amount of memory for the previous buffer.
@@ -1076,9 +1080,9 @@ extern "C"
 				offset_pt += LINE_LENGTH;
 			}
 
-			slog_debug("DEBUG: num_storages = %d\n", struct_->num_storages);
+			slog_debug("num_storages = %d", struct_->num_storages);
 			// slog_debug("DEBUG: struct_->status = %p\n", struct_->status);
-			slog_debug("DEBUG: Copy Size = %zu\n", sizeof(int) * struct_->num_storages);
+			slog_debug("Copy Size = %zu", sizeof(int) * struct_->num_storages);
 			// slog_debug("struct_->arr_num_active_storages=%d", struct_->arr_num_active_storages);
 
 			// memcpy(offset_pt, struct_->status, sizeof(int) * struct_->num_storages);

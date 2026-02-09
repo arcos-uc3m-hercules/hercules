@@ -437,6 +437,7 @@ uint32_t GetRank()
 
 __attribute__((constructor)) void imss_posix_init(void)
 {
+
 	struct timeval start, end;
 	int ret = 0;
 	gettimeofday(&start, NULL);
@@ -516,7 +517,6 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_live(" -- SYNC: %d", ASYNC_IO);
 	// fprintf(stderr, "ASYNC IO %d\n", ASYNC_IO);
 
-
 	// Metadata server
 	if (TIMING(stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank), "stat init", int32_t, rank) == -1)
 	{
@@ -540,22 +540,22 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// }
 	// if (DEPLOYMENT == 2)
 	// {
-		// Make the connection to all data servers.
-		num_active_storages = TIMING(open_imss(IMSS_ROOT), "open imss", int32_t, rank);
-		if (num_active_storages < 0)
-		{
-			slog_fatal("Error creating HERCULES's resources, the process cannot be started.");
-			printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
-			// return;
-			exit(1);
-		}
+	// Make the connection to all data servers.
+	num_active_storages = TIMING(open_imss(IMSS_ROOT), "open imss", int32_t, rank);
+	if (num_active_storages < 0)
+	{
+		slog_fatal("Error creating HERCULES's resources, the process cannot be started.");
+		printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
+		// return;
+		exit(1);
+	}
 
-		if (num_active_storages != N_SERVERS)
-		{
-			fprintf(stderr, "Number of storage servers does not match from the values retrieved from the metadata server. Setting from %d to %d\n", N_SERVERS, num_active_storages);
-			slog_warn("Number of storage servers does not match from the values retrieved from the metadata server. Setting from %d to %d\n", N_SERVERS, num_active_storages);
-			N_SERVERS = num_active_storages;
-		}
+	if (num_active_storages != N_SERVERS)
+	{
+		fprintf(stderr, "Number of storage servers does not match from the values retrieved from the metadata server. Setting from %d to %d\n", N_SERVERS, num_active_storages);
+		slog_warn("Number of storage servers does not match from the values retrieved from the metadata server. Setting from %d to %d\n", N_SERVERS, num_active_storages);
+		N_SERVERS = num_active_storages;
+	}
 	// }
 
 	// if (DEPLOYMENT != 2)
@@ -640,17 +640,17 @@ void __attribute__((destructor)) run_me_last()
 	// slog_close();
 }
 
-void check_ld_preload(void)
-{
+// void check_ld_preload(void)
+// {
 
-	if (LD_PRELOAD == 0)
-	{
-		// DPRINT("\nActivating... ld_preload=%d\n\n", LD_PRELOAD);
-		fprintf(stderr, "\nActivating... ld_preload\n");
-		LD_PRELOAD = 1;
-		imss_posix_init();
-	}
-}
+// 	if (LD_PRELOAD == 0)
+// 	{
+// 		// DPRINT("\nActivating... ld_preload=%d\n\n", LD_PRELOAD);
+// 		fprintf(stderr, "\nActivating... ld_preload\n");
+// 		LD_PRELOAD = 1;
+// 		imss_posix_init();
+// 	}
+// }
 
 int close(int fd)
 {
@@ -901,16 +901,20 @@ pid_t fork(void)
 	}
 
 	errno = 0;
-	slog_live("[POSIX] Calling fork");
 	// fprintf(stdout, "[POSIX] Calling fork\n");
+	slog_live("[POSIX] Calling fork");
 
-	release_network_resources(IMSS_ROOT, 1, rank);
-	imss_comm_cleanup();
+	pthread_mutex_lock(&lock_network);
 
+	// release_network_resources(IMSS_ROOT, 1, rank);
+	// imss_comm_cleanup();
+
+	slog_debug("[POSIX] Init real_fork");
 	pid_t pid = real_fork();
 
 	if (pid == -1)
 	{
+		pthread_mutex_unlock(&lock_network);
 		perror("Fork error");
 		slog_error("[POSIX] Error 'real fork', errno=%d:%s", errno, strerror(errno));
 		return pid;
@@ -925,10 +929,25 @@ pid_t fork(void)
 	break;
 	case 0: // child process.
 	{
+		pthread_mutex_init(&lock_network, NULL);
+		ucp_context_client = NULL;
+		ucp_worker_meta = NULL;
+		ucp_worker_data = NULL;
+		local_addr_meta = NULL;
+		local_addr_data = NULL;
+		stat_eps = NULL;
+		stat_addr = NULL;
+
+		
+		// slog_debug("ucp_worker_meta=%p", &ucp_worker_meta);
+		// slog_debug("ucp_worker_meta=%p", &ucp_worker_data);s
+		print_worker_pointer(ucp_worker_meta);
+		// print_worker_pointer(ucp_worker_data);
+
 		rank = GetRank();
 		// log init.
-		time_t t = time(NULL);
-		struct tm tm = *localtime(&t);
+		// time_t t = time(NULL);
+		// struct tm tm = *localtime(&t);
 		// sprintf(log_path, "client-thread-%ld.%02d-%02d.%d", pthread_self(), tm.tm_hour, tm.tm_min, getpid());
 		// slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
 		slog_live("[POSIX] Child process");
@@ -937,8 +956,10 @@ pid_t fork(void)
 	break;
 	default: // parent process.
 	{
+		pthread_mutex_unlock(&lock_network);
 		slog_live("[POSIX] Parent process, child pid=%d", pid);
-		init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
+		print_worker_pointer(ucp_worker_meta);
+		// init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
 	}
 	break;
 	}
@@ -2331,7 +2352,6 @@ ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size,
 		SetErrno(ret);
 		ret = -1;
 	}
-	
 
 	if (update_offset && ret >= 0)
 	{
@@ -2694,6 +2714,11 @@ int symlink(const char *name1, const char *name2)
 	// TODO.
 	if (!real_symlink)
 		real_symlink = (int (*)(const char *, const char *))dlsym(RTLD_NEXT, __func__);
+
+	if (!init)
+	{
+		return real_symlink(name1, name2);
+	}
 
 	errno = 0;
 	int ret;
@@ -3149,7 +3174,7 @@ ssize_t read(int fd, void *buf, size_t size)
 
 		unsigned long offset = 0;
 		slog_live("[POSIX]. Calling Hercules 'read', pathname=%s, size=%ld, fd=%d.", pathname, size, fd);
-		// fprintf(stderr, "[POSIX]. Calling Hercules 'read', pathname=%s, size=%ld, fd=%d\n", pathname, size, fd);
+		fprintf(stderr, "[POSIX]. Calling Hercules 'read', pathname=%s, size=%ld, fd=%d\n", pathname, size, fd);
 
 		if (fd < 0)
 		{
@@ -4034,7 +4059,7 @@ struct dirent *readdir(DIR *dirp)
 		if (init_loop_timer)
 		{
 			t = clock();
-			init_loop_timer = 0;		
+			init_loop_timer = 0;
 		}
 
 		const char *token = NULL;
@@ -4111,12 +4136,12 @@ struct dirent *readdir(DIR *dirp)
 			// name of file
 			strncpy(entry.d_name, token, len);
 
-			if (pos % 1000 == 0 || pos == n_ent ) // TODO: comments this lines, only for debug.
-			{					 // print a message every 1000 files.
+			if (pos % 1000 == 0 || pos == n_ent) // TODO: comments this lines, only for debug.
+			{									 // print a message every 1000 files.
 				t = clock() - t;
 				double time_taken = 0.0;
 				time_taken = ((double)t) / (CLOCKS_PER_SEC);
-				int diff = (pos == 0)? 1 : pos - init_number;
+				int diff = (pos == 0) ? 1 : pos - init_number;
 				// printf("[%s][%f] Reading entry %s, %ld of  %" PRIu32 ", please wait.\n", pathname, time_taken, entry.d_name, pos, n_ent);
 				fprintf(stdout, "Loading %d/%lu files, please wait. Time taken to get %d/1000 files: %f\n", pos, n_ent, diff, time_taken);
 				init_loop_timer = 1;
@@ -4868,6 +4893,11 @@ int unlinkat(int dir_fd, const char *pathname, int flags)
 
 	return ret;
 }
+
+// extern int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath)
+// {
+// 	return renameat2(olddirfd, oldpath, newdirfd, newpath, 0);
+// }
 
 int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags)
 {

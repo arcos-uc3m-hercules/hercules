@@ -186,6 +186,8 @@ extern "C"
     static int (*real_faccessat2)(int dirfd, const char *pathname, int mode, int flags) = NULL;
 
     static int (*real_unlinkat)(int fd, const char *name, int flag) = NULL;
+    
+    static int (*real_renameat)(int olddirfd, const char *oldpath, int newdirfd, const char *newpath) = NULL;
     static int (*real_renameat2)(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags) = NULL;
     // static int (*real_fstatat)(int dir_fd, const char *pathname, struct stat *buf, int flags) = NULL;
     // static int (*real_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count) = NULL;

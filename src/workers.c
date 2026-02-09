@@ -175,12 +175,9 @@ int ReadHostfile(char *deployfile, imss_info *my_imss)
 	int32_t n_chars = 0;
 	int init_server_status = 1;
 	char *line = NULL;
-	// int32_t i = 0; // index of server
 	size_t l_size = 0;
 	int32_t count = 0;
 	int ret = 0;
-	// int num_active_data_servers = 0;
-	// for (int32_t i = 0; i < num_servers; i++)
 	while ((n_chars = getline(&line, &l_size, svr_nodes)) != -1)
 	{
 		// Allocate resources in the metadata structure so as to store the current HERCULES's IP.

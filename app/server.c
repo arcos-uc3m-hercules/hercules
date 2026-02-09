@@ -463,6 +463,7 @@ int32_t main(int32_t argc, char **argv)
 				if (ret != -1)
 				{ // success "recv_dynamic_stream".
 					// fprintf(stderr, "imss_info_.num_storages=%d, length=%lu\n", imss_info_->num_storages, length);
+					slog_debug("imss_info_.num_storages=%d, length=%lu", imss_info_->num_storages, length);
 					imss_exists = 1;
 					for (int32_t i = 0; i < imss_info_->num_storages; i++)
 					{
@@ -787,8 +788,6 @@ int32_t main(int32_t argc, char **argv)
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important
 		ReadHostfile(deployfile, &my_imss);
-
-		// my_imss.num_storages = 0;
 
 		char key_plus_size[REQUEST_SIZE] = {0};
 		// Send the created structure to the metadata server.

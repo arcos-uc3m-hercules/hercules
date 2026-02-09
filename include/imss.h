@@ -56,6 +56,8 @@ extern ucp_worker_h ucp_worker_meta;	 // = (ucp_worker_h)NULL;
 extern ucp_worker_h ucp_worker_data;	 // = (ucp_worker_h)NULL;
 extern ucp_address_t **stat_addr;
 extern ucp_ep_h *stat_eps;
+extern ucp_address_t *local_addr_meta;
+extern ucp_address_t *local_addr_data;
 
 /* TCP variables. */
 extern char client_node[512];	// Node name where the client is running.
@@ -78,6 +80,7 @@ extern char client_ip[16];		// IP number of the node where the client is taking 
 // #else
 // #define DPRINT(...)
 // #endif
+
 
 // GHashMap functions.
 // int replace_dataset_entry_key(const char *old_uri, const char *new_uri);
@@ -218,6 +221,7 @@ typedef struct
 extern "C"
 {
 #endif
+	void print_worker_pointer(ucp_worker_h ucp_worker);
 
 	int GetValueFromInterval(dataset_info *curr_dataset, int data_id);
 	void PrintIntervals(dataset_info *curr_dataset);
