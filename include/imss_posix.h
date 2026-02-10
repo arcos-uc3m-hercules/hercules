@@ -87,6 +87,7 @@ extern "C"
     static int (*real_fstatat)(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag) = NULL;
     static int (*real_fstatat64)(int __fd, const char *__restrict __file, struct stat64 *__restrict __buf, int __flag) = NULL;
     static int (*real_fstatfs)(int fd, struct statfs *buf) = NULL;
+    static int (*real_fstatfs64)(int fd, struct statfs64 *buf) = NULL;
     static int (*real_statfs64)(const char *path, struct statfs64 *buf) = NULL;
     static int (*real_newfstatat)(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag) = NULL;
     static int (*real__fxstat64)(int ver, int fd, struct stat64 *buf) = NULL;
@@ -179,6 +180,7 @@ extern "C"
     // static int (*real_poll)(struct pollfd *fds, nfds_t nfds, int timeout) = NULL;
     // static int (*real_ppoll)(struct pollfd *fds, nfds_t nfds, const struct timespec tmo_p, const sigset_t sigmask) = NULL;
     static int (*real_fcntl)(int fd, int cmd, ... /* arg */) = NULL;
+    static int (*real_fcntl64)(int fd, int cmd, ...) = NULL;
     static int (*real_syncfs)(int fd) = NULL;
     static int (*real_posix_fadvise)(int fd, off_t offset, off_t len, int advice) = NULL;
     // static int (*real_posix_fadvise64)(int fd, off64_t offset, off64_t len, int advice) = NULL;
@@ -186,6 +188,8 @@ extern "C"
     static int (*real_faccessat2)(int dirfd, const char *pathname, int mode, int flags) = NULL;
 
     static int (*real_unlinkat)(int fd, const char *name, int flag) = NULL;
+    
+    static int (*real_renameat)(int olddirfd, const char *oldpath, int newdirfd, const char *newpath) = NULL;
     static int (*real_renameat2)(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags) = NULL;
     // static int (*real_fstatat)(int dir_fd, const char *pathname, struct stat *buf, int flags) = NULL;
     // static int (*real_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count) = NULL;

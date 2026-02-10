@@ -148,6 +148,7 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
 	}
 	// Increase the num. of storages. This is the "master" value used on all code.
 	my_imss->num_storages++;
+	slog_debug("new num_storages=%d", my_imss->num_storages);
 
 	// print all ips.
 	// for (size_t j = 0; j < my_imss->num_storages; j++)
@@ -175,12 +176,9 @@ int ReadHostfile(char *deployfile, imss_info *my_imss)
 	int32_t n_chars = 0;
 	int init_server_status = 1;
 	char *line = NULL;
-	// int32_t i = 0; // index of server
 	size_t l_size = 0;
 	int32_t count = 0;
 	int ret = 0;
-	// int num_active_data_servers = 0;
-	// for (int32_t i = 0; i < num_servers; i++)
 	while ((n_chars = getline(&line, &l_size, svr_nodes)) != -1)
 	{
 		// Allocate resources in the metadata structure so as to store the current HERCULES's IP.
@@ -1205,7 +1203,11 @@ void *hercules_ucx_server(void *th_argv)
 			// 	fprintf(stderr, "Failed to request: %s\n", req);
 			// 	continue;
 			// }
-			client_create_ep_data(arguments->ucp_worker, &ep, peer_addr, ucx_server_err_call_arg);
+			// size = const ucx_server_err_call_arg + UID=5 + UINT64 string representation size. 
+			size_t msg_len = strlen(ucx_server_err_call_arg)+5+UINT64_MAX_STR_LEN;
+			char tmp_msg[msg_len] = {0};
+			snprintf(tmp_msg, msg_len,"%s UID %" PRIu64, ucx_server_err_call_arg, attr.worker_uid);
+			client_create_ep_data(arguments->ucp_worker, &ep, peer_addr, tmp_msg);
 			// add the new ep to the map
 			map_server_eps_put(map_server_eps, attr.worker_uid, ep);
 		}

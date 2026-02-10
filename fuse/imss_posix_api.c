@@ -351,7 +351,7 @@ extern "C"
 			return 0;
 		}
 
-		slog_debug("Caliing fd loopkup");
+		slog_debug("Calling fd loopkup");
 		// Seek for the dataset on the local map. If it not found,
 		// we open it.
 		TIMING_NO_RETURN(fd_lookup((char *)imss_path, &fd, &stats, &aux), "fd_lookup", 0);

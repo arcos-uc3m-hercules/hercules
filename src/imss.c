@@ -76,8 +76,8 @@ int32_t IMSS_WRITE_ASYNC = 1;
 
 /* UCP objects */
 ucp_context_h ucp_context_client; // = (ucp_context_h)NULL;
-ucp_worker_h ucp_worker_meta;	  // = (ucp_worker_h)NULL;
-ucp_worker_h ucp_worker_data;	  // = (ucp_worker_h)NULL;
+ucp_worker_h ucp_worker_meta = (ucp_worker_h)NULL;
+ucp_worker_h ucp_worker_data = (ucp_worker_h)NULL;
 ucp_address_t **stat_addr = NULL;
 ucp_ep_h *stat_eps;
 
@@ -87,10 +87,12 @@ int32_t len_client_node;	 // Length of the previous node name.
 char client_ip[16] = {0};	 // IP number of the node where the client is taking execution.
 int matching_server_id = -1;
 
-static ucp_address_t *local_addr_meta;
+// static ucp_address_t *local_addr_meta;
+ucp_address_t *local_addr_meta;
 static size_t local_addr_len_meta;
 
-static ucp_address_t *local_addr_data = NULL;
+// static ucp_address_t *local_addr_data = NULL;
+ucp_address_t *local_addr_data;
 static size_t local_addr_len_data = 0;
 
 uint64_t local_meta_uid = 0;
@@ -104,6 +106,18 @@ SharedMemory *shared_memory;
 key_t shared_memory_key;
 
 struct arguments args;
+
+void print_worker_pointer(ucp_worker_h ucp_worker)
+{
+	if (ucp_worker == NULL)
+	{
+		slog_info("ucp_worker points to: NULL");
+	}
+	else
+	{
+		slog_info("ucp_worker points to address: %p", (void *)ucp_worker);
+	}
+}
 
 // Define a custom hash function for integer pointers
 guint int_pointer_hash(gconstpointer key)
@@ -656,6 +670,7 @@ int32_t stat_init(char *stat_hostfile,
 
 	// Number of metadata servers to connect to.
 	n_stat_servers = num_stat_servers;
+	slog_debug("n_stat_servers=%d", n_stat_servers);
 	// Initialize memory required to deal with metadata sockets.
 	stat_addr = (ucp_address_t **)malloc(n_stat_servers * sizeof(ucp_address_t *));
 	if (stat_addr == NULL)
@@ -681,7 +696,10 @@ int32_t stat_init(char *stat_hostfile,
 	ucs_status_t status = UCS_OK;
 
 	/* Initialize the UCX required objects */
+	// slog_debug("ucp_worker_meta=%p", &ucp_worker_meta);
+	print_worker_pointer(ucp_worker_meta);
 	ret = init_context(&ucp_context_client, NULL, &ucp_worker_meta, CLIENT_SERVER_SEND_RECV_TAG);
+	print_worker_pointer(ucp_worker_meta);
 	if (ret != 0)
 	{
 		slog_error("HERCULES_ERR_IMSS_STAT_INIT_INIT_CONTEXT");
@@ -689,7 +707,6 @@ int32_t stat_init(char *stat_hostfile,
 		free(stat_addr);
 		return -1;
 	}
-
 	ret = init_worker(ucp_context_client, &ucp_worker_data);
 	if (ret != 0)
 	{
@@ -882,6 +899,7 @@ int32_t stat_init(char *stat_hostfile,
 	ucp_worker_address_query(local_addr_meta, &attr);
 	local_meta_uid = attr.worker_uid;
 
+	slog_debug("Locking network, add=%p", &lock_network);
 	pthread_mutex_lock(&lock_network);
 
 	size_t l_size = LINE_LENGTH;
@@ -990,6 +1008,8 @@ int32_t stat_init(char *stat_hostfile,
 	}
 
 	pthread_mutex_unlock(&lock_network);
+	slog_debug("Unlock network");
+
 	// TO CHECK: free memory.
 	return 0;
 }
@@ -1058,11 +1078,13 @@ int32_t stat_release()
 	if (status != UCS_OK)
 	{
 		fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
+		slog_error("Failed to flush worker: %s\n", ucs_status_string(status));
 	}
 	// close the metadata endpoints.
 	for (int32_t i = 0; i < n_stat_servers; i++)
 	{
 		ep = stat_eps[i];
+		slog_debug("Closing endpoing %d/%d", i/n_stat_servers);
 		close_ucx_endpoint(ucp_worker_meta, ep);
 		free(stat_addr[i]);
 	}
@@ -1071,6 +1093,7 @@ int32_t stat_release()
 	free(stat_addr);
 
 	pthread_mutex_unlock(&lock_network);
+	slog_debug("Ending stat_release");
 	return 0;
 }
 

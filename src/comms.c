@@ -78,7 +78,7 @@ extern "C"
 	typedef struct
 	{
 		ucs_status_t status;
-		char msg[100];
+		char msg[200];
 	} client_ep_context_t;
 
 	/**
@@ -919,8 +919,6 @@ extern "C"
 		return ret;
 	}
 
-	
-
 	// ucs_status_t server_create_ep(ucp_worker_h data_worker,
 	// 							  ucp_conn_request_h conn_request,
 	// 							  ucp_ep_h *server_ep)
@@ -958,9 +956,16 @@ extern "C"
 		ucs_status_t ep_status = UCS_OK;
 
 		client_ep_context_t *user_data_args = (client_ep_context_t *)malloc(sizeof(client_ep_context_t));
+		if (user_data_args == NULL)
+		{
+			slog_error("failed to allocate memory for user_data_args\n");
+			fprintf(stderr, "failed to allocate memory for user_data_args\n");
+			return UCS_ERR_NO_MEMORY;
+		}
 		user_data_args->status = UCS_OK;
 		memset(user_data_args->msg, 0, sizeof(user_data_args->msg));
-		strncpy(user_data_args->msg, user_data, sizeof(user_data_args->msg)-1);
+		strncpy(user_data_args->msg, user_data, sizeof(user_data_args->msg) - 1);
+		user_data_args->msg[sizeof(user_data_args->msg) - 1] = '\0'; // ensure the final NULL.
 
 		/* Server creates an ep to the client on the data worker.
 		 * This is not the worker the listener was created on.
@@ -980,11 +985,15 @@ extern "C"
 		ep_params.user_data = (void *)user_data_args;
 
 		// ucp_worker_print_info(worker, stderr);
+		slog_debug("calling ucp_ep_create");
+		print_worker_pointer(worker);
 		status = ucp_ep_create(worker, &ep_params, ep);
+		slog_debug("ucp_ep_create passed");
 		if (status != UCS_OK)
 		{
 			fprintf(stderr, "failed to create an endpoint on the data server: (%s)\n", ucs_status_string(status));
 			slog_error("failed to create an endpoint on the data server: (%s)", ucs_status_string(status));
+			free(user_data_args);
 		}
 
 		slog_debug("[COMM] Created client endpoint");
@@ -1045,6 +1054,7 @@ extern "C"
 			// Calculate the total size of the buffer storing the structure.
 			// ips + status list + arr num active storages list.
 			// msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages) + (sizeof(int) * struct_->num_storages) + (sizeof(int) * struct_->num_storages);
+			slog_debug("struct_->num_storages=%d", struct_->num_storages);
 			msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages);
 
 			// Reserve the corresponding amount of memory for the previous buffer.
@@ -1076,9 +1086,9 @@ extern "C"
 				offset_pt += LINE_LENGTH;
 			}
 
-			slog_debug("DEBUG: num_storages = %d\n", struct_->num_storages);
+			slog_debug("num_storages = %d", struct_->num_storages);
 			// slog_debug("DEBUG: struct_->status = %p\n", struct_->status);
-			slog_debug("DEBUG: Copy Size = %zu\n", sizeof(int) * struct_->num_storages);
+			slog_debug("Copy Size = %zu", sizeof(int) * struct_->num_storages);
 			// slog_debug("struct_->arr_num_active_storages=%d", struct_->arr_num_active_storages);
 
 			// memcpy(offset_pt, struct_->status, sizeof(int) * struct_->num_storages);
