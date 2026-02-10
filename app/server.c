@@ -358,7 +358,6 @@ int32_t main(int32_t argc, char **argv)
 		for (int32_t i = 0; i < args.num_metadata_servers; i++)
 		{
 			// Allocate resources in the metadata structure so as to store the current HERCULES's IP.
-			// (my_imss.ips)[i] = (char *)calloc(LINE_LENGTH, sizeof(char));
 			size_t num_bytes_for_line = 0;
 			stat_add = NULL;
 
@@ -549,8 +548,8 @@ int32_t main(int32_t argc, char **argv)
 		}
 	}
 	// Metadata server.
-	else
-	{
+	// else
+	// {
 		// data_endpoints = (ucp_ep_h *)malloc(args.num_data_servers * sizeof(ucp_ep_h));
 
 		// Create the tree_root node.
@@ -563,7 +562,7 @@ int32_t main(int32_t argc, char **argv)
 		// 	slog_fatal("HERCULES_ERR_TREE_MUT_INIT");
 		// 	exit(1);
 		// }
-	}
+	// }
 
 	/***************************************************************/
 	/******************** INPROC COMMUNICATIONS ********************/
@@ -766,7 +765,7 @@ int32_t main(int32_t argc, char **argv)
 		}
 	}
 
-	// Notify to the metadata server the deployment of a new HERCULES.
+	// Notify to the metadata server the deployment of a new HERCULES, only performed by the server 0.
 	if ((args.type == TYPE_DATA_SERVER) && !args.id && stat_port)
 	{
 		// int res = create_dataset((char *)args.imss_uri, POLICY, 0, args.block_size, args.repl_factor, 0, args.num_data_servers, NO_LINK, 1, TYPE_DIRECTORY);
@@ -787,7 +786,7 @@ int32_t main(int32_t argc, char **argv)
 		my_imss.num_active_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important
-		ReadHostfile(deployfile, &my_imss);
+		// ReadHostfile(deployfile, &my_imss);
 
 		char key_plus_size[REQUEST_SIZE] = {0};
 		// Send the created structure to the metadata server.

@@ -148,6 +148,7 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
 	}
 	// Increase the num. of storages. This is the "master" value used on all code.
 	my_imss->num_storages++;
+	slog_debug("new num_storages=%d", my_imss->num_storages);
 
 	// print all ips.
 	// for (size_t j = 0; j < my_imss->num_storages; j++)
@@ -1202,7 +1203,11 @@ void *hercules_ucx_server(void *th_argv)
 			// 	fprintf(stderr, "Failed to request: %s\n", req);
 			// 	continue;
 			// }
-			client_create_ep_data(arguments->ucp_worker, &ep, peer_addr, ucx_server_err_call_arg);
+			// size = const ucx_server_err_call_arg + UID=5 + UINT64 string representation size. 
+			size_t msg_len = strlen(ucx_server_err_call_arg)+5+UINT64_MAX_STR_LEN;
+			char tmp_msg[msg_len] = {0};
+			snprintf(tmp_msg, msg_len,"%s UID %" PRIu64, ucx_server_err_call_arg, attr.worker_uid);
+			client_create_ep_data(arguments->ucp_worker, &ep, peer_addr, tmp_msg);
 			// add the new ep to the map
 			map_server_eps_put(map_server_eps, attr.worker_uid, ep);
 		}

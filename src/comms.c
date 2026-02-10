@@ -78,7 +78,7 @@ extern "C"
 	typedef struct
 	{
 		ucs_status_t status;
-		char msg[100];
+		char msg[200];
 	} client_ep_context_t;
 
 	/**
@@ -919,8 +919,6 @@ extern "C"
 		return ret;
 	}
 
-	
-
 	// ucs_status_t server_create_ep(ucp_worker_h data_worker,
 	// 							  ucp_conn_request_h conn_request,
 	// 							  ucp_ep_h *server_ep)
@@ -958,9 +956,16 @@ extern "C"
 		ucs_status_t ep_status = UCS_OK;
 
 		client_ep_context_t *user_data_args = (client_ep_context_t *)malloc(sizeof(client_ep_context_t));
+		if (user_data_args == NULL)
+		{
+			slog_error("failed to allocate memory for user_data_args\n");
+			fprintf(stderr, "failed to allocate memory for user_data_args\n");
+			return UCS_ERR_NO_MEMORY;
+		}
 		user_data_args->status = UCS_OK;
 		memset(user_data_args->msg, 0, sizeof(user_data_args->msg));
-		strncpy(user_data_args->msg, user_data, sizeof(user_data_args->msg)-1);
+		strncpy(user_data_args->msg, user_data, sizeof(user_data_args->msg) - 1);
+		user_data_args->msg[sizeof(user_data_args->msg) - 1] = '\0'; // ensure the final NULL.
 
 		/* Server creates an ep to the client on the data worker.
 		 * This is not the worker the listener was created on.
@@ -988,6 +993,7 @@ extern "C"
 		{
 			fprintf(stderr, "failed to create an endpoint on the data server: (%s)\n", ucs_status_string(status));
 			slog_error("failed to create an endpoint on the data server: (%s)", ucs_status_string(status));
+			free(user_data_args);
 		}
 
 		slog_debug("[COMM] Created client endpoint");

@@ -1078,11 +1078,13 @@ int32_t stat_release()
 	if (status != UCS_OK)
 	{
 		fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
+		slog_error("Failed to flush worker: %s\n", ucs_status_string(status));
 	}
 	// close the metadata endpoints.
 	for (int32_t i = 0; i < n_stat_servers; i++)
 	{
 		ep = stat_eps[i];
+		slog_debug("Closing endpoing %d/%d", i/n_stat_servers);
 		close_ucx_endpoint(ucp_worker_meta, ep);
 		free(stat_addr[i]);
 	}
@@ -1091,6 +1093,7 @@ int32_t stat_release()
 	free(stat_addr);
 
 	pthread_mutex_unlock(&lock_network);
+	slog_debug("Ending stat_release");
 	return 0;
 }
 

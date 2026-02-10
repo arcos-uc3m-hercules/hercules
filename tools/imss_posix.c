@@ -938,7 +938,6 @@ pid_t fork(void)
 		stat_eps = NULL;
 		stat_addr = NULL;
 
-		
 		// slog_debug("ucp_worker_meta=%p", &ucp_worker_meta);
 		// slog_debug("ucp_worker_meta=%p", &ucp_worker_data);s
 		print_worker_pointer(ucp_worker_meta);
@@ -1200,7 +1199,6 @@ int fstatvfs(int fd, struct statvfs *buf)
 	{
 		return real_fstatvfs(fd, buf);
 	}
-	fprintf(stderr, "fstatvfs\n");
 
 	errno = 0;
 	int ret = 0;
@@ -1340,6 +1338,33 @@ int fstatfs(int fd, struct statfs *buf)
 	{
 		slog_full("[POSIX]. Calling real 'fstatfs', fd=%d", fd);
 		ret = real_fstatfs(fd, buf);
+	}
+	return ret;
+}
+
+int fstatfs64(int fd, struct statfs64 *buf)
+{
+	if (!real_fstatfs)
+		real_fstatfs64 = (int (*)(int, struct statfs64 *))dlsym(RTLD_NEXT, __func__);
+
+	if (!init)
+	{
+		return real_fstatfs64(fd, buf);
+	}
+
+	errno = 0;
+	int ret = 0;
+	std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
+	if (!pathname_ob.empty())
+	{
+		const char *pathname = pathname_ob.c_str();
+		WarnOperationNotSupported(__func__, pathname);
+		ret = real_fstatfs64(fd, buf);
+	}
+	else
+	{
+		slog_full("[POSIX]. Calling real 'fstatfs', fd=%d", fd);
+		ret = real_fstatfs64(fd, buf);
 	}
 	return ret;
 }
@@ -3174,7 +3199,7 @@ ssize_t read(int fd, void *buf, size_t size)
 
 		unsigned long offset = 0;
 		slog_live("[POSIX]. Calling Hercules 'read', pathname=%s, size=%ld, fd=%d.", pathname, size, fd);
-		fprintf(stderr, "[POSIX]. Calling Hercules 'read', pathname=%s, size=%ld, fd=%d\n", pathname, size, fd);
+		// fprintf(stderr, "[POSIX]. Calling Hercules 'read', pathname=%s, size=%ld, fd=%d\n", pathname, size, fd);
 
 		if (fd < 0)
 		{
@@ -3605,7 +3630,7 @@ int rename(const char *old_given_path, const char *new_given_pathname)
 		ret = TIMING(imss_rename(old_path, new_path), "imss_rename", int, rank);
 		if (ret < 0)
 		{
-			errno = -ret;
+			SetErrno(ret);
 			ret = -1;
 		}
 		slog_live("[POSIX]. End Hercules 'rename', old path=%s, new_path=%s, ret=%d\n", old_path, new_path, ret);
@@ -3616,17 +3641,24 @@ int rename(const char *old_given_path, const char *new_given_pathname)
 	{ // move from file system to Hercules.
 		slog_live("[POSIX]. Calling Hercules 'rename', old_given_path=%s, new_given_pathname=%s, new_path=%s", old_given_path, new_given_pathname, new_path);
 		ret = HerculesMove(old_given_path, new_given_pathname, new_path);
-		SetErrno(ret);
-
-		// // free memory.
-		// free(old_file_buffer);
+		if (ret < 0)
+		{
+			SetErrno(ret);
+			ret = -1;
+		}
 		slog_live("[POSIX]. End Hercules 'rename', old_given_path=%s, new_given_pathname=%s, new_path=%s, ret=%d", old_given_path, new_given_pathname, new_path, ret);
+		// free memory.
 		free(new_path);
 	}
 	else if (old_path != NULL && new_path == NULL)
 	{ // move from Hercules to file system.
 		slog_live("[POSIX] Calling Hercules 'rename', Hercules %s to file system %s", old_path, new_path);
 		ret = HerculesMove(old_given_path, new_given_pathname, old_path);
+		if (ret < 0)
+		{
+			SetErrno(ret);
+			ret = -1;
+		}
 		slog_live("[POSIX] Ending Hercules 'rename', Hercules %s to file system %s, ret=%d", old_path, new_path, ret);
 	}
 	else
@@ -4007,7 +4039,8 @@ ssize_t getdents64(int fd, void *dirp, size_t count)
 		return real_getdents64(fd, dirp, count);
 	}
 
-	slog_warn("Function still not supported");
+	// slog_warn("Function still not supported");
+	WarnOperationNotSupported(__func__, "GENERIC");
 
 	return real_getdents64(fd, dirp, count);
 }
@@ -4022,7 +4055,8 @@ int getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
 		return real_getdents(fd, dirp, count);
 	}
 
-	slog_warn("Function still not supported");
+	// slog_warn("Function still not supported");
+	WarnOperationNotSupported(__func__, "GENERIC");
 
 	return real_getdents(fd, dirp, count);
 }
@@ -4067,7 +4101,7 @@ struct dirent *readdir(DIR *dirp)
 		if (to_read)
 		{
 			n_ent = imss_readdir(pathname_obj, &ori_buf, OptFiller, 0);
-			fprintf(stderr, "%lu files will be listed\n", n_ent);
+			// fprintf(stderr, "%lu files will be listed\n", n_ent); // comment this line, used for debug.
 			to_read = 0;
 			imss_path_len = pathname_obj.length();
 			if (pathname_obj[imss_path_len - 1] != '/')
@@ -4136,17 +4170,16 @@ struct dirent *readdir(DIR *dirp)
 			// name of file
 			strncpy(entry.d_name, token, len);
 
-			if (pos % 1000 == 0 || pos == n_ent) // TODO: comments this lines, only for debug.
-			{									 // print a message every 1000 files.
-				t = clock() - t;
-				double time_taken = 0.0;
-				time_taken = ((double)t) / (CLOCKS_PER_SEC);
-				int diff = (pos == 0) ? 1 : pos - init_number;
-				// printf("[%s][%f] Reading entry %s, %ld of  %" PRIu32 ", please wait.\n", pathname, time_taken, entry.d_name, pos, n_ent);
-				fprintf(stdout, "Loading %d/%lu files, please wait. Time taken to get %d/1000 files: %f\n", pos, n_ent, diff, time_taken);
-				init_loop_timer = 1;
-				init_number = pos;
-			}
+			// if (pos % 1000 == 0 || pos == n_ent) // TODO: comments this lines, only for debug.
+			// {									 // print a message every 1000 files.
+			// 	t = clock() - t;
+			// 	double time_taken = 0.0;
+			// 	time_taken = ((double)t) / (CLOCKS_PER_SEC);
+			// 	int diff = (pos == 0) ? 1 : pos - init_number;
+			// 	fprintf(stdout, "Loading %d/%lu files, please wait. Time taken to get %d/1000 files: %f\n", pos, n_ent, diff, time_taken);
+			// 	init_loop_timer = 1;
+			// 	init_number = pos;
+			// }
 			// printf("[%s] Reading entry %s, %" PRIu32 " of %u, please wait\n", pathname, entry.d_name,  pos, n_ent);
 
 			char path_search[PATH_MAX] = {0};
@@ -4894,12 +4927,17 @@ int unlinkat(int dir_fd, const char *pathname, int flags)
 	return ret;
 }
 
-// extern int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath)
-// {
-// 	return renameat2(olddirfd, oldpath, newdirfd, newpath, 0);
-// }
+extern int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath)
+{
+	if (!init)
+	{
+		return renameat2(olddirfd, oldpath, newdirfd, newpath, 0);
+	}
+	WarnOperationNotSupported(__func__, oldpath);
+	return renameat2(olddirfd, oldpath, newdirfd, newpath, 0);
+}
 
-int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags)
+extern int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags)
 {
 	if (!real_renameat2)
 	{
@@ -5188,7 +5226,7 @@ ssize_t readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz)
 	return ret;
 }
 
-int newfstatat(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag)
+extern int newfstatat(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag)
 {
 	if (!real_newfstatat)
 		real_newfstatat = (int (*)(int, const char *, struct stat *, int))dlsym(RTLD_NEXT, "newfstatat");
@@ -5198,7 +5236,8 @@ int newfstatat(int __fd, const char *__restrict __file, struct stat *__restrict 
 		return real_newfstatat(__fd, __file, __buf, __flag);
 	}
 
-	slog_warn("[POSIX][TODO]. Calling Real 'newfstatat', pathname=%s\n", __file);
+	// slog_warn("[POSIX][TODO]. Calling Real 'newfstatat', pathname=%s\n", __file);
+	WarnOperationNotSupported(__func__, __file);
 	// fprintf(stderr, "newfstatat\n");
 	// TODO.
 
@@ -6002,6 +6041,34 @@ int fcntl(int fd, int cmd, ... /* arg */)
 			ret = real_fcntl(fd, cmd, arg);
 		slog_full("[POSIX]. Ending Real 'fcntl', fd=%d, ret=%d", fd, ret);
 	}
+
+	return ret;
+}
+
+int fcntl64(int fd, int cmd, ...)
+{
+	if (!real_fcntl64)
+		real_fcntl64 = (int (*)(int, int, ...))dlsym(RTLD_NEXT, __func__);
+
+	va_list ap;
+	void *arg;
+	va_start(ap, cmd);
+	arg = va_arg(ap, void *);
+	va_end(ap);
+
+	if (!init)
+	{
+		if (!arg)
+			return real_fcntl64(fd, cmd);
+		else
+			return real_fcntl64(fd, cmd, arg);
+	}
+
+	int ret = 0;
+	if (!arg)
+		ret = real_fcntl64(fd, cmd);
+	else
+		ret = real_fcntl64(fd, cmd, arg);
 
 	return ret;
 }
