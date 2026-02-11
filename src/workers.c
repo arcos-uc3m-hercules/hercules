@@ -2688,7 +2688,7 @@ void *Checkpoint(void *th_argv)
 
 	if (strlen(checkpoint_dir) == 0)
 	{
-		printf("Snapshot path has not been provided.\tHERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/\n");
+		printf("Checkpoint path has not been provided.\tHERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/\n");
 		fflush(stdout);
 		global_finish_snapshot = 1;
 		pthread_exit(NULL);

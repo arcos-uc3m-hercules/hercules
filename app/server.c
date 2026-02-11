@@ -1252,22 +1252,23 @@ void handle_signal_server(int signal)
 		}
 
 		// Data servers performs malleability operations if it is enabled.
-		// if (args.type == TYPE_DATA_SERVER && args.malleability == 1)
-		// {
-		// 	ret = stop_server();
-		// 	if (ret == 0) // success.
-		// 	{
-		// 		ret = move_blocks_2_server(args.stat_port, args.id, args.imss_uri, g_map);
-		// 		if (ret < 0) // error.
-		// 		{
-		// 			// TODO: if "move_blocks_2_server" fails, try again?
-		// 		}
-		// 	}
-		// }
+		if (args.type == TYPE_DATA_SERVER && args.malleability == 1)
+		{
+			// ret = stop_server();
+			// if (ret == 0) // success.
+			// {
+			// 	ret = move_blocks_2_server(args.stat_port, args.id, args.imss_uri, g_map);
+			// 	if (ret < 0) // error.
+			// 	{
+			// 		// TODO: if "move_blocks_2_server" fails, try again?
+			// 	}
+			// }
+			ShutdownServer();
+		}
 		// This file is readed by the hercules script to know if this server
 		// was correctly shutting down.
-		// sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
-		// ready(tmp_file_path, "OK");
+		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
+		ready(tmp_file_path, "OK");
 	}
 	// if (signal == SIGUSR2) // wake up this server.
 	// {

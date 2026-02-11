@@ -35,6 +35,7 @@ ATTACHED = 1
 MALLEABILITY = 0
 UPPER_BOUND_MALLEABILITY = 0
 LOWER_BOUND_MALLEABILITY = 0
+ALLOC_DATA_HOSTFILE = /home/user/data_hostfile 
 
 # Full path of the file containing a list of nodes serving as data nodes
 DATA_HOSTFILE = /home/user/data_hostfile 

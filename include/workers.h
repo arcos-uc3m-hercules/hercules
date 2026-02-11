@@ -142,5 +142,9 @@ int CheckForMalleability(const p_argv *arguments, const char *req);
 bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double minimum_performance_threshold);
 
 
+// Malleability functions.
+int ShutdownServer();
+
+
 
 #endif
