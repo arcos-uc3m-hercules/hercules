@@ -894,7 +894,7 @@ int32_t main(int32_t argc, char **argv)
 	// }
 
 	ret = ready(tmp_file_path, "OK");
-	fprintf(stderr, "[%s] %c-server %d is ready = %d\n", args.data_hostname, args.type, args.id, ret);
+	fprintf(stdout, ANSI_COLOR_GREEN "[%s] %c-server %d is ready, status code=%d\n" ANSI_COLOR_RESET, args.data_hostname, args.type, args.id, ret);
 	// Wait for threads to finish.
 	for (int32_t i = 0; i < total_threads; i++)
 	{
@@ -994,11 +994,11 @@ int32_t main(int32_t argc, char **argv)
 
 
 	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
-	fprintf(stderr, "Creating the file %s", tmp_file_path);
+	fprintf(stdout, "Creating the file %s\n", tmp_file_path);
 	ready(tmp_file_path, "OK");
 
 	// Free the publisher release address.
-	fprintf(stderr, "Ending %c server\n", args.type);
+	fprintf(stdout, ANSI_COLOR_GREEN "[%s] Ending %c-server %d\n" ANSI_COLOR_RESET, args.data_hostname, args.type, args.id);
 
 	// Free the memory buffer.
 	// free(buffer);
