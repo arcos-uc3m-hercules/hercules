@@ -9,12 +9,26 @@
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/install",
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug Configuration",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     }
   ],
   "buildPresets": [
     {
       "name": "default",
       "configurePreset": "default",
+      "jobs": 8
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
       "jobs": 8
     }
   ]

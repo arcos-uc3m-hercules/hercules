@@ -7,6 +7,19 @@
 #set -x
 #######################################################
 #######################################################
+
+PrintUsage()
+{
+    ACTION=$1
+    # if [[ "${STATUS}" = "remove" ]]; then
+        echo "Usage: hercules start -f <configuration_file_path>"
+        echo "Usage: hercules stop -f <configuration_file_path>"
+        echo "Usage: hercules remove -f <configuration_file_path> -d <data_server_file_path> | -r <hostname>"
+    # fi
+    # if [[ "${STATUS}" = "start" || "${STATUS}" = "stop" ]]; then
+    # fi
+}
+
 ## To stop servers.
 StopServers() {
 
@@ -202,7 +215,8 @@ if [ ! -z "$1" ]; then
     shift
 fi
 if [[ "${STATUS}" != "stop" && "${STATUS}" != "start" && "${STATUS}" != "remove" && "${STATUS}" != "add" ]]; then
-    echo "Incorrect argument in STATUS option, usage: hercules <start|stop>"
+    echo "## Error: Missing arguments"
+    PrintUsage
     exit 1
 fi
 
@@ -319,6 +333,7 @@ fi
 
 if [ -z "${FILE}" ]; then
     echo "No configuration file was provided. Please create one and specify it using -f <file_path>"
+    PrintUsage
     exit 1
 fi
 
@@ -523,6 +538,7 @@ then
         grep -n "^${REMOTE_HOSTNAME}$" "${HERCULES_DATA_HOSTFILE}" | cut -d: -f1 > "${HERCULES_TEMPORAL_PATH}/data2${STATUS}_index_$SLURM_JOB_ID"
     else    
         echo "## Error: Data server file (-d <data_server_file_path>) or remote server hostname is nedeed (-r <hostname>)"
+        PrintUsage
         exit 1
     fi
     # 1 = Stops some servers synchronously.

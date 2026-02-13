@@ -35,7 +35,7 @@ HierarchicalRecords::HierarchicalRecords(const std::string &root)
 
 HierarchicalRecords::~HierarchicalRecords()
 {
-	slog_debug("Llamando al destructor de HierarchicalRecords");
+	slog_debug("Calling the HierarchicalRecords destructor");
 	if (this->hiermap)
 	{
 		delete this->hiermap;

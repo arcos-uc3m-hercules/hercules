@@ -22,10 +22,9 @@
 #define OPEN_OP 8
 #define READV2_OP 11 
 #define UNLINK_OP 12 
-// #define STATFS			  7
-// #define DATASET_OP 8
 #define INSTANCE_OP 9
 #define PERFORMANCE_OP 10
+#define DECOMISSIONING_OP 20
 
 #define WRITE_OP 1
 #define WRITEV 7
@@ -35,6 +34,11 @@
 
 #define GET_OP 0
 #define SET_OP 1
+
+// #define GET_OP_STR "GET"
+// #define SET_OP_STR "SET"
+// #define MALL_OP_STR "MALLEABILITY"
+// Metadata operations.
 
 #define LOCAL_DATASET_UPDATE 0
 

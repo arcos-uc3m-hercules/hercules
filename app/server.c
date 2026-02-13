@@ -41,6 +41,7 @@ extern struct arguments args;
 ucp_worker_h ucp_worker = NULL;
 ucp_address_t *req_addr = NULL;
 ucp_ep_h *metadata_endpoints = NULL;
+ucp_worker_address_attr_t attr;
 // ucp_ep_h data_endpoints[100];
 size_t req_addr_len = 0;
 
@@ -147,7 +148,6 @@ int32_t main(int32_t argc, char **argv)
 	ucp_am_handler_param_t param;
 	int ret = 0;
 	ucp_config_t *config;
-	ucp_worker_address_attr_t attr;
 
 	uint64_t max_system_ram_allowed = 0;
 	uint32_t num_blocks = 0;
@@ -550,18 +550,18 @@ int32_t main(int32_t argc, char **argv)
 	// Metadata server.
 	// else
 	// {
-		// data_endpoints = (ucp_ep_h *)malloc(args.num_data_servers * sizeof(ucp_ep_h));
+	// data_endpoints = (ucp_ep_h *)malloc(args.num_data_servers * sizeof(ucp_ep_h));
 
-		// Create the tree_root node.
-		// char *root_data = (char *)calloc(URI_, sizeof(char));
-		// strncpy(root_data, args.imss_uri, URI_);
-		// tree_root = g_node_new((void *)root_data);
-		// if (pthread_mutex_init(&tree_mut, NULL) != 0)
-		// {
-		// 	perror("HERCULES_ERR_TREE_MUT_INIT");
-		// 	slog_fatal("HERCULES_ERR_TREE_MUT_INIT");
-		// 	exit(1);
-		// }
+	// Create the tree_root node.
+	// char *root_data = (char *)calloc(URI_, sizeof(char));
+	// strncpy(root_data, args.imss_uri, URI_);
+	// tree_root = g_node_new((void *)root_data);
+	// if (pthread_mutex_init(&tree_mut, NULL) != 0)
+	// {
+	// 	perror("HERCULES_ERR_TREE_MUT_INIT");
+	// 	slog_fatal("HERCULES_ERR_TREE_MUT_INIT");
+	// 	exit(1);
+	// }
 	// }
 
 	/***************************************************************/
@@ -992,7 +992,6 @@ int32_t main(int32_t argc, char **argv)
 	ucp_worker_destroy(ucp_worker);
 	ucp_cleanup(ucp_context);
 
-
 	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
 	fprintf(stdout, "Creating the file %s\n", tmp_file_path);
 	ready(tmp_file_path, "OK");
@@ -1231,7 +1230,8 @@ void handle_signal_server(int signal)
 			// by the file descriptor "global_server_fd_thread".
 			fprintf(stderr, "global_server_fd_thread=%d\n", global_server_fd_thread);
 			slog_info("global_server_fd_thread=%d", global_server_fd_thread);
-			if (global_server_fd_thread > 0) {
+			if (global_server_fd_thread > 0)
+			{
 				slog_info("calling shutdown in accept call");
 				global_finish_dispatcher = FINISH_SYSTEM_STATUS;
 				if (shutdown(global_server_fd_thread, SHUT_RD) == -1) // Breaks the accept() call
@@ -1240,7 +1240,7 @@ void handle_signal_server(int signal)
 				}
 				close(global_server_fd_thread);
 			}
-			
+
 			// global_finish_threads = 1;
 			break;
 		default: // suspend the data server.
@@ -1263,12 +1263,22 @@ void handle_signal_server(int signal)
 			// 		// TODO: if "move_blocks_2_server" fails, try again?
 			// 	}
 			// }
-			ShutdownServer();
+			// ShutdownServer();
+
+			char formated_uri[REQUEST_SIZE] = {0};
+			sprintf(formated_uri, "%" PRIu32 " %s %lu %d", DECOMISSIONING_OP, MSG_REMOVE_SERVER, args.id);
+
+			if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, formated_uri) == 0)
+			{
+				perror("HERCULES_ERR_SEND_REQ_SET_STR");
+				slog_fatal("HERCULES_ERR_SEND_REQ_SET_STR");
+				return;
+			}
 		}
 		// This file is readed by the hercules script to know if this server
 		// was correctly shutting down.
-		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
-		ready(tmp_file_path, "OK");
+		// sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
+		// ready(tmp_file_path, "OK");
 	}
 	// if (signal == SIGUSR2) // wake up this server.
 	// {

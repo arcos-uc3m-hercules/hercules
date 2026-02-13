@@ -1470,7 +1470,7 @@ int32_t open_imss(char *imss_uri)
 		new_imss.conns.id[i] = i;
 		// client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], &new_imss.info.status[i]);
 		client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], client_err_call_arg);
-		slog_debug("[IMSS] Created endpoint with %s", (new_imss.info.ips)[i]);
+		slog_debug("Created endpoint with %s", (new_imss.info.ips)[i]);
 		// fprintf(stderr, "[IMSS] Created endpoint with %s\n", (new_imss.info.ips)[i]);
 		// Save the current socket value when the IMSS ip matches the clients' one.
 		slog_debug("ips=%s, client_node=%s, client_ip=%s", (new_imss.info.ips)[i], client_node, client_ip);

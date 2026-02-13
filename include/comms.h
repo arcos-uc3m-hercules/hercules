@@ -58,6 +58,10 @@ static const ucp_tag_t tag_mask = UINT64_MAX;
 
 // Common messages between front and back ends.
 #define MAX_RESPONSE_MSG_LEN 32
+static char MSG_SET_OP[] = "SET";
+static char MSG_GET_OP[] =  "GET";
+static char MSG_REMOVE_SERVER[] = "REMOVESERVER";
+
 static char MSG_MALLEABILITY_DATASERVERS[] = "DATASERVERS";
 static char MSG_DECOM_DATASERVERS[] = "DECOMISSIONING_COMPLETE";
 static char MSG_EMPTY_DIRECTORY[] = "EMPTY_DIRECTORY";
