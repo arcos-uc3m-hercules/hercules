@@ -50,3 +50,4 @@ bash/tests/metadata/Benchmarks/io500/results*
 # out files
 *.out
 stuff/dummy/*
+*.csv
