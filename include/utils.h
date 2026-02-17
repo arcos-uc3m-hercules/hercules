@@ -7,6 +7,8 @@
 #include <errno.h>
 #include <math.h> // for fabs in double comparition.
 #include <stdbool.h> // for bool.
+#include <limits.h>
+#include <stdlib.h> // for strtol.
 
 // Definiciones de colores ANSI
 #define ANSI_COLOR_RED     "\x1b[31m"
@@ -26,5 +28,14 @@ int get_hostname(char *buffer, size_t buffer_size);
  */
 static const double epsilon = 1e-9; // A small tolerance value
 bool double_are_equal(double a, double b);
+
+/**
+ * @brief Checks if a string is a valid integer number.
+ * 
+ * @param str Input string to be checked.
+ * @param out_val 
+ * @return int 1 if the string is a valid integer number, 0 on other case.
+ */
+int Is_valid_integer(const char *str, int *out_val);
 
 #endif

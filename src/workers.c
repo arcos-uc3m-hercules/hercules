@@ -266,12 +266,10 @@ void Attend_pending_requests()
 	}
 	slog_debug("List to send: %s", list_of_active_nodes);
 
-	// sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, node_to_use);
 	sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, list_of_active_nodes);
 	int ret = -1;
 	// fprintf(stderr, "[AttendingPendingRequests] There are %d pending requests\n", pending_requests.size());
-	slog_debug("[AttendingPendingRequests] There are %d pending requests", pending_requests.size());
-	// while (pending_requests.size() != 0)
+	slog_debug("There are %d pending requests", pending_requests.size());
 	p_argv pending_argument;
 	for (const auto &pending_info : requests_to_attend)
 	{
@@ -294,7 +292,8 @@ void Attend_pending_requests()
 		}
 	}
 	node_to_use = NULL;
-	fprintf(stderr, "No more pending requests.\n");
+	// fprintf(stderr, "No more pending requests.\n");
+	slog_debug("No more pending requests.");
 }
 
 int ShutdownServer()
@@ -314,6 +313,7 @@ int ShutdownServer()
 		// pthread_cond_broadcast(&global_run_malleability_cond);
 		// pthread_cond_wait(&global_run_shutdown_cond, &mutex_malleability);
 		fprintf(stderr, "[Shutdown] There are %d pending requests\n", pending_requests.size());
+		slog_debug("There are %d pending requests", pending_requests.size());
 		slog_info("malleability_on=%d", malleability_on);
 		if (malleability_on == 2)
 		{
@@ -337,14 +337,12 @@ int ShutdownServer()
 			pthread_mutex_unlock(&mutex_malleability);
 		}
 	}
-	// pthread_mutex_unlock(&mutex_malleability);
-	// } while (map_server_eps_get_size(map_server_eps) > 0);
 
 	global_finish_threads = 1;
 	// finish the garbage collector.
 	pthread_mutex_lock(&mutex_garbage);
-	pthread_cond_signal(&global_run_garbage_collector_cond);
 	global_finish_garbage_collector = 1;
+	pthread_cond_signal(&global_run_garbage_collector_cond);
 	pthread_mutex_unlock(&mutex_garbage);
 	return 0;
 }
@@ -353,9 +351,9 @@ void *move_blocks_2_server(void *th_argv)
 {
 	const p_argv *arguments = (p_argv *)th_argv;
 
-	uint64_t stat_port = arguments->args.stat_port;
-	uint32_t server_id = arguments->args.id;
-	const char *imss_uri = arguments->args.imss_uri;
+	uint64_t stat_port = arguments->args->stat_port;
+	uint32_t server_id = arguments->args->id;
+	const char *imss_uri = arguments->args->imss_uri;
 	fprintf(stderr, "[move_blocks_2_server] new number of active storage servers=%d\n", number_active_storage_servers);
 	// Creates endpoints to all data servers. It is use in case of
 	// malleability to move blocks between data servers.
@@ -477,7 +475,7 @@ void Decomissioning_stage(p_argv *arguments, int id_server_to_remove)
 	// p_argv *arguments = (p_argv *)th_argv;
 	// TODO: change this condition without hardcoding.
 	// Decreaste the number of servers.
-	if (arguments->args.malleability && !malleability_on)
+	if (arguments->args->malleability && !malleability_on)
 	{
 		// print all records.
 		int index = 0;
@@ -485,23 +483,26 @@ void Decomissioning_stage(p_argv *arguments, int id_server_to_remove)
 		imss_info *imss_info_struct = curr_global_imss;
 		char *element_to_delete = imss_info_struct->ips[id_server_to_remove];
 		// fprintf(stderr, "At this time, the slowest server is %d:%s\n", id_server_to_remove, element_to_delete);
-		slog_debug("Stopping server %d", id_server_to_remove);
+		slog_debug("Stopping server %d:%s", id_server_to_remove, imss_info_struct->ips[id_server_to_remove]);
 		free(element_to_delete);
 		size_t num_elements_to_shift = imss_info_struct->num_storages - id_server_to_remove - 1;
 
-		// move the pointers.
-		memmove(&imss_info_struct->ips[id_server_to_remove],
-				&imss_info_struct->ips[id_server_to_remove + 1],
-				num_elements_to_shift * sizeof(char *));
-
-		imss_info_struct->ips[imss_info_struct->num_storages - 1] = NULL;
-
+		
+		
+		// imss_info_struct->ips[imss_info_struct->num_storages - 1] = NULL;
+		
 		// TODO: after removing memory protect from all the this block, we have to protect next pointer.
 		imss_info_struct->num_storages--;
 		number_active_storage_servers = imss_info_struct->num_storages;
 		imss_info_struct->num_active_storages = number_active_storage_servers;
-		arguments->args.num_data_servers = number_active_storage_servers;
-
+		arguments->args->num_data_servers = number_active_storage_servers;
+		
+		// move the pointers.
+		memmove(&imss_info_struct->ips[id_server_to_remove],
+				&imss_info_struct->ips[id_server_to_remove + 1],
+				num_elements_to_shift * sizeof(char *));
+		imss_info_struct->ips[imss_info_struct->num_storages] = NULL;
+		
 		// This helps to avoid requests until malleability is done.
 		malleability_on = 1;
 		number_active_storage_servers = imss_info_struct->num_storages;
@@ -531,6 +532,15 @@ void Decomissioning_stage(p_argv *arguments, int id_server_to_remove)
 				return;
 			}
 		}
+
+		// Close the endpoint conecction.
+		close_ucx_endpoint(arguments->ucp_worker, data_endpoints[id_server_to_remove]);
+
+		memmove(&data_endpoints[id_server_to_remove],
+				&data_endpoints[id_server_to_remove + 1],
+				num_elements_to_shift * sizeof(char *));
+		data_endpoints[imss_info_struct->num_storages] = NULL; 
+
 		// se me ocurre cambiar todos los dataset que utilicen el número de servidores actual
 		// al que se reduce. Al final no enviarán datos a los nuevos servidores si estos crecen
 		// pero para nuevos datasets debería funcionar.
@@ -544,12 +554,12 @@ void *Comissioning_stage(void *th_argv)
 {
 	CommissioningThreadArgs *arguments = (CommissioningThreadArgs *)th_argv;
 #ifdef DPRINTF
-	fprintf(stderr, "arguments->args.malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args.malleability, comissioning_on, consecutive_scale_up_signals);
+	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on, consecutive_scale_up_signals);
 #endif
-	if (arguments->args.malleability && !comissioning_on)
+	if (arguments->args->malleability && !comissioning_on)
 	{
 		// Always check the performance trend.
-		bool to_add_server = make_scaling_decision(elasticity_records_history, arguments->args.malleability_windows_size, arguments->args.malleability_performance_threshold);
+		bool to_add_server = make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold);
 #ifdef DPRINTF
 		fprintf(stderr, "to_add_server=%d\n", to_add_server);
 #endif
@@ -566,7 +576,7 @@ void *Comissioning_stage(void *th_argv)
 		}
 
 		// Only trigger the actual scaling operation if the threshold is met.
-		if (consecutive_scale_up_signals >= arguments->args.malleability_tolerance)
+		if (consecutive_scale_up_signals >= arguments->args->malleability_tolerance)
 		{
 			consecutive_scale_up_signals = 0;
 			pthread_mutex_unlock(&mutext_malleability);
@@ -619,7 +629,7 @@ void *Comissioning_stage(void *th_argv)
 				// new_number_data_servers = imss_info_struct->num_storages;
 				number_active_storage_servers = imss_info_struct->num_storages;
 				imss_info_struct->num_active_storages = number_active_storage_servers;
-				arguments->args.num_data_servers = number_active_storage_servers;
+				arguments->args->num_data_servers = number_active_storage_servers;
 				// Set comissioning ON to avoid doing twice at same time.
 				// malleability_on = 1;
 				comissioning_on = true;
@@ -634,10 +644,10 @@ void *Comissioning_stage(void *th_argv)
 						"( ssh %s 'cd %s && UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s ~/gesanche/hercules/build/hercules_server d %d %d > %s/tmp/hercules_server_%d_log.txt 2>&1' ) &",
 						node_to_use,
 						workdir,
-						arguments->args.configuration_file_path,
+						arguments->args->configuration_file_path,
 						id_server_to_modify,
 						imss_info_struct->num_active_storages,
-						arguments->args.hercules_path,
+						arguments->args->hercules_path,
 						id_server_to_modify);
 
 				// system(command_to_exec_1);
@@ -649,7 +659,7 @@ void *Comissioning_stage(void *th_argv)
 		else
 		{
 			// fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
-			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args.malleability_tolerance);
+			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
 			pthread_mutex_unlock(&mutext_malleability);
 		}
 	}
@@ -657,7 +667,7 @@ void *Comissioning_stage(void *th_argv)
 	{
 // just for testing. It must be comment on production.
 #ifdef DPRINTF
-		make_scaling_decision(elasticity_records_history, arguments->args.malleability_windows_size, arguments->args.malleability_performance_threshold);
+		make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold);
 		fprintf(stderr, "Testing block\n");
 #endif
 	}
@@ -960,7 +970,7 @@ void *Malleability(void *th_argv)
 	// if (arguments->hercules_info_struct == NULL || curr_global_imss == NULL)
 	if (curr_global_imss == NULL)
 	{
-		if (hierarchical_map->HierarchicalMapGet(arguments->args.imss_uri, &address_, &block_size_rtvd))
+		if (hierarchical_map->HierarchicalMapGet(arguments->args->imss_uri, &address_, &block_size_rtvd))
 		{
 			curr_global_imss = (imss_info *)address_;
 			// arguments->hercules_info_struct = (imss_info *)address_;
@@ -1078,9 +1088,9 @@ void *hercules_ucx_server(void *th_argv)
 	// calculates the minimun performance threshold in megabytes.
 	// MINIMUM_PERFORMANCE_THRESHOLD *= MB;
 	// set the initial value to the global "active number of servers".
-	number_active_storage_servers = arguments->args.num_data_servers;
+	number_active_storage_servers = arguments->args->num_data_servers;
 
-	switch (arguments->args.type)
+	switch (arguments->args->type)
 	{
 	case TYPE_DATA_SERVER:
 		sprintf(server_name, "data");
@@ -1093,8 +1103,8 @@ void *hercules_ucx_server(void *th_argv)
 		SERVER_TYPE = TYPE_METADATA_SERVER;
 		break;
 	default:
-		fprintf(stderr, "HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args.type);
-		slog_error("HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args.type);
+		fprintf(stderr, "HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args->type);
+		slog_error("HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args->type);
 		pthread_exit((void *)-1);
 	}
 
@@ -1129,6 +1139,7 @@ void *hercules_ucx_server(void *th_argv)
 			{
 				map_server_eps_destroy(map_server_eps);
 				fprintf(stderr, "Ending %s server thread.\n", server_name);
+				slog_info("Ending %s server thread.", server_name);
 				pthread_exit((void *)0);
 			}
 		} while (msg_tag == NULL);
@@ -1243,10 +1254,10 @@ void *hercules_ucx_server(void *th_argv)
 		arguments->peer_address = peer_addr;
 		arguments->server_ep = ep;
 		arguments->worker_uid = attr.worker_uid;
-		arguments->hierarchical_map = hierarchical_map;
+		arguments->hierarchical_map = hierarchical_map; // TODO: move this out of the loop.
 		strncpy(arguments->curr_req, req, sizeof(arguments->curr_req));
 
-		switch (arguments->args.type)
+		switch (arguments->args->type)
 		{
 		case TYPE_DATA_SERVER:
 			TIMING_NO_RETURN(srv_worker_helper(arguments, req, map_server_eps), ("srv_worker_helper %s", req), arguments->thread_id);
@@ -1255,8 +1266,8 @@ void *hercules_ucx_server(void *th_argv)
 			ret = TIMING(stat_worker_helper(arguments, req, map_server_eps), ("stat_worker_helper %s", req), int, arguments->thread_id);
 			break;
 		default:
-			fprintf(stderr, "HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args.type);
-			slog_error("HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args.type);
+			fprintf(stderr, "HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args->type);
+			slog_error("HERCULES_ERR_INVALID_SERVER_TYPE: %c\n", arguments->args->type);
 			pthread_exit((void *)-1);
 		}
 
@@ -1343,7 +1354,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		sscanf(req, "%s %s %d", mode, uri_, &sender);
 		slog_debug("BROADCAST condition, req=%s, mode=%s, uri_=%s, sender=%d", req, mode, uri_, sender);
 		map->put_snapshot(uri_, sender);
-		fprintf(stderr, "Sending signal to do Snapshot in server %d\n", arguments->args.id);
+		fprintf(stderr, "Sending signal to do Snapshot in server %d\n", arguments->args->id);
 		pthread_cond_signal(&global_run_snapshot_cond);
 		pthread_cond_signal(&global_run_checkpoint_cond);
 		// nothing else to do.
@@ -1396,14 +1407,19 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	{
 		// TODO: move this to the correct case.
 		malleability_on = 1;
-		id_server_to_modify = arguments->args.id;
+		id_server_to_modify = arguments->args->id;
 		sscanf(req, "%s %" PRIu32 " %" PRIu32 "", mode, &number_active_storage_servers);
 		pthread_t thread;
-		p_argv arguments_aux = *arguments;
-		if (pthread_create(&thread, NULL, move_blocks_2_server, (void *)&arguments_aux) != 0)
+		p_argv *arguments_aux = new p_argv; //*arguments;
+		// arguments_aux.args = arguments->args;
+		// memcpy(&arguments_aux.args, arguments->args, sizeof(p_argv *));
+		// arguments_aux.args = arguments->args;
+		*arguments_aux = *arguments;
+		if (pthread_create(&thread, NULL, move_blocks_2_server, (void *)arguments_aux) != 0)
 		{
 			perror("HERCULES_ERR_SRV_WORKER_THREAD_MOVE_BLOCKS_2_SERVER");
 			slog_error("HERCULES_ERR_SRV_WPORKER_THREAD_MOVE_BLOCKS_2_SERVER");
+			delete arguments_aux;
 			return -1;
 		}
 
@@ -1429,13 +1445,21 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	{
 		int32_t new_id = 0;
 		sscanf(req, "%s %" PRIu32 " %" PRIu32 "", mode, &number_active_storage_servers, &new_id);
-		arguments->args.id = new_id;
+		slog_debug("mode=%s, number_active_storage_servers=%" PRIu32 ", new_id=%" PRIu32 "", mode, number_active_storage_servers, new_id);
+		arguments->args->id = new_id;
+		slog_debug("new id on args=%d", arguments->args->id);
 		pthread_t thread;
-		p_argv arguments_aux = *arguments;
-		if (pthread_create(&thread, NULL, move_blocks_2_server, (void *)&arguments_aux) != 0)
+		p_argv *arguments_aux = new p_argv; //*arguments;
+		*arguments_aux = *arguments;
+		// p_argv arguments_aux = *arguments;
+		// arguments_aux.args = arguments->args;
+		// arguments_aux.args = arguments->args;
+		// p_argv *arguments_aux = new p_argv(*arguments);
+		if (pthread_create(&thread, NULL, move_blocks_2_server, (void *)arguments_aux) != 0)
 		{
 			perror("HERCULES_ERR_SRV_WORKER_THREAD_MOVE_BLOCKS_2_SERVER");
 			slog_error("HERCULES_ERR_SRV_WPORKER_THREAD_MOVE_BLOCKS_2_SERVER");
+			delete arguments_aux;
 			return -1;
 		}
 
@@ -1614,7 +1638,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				}
 				else
 				{
-					if (arguments->args.async_io == SYNC)
+					if (arguments->args->async_io == SYNC)
 					{ // Synchronous.
 						// pthread_mutex_lock(&lock_network);
 						ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
@@ -1659,7 +1683,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			if (prefetch_size <= 0)
 			{
 				// use the prefetch size defined on the configuration file.
-				prefetch_size = arguments->args.prefetch_size;
+				prefetch_size = arguments->args->prefetch_size;
 			}
 
 			if (prefetch_size < RECORD_SIZE)
@@ -1701,7 +1725,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			ssize_t buffer_offset = hierarchical_map->HierarchicalMapGetPrefetch(
 				base_key,
 				current_block_id,
-				arguments->args.num_data_servers,
+				arguments->args->num_data_servers,
 				prefetch_buffer,
 				prefetch_size);
 
@@ -2671,7 +2695,11 @@ void *GarbageCollector(void *th_argv)
 		// Gnodetraverse_garbage_collector(map);//Future
 		// sleep(GARBAGE_COLLECTOR_PERIOD);
 		pthread_mutex_lock(&mutex_garbage);
-		pthread_cond_wait(&global_run_garbage_collector_cond, &mutex_garbage);
+		while (global_finish_garbage_collector == 0)
+		{
+			pthread_cond_wait(&global_run_garbage_collector_cond, &mutex_garbage);
+		}
+		
 		fprintf(stderr, "Running Garbage collector\n");
 
 		if (global_finish_garbage_collector == 1)
@@ -2706,9 +2734,9 @@ void *Checkpoint(void *th_argv)
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
 
-	const char *checkpoint_dir = arguments->args.hercules_snapshot_path;
-	const int server_id = arguments->args.id;
-	const char *POLICY = arguments->args.policy;
+	const char *checkpoint_dir = arguments->args->hercules_snapshot_path;
+	const int server_id = arguments->args->id;
+	const char *POLICY = arguments->args->policy;
 
 	if (strlen(checkpoint_dir) == 0)
 	{
@@ -2718,7 +2746,7 @@ void *Checkpoint(void *th_argv)
 		pthread_exit(NULL);
 	}
 
-	// if (!arguments->args.id)
+	// if (!arguments->args->id)
 	// { // only one server creates the snapshot directory.
 	// 	Make_directory(checkpoint_dir);
 	// }
@@ -2732,7 +2760,7 @@ void *Checkpoint(void *th_argv)
 		slog_debug("Running Checkpoint in %s", checkpoint_dir);
 
 		TIMING_NO_RETURN(
-			ret = map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Checkpoint", arguments->thread_id);
+			ret = map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_snapshot, arguments->args->id, arguments->args->data_hostname, *arguments->args), "Checkpoint", arguments->thread_id);
 
 		if (ret != 1)
 		{
@@ -2781,9 +2809,9 @@ void *Snapshot(void *th_argv)
 	std::shared_ptr<map_records> map = arguments->map;
 	// arguments->hercules_info_struct = NULL;
 
-	const char *snapshot_dir = arguments->args.hercules_snapshot_path;
-	const int server_id = arguments->args.id;
-	const char *POLICY = arguments->args.policy;
+	const char *snapshot_dir = arguments->args->hercules_snapshot_path;
+	const int server_id = arguments->args->id;
+	const char *POLICY = arguments->args->policy;
 
 	if (strlen(snapshot_dir) == 0)
 	{
@@ -2793,7 +2821,7 @@ void *Snapshot(void *th_argv)
 		pthread_exit(NULL);
 	}
 
-	// if (!arguments->args.id)
+	// if (!arguments->args->id)
 	// { // only one server creates the snapshot directory.
 	// 	Make_directory(snapshot_dir);
 	// }
@@ -2807,7 +2835,7 @@ void *Snapshot(void *th_argv)
 		slog_debug("Running Snapshot in %s", snapshot_dir);
 
 		TIMING_NO_RETURN(
-			ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args.id, arguments->args.data_hostname, arguments->args), "Snapshot", arguments->thread_id);
+			ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args->id, arguments->args->data_hostname, *arguments->args), "Snapshot", arguments->thread_id);
 
 		if (ret != 1)
 		{
@@ -2877,7 +2905,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	if (!strcmp(req, MSG_DECOM_DATASERVERS))
 	{
 		acks_received++;
-		int expected_acks = arguments->args.num_data_servers + 1;
+		int expected_acks = arguments->args->num_data_servers + 1;
 		fprintf(stderr, "[%d/%d] ACK received: %s\n", acks_received, expected_acks, req);
 		slog_debug("[%d/%d] ACK received: %s", acks_received, expected_acks, req);
 		if (acks_received >= expected_acks)
@@ -2928,7 +2956,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		}
 
 		char request[REQUEST_SIZE] = {0};
-		sprintf(request, "%" PRIu32 " GET %s", arguments->args.id, "HELLO!JOIN");
+		sprintf(request, "%" PRIu32 " GET %s", arguments->args->id, "HELLO!JOIN");
 		// slog_live("ip_address=%s:%d", new_imss.info.ips[i], new_imss.info.conn_port);
 
 		if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
@@ -2994,7 +3022,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	}
 	else if (!strcmp(mode, MSG_REMOVE_SERVER))
 	{
-		slog_debug("Running decomissioning stage");
+		slog_debug("Running decomissioning stage, number=%s", number);
 		Decomissioning_stage(arguments, atoi(number));
 		return 0;
 	}
@@ -3023,8 +3051,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// this allows to remove an extra "find" operation (with and without the last slash).
 	// So, we are assuming that imsss://dir/mydir/ == imsss://dir/mydir and imsss://dir/mydir/myfile == imsss://dir/mydir/myfile/
 	// TODO: check root case to avoid deleting last slash.
-	slog_debug("arguments->args.imss_uri=%s", arguments->args.imss_uri);
-	if (key.compare(arguments->args.imss_uri))
+	slog_debug("arguments->args->imss_uri=%s", arguments->args->imss_uri);
+	if (key.compare(arguments->args->imss_uri))
 	{
 		RemoveLastSlash(key);
 	}
@@ -4045,7 +4073,7 @@ void *HandleClient(void *args)
 	char req[REQUEST_SIZE] = {0};
 	char mode[MODE_SIZE] = {0};
 	uint32_t client_id_from_req = 0;
-	slog_debug("Client %u connected, socket %d.", current_client_id, new_socket);
+	slog_debug("\nClient %u connected, socket %d.", current_client_id, new_socket);
 
 	ret = recv(new_socket, req, REQUEST_SIZE, MSG_WAITALL);
 	if (ret < 0)

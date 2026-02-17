@@ -72,7 +72,7 @@ typedef struct
 	char *tmp_file_path;
 	u_int16_t hercules_thread_pool_size;
 	int thread_id;
-	struct arguments args;
+	struct arguments *args;
 	char curr_req[PATH_MAX];
 } p_argv;
 
@@ -90,7 +90,7 @@ typedef struct
 typedef struct
 {
     // The entire 'args' substruct containing configuration.
-    struct arguments args;
+    struct arguments *args;
 
     // A pointer to the shared Hercules instance information.
     imss_info *hercules_info_struct;

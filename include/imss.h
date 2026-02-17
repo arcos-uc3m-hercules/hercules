@@ -57,7 +57,11 @@ extern ucp_worker_h ucp_worker_data;	 // = (ucp_worker_h)NULL;
 extern ucp_address_t **stat_addr;
 extern ucp_ep_h *stat_eps;
 extern ucp_address_t *local_addr_meta;
+extern size_t local_addr_len_meta;
 extern ucp_address_t *local_addr_data;
+extern uint64_t local_meta_uid;
+extern uint64_t local_data_uid;
+
 
 /* TCP variables. */
 extern char client_node[512];	// Node name where the client is running.
@@ -80,7 +84,6 @@ extern char client_ip[16];		// IP number of the node where the client is taking 
 // #else
 // #define DPRINT(...)
 // #endif
-
 
 // GHashMap functions.
 // int replace_dataset_entry_key(const char *old_uri, const char *new_uri);
@@ -645,7 +648,7 @@ RETURNS:	0 - Resources were released successfully.
 	 */
 	int32_t Make_directory(const char *dirname);
 	int32_t Open_file(const char *checkpoint_dir, const char *filename);
-	int32_t Close_file(int fd);
+	int32_t Close_file(int fd, const char *err_msg_to_print);
 	ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset);
 
 #ifdef __cplusplus

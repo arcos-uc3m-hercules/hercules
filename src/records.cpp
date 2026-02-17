@@ -53,6 +53,7 @@ map_records::map_records(const int64_t nsize)
 map_records::~map_records()
 {
 	fprintf(stderr, "Freeing memory\n");
+	slog_debug("Freeing memory\n")
 	// freeAllMemory();
 
 	delete mut;
@@ -1455,7 +1456,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 				ssize_t written_bytes_in_disk = Write_2_disk(fd, full_data_from_file, size_of_merge_data, 0);
 				fprintf(stderr, "Writting %lu bytes to disk from %d servers with the name %s, written_bytes_in_disk=%zd\n", size_of_merge_data, number_active_storage_servers, data_hostname, written_bytes_in_disk);
 
-				Close_file(fd);
+				Close_file(fd, "HERCULES_ERR_SNAPSHOT_CLOSE_FILE");
 
 				t = clock() - t;
 				time_taken_for_writting = ((double)t) / (CLOCKS_PER_SEC);
@@ -1742,7 +1743,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 				ssize_t written_bytes_in_disk = Write_2_disk(fd, full_data_from_file, size_of_merge_data, 0);
 				fprintf(stderr, "Writting %lu bytes to disk from %d servers with the name %s, written_bytes_in_disk=%zd\n", size_of_merge_data, number_active_storage_servers, data_hostname, written_bytes_in_disk);
 
-				Close_file(fd);
+				Close_file(fd, "HERCULES_ERR_CHECKPOINT_CLOSE_FILE");
 
 				t = clock() - t;
 				time_taken_for_writting = ((double)t) / (CLOCKS_PER_SEC);

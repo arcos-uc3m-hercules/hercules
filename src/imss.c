@@ -89,7 +89,7 @@ int matching_server_id = -1;
 
 // static ucp_address_t *local_addr_meta;
 ucp_address_t *local_addr_meta;
-static size_t local_addr_len_meta;
+size_t local_addr_len_meta;
 
 // static ucp_address_t *local_addr_data = NULL;
 ucp_address_t *local_addr_data;
@@ -893,11 +893,21 @@ int32_t stat_init(char *stat_hostfile,
 	// Connect to all servers.
 	char request[REQUEST_SIZE] = {0};
 
-	status = ucp_worker_get_address(ucp_worker_meta, &local_addr_meta, &local_addr_len_meta);
+	// status = ucp_worker_get_address(ucp_worker_meta, &local_addr_meta, &local_addr_len_meta);
+
+	// Get the address of the worker object.
+	ucp_worker_attr_t worker_attr;
+	worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
+	status = ucp_worker_query(ucp_worker_meta, &worker_attr);
+	local_addr_len_meta = worker_attr.address_length;
+	local_addr_meta = worker_attr.address;
+	
+	// Get attributes of the particular worker address.
 	ucp_worker_address_attr_t attr;
 	attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
 	ucp_worker_address_query(local_addr_meta, &attr);
 	local_meta_uid = attr.worker_uid;
+	slog_debug("[srv_worker_thread] Server UID %" PRIu64 ".", local_meta_uid);
 
 	slog_debug("Locking network, add=%p", &lock_network);
 	pthread_mutex_lock(&lock_network);
@@ -1084,7 +1094,7 @@ int32_t stat_release()
 	for (int32_t i = 0; i < n_stat_servers; i++)
 	{
 		ep = stat_eps[i];
-		slog_debug("Closing endpoing %d/%d", i/n_stat_servers);
+		slog_debug("Closing endpoing %d/%d", i / n_stat_servers);
 		close_ucx_endpoint(ucp_worker_meta, ep);
 		free(stat_addr[i]);
 	}
@@ -6390,14 +6400,19 @@ int32_t Open_file(const char *checkpoint_dir, const char *filename)
 	return fd;
 }
 
-int32_t Close_file(int fd)
+int32_t Close_file(int fd, const char *err_msg_to_print)
 {
+	if (fd < 0)
+	{
+		return -1;
+	}
+
 	int ret = -1;
 	ret = close(fd);
 	if (ret < 0)
 	{
-		perror("HERCULES_ERR_CLOSE_DISK");
-		slog_error("HERCULES_ERR_CLOSE_DISK");
+		perror(err_msg_to_print);
+		slog_error("%s", err_msg_to_print);
 		return -1;
 	}
 	return ret;
@@ -6405,6 +6420,12 @@ int32_t Close_file(int fd)
 
 ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset)
 {
+
+	if (fd < 0)
+	{
+		return -1;
+	}
+
 	int ret = -1;
 
 	// ssize_t bytes = pwrite(fd, buffer, size, offset);
@@ -6425,7 +6446,7 @@ ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset)
 		{
 			perror("HERCULES_ERR_WRITE_DISK");
 			slog_error("HERCULES_ERR_WRITE_DISK");
-			Close_file(fd);
+			Close_file(fd, "HERCULES_ERR_CLOSE_DISK");
 			return -1;
 		}
 		bytes_written += bytes;
