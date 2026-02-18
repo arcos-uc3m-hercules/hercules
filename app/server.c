@@ -822,6 +822,11 @@ int32_t main(int32_t argc, char **argv)
 			{
 				return -1;
 			}
+
+			// ack from the server.
+			size_t msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
+			void *response_buffer = (void *)malloc(msg_length * sizeof(char));
+			msg_length = recv_data(ucp_worker_meta, stat_eps[j], response_buffer, msg_length, local_meta_uid, SYNC);
 		}
 
 		for (int32_t i = 0; i < num_servers; i++)
@@ -938,7 +943,7 @@ int32_t main(int32_t argc, char **argv)
 	// Release UCX resources used by the threads.
 	for (int i = 0; i < hercules_thread_pool_size; i++)
 	{
-		fprintf(stdout, "Releasing UCX resources for worker %d/%d\n", i, hercules_thread_pool_size);
+		fprintf(stdout, "Releasing UCX resources for worker %d/%d\n", i+1, hercules_thread_pool_size);
 		slog_info("Releasing UCX resources for worker %d/%d", i, hercules_thread_pool_size);
 		// fprintf(stdout, "ucp_worker_progress for worker %d\n", i);
 		// ucp_worker_progress(ucp_worker_threads[i]);
@@ -1283,7 +1288,7 @@ void handle_signal_server(int signal)
 			// 		// TODO: if "move_blocks_2_server" fails, try again?
 			// 	}
 			// }
-			// ShutdownServer();
+			// Shutdown_server();
 
 			char formated_uri[REQUEST_SIZE] = {0};
 			sprintf(formated_uri, "%" PRIu32 " %s %d", DECOMISSIONING_OP, MSG_REMOVE_SERVER, args.id);

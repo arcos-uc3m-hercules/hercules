@@ -12,7 +12,7 @@
 #include "cfg_parse.h"
 
 static u_int16_t HERCULES_THREAD_POOL_SIZE = 1;
-static u_int16_t MALLEABILITY_ON = 0;
+static u_int16_t CONF_MALLEABILITY_STATUS = 0;
 extern u_int16_t ASYNC_IO;
 // using std::string;
 

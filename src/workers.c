@@ -1,3 +1,4 @@
+#include <atomic>
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
@@ -15,6 +16,8 @@
 #include <fcntl.h>
 #include <condition_variable>
 #include <numeric>
+#include "comms.h"
+#include "hercules.hpp"
 #include "imss.h"
 #include "workers.h"
 #include "directory.h"
@@ -22,6 +25,7 @@
 #include "map_server_eps.hpp"
 #include "policies.h"
 #include "shared_memory.h"
+#include "slog.h"
 
 // void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
@@ -37,10 +41,10 @@ pthread_mutex_t mutext_malleability = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutext_progress = PTHREAD_MUTEX_INITIALIZER;
 std::mutex operation_lock;
 
-// if malleability_on = 1, new requests will be not handled and server will
+// if malleability_status = 1, new requests will be not handled and server will
 // respond with a "malleability" string.
-int malleability_on = 0;
-bool comissioning_on = false;
+std::atomic<int> malleability_status(MALLEABILITY_OFF);
+std::atomic<bool> comissioning_on(false);
 uint32_t number_active_storage_servers = 0;
 int32_t id_server_to_modify = -1;
 char *node_to_use = NULL;
@@ -226,9 +230,9 @@ int SendConfirmationMessage(const p_argv *arguments, const char *msg)
 
 void Attend_pending_requests()
 {
-	if (malleability_on <= 0)
+	if (malleability_status.load(std::memory_order_acquire) <= MALLEABILITY_OFF)
 	{
-		slog_debug("Malleability is not running, malleability_on=%d", malleability_on);
+		slog_debug("Malleability is not running, malleability_status=%d", malleability_status.load());
 		return;
 	}
 
@@ -239,7 +243,7 @@ void Attend_pending_requests()
 		return;
 	}
 
-	if(curr_global_imss == NULL)
+	if (curr_global_imss == NULL)
 	{
 		fprintf(stderr, "Invalid Hercules struct.\n");
 		slog_error("Invalid Hercules struct.");
@@ -279,7 +283,8 @@ void Attend_pending_requests()
 		pending_argument.ucp_worker = pending_info.ucp_worker;
 		pending_argument.server_ep = pending_info.server_ep;
 		pending_argument.worker_uid = pending_info.worker_uid;
-		fprintf(stderr, "Replying to pending request %s, pool size=%d\n", pending_info.curr_req, requests_to_attend.size());
+		// fprintf(stderr, "Replying to pending request %s, pool size=%zu\n", pending_info.curr_req, requests_to_attend.size());
+		slog_info("Replying to pending request %s, pool size=%zu", pending_info.curr_req, requests_to_attend.size());
 		ret = SendConfirmationMessage(&pending_argument, response);
 		// pending_requests.pop_back();
 		// pthread_cond_signal(&global_run_malleability_cond);
@@ -296,26 +301,25 @@ void Attend_pending_requests()
 	slog_debug("No more pending requests.");
 }
 
-int ShutdownServer()
+int Shutdown_server()
 {
 
 	if (global_finish_dispatcher == FINISH_SYSTEM_STATUS)
 	{ // the entire system is being shutting down. We do not need to wait for pending requests.
 		return 0;
 	}
-	
 
-	sleep(3);
+	// sleep(3);
 	while (1)
 	{
 		// pthread_cond_signal(&global_run_malleability_cond);
-		// fprintf(stderr, "ShutdownServer is lock..., waiting connections=%ld\n", map_server_eps_get_size(map_server_eps));
+		// fprintf(stderr, "Shutdown_server is lock..., waiting connections=%ld\n", map_server_eps_get_size(map_server_eps));
 		// pthread_cond_broadcast(&global_run_malleability_cond);
 		// pthread_cond_wait(&global_run_shutdown_cond, &mutex_malleability);
-		fprintf(stderr, "[Shutdown] There are %d pending requests\n", pending_requests.size());
+		// fprintf(stderr, "[Shutdown] There are %zu pending requests\n", pending_requests.size());
 		slog_debug("There are %d pending requests", pending_requests.size());
-		slog_info("malleability_on=%d", malleability_on);
-		if (malleability_on == 2)
+		slog_info("malleability_status=%d", malleability_status.load());
+		if (malleability_status.load(std::memory_order_acquire) == MALLEABILITY_COMPLETE)
 		{
 			pthread_mutex_lock(&mutex_malleability);
 
@@ -331,7 +335,7 @@ int ShutdownServer()
 			Attend_pending_requests();
 		}
 		else
-		{
+		{ // lock until malleability completes.
 			pthread_mutex_lock(&mutex_malleability);
 			pthread_cond_wait(&global_run_malleability_cond, &mutex_malleability);
 			pthread_mutex_unlock(&mutex_malleability);
@@ -354,18 +358,28 @@ void *move_blocks_2_server(void *th_argv)
 	uint64_t stat_port = arguments->args->stat_port;
 	uint32_t server_id = arguments->args->id;
 	const char *imss_uri = arguments->args->imss_uri;
-	fprintf(stderr, "[move_blocks_2_server] new number of active storage servers=%d\n", number_active_storage_servers);
-	// Creates endpoints to all data servers. It is use in case of
-	// malleability to move blocks between data servers.
+	// fprintf(stderr, "[move_blocks_2_server] new number of active storage servers=%d\n", number_active_storage_servers);
+	slog_debug("[move_blocks_2_server] new number of active storage servers=%d", number_active_storage_servers);
+
 	slog_debug("Connecting to data servers");
-	open_imss((char *)imss_uri);
-	if (number_active_storage_servers < 0)
-	{
-		slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-		return NULL;
+	int32_t imss_found_in = -1;
+	imss_found_in = find_imss(imss_uri, &curr_imss);
+	curr_global_imss = &curr_imss.info;
+	if(imss_found_in == -1)
+	{ // request the metadata.
+		number_active_storage_servers = open_imss((char *)arguments->args->imss_uri);
+		if (number_active_storage_servers < 0)
+		{
+			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+			pthread_exit(NULL);
+		}
+	} 
+	else 
+	{ // update current struct.
+		size_t num_elements_to_shift = Update_ips_list(id_server_to_modify);
+		Update_data_endpoint_list(id_server_to_modify, num_elements_to_shift);
 	}
 
-	curr_global_imss = &curr_imss.info;
 
 	// Here data server should to move the datablocks.
 	// print all key/value elements.
@@ -381,7 +395,7 @@ void *move_blocks_2_server(void *th_argv)
 	// Map to use.
 	HierarchicalMap *hiermap = hierarchical_map->hiermap;
 
-	fprintf(stderr, "--- Root Map ---\n");
+	// fprintf(stderr, "--- Root Map ---\n");
 	slog_debug("--- Root Map ---");
 	int number_of_blocks_sent = 0;
 	for (const auto &pair : *hiermap)
@@ -416,9 +430,11 @@ void *move_blocks_2_server(void *th_argv)
 
 				slog_live("key='%s',\turi='%s',\tblock='%s',\tnext server=%d", inner_key.c_str(), data_uri.c_str(), block.c_str(), next_server);
 
-				if (id_server_to_modify == -1 && next_server == server_id)
+				// if (id_server_to_modify == -1 && next_server == server_id)
+				if (next_server == server_id)
 				{
 					fprintf(stderr, "[SKIP] BLOCK %d TO %d SERVER\n", block_number, next_server);
+					slog_debug("[SKIP] BLOCK %d TO %d SERVER", block_number, next_server);
 					continue;
 				}
 
@@ -431,8 +447,6 @@ void *move_blocks_2_server(void *th_argv)
 					slog_error("ERR_HERCULES_SET_DATA_IN_SERVER\n");
 					perror("ERR_HERCULES_SET_DATA_IN_SERVER");
 					// TODO: do not return, continue with the following blocks.
-					// pthread_mutex_unlock(&mutex_malleability);
-					// sem_post(&mutex_malleability);
 					return NULL;
 				}
 
@@ -441,71 +455,102 @@ void *move_blocks_2_server(void *th_argv)
 			}
 		}
 	}
-	fprintf(stderr, "++ number_of_blocks_sent=%d\n", number_of_blocks_sent);
+	// fprintf(stderr, "++ number_of_blocks_sent=%d\n", number_of_blocks_sent);
 	slog_debug("++ number_of_blocks_sent=%d", number_of_blocks_sent);
 	imss_flush_data();
 	// Check for pending requests.
 	Attend_pending_requests();
 
 	pthread_mutex_lock(&mutex_malleability);
-	fprintf(stderr, "Sending ACK to metadata server\n");
+	// fprintf(stderr, "Sending ACK to metadata server\n");
 	slog_debug("Sending ACK to metadata server");
 	// ep = stat_eps[m_srv];
 	// pthread_mutex_lock(&lock_network);
 	// Send the request.
 	StatACK(MSG_DECOM_DATASERVERS, 0);
 
-	fprintf(stderr, "ACK to metadata server sent.\n");
+	// fprintf(stderr, "ACK to metadata server sent.\n");
 	slog_debug("ACK to metadata server sent, id_server_to_modify=%d", id_server_to_modify);
-	if (id_server_to_modify != -1)
+	// if (id_server_to_modify != -1)
+	if(global_finish_dispatcher == FINISH_SERVER_STATUS)
 	{
-		malleability_on = 2;
-		// id_server_to_modify = -1;
+		malleability_status.store(MALLEABILITY_COMPLETE, std::memory_order_release);
+	} if(global_finish_dispatcher == RUNNING_SERVER_STATUS) {
+		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
 	}
 	pthread_cond_signal(&global_run_malleability_cond);
 	pthread_mutex_unlock(&mutex_malleability);
 
-	slog_debug("Ending move_blocks_2_server");
+	slog_debug("Ending move_blocks_2_server\n");
 
 	pthread_exit(NULL);
 }
 
+size_t Update_ips_list(int id_server_to_remove)
+{
+	slog_debug("id_server_to_remove=%d", id_server_to_remove)
+	imss_info *imss_info_struct = curr_global_imss;
+	if (imss_info_struct->num_storages <= 0) {
+		return 0;
+	}
+	char *element_to_delete = imss_info_struct->ips[id_server_to_remove];
+	slog_debug("Stopping server %d:%s", id_server_to_remove, imss_info_struct->ips[id_server_to_remove]);
+	// fprintf(stderr, "At this time, the slowest server is %d:%s\n", id_server_to_remove, element_to_delete);
+	free(element_to_delete);
+	size_t num_elements_to_shift = imss_info_struct->num_storages - id_server_to_remove - 1;
+
+	// imss_info_struct->ips[imss_info_struct->num_storages - 1] = NULL;
+
+	// TODO: after removing memory protect from all the this block, we have to protect next pointer.
+	imss_info_struct->num_storages--;
+	number_active_storage_servers = imss_info_struct->num_storages;
+	imss_info_struct->num_active_storages = number_active_storage_servers;
+
+	// move the pointers.
+	memmove(&imss_info_struct->ips[id_server_to_remove],
+			&imss_info_struct->ips[id_server_to_remove + 1],
+			num_elements_to_shift * sizeof(char *));
+	imss_info_struct->ips[imss_info_struct->num_storages] = NULL;
+
+	slog_debug("num_elements_to_shift=%d, imss_info_struct->num_storages=%d", num_elements_to_shift, imss_info_struct->num_storages);
+
+	return num_elements_to_shift;
+}
+
+void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift)
+{
+	if (num_elements_to_shift <= 0) {
+		return;
+	}
+	memmove(&data_endpoints[id_server_to_remove],
+			&data_endpoints[id_server_to_remove + 1],
+			num_elements_to_shift * sizeof(char *));
+	data_endpoints[number_active_storage_servers] = NULL;
+	return;
+}
+
+/**
+ * @brief Decrease the number of servers.
+ * 
+ * @param arguments 
+ * @param id_server_to_remove 
+ */
 void Decomissioning_stage(p_argv *arguments, int id_server_to_remove)
 {
 	// p_argv *arguments = (p_argv *)th_argv;
-	// TODO: change this condition without hardcoding.
-	// Decreaste the number of servers.
-	if (arguments->args->malleability && !malleability_on)
+	// Check if malleability is enable from the configuration file and if malleability is not running.
+	// Setting MALLEABILITY_INPROGRESS helps to avoid requests until malleability is done.
+	int expected_status = MALLEABILITY_OFF;
+	if (arguments->args->malleability && malleability_status.compare_exchange_strong(expected_status, MALLEABILITY_INPROGRESS, std::memory_order_acq_rel))
 	{
 		// print all records.
 		int index = 0;
-		// Turn off the slowest server at this time.
-		imss_info *imss_info_struct = curr_global_imss;
-		char *element_to_delete = imss_info_struct->ips[id_server_to_remove];
-		// fprintf(stderr, "At this time, the slowest server is %d:%s\n", id_server_to_remove, element_to_delete);
-		slog_debug("Stopping server %d:%s", id_server_to_remove, imss_info_struct->ips[id_server_to_remove]);
-		free(element_to_delete);
-		size_t num_elements_to_shift = imss_info_struct->num_storages - id_server_to_remove - 1;
-
-		
-		
-		// imss_info_struct->ips[imss_info_struct->num_storages - 1] = NULL;
-		
-		// TODO: after removing memory protect from all the this block, we have to protect next pointer.
-		imss_info_struct->num_storages--;
-		number_active_storage_servers = imss_info_struct->num_storages;
-		imss_info_struct->num_active_storages = number_active_storage_servers;
+		// removes the server from the ips list.
+		size_t num_elements_to_shift = Update_ips_list(id_server_to_remove);
 		arguments->args->num_data_servers = number_active_storage_servers;
-		
-		// move the pointers.
-		memmove(&imss_info_struct->ips[id_server_to_remove],
-				&imss_info_struct->ips[id_server_to_remove + 1],
-				num_elements_to_shift * sizeof(char *));
-		imss_info_struct->ips[imss_info_struct->num_storages] = NULL;
-		
-		// This helps to avoid requests until malleability is done.
-		malleability_on = 1;
-		number_active_storage_servers = imss_info_struct->num_storages;
+
+		// malleability_status.store(MALLEABILITY_INPROGRESS, std::memory_order_release);
+		// number_active_storage_servers = imss_info_struct->num_storages;
 
 		char request[REQUEST_SIZE] = {0};
 		int ret = 0;
@@ -516,11 +561,11 @@ void Decomissioning_stage(p_argv *arguments, int id_server_to_remove)
 			// Send the request to all servers.
 			if (i == id_server_to_remove)
 			{
-				sprintf(request, "STOPSERVER %" PRId32 "\0", number_active_storage_servers);
+				sprintf(request, "STOPSERVER %" PRId32 "", number_active_storage_servers);
 			}
 			else
 			{
-				sprintf(request, "REORDERSERVER %" PRId32 " %" PRId32 "\0", number_active_storage_servers, new_id);
+				sprintf(request, "REORDERSERVER %" PRId32 " %" PRId32 " %d", number_active_storage_servers, new_id, id_server_to_remove);
 				new_id++;
 			}
 			slog_debug("Sending %s to server ID %d, number of active storage servers=%d", request, id_server_to_remove, number_active_storage_servers);
@@ -529,17 +574,15 @@ void Decomissioning_stage(p_argv *arguments, int id_server_to_remove)
 			{
 				perror("HERCULES_ERR_SEND_REQ_SETSERVER");
 				slog_fatal("HERCULES_ERR_SEND_REQ_SETSERVER");
-				return;
+				// TODO: if it fails we continue the loop. We need to ensure consistency between servers so this operation should succeed.
+				// return;
 			}
 		}
 
-		// Close the endpoint conecction.
+		// Close the endpoint connection.
 		close_ucx_endpoint(arguments->ucp_worker, data_endpoints[id_server_to_remove]);
 
-		memmove(&data_endpoints[id_server_to_remove],
-				&data_endpoints[id_server_to_remove + 1],
-				num_elements_to_shift * sizeof(char *));
-		data_endpoints[imss_info_struct->num_storages] = NULL; 
+		Update_data_endpoint_list(id_server_to_remove, num_elements_to_shift);
 
 		// se me ocurre cambiar todos los dataset que utilicen el número de servidores actual
 		// al que se reduce. Al final no enviarán datos a los nuevos servidores si estos crecen
@@ -556,7 +599,7 @@ void *Comissioning_stage(void *th_argv)
 #ifdef DPRINTF
 	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on, consecutive_scale_up_signals);
 #endif
-	if (arguments->args->malleability && !comissioning_on)
+	if (arguments->args->malleability && comissioning_on.load(std::memory_order_acquire) == false)
 	{
 		// Always check the performance trend.
 		bool to_add_server = make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold);
@@ -631,7 +674,7 @@ void *Comissioning_stage(void *th_argv)
 				imss_info_struct->num_active_storages = number_active_storage_servers;
 				arguments->args->num_data_servers = number_active_storage_servers;
 				// Set comissioning ON to avoid doing twice at same time.
-				// malleability_on = 1;
+				// malleability_status = 1;
 				comissioning_on = true;
 				id_server_to_modify = number_active_storage_servers - 1;
 
@@ -650,7 +693,6 @@ void *Comissioning_stage(void *th_argv)
 						arguments->args->hercules_path,
 						id_server_to_modify);
 
-				// system(command_to_exec_1);
 				fprintf(stderr, "Running command: %s, id server=%d\n", command_to_exec, id_server_to_modify);
 				// Deploy the new hercules instance on the avaiable node.
 				system(command_to_exec);
@@ -678,7 +720,7 @@ void *Comissioning_stage(void *th_argv)
 	temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
 	strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
 
-	// if (malleability_on)
+	// if (malleability_status)
 	// {
 	// 	CheckForMalleability(&temp_p_argv_for_calls, arguments->curr_req);
 	// }
@@ -984,7 +1026,6 @@ void *Malleability(void *th_argv)
 		slog_live("Hercules instance found: %s", key.c_str());
 	}
 
-	
 	// 	// remove the records for this server.
 	// 	elasticity_records_history.erase(element_to_delete);
 	// }
@@ -1238,10 +1279,10 @@ void *hercules_ucx_server(void *th_argv)
 			// 	fprintf(stderr, "Failed to request: %s\n", req);
 			// 	continue;
 			// }
-			// size = const ucx_server_err_call_arg + UID=5 + UINT64 string representation size. 
-			size_t msg_len = strlen(ucx_server_err_call_arg)+5+UINT64_MAX_STR_LEN;
+			// size = const ucx_server_err_call_arg + UID=5 + UINT64 string representation size.
+			const size_t msg_len = strlen(ucx_server_err_call_arg) + 5 + UINT64_MAX_STR_LEN;
 			char tmp_msg[msg_len] = {0};
-			snprintf(tmp_msg, msg_len,"%s UID %" PRIu64, ucx_server_err_call_arg, attr.worker_uid);
+			snprintf(tmp_msg, msg_len, "%s UID %" PRIu64, ucx_server_err_call_arg, attr.worker_uid);
 			client_create_ep_data(arguments->ucp_worker, &ep, peer_addr, tmp_msg);
 			// add the new ep to the map
 			map_server_eps_put(map_server_eps, attr.worker_uid, ep);
@@ -1289,9 +1330,15 @@ void *hercules_ucx_server(void *th_argv)
 
 int CheckForMalleability(const p_argv *arguments, const char *req)
 {
-	if (malleability_on)
+	if (malleability_status.load(std::memory_order_acquire) == MALLEABILITY_INPROGRESS)
 	{
 		pthread_mutex_lock(&mutex_malleability);
+		if (malleability_status.load(std::memory_order_relaxed) != MALLEABILITY_INPROGRESS)
+		{
+			pthread_cond_signal(&global_run_malleability_cond);
+			pthread_mutex_unlock(&mutex_malleability);	
+			return 0;
+		}
 		waiting_clients++;
 		// fprintf(stderr, "+ Clients waiting %d, req=%s\n", waiting_clients, req);
 		slog_debug("+ Clients waiting %d, req=%s", waiting_clients, req);
@@ -1406,14 +1453,14 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	else if (!strcmp(mode, "STOPSERVER"))
 	{
 		// TODO: move this to the correct case.
-		malleability_on = 1;
+		// malleability_status = MALLEABILITY_INPROGRESS;
+		malleability_status.store(MALLEABILITY_INPROGRESS, std::memory_order_release);
+		global_finish_dispatcher = FINISH_SERVER_STATUS;
 		id_server_to_modify = arguments->args->id;
 		sscanf(req, "%s %" PRIu32 " %" PRIu32 "", mode, &number_active_storage_servers);
 		pthread_t thread;
-		p_argv *arguments_aux = new p_argv; //*arguments;
-		// arguments_aux.args = arguments->args;
-		// memcpy(&arguments_aux.args, arguments->args, sizeof(p_argv *));
-		// arguments_aux.args = arguments->args;
+		p_argv *arguments_aux = new p_argv;
+
 		*arguments_aux = *arguments;
 		if (pthread_create(&thread, NULL, move_blocks_2_server, (void *)arguments_aux) != 0)
 		{
@@ -1433,7 +1480,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		// After moving all data, delete this server.
 		// Shutdown or close the socket used by the dispatcher pointed
 		// by the file descriptor "global_server_fd_thread".
-		global_finish_dispatcher = FINISH_SERVER_STATUS;
 		if (shutdown(global_server_fd_thread, SHUT_RD) == -1)
 		{
 			perror("HERCULES_ERR_SRV_WORKER_SHUTDOWN_SERVER_FD\n");
@@ -1443,8 +1489,12 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	}
 	else if (!strcmp(mode, "REORDERSERVER"))
 	{
+		// should I enable malleability here?
+		// malleability_status = MALLEABILITY_INPROGRESS;
+		
+
 		int32_t new_id = 0;
-		sscanf(req, "%s %" PRIu32 " %" PRIu32 "", mode, &number_active_storage_servers, &new_id);
+		sscanf(req, "%s %" PRIu32 " %" PRIu32 " %d", mode, &number_active_storage_servers, &new_id, &id_server_to_modify);
 		slog_debug("mode=%s, number_active_storage_servers=%" PRIu32 ", new_id=%" PRIu32 "", mode, number_active_storage_servers, new_id);
 		arguments->args->id = new_id;
 		slog_debug("new id on args=%d", arguments->args->id);
@@ -2699,7 +2749,7 @@ void *GarbageCollector(void *th_argv)
 		{
 			pthread_cond_wait(&global_run_garbage_collector_cond, &mutex_garbage);
 		}
-		
+
 		fprintf(stderr, "Running Garbage collector\n");
 
 		if (global_finish_garbage_collector == 1)
@@ -2890,8 +2940,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	uint32_t operation = 0; // Hercules instance or dataset structure.
 	char mode[MODE_SIZE] = {0};
-	int32_t req_size = 0;
-	char raw_msg[req_size + 1] = {0};
+	// int32_t req_size = 0;
+	// char raw_msg[req_size + 1] = {0};
 	char number[16] = {0};
 	char uri_[URI_] = {0};
 	int extra_info = 0;
@@ -2911,7 +2961,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		if (acks_received >= expected_acks)
 		{
 			Attend_pending_requests();
-			malleability_on = 0;
+			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
 			acks_received = 0;
 		}
 		return 0;
@@ -2944,7 +2994,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		// number  == client ip.
 		// uri_ == hostname.
 		char *added_hostname = uri_;
-		slog_debug("connecting to %s:8500",number);
+		slog_debug("connecting to %s:8500", number);
 		oob_sock = connect_common(number, 85000, AF_INET);
 		if (oob_sock < 0)
 		{
@@ -3034,8 +3084,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// 	slog_error("HERCULES_ERR_BAD_REQUEST");
 	// 	return -1;
 	// }
-	
-	
+
 	uint64_t block_size_recv = (uint64_t)atoi(number);
 
 	slog_info("mode=%s, operation=%d, number=%s, uri=%s, block_size_recv=%ld, num_characters_read=%d", mode, operation, number, uri_, block_size_recv, num_characters_read);
@@ -3156,6 +3205,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			{ // dataset exists.
 				if (operation == IMSS_INFO)
 				{ // Hercules instance case.
+					slog_info("Sending IMSS_INFO struct");
 					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, address_, IMSS_INFO, arguments->worker_uid);
 					// imss_info *my_imss = (imss_info *)address_;
 				}
@@ -4013,7 +4063,7 @@ void *Dispatcher(void *th_argv)
 		if (global_finish_dispatcher != RUNNING_SERVER_STATUS)
 		{ // This server is shutting down. No more connections are allowed.
 			slog_info("Shutdown received on dispatcher thread.");
-			ShutdownServer();
+			Shutdown_server();
 			fprintf(stderr, "Ending dispatcher thread.\n");
 			slog_info("Ending dispatcher thread.");
 			pthread_exit(NULL);

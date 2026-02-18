@@ -729,7 +729,7 @@ extern "C"
 			}
 		}
 
-		if (MALLEABILITY_ON == 1)
+		if (CONF_MALLEABILITY_STATUS == 1)
 		{
 			update_dataset((char *)path, ds);
 		}
@@ -897,7 +897,7 @@ extern "C"
 			}
 		}
 
-		if (MALLEABILITY_ON == 1)
+		if (CONF_MALLEABILITY_STATUS == 1)
 		{
 			update_dataset((char *)path, ds);
 		}
@@ -1821,7 +1821,7 @@ extern "C"
 		}
 
 		// updates intervals on the back-end.
-		if (MALLEABILITY_ON == 1)
+		if (CONF_MALLEABILITY_STATUS == 1)
 		{
 			update_dataset((char *)path, ds);
 		}

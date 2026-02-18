@@ -148,7 +148,9 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 
 // Malleability functions.
 int ShutdownServer();
-
+void Decomissioning_stage(p_argv *arguments, int id_server_to_remove);
+void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift);
+size_t Update_ips_list(int id_server_to_remove);
 
 
 #endif

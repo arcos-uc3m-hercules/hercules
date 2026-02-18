@@ -11,10 +11,12 @@
 #include <ucp/api/ucp.h>
 #include <semaphore.h>
 #include <fcntl.h> // for O_* constants
+#include <string>
+#include <atomic>
+
 // to manage logs.
 #include "slog.h"
 #include "hello_world_util.h"
-#include <string>
 
 #define DATASET_INFO 1
 #define STRING 2
@@ -87,6 +89,14 @@ const static char main_server_err_call_arg[] = "main server ep";
 const static char add_server_err_call_arg[] = "add backend server ep";
 const static char ucx_server_err_call_arg[] = "ucx server ep";
 const static char set_server_err_call_arg[] = "set server ep";
+
+// Malleability status.
+typedef enum 
+{
+    MALLEABILITY_OFF,
+    MALLEABILITY_INPROGRESS,
+    MALLEABILITY_COMPLETE
+} malleability_status_t;
 
 // To synchronize network operations.
 static pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;

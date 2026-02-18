@@ -18,6 +18,7 @@
 #include "crc.h"
 #include "imss.h"
 #include "map_ep.hpp"
+#include "slog.h"
 #include "workers.h"
 #include "policies.h"
 #include "shared_memory.h"
@@ -1351,7 +1352,6 @@ uint32_t get_dir(std::string requested_uri_obj, char ***items)
  */
 int32_t open_imss(char *imss_uri)
 {
-
 	// New IMSS structure storing the entity to be created.
 	imss new_imss;
 	ucs_status_t status;
@@ -1372,13 +1372,13 @@ int32_t open_imss(char *imss_uri)
 	case 2:
 	{
 		imss check_imss = g_array_index(imssd, imss, found_in);
-
+		slog_debug("check_imss.conns.matching_server=%d", check_imss.conns.matching_server)
 		if (check_imss.conns.matching_server != -2)
 		{
 			// instance has been already created.
 			return -2;
 		}
-
+		slog_debug("freeing ips")
 		for (int32_t i = 0; i < check_imss.info.num_storages; i++)
 			free(check_imss.info.ips[i]);
 
@@ -1392,7 +1392,7 @@ int32_t open_imss(char *imss_uri)
 	}
 	}
 
-	slog_debug("[IMSS]session_policy new_imss.info.num_active_storages=%ld, num_storages=%ld", new_imss.info.num_active_storages, new_imss.info.num_storages);
+	slog_debug("[IMSS] session_policy new_imss.info.num_active_storages=%ld, num_storages=%ld", new_imss.info.num_active_storages, new_imss.info.num_storages);
 
 	new_imss.conns.peer_addr = (ucp_address_t **)malloc(new_imss.info.num_storages * sizeof(ucp_address_t *));
 	new_imss.conns.id = (uint32_t *)calloc(new_imss.info.num_storages, sizeof(uint32_t));
@@ -1414,6 +1414,7 @@ int32_t open_imss(char *imss_uri)
 	local_data_uid = attr.worker_uid;
 
 	// fprintf(stderr, "Connecting to %d servers\n", new_imss.info.num_storages);
+	slog_debug("Connecting to %d servers", new_imss.info.num_storages);
 	for (int32_t i = 0; i < new_imss.info.num_storages; i++)
 	{
 		// fprintf(stderr, "node=%s, status=%d, new_imss.info.num_storages=%d\n", new_imss.info.ips[i], new_imss.info.status[i], new_imss.info.num_storages);
@@ -1435,7 +1436,7 @@ int32_t open_imss(char *imss_uri)
 
 		char request[REQUEST_SIZE] = {0};
 		sprintf(request, "%" PRIu32 " GET %s", process_rank, "HELLO!JOIN");
-		slog_live("ip_address=%s:%d", new_imss.info.ips[i], new_imss.info.conn_port);
+		slog_live("ip_address=%s:%d, local_data_uid=%d", new_imss.info.ips[i], new_imss.info.conn_port, local_data_uid);
 		// fprintf(stderr, "ip_address=%s:%d\n", new_imss.info.ips[i], new_imss.info.conn_port);
 
 		if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
@@ -1568,7 +1569,7 @@ int32_t open_imss(char *imss_uri)
 		// root_directory_info->type = TYPE_HERCULES_INSTANCE;
 	}
 
-	// return 0;
+	slog_debug("new_imss.info.num_storages=%d", new_imss.info.num_storages);
 	return new_imss.info.num_storages;
 }
 
@@ -2022,7 +2023,7 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 	pthread_mutex_lock(&lock_network);
 	// Send the request.
 	// sprintf(formated_uri, "%" PRIu32 " GET 0 %s", stat_ids[m_srv], imss_uri);
-	sprintf(formated_uri, "%" PRIu32 " GET 0 %s", IMSS_INFO, imss_uri);
+	sprintf(formated_uri, "%" PRIu32 " GET 0 %s %" PRIu64 "", IMSS_INFO, imss_uri, local_meta_uid);
 	slog_info("[IMSS] Request to metadata %d - '%s'", m_srv, formated_uri);
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
 	{
@@ -2509,6 +2510,7 @@ int32_t create_dataset(char *dataset_uri,
 	size_t msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
 	void *response_buffer = (void *)malloc(msg_length * sizeof(char));
 	msg_length = recv_data(ucp_worker_meta, ep, response_buffer, msg_length, local_meta_uid, SYNC);
+	free(response_buffer);
 
 	pthread_mutex_unlock(&lock_network);
 
@@ -2839,7 +2841,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	free(result);
 	result = NULL;
 
-	if (MALLEABILITY_ON == 1)
+	if (CONF_MALLEABILITY_STATUS == 1)
 	{ // To send performance metrics.
 		time_t init_malleability_t = clock();
 		time_t end_malleability_t, end_send_performance_t;
@@ -5285,7 +5287,7 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 
 	// check if there are any interval.
 	// if # intervals is zero, no malleability operations was launched.
-	if (curr_dataset->num_intervals == 0 && MALLEABILITY_ON == 1)
+	if (curr_dataset->num_intervals == 0 && CONF_MALLEABILITY_STATUS == 1)
 	{
 		// fprintf(stderr, "[update_dataset] num_intervals=%d\n", curr_dataset->num_intervals);
 		slog_debug("num_intervals=%d", curr_dataset->num_intervals);
@@ -5382,13 +5384,13 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	slog_debug("curr_imss_storages=%d, curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_imss_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
 
 	// keep the last block id.
-	if (data_id > curr_dataset->last_block_id && data_id != 0 && MALLEABILITY_ON == 1)
+	if (data_id > curr_dataset->last_block_id && data_id != 0 && CONF_MALLEABILITY_STATUS == 1)
 	{
 		slog_debug("setting %d as last block id", data_id);
 		curr_dataset->last_block_id = data_id;
 	}
 
-	if (curr_dataset->first_block_id == -1 && data_id != 0 && MALLEABILITY_ON == 1)
+	if (curr_dataset->first_block_id == -1 && data_id != 0 && CONF_MALLEABILITY_STATUS == 1)
 	{
 		slog_debug("setting %d as first block id", data_id);
 		curr_dataset->first_block_id = data_id;

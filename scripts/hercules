@@ -20,6 +20,16 @@ PrintUsage()
     # fi
 }
 
+update_config_line() {
+    local key=$1
+    local value=$2
+    local file=$3
+    echo "updating config file ${file}, ${key} = ${value}"
+    # sed -i "s|^${key}[[:space:]]*=[[:space:]]*.*|${key} = ${value}|g" "$file"
+    sed -i "s#^${key}[[:space:]]*=[[:space:]]*.*#${key} = ${value}#g" "$file"
+    echo "ending update config line"
+}
+
 ## To stop servers.
 StopServers() {
 
@@ -426,8 +436,8 @@ NUM_CLIENTS_PER_NODE=$(cat "${FILE}" | grep "\<NUM_CLIENTS_PER_NODE\>" | awk '{p
 ATTACHED=$(cat "${FILE}" | grep "\<ATTACHED\>" | awk '{print $3}')
 HERCULES_BLOCK_SIZE=$(cat "${FILE}" | grep "\<BLOCK_SIZE\>" | awk '{print $3}')
 STORAGE_SIZE=$(cat "${FILE}" | grep "\<STORAGE_SIZE\>" | awk '{print $3}')
-HERCULES_DATA_HOSTFILE=$(cat "${FILE}" | grep "\<DATA_HOSTFILE\>" | awk '{print $3}')
-HERCULES_ALLOC_DATA_HOSTFILE=$(cat "${FILE}" | grep "\<ALLOC_DATA_HOSTFILE\>" | awk '{print $3}')
+HERCULES_DATA_HOSTFILE=$(grep "^DATA_HOSTFILE[[:space:]]*=" "${FILE}" | awk '{print $3}')
+HERCULES_ALLOC_DATA_HOSTFILE=$(grep "^ALLOC_DATA_HOSTFILE[[:space:]]*=" "${FILE}" | awk '{print $3}')
 HERCULES_METADATA_HOSTFILE=$(cat "${FILE}" | grep "\<METADATA_HOSTFILE\>" | awk '{print $3}')
 INIT_HERCULES_NUM_DATA=$(cat "${FILE}" | grep "\<INIT_NUM_DATA_SERVERS\>" | awk '{print $3}')
 UPPER_BOUND_MALLEABILITY=$(cat "${FILE}" | grep "\<UPPER_BOUND_MALLEABILITY\>" | awk '{print $3}')
@@ -596,10 +606,10 @@ if [ ! -z "$HERCULES_METADATA_HOSTFILE" ]; then
     if [[ "$SLURM" -eq "1" ]]; then
         # If slurm is enabled, we added the slurm job id to the meta hostfile.
         METADATA_HOSTFILE_BASENAME=$(basename "${HERCULES_METADATA_HOSTFILE}")
-        HERCULES_METADATA_HOSTFILE="${HERCULES_TEMPORAL_PATH}/${METADATA_HOSTFILE_BASENAME}"
-        HERCULES_METADATA_HOSTFILE+="_"$SLURM_JOB_ID
+        NEW_VAL="${HERCULES_TEMPORAL_PATH}/${METADATA_HOSTFILE_BASENAME}_${SLURM_JOB_ID}"
         ## Replace the old metadata hostfile name with the new one containing the job id.
-		sed -i "s|^METADATA_HOSTFILE = .*|METADATA_HOSTFILE = $HERCULES_METADATA_HOSTFILE|g" "$CURR_HERCULES_CONF_FILE"
+        update_config_line "METADATA_HOSTFILE" "${NEW_VAL}" "${CURR_HERCULES_CONF_FILE}"
+        HERCULES_METADATA_HOSTFILE=${NEW_VAL}
     fi
 fi
 
@@ -607,14 +617,10 @@ if [ ! -z "${HERCULES_DATA_HOSTFILE}" ]; then
     if [[ "$SLURM" -eq "1" ]]; then
         # If slurm is enabled, we added the slurm job id to the data hostfile.
         DATA_HOSTFILE_BASENAME=$(basename "${HERCULES_DATA_HOSTFILE}")
-        HERCULES_DATA_HOSTFILE="${HERCULES_TEMPORAL_PATH}/${DATA_HOSTFILE_BASENAME}"
-        HERCULES_DATA_HOSTFILE+="_${SLURM_JOB_ID}"
-        ## Replace all "/" with "\/" because "/" is an special character for the sed command.
-        #ESCAPED_HERCULES_DATA_HOSTFILE="${HERCULES_DATA_HOSTFILE//\//\\/}"
+        NEW_VAL="${HERCULES_TEMPORAL_PATH}/${DATA_HOSTFILE_BASENAME}_${SLURM_JOB_ID}"
         ## Replace the old data hostfile name with the new one containing the job id.
-        #sed -i "s/^DATA_HOSTFILE = .*/DATA_HOSTFILE = ${ESCAPED_HERCULES_DATA_HOSTFILE}/g"  "${CURR_HERCULES_CONF_FILE}"
-        sed -i "s|^DATA_HOSTFILE = .*|DATA_HOSTFILE = $HERCULES_DATA_HOSTFILE|g" "$CURR_HERCULES_CONF_FILE"
-        #echo "HERCULES_DATA_HOSTFILE=${HERCULES_DATA_HOSTFILE}"
+        update_config_line "DATA_HOSTFILE" "${NEW_VAL}" "${CURR_HERCULES_CONF_FILE}"
+        HERCULES_DATA_HOSTFILE=${NEW_VAL}
     fi
 fi
 
@@ -623,14 +629,10 @@ if [ ! -z "${HERCULES_ALLOC_DATA_HOSTFILE}" ]; then
     if [[ "$SLURM" -eq "1" ]]; then
         # If slurm is enabled, we added the slurm job id to the data hostfile.
         ALLOC_DATA_HOSTFILE_BASENAME=$(basename "${HERCULES_ALLOC_DATA_HOSTFILE}")
-        HERCULES_ALLOC_DATA_HOSTFILE="${HERCULES_TEMPORAL_PATH}/${ALLOC_DATA_HOSTFILE_BASENAME}"
-        HERCULES_ALLOC_DATA_HOSTFILE+="_${SLURM_JOB_ID}"
-        ## Replace all "/" with "\/" because "/" is an special character for the sed command.
-        #ESCAPED_HERCULES_DATA_HOSTFILE="${HERCULES_DATA_HOSTFILE//\//\\/}"
-        ## Replace the old data hostfile name with the new one containing the job id.
-        #sed -i "s/^DATA_HOSTFILE = .*/DATA_HOSTFILE = ${ESCAPED_HERCULES_DATA_HOSTFILE}/g"  "${CURR_HERCULES_CONF_FILE}"
-        sed -i "s|^ALLOC_DATA_HOSTFILE = .*|ALLOC_DATA_HOSTFILE = $HERCULES_ALLOC_DATA_HOSTFILE|g" "$CURR_HERCULES_CONF_FILE"
-        #echo "HERCULES_DATA_HOSTFILE=${HERCULES_DATA_HOSTFILE}"
+        NEW_VAL="${HERCULES_TEMPORAL_PATH}/${ALLOC_DATA_HOSTFILE_BASENAME}_${SLURM_JOB_ID}"
+        ## Replace the old alloc data hostfile name with the new one containing the job id.
+        update_config_line "ALLOC_DATA_HOSTFILE" "$NEW_VAL" "$CURR_HERCULES_CONF_FILE"
+        HERCULES_ALLOC_DATA_HOSTFILE=${NEW_VAL}
     fi
 fi
 # set +x

@@ -655,7 +655,7 @@ int getConfiguration(struct arguments *args)
 
 	if (args->malleability)
 	{
-		MALLEABILITY_ON = 1;
+		CONF_MALLEABILITY_STATUS = 1;
 		// tolerance for performing a malleability operation.
 		int32_t default_tolerance = 100;
 		if (getenv("HERCULES_MALLEABILITY_TOLERANCE") != NULL)

@@ -322,6 +322,7 @@ free_imss(imss_info_);
 	 */
 	int32_t stat_imss(char *imss_uri, imss_info *imss_info_);
 	int32_t stat_imss_info();
+	int32_t find_imss(const char *imss_uri, imss *imss_);
 
 	/* Method providing the URI of the attached IMSS instance.
 

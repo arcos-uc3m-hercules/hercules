@@ -22,9 +22,9 @@
 #include <netinet/in.h>
 #include <sys/statvfs.h>
 #include <sys/vfs.h> // statfs
-extern "C" {
+// extern "C" {
     #include <imss_posix_api.h>
-}
+// }
 #include <stdarg.h>
 #include <math.h>
 #include <sys/utsname.h>
