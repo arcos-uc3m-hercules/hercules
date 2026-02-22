@@ -1,6 +1,6 @@
 #!/bin/bash
 ## Hercules ad hoc file system deployment script.
-## Last modification: 12/02/2026
+## Last modification: 22/02/2026
 ## Genaro Sanchez-Gallegos
 ## Javier Garcia-Blas
 ## Jesus Carretero
@@ -72,7 +72,7 @@ StopServers() {
         return 1
     fi
     
-    # Leemos los índices en un array
+    # Read the indexes to the array
     readarray -t server_index_arr < "${index_file}"
 
     echo "# Hercules: Stopping $NAME servers in ${hosts[*]}"
@@ -104,6 +104,10 @@ StopServers() {
         srun --nodelist="${node}" --ntasks=1 --nodes=1 --overlap --jobid="${SLURM_JOB_ID}" bash -c "rm -f ${FILE_TO_REMOVE}; pkill -SIGUSR1 hercules_server"
         set +x
         i=$(($i+1))
+
+        # Removes the host from the hostfile.
+        # On sed, index start on 1, not 0, so we need to add 1 to REAL_ID.
+        sed -i "${REAL_ID+1}d" ${HERCULES_DATA_HOSTFILE} 
     done
     # rm "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
 }
@@ -135,20 +139,77 @@ StopAllMetadata() {
 }
 
 WakeUpServers() {
-    NAME=$1 # Server type ("meta" or "data").
-    shift
-    hosts=("$@") # List of hostnames.
-    # hosts=$2 # List of hostnames.
+    # NAME=$1 # Server type ("meta" or "data").
+    # shift
+    # hosts=("$@") # List of hostnames.
+    # # hosts=$2 # List of hostnames.
 
-    # Wake up desired servers.
-    for node in "${hosts[@]}"
+    # # Wake up desired servers.
+    # for node in "${hosts[@]}"
+    # do
+    #     ( ssh $node "pkill -SIGUSR2 hercules_server" )
+    # done
+    # #set -x
+    # awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' "${HERCULES_DATA_HOSTFILE}" "${HERCULES_DATA_HOSTFILE_PROV}" > "${HERCULES_TEMPORAL_PATH}/data2up_index_$SLURM_JOB_ID"
+    # #set +x
+    # WaitForServers "data" "d" "up" ${hosts[@]}    
+
+    NAME=$1 # Server type ("metadata" or "data").
+    shift
+    index_file=$1
+    shift
+    data_hosts=("$@") # List of hostnames.
+
+    # Read the index file.
+    #index_file="${HERCULES_TEMPORAL_PATH}/data2${ACTION}_index_${SLURM_JOB_ID}"
+    
+    if [ ! -f "$index_file" ]; then
+        echo "[WakeUpServers] Error: Index file not found at ${index_file}"
+        return 1
+    fi
+    
+    # Read the indexes to the array
+    readarray -t server_index_arr < "${index_file}"
+
+    i=0
+    if [[ "${VERBOSE}" -eq "1" ]]; then
+        echo "[+] Hercules: Starting data servers on ${data_hosts[@]}"
+    fi
+    start=`date +%s.%N`
+    for node in ${data_hosts[@]}
     do
-        ( ssh $node "pkill -SIGUSR2 hercules_server" )
+        # get the real id from the index array.
+        REAL_ID=$((server_index_arr[$i]-1))
+        
+        RM="rm ${HERCULES_TEMPORAL_PATH}/d-hercules-$REAL_ID-start"
+        COMMAND="${HERCULES_BUILD_PATH}/hercules_server d ${REAL_ID} ${INIT_HERCULES_NUM_DATA}"
+        if [[ "${SLURM}" -eq "0" ]]; then
+            # ssh $node "$RM; cd $HERCULES_BASH_PATH &&  $COMMAND &"
+            if [[ "${VERBOSE}" -eq "1" ]]; then
+                echo "[ + ] Removing temporal files on ${node}"
+            fi
+            ( ssh ${node} "${RM}" )
+            if [[ "${VERBOSE}" -eq "1" ]]; then
+                echo "[ + ] Starting data server $REAL_ID in $node..."
+                echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}"
+            fi
+            ( ssh ${node} "cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}" ) &
+        else
+            ## Deletes the file that we use to make sure that the server has started.
+            if [[ "${VERBOSE}" -eq "1" ]]; then
+                echo "[+] Removing temporal files on $node"
+            fi
+            #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
+            srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
+            ## If slurm is being used, the service is deploy using srun.
+            if [[ "${VERBOSE}" -eq "1" ]]; then
+                echo "[+] Starting data server $REAL_ID on $node..."
+            fi
+            #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
+            srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- $COMMAND &
+        fi
+        i=$(($i+1))
     done
-    #set -x
-    awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' "${HERCULES_DATA_HOSTFILE}" "${HERCULES_DATA_HOSTFILE_PROV}" > "${HERCULES_TEMPORAL_PATH}/data2up_index_$SLURM_JOB_ID"
-    #set +x
-    WaitForServers "data" "d" "up" ${hosts[@]}    
 }
 
 ## To wait until a list of servers are up or down.
@@ -448,7 +509,7 @@ if [ -z "$INIT_HERCULES_NUM_DATA" ] || [ "$INIT_HERCULES_NUM_DATA" = "0" ] ; the
 fi
 
 # set -x
-if [[ "$SLURM" -eq "1" && "${STATUS}" = "start" ]]; then
+if [[ "$SLURM" -eq "1" && ( "${STATUS}" = "start" || "${STATUS}" = "add" ) ]]; then
     echo "[+] Slurm is active."
     ## If slurm is enabled, we concat the job id to the configuration file to create a new one.
     CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
@@ -461,6 +522,8 @@ else
     CURR_HERCULES_CONF_FILE="${FILE}"
 fi
 
+export HERCULES_CONF="${CURR_HERCULES_CONF_FILE}"
+echo "Temporal configuration file ${CURR_HERCULES_CONF_FILE}"
 
 ## Checks if the user wants to stop the services.
 if [[ "${STATUS}" = "stop" ]];
@@ -541,7 +604,7 @@ then
         hosts+=("${REMOTE_HOSTNAME}")
         # verifies that the remote hostname is on the data hostfile.
         if ! grep -q "^${REMOTE_HOSTNAME}$" "${HERCULES_DATA_HOSTFILE}"; then
-             echo "## Error: Hostname '${REMOTE_HOSTNAME}' not found in the hostfile ${HERCULES_DATA_HOSTFILE}."
+             echo "## [remove] Error: Hostname '${REMOTE_HOSTNAME}' not found in the hostfile ${HERCULES_DATA_HOSTFILE}."
              exit 1
         fi
 
@@ -560,18 +623,11 @@ then
     WaitForServers "data" "d" "${STATUS}" "${hosts[@]}"
 
     # Metadata server is not stopped.
+
+    ## TODO: remove the server from the data hostfile.
    
     exit 0
 fi
-
-export HERCULES_CONF="${CURR_HERCULES_CONF_FILE}"
-echo "Temporal configuration file ${CURR_HERCULES_CONF_FILE}"
-# exit 0
-
-# echo "+ + + Initial number of data nodes is $INIT_HERCULES_NUM_DATA/$HERCULES_NUM_DATA"
-export HERCULES_INIT_NUM_DATA="${INIT_HERCULES_NUM_DATA}"
-
-## \< \> to match exact word.
 
 ## Checks if the user wants to add more servers.
 if [[ "${STATUS}" = "add" ]];
@@ -580,25 +636,48 @@ then
     if [[ "${VERBOSE}" -eq "1" ]]; then
         echo "Starting comissioning state."
     fi
-    # Checks if a list of data servers was passed by the user.
-    # If the user does not pass any list, we exit the script.
+    hosts=()
+    index_file="${HERCULES_TEMPORAL_PATH}/data2${STATUS}_index_$SLURM_JOB_ID"
+    # Checks if a list of data servers was passed by the user (-d).
     if [ ! -z "${DATA_SERVER_FILE}" ]; then
         if [ ! -f "${DATA_SERVER_FILE}" ]; then
             echo "Data server file ${DATA_SERVER_FILE} does not exist"
-            exit 0
+            exit 1
         fi
-        HERCULES_DATA_HOSTFILE_PROV="${DATA_SERVER_FILE}"
-    else 
-        echo "No data server file was provided to add more servers."
-        exit 0
+        # to read the file passed by the user.
+        readarray -t hosts < "${DATA_SERVER_FILE}"
+        awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' "${HERCULES_DATA_HOSTFILE}" "${HERCULES_ALLOC_DATA_HOSTFILE}" > ${index_file}
+    ## Checks if the user pass a single remote hostname as string (-r).
+    elif [[ ! -z "${REMOTE_HOSTNAME}" ]]; then
+        hosts+=("${REMOTE_HOSTNAME}")
+        # verifies that the remote hostname is on the data hostfile.
+        if ! grep -q "^${REMOTE_HOSTNAME}$" "${HERCULES_ALLOC_DATA_HOSTFILE}"; then
+             echo "## [add] Error: Hostname '${REMOTE_HOSTNAME}' not found in the hostfile ${HERCULES_ALLOC_DATA_HOSTFILE}."
+             exit 1
+        fi
+
+        grep -n "^${REMOTE_HOSTNAME}$" "${HERCULES_ALLOC_DATA_HOSTFILE}" | cut -d: -f1 > ${index_file}
+    else    
+        echo "## Error: Data server file (-d <data_server_file_path>) or remote server hostname is nedeed (-r <hostname>)"
+        PrintUsage
+        exit 1
     fi
-    readarray -t hosts < "${HERCULES_DATA_HOSTFILE_PROV}"
     # echo "data hosts=$hosts"
-    WakeUpServers "data" ${hosts[@]}
+    ## TODO: add error handling.
+    WakeUpServers "data" "${index_file}" "${hosts[@]}"
+
+    echo "${REMOTE_HOSTNAME}" >> ${HERCULES_DATA_HOSTFILE}
     # sleep 10
     exit 0
 fi
 
+
+# exit 0
+
+# echo "+ + + Initial number of data nodes is $INIT_HERCULES_NUM_DATA/$HERCULES_NUM_DATA"
+export HERCULES_INIT_NUM_DATA="${INIT_HERCULES_NUM_DATA}"
+
+## \< \> to match exact word.
 # set -x
 ## If not empty, the field "METADATA_HOSTFILE" and "DATA_HOSTFILE" field was set on the configuration file.
 if [ ! -z "$HERCULES_METADATA_HOSTFILE" ]; then
@@ -829,45 +908,14 @@ else
     readarray -t data_hosts < "${DATA_SERVER_FILE}"
 fi
 
-i=0
-if [[ "${VERBOSE}" -eq "1" ]]; then
-    echo "[+] Hercules: Starting data servers on ${data_hosts[@]}"
-fi
-start=`date +%s.%N`
-for node in ${data_hosts[@]}
-do
-    RM="rm ${HERCULES_TEMPORAL_PATH}/d-hercules-$i-start"
-    COMMAND="${HERCULES_BUILD_PATH}/hercules_server d ${i} ${INIT_HERCULES_NUM_DATA}"
-    if [[ "${SLURM}" -eq "0" ]]; then
-        # ssh $node "$RM; cd $HERCULES_BASH_PATH &&  $COMMAND &"
-        if [[ "${VERBOSE}" -eq "1" ]]; then
-            echo "[ + ] Removing temporal files on ${node}"
-        fi
-        ( ssh ${node} "${RM}" )
-        if [[ "${VERBOSE}" -eq "1" ]]; then
-            echo "[ + ] Starting data server $i in $node..."
-            echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}"
-        fi
-        ( ssh ${node} "cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}" ) &
-    else
-        ## Deletes the file that we use to make sure that the server has started.
-        if [[ "${VERBOSE}" -eq "1" ]]; then
-            echo "[+] Removing temporal files on $node"
-        fi
-        #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
-        srun  -N 1 -n 1 -c 1 -m block:block:block --mem=1G -w $node -- $RM 2> /dev/null
-        ## If slurm is being used, the service is deploy using srun.
-        if [[ "${VERBOSE}" -eq "1" ]]; then
-            echo "[+] Starting data server $i on $node..."
-        fi
-        #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
-        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- $COMMAND &
-    fi
-    i=$(($i+1))
-done
+# Index file
+index_file="${HERCULES_TEMPORAL_PATH}/data2start_index_${SLURM_JOB_ID}"
+awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' "${HERCULES_DATA_HOSTFILE}" "${HERCULES_DATA_HOSTFILE}" > ${index_file}
 
+set -x
+WakeUpServers "data" "${index_file}" "${data_hosts[@]}" 
+set +x
 ## Wait until all data servers are up.
-awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' "${HERCULES_DATA_HOSTFILE}" "${HERCULES_DATA_HOSTFILE}" > "${HERCULES_TEMPORAL_PATH}/data2start_index_${SLURM_JOB_ID}"
 WaitForServers "data" "d" "start" ${data_hosts[@]}
 end=`date +%s.%N`
 runtime=$( echo "$end - $start" | bc -l )

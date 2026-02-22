@@ -933,7 +933,7 @@ int32_t main(int32_t argc, char **argv)
 				fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
 				slog_error("Failed to flush worker: %s\n", ucs_status_string(status));
 			}
-			slog_debug("Closing endpoing %d/%d", i / args.num_metadata_servers);
+			slog_debug("Closing endpoing %d/%d", i , args.num_metadata_servers);
 			close_ucx_endpoint(ucp_worker_meta, ep);
 			// close_ucx_endpoint(ucp_worker, metadata_endpoints[i]);
 		}
@@ -1236,18 +1236,18 @@ void handle_signal_server(int signal)
 					pthread_mutex_unlock(&global_finish_mut);
 				}
 
-				fprintf(stderr, "Locking mutext_malleability\n");
+				slog_debug("Locking mutext_malleability\n");
 				pthread_mutex_lock(&mutext_malleability);
-				fprintf(stderr, "Sending broadcast mutext_malleability\n");
+				slog_debug("Sending broadcast mutext_malleability\n");
 				pthread_cond_broadcast(&global_run_malleability_cond); // Wake up everyone
 				pthread_mutex_unlock(&mutext_malleability);
-				fprintf(stderr, "Unlock mutext_malleability\n");
+				slog_debug( "Unlock mutext_malleability\n");
 
 				// This file is readed by the hercules script to know if this server
 				// was correctly shutting down.
 				sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
 				ready(tmp_file_path, "LOCKED");
-				fprintf(stderr, "Server %d has been unlocked\n", args.id);
+				slog_debug( "Server %d has been unlocked\n", args.id);
 				global_finish_threads = 1;
 			}
 
@@ -1270,37 +1270,40 @@ void handle_signal_server(int signal)
 			break;
 		default: // suspend the data server.
 			sprintf(action, "remove");
-			// Data servers processes will still running to be reused on
+			// TODO: Data servers processes will still running to be reused on
 			// the future. On shrink process, this server won't be used,
 			// but backend processes will be still running.
+
+			// Data servers performs malleability operations if it is enabled.
+			// Malleability is performed only when remove option is used.
+			if (args.type == TYPE_DATA_SERVER && args.malleability == 1)
+			{
+				// ret = stop_server();
+				// if (ret == 0) // success.
+				// {
+				// 	ret = move_blocks_2_server(args.stat_port, args.id, args.imss_uri, g_map);
+				// 	if (ret < 0) // error.
+				// 	{
+				// 		// TODO: if "move_blocks_2_server" fails, try again?
+				// 	}
+				// }
+				// Shutdown_server();
+
+				char formated_uri[REQUEST_SIZE] = {0};
+				sprintf(formated_uri, "%" PRIu32 " %s %d", DECOMISSIONING_OP, MSG_REMOVE_SERVER, args.id);
+				slog_info("Request: %s", formated_uri);
+				// TODO: here we asume metadata server 0 always perform malleability operations.
+				if (send_req(ucp_worker_meta, stat_eps[0], local_addr_meta, local_addr_len_meta, formated_uri) == 0)
+				{
+					perror("HERCULES_ERR_SEND_REQ_SET_STR");
+					slog_fatal("HERCULES_ERR_SEND_REQ_SET_STR");
+					return;
+				}
+			}
 			break;
 		}
 
-		// Data servers performs malleability operations if it is enabled.
-		if (args.type == TYPE_DATA_SERVER && args.malleability == 1)
-		{
-			// ret = stop_server();
-			// if (ret == 0) // success.
-			// {
-			// 	ret = move_blocks_2_server(args.stat_port, args.id, args.imss_uri, g_map);
-			// 	if (ret < 0) // error.
-			// 	{
-			// 		// TODO: if "move_blocks_2_server" fails, try again?
-			// 	}
-			// }
-			// Shutdown_server();
-
-			char formated_uri[REQUEST_SIZE] = {0};
-			sprintf(formated_uri, "%" PRIu32 " %s %d", DECOMISSIONING_OP, MSG_REMOVE_SERVER, args.id);
-			slog_info("Request: %s", formated_uri);
-			// TODO: here we asume metadata server always perform malleability operations.
-			if (send_req(ucp_worker_meta, stat_eps[0], local_addr_meta, local_addr_len_meta, formated_uri) == 0)
-			{
-				perror("HERCULES_ERR_SEND_REQ_SET_STR");
-				slog_fatal("HERCULES_ERR_SEND_REQ_SET_STR");
-				return;
-			}
-		}
+		
 		// This file is readed by the hercules script to know if this server
 		// was correctly shutting down.
 		// sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
