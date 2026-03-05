@@ -41,7 +41,7 @@ typedef struct
 /***************************************************************************
 ****************************  GLOBAL VARIABLES  ****************************
 ***************************************************************************/
-
+u_int16_t CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_DISABLED;
 u_int16_t ASYNC_IO;
 
 // IMSS server thread.
@@ -655,7 +655,7 @@ int getConfiguration(struct arguments *args)
 
 	if (args->malleability)
 	{
-		CONF_MALLEABILITY_STATUS = 1;
+		CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_ENABLED;
 		// tolerance for performing a malleability operation.
 		int32_t default_tolerance = 100;
 		if (getenv("HERCULES_MALLEABILITY_TOLERANCE") != NULL)

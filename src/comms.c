@@ -1,9 +1,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include "imss.h"
-#include "queue.h"
+// #include "queue.h"
 #include "comms.h"
 #include "map_ep.hpp"
+#include "slog.h"
 #include <errno.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -573,6 +574,42 @@ extern "C"
 		// }
 
 		return msg_length;
+	}
+
+	int wait_ack(ucp_worker_h ucp_worker_data, uint64_t local_data_uid, ucp_ep_h ep, int async)
+	{
+		slog_info("Waiting for ACK");
+		// wait for response.
+		// ack from the server.
+		size_t msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
+		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
+		if (msg_length == 0)
+		{
+			perror("ERR_HERCULES_GET_DATA_ACK_INVALID_MSG_LENGTH");
+			slog_error("ERR_HERCULES_GET_DATA_ACK_INVALID_MSG_LENGTH");
+			pthread_mutex_unlock(&lock_network);
+			return -ECANCELED;
+		}
+
+		char *response_buffer = (char *)malloc(msg_length * sizeof(char));
+		if (response_buffer == NULL)
+		{
+			perror("ERR_HERCULES_GET_DATA_ACK_MEMORY_ALLOCATION");
+			slog_error("ERR_HERCULES_GET_DATA_ACK_MEMORY_ALLOCATION");
+			pthread_mutex_unlock(&lock_network);
+			return -ECANCELED;
+		}
+		size_t size_received_data = recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async);
+
+		if (!strncmp(response_buffer, MSG_SPACE_OP, strlen(response_buffer)))
+		{
+			free(response_buffer);
+			pthread_mutex_unlock(&lock_network);
+			return -EAGAIN;
+		}
+		slog_debug("msg=%s", response_buffer);
+		free(response_buffer);
+		return 0;
 	}
 
 	/**

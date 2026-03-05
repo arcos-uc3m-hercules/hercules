@@ -513,10 +513,19 @@ RETURNS:	 0 - Release operation took place successfully.
 	 * error.
 	 */
 	size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int32_t num_storages);
+	
+	/**
+	 * @brief Method to send performance metrics recorded by a client to the Malleability Manager.
+	 * 
+	 * @param ep endpoint to the Malleability Manager.
+	 * @param dataset_uri // TOCHECK: this could be not necessary.
+	 * @param m_srv id of the Metadata server acting like the Malleability Manager (see stat_ids[]).
+	 * @return int32_t 0 on success, -1 in other case.
+	 */
+	int32_t send_performance_metrics(ucp_ep_h ep, const char  *dataset_uri, uint32_t m_srv);
+
 	/* Method storing a specific data element.
-
-
-RECEIVES:	dataset_id - Number identifying the concerned dataset among the client's session.
+	RECEIVES:	dataset_id - Number identifying the concerned dataset among the client's session.
 data_id    - Data block number identifying the data block to be stored.
 buffer     - Buffer containing the data block information.
 size       - Number of bytes to store.

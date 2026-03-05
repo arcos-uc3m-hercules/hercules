@@ -236,6 +236,7 @@ int32_t main(int32_t argc, char **argv)
 		{
 			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
 			fprintf(stderr, "Number of hosts in %s are %d\n", args.alloc_data_hostfile, number_of_hosts);
+			slog_debug( "Number of hosts in %s are %d", args.alloc_data_hostfile, number_of_hosts);
 		}
 		// TODO: put the following message on the workers.c, where malleability is applied.
 		// else

@@ -1,4 +1,5 @@
 // #define FUSE_USE_VERSION 26
+#include "comms.h"
 #include "hierarchical_map.hpp"
 #include "mapprefetch.hpp"
 #include "hercules.hpp"
@@ -729,7 +730,7 @@ extern "C"
 			}
 		}
 
-		if (CONF_MALLEABILITY_STATUS == 1)
+		if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
 		{
 			update_dataset((char *)path, ds);
 		}
@@ -897,7 +898,7 @@ extern "C"
 			}
 		}
 
-		if (CONF_MALLEABILITY_STATUS == 1)
+		if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
 		{
 			update_dataset((char *)path, ds);
 		}
@@ -1821,7 +1822,7 @@ extern "C"
 		}
 
 		// updates intervals on the back-end.
-		if (CONF_MALLEABILITY_STATUS == 1)
+		if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
 		{
 			update_dataset((char *)path, ds);
 		}

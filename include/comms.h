@@ -90,6 +90,13 @@ const static char add_server_err_call_arg[] = "add backend server ep";
 const static char ucx_server_err_call_arg[] = "ucx server ep";
 const static char set_server_err_call_arg[] = "set server ep";
 
+// Is malleability enabled?
+typedef enum
+{
+    MALLEABILITY_CONF_DISABLED,
+    MALLEABILITY_CONF_ENABLED
+} malleability_configuration_t;
+
 // Malleability status.
 typedef enum 
 {
@@ -256,6 +263,7 @@ extern "C"
     // Method sending a data structure with dynamic memory allocation fields.
     int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_struct, int32_t data_type, uint64_t from);
 
+
     /**
      * @brief  Method retrieving a serialized dynamic data structure.
      * @return bytes of the message received or -1 on error.
@@ -266,6 +274,7 @@ extern "C"
     int connect_common(const char *server, uint64_t server_port, sa_family_t af);
 
     ucs_status_t ucx_wait(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str);
+	int wait_ack(ucp_worker_h ucp_worker_data, uint64_t local_data_uid, ucp_ep_h ep, int async);
 
     size_t send_stream_addr(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len);
 

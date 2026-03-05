@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <netdb.h>
 #include <errno.h>
 #include <unistd.h>
@@ -15,6 +16,7 @@
 #include <inttypes.h>
 #include <ucp/api/ucp.h>
 #include <ifaddrs.h>
+#include "comms.h"
 #include "crc.h"
 #include "imss.h"
 #include "map_ep.hpp"
@@ -2762,6 +2764,242 @@ int32_t clear_dataset(const char *dataset_uri)
 	return 0;
 }
 
+int32_t send_performance_metrics(ucp_ep_h ep, const char  *dataset_uri, uint32_t m_srv)
+{
+	char formated_uri[REQUEST_SIZE] = {0};
+	int32_t ret = -1;
+	size_t msg_length = 0;
+
+	time_t init_malleability_t = clock();
+	time_t end_malleability_t, end_send_performance_t;
+	double malleability_time_taken = 0.0, send_performance_time_taken;
+
+	// Send performance metrics.
+	if (backend_performance_metrics.empty())
+	{
+		return ret;
+	}
+
+	sprintf(formated_uri, "%" PRIu32 " SETPERFORMANCE %d %s", stat_ids[m_srv], PERFORMANCE_OP, dataset_uri);
+
+	pthread_mutex_lock(&lock_network);
+
+	slog_debug("[IMSS] formated_uri='%s'", formated_uri);
+	msg_length = send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri);
+	slog_debug("[IMSS] after send_req, ret=%lu", msg_length);
+	if (msg_length == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_SEND_REQ_CLOSE_DATASET");
+		perror("HERCULES_ERR_SEND_REQ_CLOSE_DATASET");
+		return -1;
+	}
+
+	// Calculate the size of a single key-value entry in a generic way.
+	// We use a reference to the first element to get the correct types.
+	double write_performance = 0.0, read_performance = 0.0; // to store the performance of each server.
+	// const auto &first_pair = *backend_performance_metrics.begin();
+	// size_t key_size = sizeof(first_pair.first);
+	// size_t value_size = sizeof(first_pair.second);
+	// size_t entry_size = key_size + sizeof(first_pair.second.server_id) + sizeof(write_performance) + sizeof(read_performance); // key_size + value_size;
+
+	uint64_t num_entries = static_cast<uint64_t>(backend_performance_metrics.size());
+	slog_debug("Sending metrics of %llu server(s).", num_entries);
+	// memory for the buffer to store serializated data.
+	size_t total_size = sizeof(num_entries);
+	for (const auto &pair : backend_performance_metrics)
+	{
+		// String length, string data, server_id, and performance metrics
+		total_size += sizeof(size_t) + pair.first.length();
+		total_size += sizeof(pair.second.server_id);
+		total_size += sizeof(write_performance) + sizeof(read_performance);
+	}
+
+	// data serialization.
+	std::vector<char> buffer_metrics_ser(total_size);
+	char *current_ptr = buffer_metrics_ser.data();
+
+	// copy the number of entries.
+	memcpy(current_ptr, &num_entries, sizeof(num_entries));
+	current_ptr += sizeof(num_entries);
+
+	// copy the key (ID) and the performance of each server.
+	// fprintf(stderr, "Sending metrics of %d server(s).\n", num_entries);
+	for (const auto &pair : backend_performance_metrics)
+	{
+		// Copy the length of the string key
+		uint64_t key_length = static_cast<uint64_t>(pair.first.length());
+		memcpy(current_ptr, &key_length, sizeof(key_length));
+		current_ptr += sizeof(key_length);
+
+		// Copy the server hostname (KEY).
+		memcpy(current_ptr, pair.first.c_str(), key_length);
+		current_ptr += key_length;
+
+		// Copy the server ID.
+		memcpy(current_ptr, &pair.second.server_id, sizeof(pair.second.server_id));
+		current_ptr += sizeof(pair.second.server_id);
+
+		// Calculates the write performance.
+		if (pair.second.write.total_data_time > 0.0 && !double_are_equal(pair.second.write.total_data_size, 0.0) && pair.second.write.total_data_size > 1 * MB)
+		{
+			write_performance = pair.second.write.total_data_size / pair.second.write.total_data_time;
+		}
+		else
+		{
+			write_performance = 0.0;
+		}
+
+		memcpy(current_ptr, &write_performance, sizeof(write_performance));
+		current_ptr += sizeof(write_performance);
+		// fprintf(stderr, "Write Performance for server %d: %f\n", pair.first, write_performance);
+
+		// Calculates the read performance.
+		if (pair.second.read.total_data_time > 0.0 && !double_are_equal(pair.second.read.total_data_size, 0.0) && pair.second.read.total_data_size > 1 * MB)
+		{
+			read_performance = pair.second.read.total_data_size / pair.second.read.total_data_time;
+		}
+		else
+		{
+			read_performance = 0.0;
+		}
+
+		memcpy(current_ptr, &read_performance, sizeof(read_performance));
+		current_ptr += sizeof(read_performance);
+
+		// fprintf(stderr, "key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, write_performance=%.2f (%.2f MB), read_size=%lld (%lld MB), read_time=%.2f, read_performance=%.2f (%.2f MB)\n",
+		// 		pair.first.c_str(),
+		// 		pair.second.server_id,
+		// 		pair.second.write.total_data_size,
+		// 		pair.second.write.total_data_size / MB,
+		// 		pair.second.write.total_data_time,
+		// 		write_performance,
+		// 		write_performance / MB,
+		// 		pair.second.read.total_data_size,
+		// 		pair.second.read.total_data_size / MB,
+		// 		pair.second.read.total_data_time,
+		// 		read_performance,
+		// 		read_performance / MB);
+	}
+
+	// size_t num_performance_entries = backend_performance_metrics.size();
+
+	// Send the struct of the performance metrics in a serializate way.
+	slog_debug("Sending %lu bytes", total_size);
+	if (send_data(ucp_worker_meta, ep, buffer_metrics_ser.data(), total_size, local_meta_uid) == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		perror("ERR_HERCULES_SPLIT_READV_SEND_DATA");
+		slog_error("ERR_HERCULES_SPLIT_READV_SEND_DATA");
+		pthread_exit(NULL);
+	}
+
+	wait_ack(ucp_worker_meta, local_meta_uid, ep, SYNC);
+
+	// Wait for the metadata server to get the current number of data servers.
+	// This value can change due malleability operations.
+	// DATASERVERS operation. MSG_MALLEABILITY_DATASERVERS
+	slog_debug("Waiting for response");
+	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
+	slog_debug("get_recv_data_length, msg_length=%lu", msg_length);
+	if (msg_length == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		perror("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
+		slog_error("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
+		return -1;
+	}
+
+	void *result = malloc(msg_length);
+	msg_length = recv_data(ucp_worker_meta, ep, result, msg_length, local_meta_uid, 0);
+	slog_debug(" after recv_data, msg_length=%lu", msg_length);
+	if (msg_length == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		perror("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
+		slog_error("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
+		free(result);
+		return -1;
+	}
+	slog_debug(" result=%s, msg_length=%d", result, msg_length);
+	// fprintf(stderr, " result=%s, msg_length=%d\n", result, msg_length);
+	char message[PATH_MAX] = {'\0'};
+	int32_t new_number_of_data_servers = 0;
+	int32_t id_modified_server = 0;
+	char list_of_active_nodes[PATH_MAX] = {'\0'};
+	// get the server id to remove.
+	sscanf((const char *)result, "%s %" PRId32 "%" PRId32 " %s", message, &new_number_of_data_servers, &id_modified_server, list_of_active_nodes);
+	slog_debug("message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 "", message, new_number_of_data_servers, id_modified_server);
+
+	// sort the array of ips and endpoints according to the new data servers number.
+	// if (id_modified_server != -1)
+	{
+		// // when the metadata server response with an ID != -1 it means
+		// // that server will be shutting down or a new one will be added.
+		// if (new_number_of_data_servers < curr_imss.info.num_storages)
+		// { // Decomissioning.
+		// 	// fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from close_dataset.\n");
+		// 	slog_debug("Calling ReleaseSpecificDataServerNetworkResources from close_dataset.");
+		// 	ReleaseSpecificDataServerNetworkResources("imss://", 1, id_modified_server, new_number_of_data_servers);
+		// 	SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+		// }
+		// else
+		// if (new_number_of_data_servers > curr_imss.info.num_storages)
+		{
+			// fprintf(stderr, "read | write, num servers=%d\n", new_number_of_data_servers);
+			PrintIntervals(curr_dataset);
+			// release_network_resources(args.imss_uri, 1, process_rank);
+			// imss_comm_cleanup();
+			// init_network_resources(args.meta_hostfile, args.stat_port, args.num_metadata_servers, process_rank, args.imss_uri);
+			slog_debug("&(my_imss)->num_storages=%p", &curr_imss.info.num_storages);
+			char *token = strtok(list_of_active_nodes, ",");
+			while (token != NULL)
+			{
+				int found = 0;
+				slog_debug("Node found: %s", token);
+				for (size_t i = 0; i < curr_imss.info.num_storages; i++)
+				{
+					if (!strcmp(token, curr_imss.info.ips[i]))
+					{
+						// token found in the struct.
+						found = 1;
+					}
+				}
+				if (!found)
+				{
+					// AddIPS(&curr_imss.info, node_to_use, strlen(node_to_use));
+#ifdef DPRINTF
+					fprintf(stderr, "Adding %s on the client %d.\n", token, process_rank);
+#endif
+					AddIPS(&curr_imss.info, token, strlen(token));
+					AddBackEndServer2Imss(IMSS_ROOT);
+				}
+				else
+				{
+					slog_debug("%s node already on the local struct.", token);
+				}
+				token = strtok(NULL, ",");
+			}
+			end_malleability_t = clock() - init_malleability_t;
+			malleability_time_taken = ((double)end_malleability_t) / CLOCKS_PER_SEC; // in seconds
+#ifdef DPRINTF
+			fprintf(stderr, "read | write, New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d\n", malleability_time_taken, id_modified_server, new_number_of_data_servers);
+#endif
+			slog_debug("New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d", malleability_time_taken, id_modified_server, new_number_of_data_servers);
+		}
+	}
+
+	end_send_performance_t = clock() - init_malleability_t;
+	send_performance_time_taken = ((double)end_send_performance_t) / CLOCKS_PER_SEC; // in seconds
+	slog_debug("Send performance time %f seconds", send_performance_time_taken);
+	// fprintf(stderr, "Send performance time %f seconds\n", send_performance_time_taken);
+
+	free(result);
+	result = NULL;
+	pthread_mutex_unlock(&lock_network);
+	return 0;
+}
+
 /**
  * @brief Set a dataset as closed on the metadata server.
  * @return 1 if the file was correctly closed,
@@ -2841,233 +3079,10 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	free(result);
 	result = NULL;
 
-	if (CONF_MALLEABILITY_STATUS == 1)
+	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED) // TODO: add a new condition to check the Malleability type (e.g., memory usage, performance, ...)
 	{ // To send performance metrics.
-		time_t init_malleability_t = clock();
-		time_t end_malleability_t, end_send_performance_t;
-		double malleability_time_taken = 0.0, send_performance_time_taken;
+		int status = send_performance_metrics(ep, dataset_uri, m_srv);
 
-		// Send performance metrics.
-		if (backend_performance_metrics.empty())
-		{
-			return ret;
-		}
-
-		sprintf(formated_uri, "%" PRIu32 " SETPERFORMANCE %d %s", stat_ids[m_srv], PERFORMANCE_OP, dataset_uri);
-
-		pthread_mutex_lock(&lock_network);
-
-		slog_debug("[IMSS] formated_uri='%s'", formated_uri);
-		msg_length = send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri);
-		slog_debug("[IMSS] after send_req, ret=%lu", msg_length);
-		if (msg_length == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			slog_error("HERCULES_ERR_SEND_REQ_CLOSE_DATASET");
-			perror("HERCULES_ERR_SEND_REQ_CLOSE_DATASET");
-			return -1;
-		}
-
-		// Calculate the size of a single key-value entry in a generic way.
-		// We use a reference to the first element to get the correct types.
-		double write_performance = 0.0, read_performance = 0.0; // to store the performance of each server.
-		// const auto &first_pair = *backend_performance_metrics.begin();
-		// size_t key_size = sizeof(first_pair.first);
-		// size_t value_size = sizeof(first_pair.second);
-		// size_t entry_size = key_size + sizeof(first_pair.second.server_id) + sizeof(write_performance) + sizeof(read_performance); // key_size + value_size;
-
-		size_t num_entries = backend_performance_metrics.size();
-		slog_debug("Sending metrics of %d server(s).", num_entries);
-		// memory for the buffer to store serializated data.
-		size_t total_size = sizeof(num_entries);
-		for (const auto &pair : backend_performance_metrics)
-		{
-			// String length, string data, server_id, and performance metrics
-			total_size += sizeof(size_t) + pair.first.length();
-			total_size += sizeof(pair.second.server_id);
-			total_size += sizeof(write_performance) + sizeof(read_performance);
-		}
-
-		// data serialization.
-		std::vector<char> buffer_metrics_ser(total_size);
-		char *current_ptr = buffer_metrics_ser.data();
-
-		// copy the number of entries.
-		memcpy(current_ptr, &num_entries, sizeof(num_entries));
-		current_ptr += sizeof(num_entries);
-
-		// copy the key (ID) and the performance of each server.
-		// fprintf(stderr, "Sending metrics of %d server(s).\n", num_entries);
-		for (const auto &pair : backend_performance_metrics)
-		{
-			// Copy the length of the string key
-			size_t key_length = pair.first.length();
-			memcpy(current_ptr, &key_length, sizeof(key_length));
-			current_ptr += sizeof(key_length);
-
-			// Copy the server hostname (KEY).
-			memcpy(current_ptr, pair.first.c_str(), key_length);
-			current_ptr += key_length;
-
-			// Copy the server ID.
-			memcpy(current_ptr, &pair.second.server_id, sizeof(pair.second.server_id));
-			current_ptr += sizeof(pair.second.server_id);
-
-			// Calculates the write performance.
-			if (pair.second.write.total_data_time > 0.0 && !double_are_equal(pair.second.write.total_data_size, 0.0) && pair.second.write.total_data_size > 1 * MB)
-			{
-				write_performance = pair.second.write.total_data_size / pair.second.write.total_data_time;
-			}
-			else
-			{
-				write_performance = 0.0;
-			}
-
-			memcpy(current_ptr, &write_performance, sizeof(write_performance));
-			current_ptr += sizeof(write_performance);
-			// fprintf(stderr, "Write Performance for server %d: %f\n", pair.first, write_performance);
-
-			// Calculates the read performance.
-			if (pair.second.read.total_data_time > 0.0 && !double_are_equal(pair.second.read.total_data_size, 0.0) && pair.second.read.total_data_size > 1 * MB)
-			{
-				read_performance = pair.second.read.total_data_size / pair.second.read.total_data_time;
-			}
-			else
-			{
-				read_performance = 0.0;
-			}
-
-			memcpy(current_ptr, &read_performance, sizeof(read_performance));
-			current_ptr += sizeof(read_performance);
-
-			// fprintf(stderr, "key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, write_performance=%.2f (%.2f MB), read_size=%lld (%lld MB), read_time=%.2f, read_performance=%.2f (%.2f MB)\n",
-			// 		pair.first.c_str(),
-			// 		pair.second.server_id,
-			// 		pair.second.write.total_data_size,
-			// 		pair.second.write.total_data_size / MB,
-			// 		pair.second.write.total_data_time,
-			// 		write_performance,
-			// 		write_performance / MB,
-			// 		pair.second.read.total_data_size,
-			// 		pair.second.read.total_data_size / MB,
-			// 		pair.second.read.total_data_time,
-			// 		read_performance,
-			// 		read_performance / MB);
-		}
-
-		// size_t num_performance_entries = backend_performance_metrics.size();
-
-		// Send the struct of the performance metrics in a serializate way.
-		slog_debug("Sending %lu bytes", total_size);
-		if (send_data(ucp_worker_meta, ep, buffer_metrics_ser.data(), total_size, local_meta_uid) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("ERR_HERCULES_SPLIT_READV_SEND_DATA");
-			slog_error("ERR_HERCULES_SPLIT_READV_SEND_DATA");
-			pthread_exit(NULL);
-		}
-
-		// Wait for the metadata server to get the current number of data servers.
-		// This value can change due malleability operations.
-		// DATASERVERS operation. MSG_MALLEABILITY_DATASERVERS
-		slog_debug("Waiting for response");
-		msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
-		slog_debug("get_recv_data_length, msg_length=%lu", msg_length);
-		if (msg_length == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
-			slog_error("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
-			return -1;
-		}
-
-		result = malloc(msg_length);
-		msg_length = recv_data(ucp_worker_meta, ep, result, msg_length, local_meta_uid, 0);
-		slog_debug(" after recv_data, msg_length=%lu", msg_length);
-		if (msg_length == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
-			slog_error("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
-			free(result);
-			return -1;
-		}
-		slog_debug(" result=%s, msg_length=%d", result, msg_length);
-		// fprintf(stderr, " result=%s, msg_length=%d\n", result, msg_length);
-		char message[PATH_MAX] = {'\0'};
-		int32_t new_number_of_data_servers = 0;
-		int32_t id_modified_server = 0;
-		char list_of_active_nodes[PATH_MAX] = {'\0'};
-		// get the server id to remove.
-		sscanf((const char *)result, "%s %" PRId32 "%" PRId32 " %s", message, &new_number_of_data_servers, &id_modified_server, list_of_active_nodes);
-		slog_debug("message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 "", message, new_number_of_data_servers, id_modified_server);
-
-		// sort the array of ips and endpoints according to the new data servers number.
-		// if (id_modified_server != -1)
-		{
-			// // when the metadata server response with an ID != -1 it means
-			// // that server will be shutting down or a new one will be added.
-			// if (new_number_of_data_servers < curr_imss.info.num_storages)
-			// { // Decomissioning.
-			// 	// fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from close_dataset.\n");
-			// 	slog_debug("Calling ReleaseSpecificDataServerNetworkResources from close_dataset.");
-			// 	ReleaseSpecificDataServerNetworkResources("imss://", 1, id_modified_server, new_number_of_data_servers);
-			// 	SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
-			// }
-			// else
-			// if (new_number_of_data_servers > curr_imss.info.num_storages)
-			{
-				// fprintf(stderr, "read | write, num servers=%d\n", new_number_of_data_servers);
-				PrintIntervals(curr_dataset);
-				// release_network_resources(args.imss_uri, 1, process_rank);
-				// imss_comm_cleanup();
-				// init_network_resources(args.meta_hostfile, args.stat_port, args.num_metadata_servers, process_rank, args.imss_uri);
-				slog_debug("&(my_imss)->num_storages=%p", &curr_imss.info.num_storages);
-				char *token = strtok(list_of_active_nodes, ",");
-				while (token != NULL)
-				{
-					int found = 0;
-					slog_debug("Node found: %s", token);
-					for (size_t i = 0; i < curr_imss.info.num_storages; i++)
-					{
-						if (!strcmp(token, curr_imss.info.ips[i]))
-						{
-							// token found in the struct.
-							found = 1;
-						}
-					}
-					if (!found)
-					{
-						// AddIPS(&curr_imss.info, node_to_use, strlen(node_to_use));
-#ifdef DPRINTF
-						fprintf(stderr, "Adding %s on the client %d.\n", token, process_rank);
-#endif
-						AddIPS(&curr_imss.info, token, strlen(token));
-						AddBackEndServer2Imss(IMSS_ROOT);
-					}
-					else
-					{
-						slog_debug("%s node already on the local struct.", token);
-					}
-					token = strtok(NULL, ",");
-				}
-				end_malleability_t = clock() - init_malleability_t;
-				malleability_time_taken = ((double)end_malleability_t) / CLOCKS_PER_SEC; // in seconds
-#ifdef DPRINTF
-				fprintf(stderr, "read | write, New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d\n", malleability_time_taken, id_modified_server, new_number_of_data_servers);
-#endif
-				slog_debug("New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d", malleability_time_taken, id_modified_server, new_number_of_data_servers);
-			}
-		}
-
-		end_send_performance_t = clock() - init_malleability_t;
-		send_performance_time_taken = ((double)end_send_performance_t) / CLOCKS_PER_SEC; // in seconds
-		slog_debug("Send performance time %f seconds", send_performance_time_taken);
-		// fprintf(stderr, "Send performance time %f seconds\n", send_performance_time_taken);
-
-		free(result);
-		result = NULL;
-		pthread_mutex_unlock(&lock_network);
 	}
 
 	return ret;
@@ -3614,6 +3629,8 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int 
 		slog_error("HERCULES_ERR_STAT_DATASET_SEND_REQ");
 		return -1;
 	}
+
+	// wait_ack(ucp_worker_data, local_data_uid, ep, SYNC);
 
 	// Get the length of the message to be received.
 	msg_len = get_recv_data_length(ucp_worker_meta, local_meta_uid);
@@ -5287,7 +5304,7 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 
 	// check if there are any interval.
 	// if # intervals is zero, no malleability operations was launched.
-	if (curr_dataset->num_intervals == 0 && CONF_MALLEABILITY_STATUS == 1)
+	if (curr_dataset->num_intervals == 0 && CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
 	{
 		// fprintf(stderr, "[update_dataset] num_intervals=%d\n", curr_dataset->num_intervals);
 		slog_debug("num_intervals=%d", curr_dataset->num_intervals);
@@ -5335,6 +5352,8 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 		perror("HERCULES_ERR_CREATEDATASET_SENDSTREAM");
 		return -1;
 	}
+
+	wait_ack(ucp_worker_meta, local_meta_uid, ep, SYNC);
 
 	return 1;
 }
@@ -5384,13 +5403,13 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	slog_debug("curr_imss_storages=%d, curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_imss_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
 
 	// keep the last block id.
-	if (data_id > curr_dataset->last_block_id && data_id != 0 && CONF_MALLEABILITY_STATUS == 1)
+	if (data_id > curr_dataset->last_block_id && data_id != 0 && CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
 	{
 		slog_debug("setting %d as last block id", data_id);
 		curr_dataset->last_block_id = data_id;
 	}
 
-	if (curr_dataset->first_block_id == -1 && data_id != 0 && CONF_MALLEABILITY_STATUS == 1)
+	if (curr_dataset->first_block_id == -1 && data_id != 0 && CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
 	{
 		slog_debug("setting %d as first block id", data_id);
 		curr_dataset->first_block_id = data_id;
@@ -5422,7 +5441,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			int shm_id = getIdentifierSM(shm_key, size);
 			if (shm_id == -1)
 			{
-				fprintf(stderr, "Cannot generated a valid id for file %s$%d key %d with size %d\n", dataset_uri, data_id, shm_key, size);
+				fprintf(stderr, "Cannot generated a valid id for file %s$%d key %d with size %zu\n", dataset_uri, data_id, shm_key, size);
 				perror("HERCULES_ERR_SET_DATA_GET_IDENTIFIER_INVALID_SHM_ID");
 				slog_error("HERCULES_ERR_SET_DATA_GET_IDENTIFIER_INVALID_SHM_ID");
 				pthread_mutex_unlock(&lock_network);
