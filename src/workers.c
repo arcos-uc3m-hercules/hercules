@@ -1,5 +1,7 @@
 #include <atomic>
+#include <cstdint>
 #include <errno.h>
+#include <linux/limits.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -599,6 +601,7 @@ void *Comissioning_stage(void *th_argv)
 #ifdef DPRINTF
 	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on, consecutive_scale_up_signals);
 #endif
+	slog_debug("arguments->args->malleability: %d comissioning_on.load:%d", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire));
 	if (arguments->args->malleability && comissioning_on.load(std::memory_order_acquire) == false)
 	{
 		// Always check the performance trend.
@@ -611,7 +614,7 @@ void *Comissioning_stage(void *th_argv)
 		{
 			consecutive_scale_up_signals++; // Increment counter if scaling is needed.
 			// fprintf(stderr, "Scale-up signal received. Consecutive count: %d\n", consecutive_scale_up_signals);
-			slog_debug("Scale-up signal received. Consecutive count: %d", consecutive_scale_up_signals);
+			slog_debug("Scale-up signal received. Consecutive count: %d/%d", consecutive_scale_up_signals, arguments->args->malleability_tolerance);
 		}
 		else
 		{
@@ -632,9 +635,6 @@ void *Comissioning_stage(void *th_argv)
 			}
 
 			int num_server_to_increase = 1;
-			// ****************************
-			char command_to_exec[PATH_MAX] = {0};
-			// ****************************
 			fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
 			slog_debug("number_of_hosts=%d\n", number_of_hosts);
 			int found = 0;
@@ -683,20 +683,20 @@ void *Comissioning_stage(void *th_argv)
 				imss_info_struct->num_active_storages = number_active_storage_servers;
 				arguments->args->num_data_servers = number_active_storage_servers;
 				// Set comissioning ON to avoid doing twice at same time.
-				// malleability_status = 1;
 				comissioning_on = true;
 				id_server_to_modify = number_active_storage_servers - 1;
 
 				slog_debug("number_active_storage_servers=%d", number_active_storage_servers);
 
 				pthread_mutex_unlock(&mutext_malleability);
-
+				char command_to_exec[PATH_MAX] = {0};
 				char *workdir = getenv("PWD");
 				sprintf(command_to_exec,
-						"( ssh %s 'cd %s && UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s ~/gesanche/hercules/build/hercules_server d %d %d > %s/tmp/hercules_server_%d_log.txt 2>&1' ) &",
+						"( ssh %s 'cd %s && UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s %s/build/hercules_server d %d %d > %s/tmp/hercules_server_%d_log.txt 2>&1' ) &",
 						node_to_use,
 						workdir,
 						arguments->args->configuration_file_path,
+						arguments->args->hercules_path,
 						id_server_to_modify,
 						imss_info_struct->num_active_storages,
 						arguments->args->hercules_path,
@@ -707,7 +707,29 @@ void *Comissioning_stage(void *th_argv)
 				fprintf(stderr, "%s", msg);
 				slog_debug(msg);
 				// Deploy the new hercules instance on the avaiable node.
-				system(command_to_exec);
+				// system(command_to_exec);
+				// clone the process to run the command.
+				pid_t pid = fork();
+
+				if (pid == -1) 
+				{ // error
+					char msg_err[PATH_MAX] = {'\0'};
+					sprintf(msg_err, "HERCULES_ERR_FORK_COMISSIONING_STAGE: %s", node_to_use);
+					perror(msg_err);
+					slog_error("%s", msg_err);
+				} 
+				else if (pid == 0) 
+				{ // child
+					execlp("ssh", "ssh", node_to_use, command_to_exec, (char *)NULL);
+					// the process is replaced by the ssh.
+					slog_error("HERCULES_ERR_COMISSIONING_STAGE_CHILD_EXECLP");
+					exit(-1);
+				} 
+				else 
+				{ // parent
+					slog_debug("Child process run with PID %d", pid);
+					// waitpid is not here to avoid blocking the parent process.
+				}
 			}
 		}
 		else
@@ -946,38 +968,34 @@ void *Malleability(void *th_argv)
 		// pthread_mutex_unlock(&lock_network);
 		return NULL;
 	}
-	// data_ref = malloc(msg_length);
 	std::vector<char> buffer_metrics_ser(msg_length);
 	msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, buffer_metrics_ser.data(), msg_length, arguments->worker_uid, 0);
 	if (msg_length == 0)
 	{
 		perror("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP_PERFORMANCE_OP");
 		slog_error("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP_PERFORMANCE_OP");
-		free(data_ref);
 		// pthread_mutex_unlock(&lock_network);
 		return NULL;
 	}
 	char *current_ptr = buffer_metrics_ser.data();
 	// Get the number of entries.
-	size_t num_entries = 0;
+	uint64_t num_entries = 0;
 	memcpy(&num_entries, current_ptr, sizeof(num_entries));
 	current_ptr += sizeof(num_entries);
 
-	int32_t slowest_server_id = -1;
-	double min_overall_performance = -1.0;
+	// int32_t slowest_server_id = -1;
+	// double min_overall_performance = -1.0;
 	pthread_mutex_lock(&mutext_malleability);
 	number_of_history_records++;
 	pthread_mutex_unlock(&mutext_malleability);
 
-	uint64_t key_length = 0;
-	int metric_recorded = 0;
 	// decode all metrics sent from the client.
 	for (size_t i = 0; i < num_entries; ++i)
 	{
-		// int32_t server_id = 0;
 		ElasticityMetric received_metrics;
-
+		
 		// Get the key Size.
+		uint64_t key_length = 0;
 		memcpy(&key_length, current_ptr, sizeof(key_length));
 		current_ptr += sizeof(key_length);
 
@@ -1000,10 +1018,11 @@ void *Malleability(void *th_argv)
 		current_ptr += sizeof(received_metrics.read_performance);
 		// fprintf(stderr, "Read Performance for server %d: %.2f\n", server_id, read_performance/MB);
 
+		int metric_recorded = 2;// 0;
 		// Calculates overall performance.
 		if (!double_are_equal(received_metrics.read_performance, 0.0))
 		{ // read performance is not zero.
-			metric_recorded++;
+			// metric_recorded++;
 		}
 		else
 		{
@@ -1012,7 +1031,7 @@ void *Malleability(void *th_argv)
 
 		if (!double_are_equal(received_metrics.write_performance, 0.0))
 		{ // write performance is not zero.
-			metric_recorded++;
+			// metric_recorded++;
 		}
 		else
 		{

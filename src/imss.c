@@ -103,7 +103,7 @@ uint64_t local_data_uid = 0;
 
 extern char POLICY[MAX_POLICY_LEN];
 
-pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
+// pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
 
 SharedMemory *shared_memory;
 key_t shared_memory_key;
