@@ -1,25 +1,29 @@
 #!/bin/bash
+echo "Running $0"
+export PARENT_SCRIPT=$0
 
 SBATCH_FLAGS="--partition=large -A ${SLURM_ACC}" # -- exclusiv # -- exclusive
 SCRIPT_NAME="c3_hercules_wacomm_slurm.sh"
+
+export NUMBER_OF_PARTICLES=100
 
 ATTACHED=0
 
 #TEST_TYPE="weak"
 TEST_TYPE="strong"
-HERCULES_PATH="/home/gesanche/hercules"
+export HERCULES_PATH="/home/gesanche/hercules"
 TEMPLATE_CONFIG_PATH="${HERCULES_PATH}/conf/hercules-template.conf"
 HERCULES_CHECKPOINT_PATH=""
 #HERCULES_SNAPSHOT_PATH="${HERCULES_PATH}/bash/tests/disk/HerculesSnapshot"
 DATA_HOSTFILE="${HERCULES_PATH}/tmp/data_hostfile"
 ALLOC_DATA_HOSTFILE="${HERCULES_PATH}/tmp/alloc_data_hostfile"
 METADATA_HOSTFILE="${HERCULES_PATH}/tmp/meta_hostfile"
-DEBUG_LEVEL="none"
+DEBUG_LEVEL="all"
 #RR, BUCKETS, HASH, CRC16b, CRC64b, LOCAL, ZCOPY
 export POLICY="RR"
 
 MALLEABILITY=1
-MALLEABILITY_TOLERANCE=100
+MALLEABILITY_TOLERANCE=10
 MALLEABILITY_WSIZE=20
 MALLEABILITY_THRESHOLD=5000 # MB
 MAX_DATA_SERVERS_RANGE=(16)

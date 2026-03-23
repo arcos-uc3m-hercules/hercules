@@ -21,7 +21,7 @@ NUMBER_OF_PROCESS=$2
 echo "------------------"
 echo "Deployment script content:"
 echo "------------------"
-cat c3_HERCULES_WACOMM_MALL_ON_CONFIGFILE.sh
+cat ${PARENT_SCRIPT}
 echo "------------------"
 echo "Configuration file content:"
 echo "------------------"
@@ -30,9 +30,8 @@ echo "------------------"
 
 ## Uncomment when working in C3.
 ## C3 packages.
-# source "/home/tester004/load-local-spack.sh"
-source "/home/gesanche/hercules/stuff/c3-spack-modules.sh"
-module load hpcx
+echo "Running ${HERCULES_PATH}/scripts/c3/c3-load-dependencies.sh"
+source "${HERCULES_PATH}/scripts/c3/c3-load-dependencies.sh"
 
 export UCX_NET_DEVICES="ib0"
 
@@ -41,16 +40,26 @@ start_=$(date +%s.%N)
 if [ -z "$CONFIG_PATH" ]; then
    echo "No configuration file"
    source hercules start
+   # Get the exit status of the hercules script.
+   STATUS=$?
 else
-   echo "Configuration file pass $CONFIG_PATH"
+   echo "Configuration file: $CONFIG_PATH"
 #   export HERCULES_DEBUG_LEVEL=none
-   source /home/gesanche/hercules/scripts/hercules start \
+   source ${HERCULES_PATH}/scripts/hercules start \
    -f "$CONFIG_PATH" 
+   # Get the exit status of the hercules script.
+   STATUS=$?
    unset HERCULES_DEBUG_LEVEL
 fi
 end_=$(date +%s.%N)
 runtime=$(echo "$end_ - $start_" | bc -l)
-echo "Hercules started in $runtime seconds, start=$start_, end=$end_"
+
+if [ $STATUS -eq 0 ]; then
+   echo "Hercules started in $runtime seconds, start=$start_, end=$end_"
+else
+   echo "Error running Hercules, exit code: $STATUS"
+   exit $STATUS
+fi
 
 echo "DATASERVERS $HERCULES_NUM_DATA"
 echo "THREADS $THREAD_POOL"
@@ -58,7 +67,7 @@ echo "Running clients"
 # ---------------------------------------------------------------
 
 ##  Add the program.
-COMMAND="${HOME_LUSTRE}/apps/wacomm-kernel/m_wacomm1_mpi/m_wacomm1_mpi-disk"
+COMMAND="${HOME_LUSTRE}/apps/wacomm-kernel/m_wacomm1_mpi/m_wacomm1_mpi-disk ${NUMBER_OF_PARTICLES}"
 
 ## Output directory.
 #export PARTICLE_OUTPUT_DIR=/lustre/tester004/apps/wacomm-kernel/m_wacomm1_mpi/output-files/
@@ -73,7 +82,8 @@ time mpiexec --map-by node  $HERCULES_MPI_NP$NUMBER_OF_PROCESS  $HERCULES_MPI_HO
    $HERCULES_MPI_ENV_DEF LD_PRELOAD=$HERCULES_POSIX_PRELOAD \
    $COMMAND
 
-LD_PRELOAD=$HERCULES_POSIX_PRELOAD HERCULES_CONF=$HERCULES_CONF ls -lh /mnt/hercules/
+#LD_PRELOAD=$HERCULES_POSIX_PRELOAD HERCULES_CONF=$HERCULES_CONF ls -lh /mnt/hercules/
+
 #LD_PRELOAD=$HERCULES_POSIX_PRELOAD HERCULES_CONF=$HERCULES_CONF du -sh /mnt/hercules/
 ## print the total size in kilobytes.
 #LD_PRELOAD=$HERCULES_POSIX_PRELOAD HERCULES_CONF=$HERCULES_CONF du -s /mnt/hercules/
