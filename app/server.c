@@ -883,7 +883,8 @@ int32_t main(int32_t argc, char **argv)
 	// }
 
 	ret = ready(tmp_file_path, "OK");
-	fprintf(stdout, ANSI_COLOR_GREEN "[%s] %c-server %d is ready, status code=%d\n" ANSI_COLOR_RESET, args.data_hostname, args.type, args.id, ret);
+	fprintf(stdout, ANSI_COLOR_GREEN "[%s] %c-server %d is ready, status code=%d" ANSI_COLOR_RESET "\n" , args.data_hostname, args.type, args.id, ret);
+	slog_debug("[%s] %c-server %d is ready, status code=%d" , args.data_hostname, args.type, args.id, ret);
 	// Wait for threads to finish.
 	for (int32_t i = 0; i < total_threads; i++)
 	{
@@ -1013,7 +1014,7 @@ int32_t main(int32_t argc, char **argv)
 	slog_info("Creating the file %s", tmp_file_path);
 	ready(tmp_file_path, "OK");
 
-	fprintf(stdout, ANSI_COLOR_GREEN "[%s] Ending %c-server %d\n" ANSI_COLOR_RESET, args.data_hostname, args.type, args.id);
+	fprintf(stdout, ANSI_COLOR_GREEN "[%s] Ending %c-server %d" ANSI_COLOR_RESET "\n", args.data_hostname, args.type, args.id);
 	slog_info("[%s] Ending %c-server %d", args.data_hostname, args.type, args.id);
 
 	// Free the memory buffer.

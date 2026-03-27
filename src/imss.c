@@ -2841,7 +2841,8 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char  *dataset_uri, uint32_t
 		current_ptr += sizeof(pair.second.server_id);
 
 		// Calculates the write performance.
-		if (pair.second.write.total_data_time > 0.0 && !double_are_equal(pair.second.write.total_data_size, 0.0) && pair.second.write.total_data_size > 1 * MB)
+		// if (pair.second.write.total_data_time > 0.0 && !double_are_equal(pair.second.write.total_data_size, 0.0) && pair.second.write.total_data_size > 1 * MB)
+		if (pair.second.write.total_data_time > 0.0 && !double_are_equal(pair.second.write.total_data_size, 0.0))
 		{
 			write_performance = pair.second.write.total_data_size / pair.second.write.total_data_time;
 		}
@@ -2855,7 +2856,7 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char  *dataset_uri, uint32_t
 		// fprintf(stderr, "Write Performance for server %d: %f\n", pair.first, write_performance);
 
 		// Calculates the read performance.
-		if (pair.second.read.total_data_time > 0.0 && !double_are_equal(pair.second.read.total_data_size, 0.0) && pair.second.read.total_data_size > 1 * MB)
+		if (pair.second.read.total_data_time > 0.0 && !double_are_equal(pair.second.read.total_data_size, 0.0))
 		{
 			read_performance = pair.second.read.total_data_size / pair.second.read.total_data_time;
 		}
@@ -3079,6 +3080,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	free(result);
 	result = NULL;
 
+	// TODO: add a new variable to enable measuring performance for debugging.
 	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED) // TODO: add a new condition to check the Malleability type (e.g., memory usage, performance, ...)
 	{ // To send performance metrics.
 		int status = send_performance_metrics(ep, dataset_uri, m_srv);

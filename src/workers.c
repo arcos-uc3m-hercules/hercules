@@ -51,7 +51,6 @@ uint32_t number_active_storage_servers = 0;
 int32_t id_server_to_modify = -1;
 char *node_to_use = NULL;
 int32_t acks_received = 0;
-// #define MALLEABILITY_MESSAGE = "MALLEABILITY";
 // malleability time measure.
 clock_t global_malleability_t;
 double global_malleability_time_taken = 0.0;
@@ -96,6 +95,11 @@ pthread_mutex_t global_finish_mut = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_garbage = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t global_run_garbage_collector_cond;
 pthread_cond_t global_free_space_cond;
+
+// Malleability comissioning.
+pthread_mutex_t server_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t server_ready_cond = PTHREAD_COND_INITIALIZER;
+bool is_new_server_ready = false;
 
 // Malleability decomissioning.
 int waiting_clients = 0;
@@ -601,7 +605,7 @@ void *Comissioning_stage(void *th_argv)
 #ifdef DPRINTF
 	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on, consecutive_scale_up_signals);
 #endif
-	slog_debug("arguments->args->malleability: %d comissioning_on.load:%d", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire));
+	slog_debug("arguments->args->malleability:%d comissioning_on.load:%d", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire));
 	if (arguments->args->malleability && comissioning_on.load(std::memory_order_acquire) == false)
 	{
 		// Always check the performance trend.
@@ -638,6 +642,7 @@ void *Comissioning_stage(void *th_argv)
 			fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
 			slog_debug("number_of_hosts=%d\n", number_of_hosts);
 			int found = 0;
+			node_to_use=NULL;
 			// Iterates over all hosts defined on the "hostfile" in order to find a
 			// hostname that is not already under use.
 			for (size_t j = 0; j < number_of_hosts; j++)
@@ -672,6 +677,7 @@ void *Comissioning_stage(void *th_argv)
 			{
 				// start timer to now how much time it takes the malleability.
 				global_malleability_t = clock();
+				is_new_server_ready = false; 
 
 				// Update the variables.
 				pthread_mutex_lock(&mutext_malleability);
@@ -729,6 +735,22 @@ void *Comissioning_stage(void *th_argv)
 				{ // parent
 					slog_debug("Child process run with PID %d", pid);
 					// waitpid is not here to avoid blocking the parent process.
+					int status;
+					
+					slog_debug("Waiting for the signal from the main thread (SETSERVER).");
+
+					// block waiting for the "SETSERVER" message on the main thread.
+					pthread_mutex_lock(&server_ready_mutex);
+					
+					while (!is_new_server_ready) 
+					{
+						pthread_cond_wait(&server_ready_cond, &server_ready_mutex);
+					}
+					is_new_server_ready = false; 
+					pthread_mutex_unlock(&server_ready_mutex);
+
+					slog_debug("Signal received.");
+					comissioning_on=false;
 				}
 			}
 		}
@@ -741,6 +763,7 @@ void *Comissioning_stage(void *th_argv)
 	}
 	else
 	{
+		slog_debug("Malleability is not enabled or is in progress by another thread.");
 // just for testing. It must be comment on production.
 #ifdef DPRINTF
 		make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold);
@@ -905,7 +928,7 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 	// fprintf(stderr, "Performance sum=%.2f (%.2f MB), aggregate_performance_history.size()=%ld\n", performance_sum, performance_sum / MB, aggregate_performance_history.size());
 	slog_debug("Performance sum=%.2f (%.2f MB), aggregate_performance_history.size()=%ld", performance_sum, performance_sum / MB, aggregate_performance_history.size());
 
-	// fprintf(stderr, "Elasticity analysis: Moving Average Performance = %.2f MB/s\n", moving_average / MB);
+	fprintf(stderr, "Elasticity analysis: Moving Average Performance = %.2f MB/s, servers = %d\n", moving_average / MB, number_active_storage_servers);
 	slog_debug("Elasticity analysis: Moving Average Performance = %.2f MB/s", moving_average / MB);
 
 	// Calculate the trend slope.
@@ -1112,20 +1135,20 @@ void *Malleability(void *th_argv)
 	}
 
 	// TO FIX: making a parallel thread is throwing an IOR WARNING on write operations.
-	int *ret_thread = NULL;
-	if (pthread_join(comissioning_stage_thread, (void **)&ret_thread) != 0)
-	{
-		perror("HERCULES_ERR_MALLEABILITY_PTHREAD_JOIN_COMISSIONING_STAGE");
-		slog_error("HERCULES_ERR_MALLEABILITY_PTHREAD_JOIN_COMISSIONING_STAGE");
-		return (void *)-1;
-	}
-
-	// if (pthread_detach(comissioning_stage_thread) != 0)
+	// int *ret_thread = NULL;
+	// if (pthread_join(comissioning_stage_thread, (void **)&ret_thread) != 0)
 	// {
-	// 	perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
-	// 	slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
+	// 	perror("HERCULES_ERR_MALLEABILITY_PTHREAD_JOIN_COMISSIONING_STAGE");
+	// 	slog_error("HERCULES_ERR_MALLEABILITY_PTHREAD_JOIN_COMISSIONING_STAGE");
 	// 	return (void *)-1;
 	// }
+
+	if (pthread_detach(comissioning_stage_thread) != 0)
+	{
+		perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
+		slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
+		return (void *)-1;
+	}
 
 	return NULL;
 }
@@ -2836,7 +2859,6 @@ void *Checkpoint(void *th_argv)
 
 	p_argv *arguments = (p_argv *)th_argv;
 	BLOCK_SIZE = arguments->blocksize * 1024;
-	sleep(1);
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
 
@@ -2852,6 +2874,8 @@ void *Checkpoint(void *th_argv)
 		pthread_exit(NULL);
 	}
 
+	sleep(1);
+	
 	// if (!arguments->args->id)
 	// { // only one server creates the snapshot directory.
 	// 	Make_directory(checkpoint_dir);
@@ -3110,7 +3134,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		// finish malleability comissioning process.
 		// Attend_pending_requests();
-		comissioning_on = false;
+		// comissioning_on = false;
 
 		global_malleability_t = clock() - global_malleability_t;
 		global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
@@ -3124,6 +3148,13 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		// num_storages is increased inside AddIPS.
 		fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
 		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname));
+
+        // signal to the Comissioning thread.
+        pthread_mutex_lock(&server_ready_mutex);
+        is_new_server_ready = true;
+        pthread_cond_signal(&server_ready_cond); 
+        pthread_mutex_unlock(&server_ready_mutex);
+
 		return 0;
 	}
 	else if (!strcmp(mode, MSG_REMOVE_SERVER))

@@ -12,7 +12,6 @@ tst/exo
 tst/res
 tst/tex
 tst/tests.csv
-tst/debugging.txt
 tst/BUCKETS.csv
 tst/2_4_6_SERVERS_RESULTS.csv
 .aux
@@ -51,3 +50,6 @@ bash/tests/metadata/Benchmarks/io500/results*
 *.out
 stuff/dummy/*
 *.csv
+.cache/
+*_TEMP
+*.txt
