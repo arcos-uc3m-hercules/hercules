@@ -1,4 +1,0 @@
-[HS] Start servers 0:00.00 sec.
-[HS] Hercules stop 0:00.80 sec.
-[HS] Restart servers 0:00.00 sec.
-[HS] Hercules stop 0:00.74 sec.

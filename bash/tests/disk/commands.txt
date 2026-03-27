@@ -1,9 +1,0 @@
-spack load mpich
-HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/disk/configurations_hercules/hercules.conf ~/hercules/build/hercules_server m 0
-HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/disk/configurations_hercules/hercules.conf ~/hercules/build/hercules_server d 0 broadwell-003 1
-
-# First short test (size < block size)
-HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/disk/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so cp myfile.txt /mnt/hercules/myfile.txt
-
-# First large test (2.7 Gb)
-HERCULES_CONF=/beegfs/home/javier.garciablas/hercules/bash/tests/disk/configurations_hercules/hercules.conf LD_PRELOAD=/beegfs/home/javier.garciablas/hercules/build/tools/libhercules_posix.so cp rms3_d03_20201130Z0000.nc /mnt/hercules/
