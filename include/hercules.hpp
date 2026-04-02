@@ -35,14 +35,14 @@ extern "C"
         RETURNS: 	 0 - Successful deployment.
                     -1 - In case of error.
     */
-    int32_t hercules_init(uint32_t rank, uint64_t backend_strg_size, uint16_t server_port_num, int32_t deploy_metadata, uint16_t metadata_port_num, uint64_t metadata_buff_size, char *metadata_file);
+    // int32_t hercules_init(uint32_t rank, uint64_t backend_strg_size, uint16_t server_port_num, int32_t deploy_metadata, uint16_t metadata_port_num, uint64_t metadata_buff_size, char *metadata_file);
 
     /* Method releasing an instance of the HERCULES in-memory storage system.
 
         RETURNS: 	 0 - Release operation performed successfully.
                     -1 - In case of error.
     */
-    int32_t hercules_release();
+    // int32_t hercules_release();
 
     /**
      * @brief Get the Configuration of the Hercules deployment from enviroment
@@ -52,6 +52,11 @@ extern "C"
      * @return 1 on success.
      */
     int getConfiguration(struct arguments *args);
+
+    /**
+     * @brief Get the Mallebaility's configuration.
+     */
+    void fillMalleabilityParams(struct arguments *args, struct cfg_struct *cfg);
 
     void getBlockInformation(std::string key, int *block_number, std::string *data_uri, std::string *file_name);
 

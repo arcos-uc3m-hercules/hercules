@@ -94,7 +94,8 @@ const static char set_server_err_call_arg[] = "set server ep";
 typedef enum
 {
     MALLEABILITY_CONF_DISABLED,
-    MALLEABILITY_CONF_ENABLED
+    MALLEABILITY_CONF_ENABLED,
+    MALLEABILITY_CONF_PERF
 } malleability_configuration_t;
 
 // Malleability status.
@@ -104,6 +105,9 @@ typedef enum
     MALLEABILITY_INPROGRESS,
     MALLEABILITY_COMPLETE
 } malleability_status_t;
+
+// Malleability default values.
+const static int32_t DEFAULT_ANALYSIS_WINDOW_SIZE = 20;
 
 // To synchronize network operations.
 static pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;

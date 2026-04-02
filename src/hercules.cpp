@@ -653,62 +653,29 @@ int getConfiguration(struct arguments *args)
 	else
 		args->malleability = 0;
 
+	switch (args->malleability) {
+		case MALLEABILITY_CONF_DISABLED:
+		break;
+		case MALLEABILITY_CONF_ENABLED:
+		{
+			CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_ENABLED;
+			fillMalleabilityParams(args, cfg);
+		}
+		break;
+		case MALLEABILITY_CONF_PERF:
+		{
+			CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_PERF;
+			fillMalleabilityParams(args, cfg);
+		}
+		break;	
+		default:
+			fprintf(stdout, "Invalid malleability option %d\n", args->malleability);
+			break;
+	}
+
 	if (args->malleability)
 	{
-		CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_ENABLED;
-		// tolerance for performing a malleability operation.
-		int32_t default_tolerance = 100;
-		if (getenv("HERCULES_MALLEABILITY_TOLERANCE") != NULL)
-			args->malleability_tolerance = atoi(getenv("HERCULES_MALLEABILITY_TOLERANCE"));
-		else if (cfg_get(cfg, "MALLEABILITY_TOLERANCE"))
-			args->malleability_tolerance = atoi(cfg_get(cfg, "MALLEABILITY_TOLERANCE"));
-		else
-			// default value.
-			args->malleability_tolerance = default_tolerance;
-
-		if (args->malleability_tolerance < 0)
-		{
-			fprintf(stderr, "WARNING: Invalid performance windows size of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_tolerance, default_tolerance);
-			args->malleability_tolerance = default_tolerance;
-		}
-
-		// windows size or how many records are used to check the performance status.
-		int32_t default_windows_size = 20;
-		if (getenv("HERCULES_MALLEABILITY_WSIZE") != NULL)
-			args->malleability_windows_size = atoi(getenv("HERCULES_MALLEABILITY_WSIZE"));
-		else if (cfg_get(cfg, "MALLEABILITY_WSIZE"))
-			args->malleability_windows_size = atoi(cfg_get(cfg, "MALLEABILITY_WSIZE"));
-		else
-			// default value.
-			args->malleability_windows_size = default_windows_size;
-
-		if (args->malleability_windows_size < 0)
-		{
-			fprintf(stderr, "WARNING: Invalid performance windows size of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_windows_size, default_windows_size);
-			args->malleability_windows_size = default_windows_size;
-		}
-
-		// performance threshold in MB/s.
-		double default_threshold = 5000.0;
-		if (getenv("HERCULES_MALLEABILITY_THRESHOLD") != NULL)
-			args->malleability_performance_threshold = atoi(getenv("HERCULES_MALLEABILITY_THRESHOLD"));
-		else if (cfg_get(cfg, "MALLEABILITY_THRESHOLD"))
-			args->malleability_performance_threshold = atoi(cfg_get(cfg, "MALLEABILITY_THRESHOLD"));
-		else
-			// default value.
-			args->malleability_performance_threshold = default_threshold;
-
-		if (args->malleability_performance_threshold < 0)
-		{
-			fprintf(stderr, "WARNING: Invalid performance threshold of %f MB, setting to %f MB\n", args->malleability_performance_threshold, default_threshold);
-			args->malleability_performance_threshold = default_threshold;
-		}
-		// Convert from MB to bytes.
-		args->malleability_performance_threshold *= MB;
-		fprintf(stderr, "Malleability is enabled.\n HERCULES_MALLEABILITY_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f\n",
-				args->malleability_tolerance,
-				args->malleability_windows_size,
-				args->malleability_performance_threshold);
+		
 	}
 
 	// @deprecated
@@ -906,6 +873,62 @@ int getConfiguration(struct arguments *args)
 	get_hostname(args->data_hostname, HOST_NAME_MAX);
 
 	return 1;
+}
+
+void fillMalleabilityParams(struct arguments *args, struct cfg_struct *cfg) 
+{
+	// tolerance for performing a malleability operation.
+	int32_t default_tolerance = 100;
+	if (getenv("HERCULES_MALLEABILITY_TOLERANCE") != NULL)
+		args->malleability_tolerance = atoi(getenv("HERCULES_MALLEABILITY_TOLERANCE"));
+	else if (cfg_get(cfg, "MALLEABILITY_TOLERANCE"))
+		args->malleability_tolerance = atoi(cfg_get(cfg, "MALLEABILITY_TOLERANCE"));
+	else
+		// default value.
+		args->malleability_tolerance = default_tolerance;
+
+	if (args->malleability_tolerance < 0)
+	{
+		fprintf(stderr, "WARNING: Invalid performance windows size of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_tolerance, default_tolerance);
+		args->malleability_tolerance = default_tolerance;
+	}
+
+	// windows size or how many records are used to check the performance status.
+	if (getenv("HERCULES_MALLEABILITY_WSIZE") != NULL)
+		args->malleability_windows_size = atoi(getenv("HERCULES_MALLEABILITY_WSIZE"));
+	else if (cfg_get(cfg, "MALLEABILITY_WSIZE"))
+		args->malleability_windows_size = atoi(cfg_get(cfg, "MALLEABILITY_WSIZE"));
+	else
+		// default value.
+		args->malleability_windows_size = DEFAULT_ANALYSIS_WINDOW_SIZE;
+
+	if (args->malleability_windows_size < 0)
+	{
+		fprintf(stderr, "WARNING: Invalid performance windows size of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_windows_size, DEFAULT_ANALYSIS_WINDOW_SIZE);
+		args->malleability_windows_size = DEFAULT_ANALYSIS_WINDOW_SIZE;
+	}
+
+	// performance threshold in MB/s.
+	double default_threshold = 5000.0;
+	if (getenv("HERCULES_MALLEABILITY_THRESHOLD") != NULL)
+		args->malleability_performance_threshold = atoi(getenv("HERCULES_MALLEABILITY_THRESHOLD"));
+	else if (cfg_get(cfg, "MALLEABILITY_THRESHOLD"))
+		args->malleability_performance_threshold = atoi(cfg_get(cfg, "MALLEABILITY_THRESHOLD"));
+	else
+		// default value.
+		args->malleability_performance_threshold = default_threshold;
+
+	if (args->malleability_performance_threshold < 0)
+	{
+		fprintf(stderr, "WARNING: Invalid performance threshold of %f MB, setting to %f MB\n", args->malleability_performance_threshold, default_threshold);
+		args->malleability_performance_threshold = default_threshold;
+	}
+	// Convert from MB to bytes.
+	args->malleability_performance_threshold *= MB;
+	fprintf(stdout, "Malleability is enabled.\n HERCULES_MALLEABILITY_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f\n",
+			args->malleability_tolerance,
+			args->malleability_windows_size,
+			args->malleability_performance_threshold);
 }
 
 void getBlockInformation(std::string key, int *block_number, std::string *data_uri, std::string *file_name)

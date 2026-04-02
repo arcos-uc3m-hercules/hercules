@@ -547,7 +547,7 @@ void Decomissioning_stage(p_argv *arguments, int id_server_to_remove)
 	// Check if malleability is enable from the configuration file and if malleability is not running.
 	// Setting MALLEABILITY_INPROGRESS helps to avoid requests until malleability is done.
 	int expected_status = MALLEABILITY_OFF;
-	if (arguments->args->malleability && malleability_status.compare_exchange_strong(expected_status, MALLEABILITY_INPROGRESS, std::memory_order_acq_rel))
+	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED  && malleability_status.compare_exchange_strong(expected_status, MALLEABILITY_INPROGRESS, std::memory_order_acq_rel))
 	{
 		// print all records.
 		int index = 0;
@@ -606,7 +606,7 @@ void *Comissioning_stage(void *th_argv)
 	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on, consecutive_scale_up_signals);
 #endif
 	slog_debug("arguments->args->malleability:%d comissioning_on.load:%d", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire));
-	if (arguments->args->malleability && comissioning_on.load(std::memory_order_acquire) == false)
+	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
 	{
 		// Always check the performance trend.
 		bool to_add_server = make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold);
@@ -764,9 +764,11 @@ void *Comissioning_stage(void *th_argv)
 	else
 	{
 		slog_debug("Malleability is not enabled or is in progress by another thread.");
-// just for testing. It must be comment on production.
+		// just for testing.
+		if (arguments->args->malleability == MALLEABILITY_CONF_PERF) {
+			make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold);
+		}
 #ifdef DPRINTF
-		make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold);
 		fprintf(stderr, "Testing block\n");
 #endif
 	}
@@ -860,6 +862,10 @@ double calculate_trend_slope(const std::vector<double> &y)
 bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double minimum_performance_threshold)
 {
 	pthread_mutex_lock(&mutext_malleability); // history is a shared resource.
+	if (analysis_window_size <= 0) {
+		analysis_window_size = DEFAULT_ANALYSIS_WINDOW_SIZE;
+		slog_warn("Invalid windows size, using the default one: %" PRId32 , analysis_window_size)
+	}	
 #ifdef DPRINTF
 	fprintf(stderr, "analysis_window_size=%" PRId32 ", minimum_performance_threshold=%f, history.empty()=%d\n", analysis_window_size, minimum_performance_threshold, history.empty());
 #endif
@@ -880,6 +886,8 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 		return false;
 	}
 
+	slog_debug("num_records=%d, analysis_window_size=%d", num_records, analysis_window_size);
+
 	// Calculate the aggregate system performance for the analysis window.
 	std::vector<double> aggregate_performance_history;
 	for (size_t i = num_records - analysis_window_size; i < num_records; ++i)
@@ -889,6 +897,7 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 
 		for (const auto &pair : history)
 		{
+			slog_debug("i=%d, pair.second.size())=%ld", i , pair.second.size());
 			if (i < pair.second.size())
 			{
 				// fprintf(stderr, "Entry %d:%s, size=%ld, overall performance='%.2f' ('%.2f' MB), W='%.2f' ('%.2f' MB), R='%.2f' ('%.2f' MB)\n",
@@ -901,6 +910,17 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 				// 		pair.second[i].write_performance / MB,
 				// 		pair.second[i].read_performance,
 				// 		pair.second[i].read_performance / MB);
+
+				slog_debug( "Entry %d:%s, size=%ld, overall performance='%.2f' ('%.2f' MB), W='%.2f' ('%.2f' MB), R='%.2f' ('%.2f' MB)\n",
+						i,
+						pair.second[i].server_hostname,
+						pair.second.size(),
+						pair.second[i].overall_performance,
+						pair.second[i].overall_performance / MB,
+						pair.second[i].write_performance,
+						pair.second[i].write_performance / MB,
+						pair.second[i].read_performance,
+						pair.second[i].read_performance / MB);
 
 				total_performance_at_point_i += pair.second[i].overall_performance;
 				active_servers_count++;
@@ -959,6 +979,7 @@ bool make_scaling_decision(const std::map<std::string, std::vector<ElasticityMet
 			performance_sum / MB);
 		return true;
 	}
+
 
 	// if (slope < CRITICAL_SLOPE)
 	// {
@@ -1084,7 +1105,7 @@ void *Malleability(void *th_argv)
 		elasticity_records_history[received_metrics.server_hostname].push_back(received_metrics);
 		pthread_mutex_unlock(&mutext_malleability);
 
-		metric_recorded = 0;
+		// metric_recorded = 0;
 	}
 
 	// checks if the struct is not pointing to the hercules instance.
