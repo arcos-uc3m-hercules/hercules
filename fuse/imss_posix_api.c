@@ -1,21 +1,21 @@
 // #define FUSE_USE_VERSION 26
+#include "imss_posix_api.h"
 #include "comms.h"
+#include "hercules.hpp"
 #include "hierarchical_map.hpp"
 #include "mapprefetch.hpp"
-#include "hercules.hpp"
-#include "imss_posix_api.h"
-#include <pthread.h>
-#include <stdio.h>
-#include <string.h>
 #include <errno.h>
-#include <unistd.h>
 #include <inttypes.h>
-#include <stdlib.h>
-#include <time.h>
+#include <libgen.h>
 #include <limits.h>
 #include <math.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
-#include <libgen.h>
+#include <time.h>
+#include <unistd.h>
 
 #define HEADER sizeof(uint32_t)
 
@@ -1058,8 +1058,8 @@ extern "C"
 					{
 						// Copy data from its temporary buffer to the correct final destination
 						memcpy((char *)buf + requests[i].final_offset_in_buf,
-							   requests[i].temp_buffer,
-							   requests[i].bytes_to_read_in_req);
+						       requests[i].temp_buffer,
+						       requests[i].bytes_to_read_in_req);
 
 						total_bytes_completed += requests[i].bytes_to_read_in_req;
 						requests[i].in_use = false;
@@ -1191,7 +1191,7 @@ extern "C"
 						// printf("READV LOS QUE FALTABAN\n");
 						pthread_mutex_lock(&lock);
 						err = readv_multiple((char *)path, ds, curr_blk, end_blk, buf + byte_count, IMSS_BLKSIZE,
-											 start_offset, IMSS_DATA_BSIZE * (end_blk - curr_blk + 1));
+								     start_offset, IMSS_DATA_BSIZE * (end_blk - curr_blk + 1));
 						pthread_mutex_unlock(&lock);
 						// PREFETCH
 						pthread_mutex_lock(&lock);
@@ -1383,7 +1383,7 @@ extern "C"
 				// printf("READV LOS QUE FALTABAN\n");
 				pthread_mutex_lock(&lock);
 				err = readv_multiple((char *)path, ds, curr_blk, end_blk, buf + byte_count, IMSS_BLKSIZE,
-									 start_offset, IMSS_BLKSIZE * KB * (end_blk - curr_blk + 1));
+						     start_offset, IMSS_BLKSIZE * KB * (end_blk - curr_blk + 1));
 				pthread_mutex_unlock(&lock);
 				if (err == -1)
 				{
@@ -1558,7 +1558,7 @@ extern "C"
 					pthread_mutex_lock(&lock);
 					// printf("2ASK real ones\n");
 					err = readv_multiple((char *)path, ds, curr_blk, end_blk, buf + byte_count, IMSS_BLKSIZE,
-										 start_offset, IMSS_BLKSIZE * KB * (end_blk - curr_blk));
+							     start_offset, IMSS_BLKSIZE * KB * (end_blk - curr_blk));
 					pthread_mutex_unlock(&lock);
 
 					// PERSONAL PREFETCH
@@ -1732,7 +1732,7 @@ extern "C"
 		char *aux = NULL;
 		// char *data_pointer = (char *)buf; // points to the buffer containing all bytes to be stored
 		const void *data_pointer = buf; // points to the buffer containing all bytes to be stored
-		const char *rpath = path;		// this pointer should not be free.
+		const char *rpath = path;	// this pointer should not be free.
 		int middle = 0;
 
 		int fd = -1;
@@ -3350,7 +3350,7 @@ extern "C"
 		if (len == 0)
 		{
 			*basename_len = 1; // Length of "."
-			return ".";		   // Return a pointer to a string literal, no allocation.
+			return ".";	   // Return a pointer to a string literal, no allocation.
 		}
 
 		// Initialize a pointer to the end of the string (just before the null terminator).
@@ -3369,7 +3369,7 @@ extern "C"
 		if (end_ptr == path && *end_ptr == '/')
 		{
 			*basename_len = 1; // Length of "/"
-			return "/";		   // Return a pointer to a string literal, no allocation.
+			return "/";	   // Return a pointer to a string literal, no allocation.
 		}
 
 		// Now, find the beginning of the basename by searching backward from 'end_ptr'
@@ -3415,7 +3415,7 @@ extern "C"
 		int old_exists = 0;
 		TIMING_NO_RETURN(fd_lookup((char *)old_path, &fd, &old_file_stat, &buff), "fd_lookup old_path", 0);
 		if (fd >= 0)
-		{					// file found in the local map.
+		{			// file found in the local map.
 			old_exists = 0; // 0 indicates the file exists.
 		}
 		else
@@ -3466,7 +3466,7 @@ extern "C"
 		int new_exists = 0;
 		TIMING_NO_RETURN(fd_lookup((char *)new_path, &fd, &new_file_stat, &buff), "fd_lookup new path", 0);
 		if (fd >= 0)
-		{					// file found in the local map.
+		{			// file found in the local map.
 			new_exists = 0; // 0 indicates the file exists.
 		}
 		else

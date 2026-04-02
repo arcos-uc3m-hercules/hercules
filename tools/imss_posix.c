@@ -22,13 +22,13 @@ char *IMSS_HOSTFILE = NULL; // Not default
 extern char *IMSS_ROOT;
 extern size_t IMSS_ROOT_LEN;
 char *META_HOSTFILE = NULL;
-uint64_t STORAGE_SIZE = 16;	  // In GB
+uint64_t STORAGE_SIZE = 16;   // In GB
 uint64_t META_BUFFSIZE = 16;  // In GB
 uint64_t IMSS_BLKSIZE = 1024; // In KB
 // uint64_t IMSS_BUFFSIZE = 2;			 // In GB
 uint64_t IMSS_DATA_BSIZE = 512 * KB; // In Bytes.
-int32_t REPL_FACTOR = NONE;			 // Default none
-int32_t REPL_TYPE = ASYNC;			 // Default async
+int32_t REPL_FACTOR = NONE;	     // Default none
+int32_t REPL_TYPE = ASYNC;	     // Default async
 
 extern int32_t MALLEABILITY;
 // extern int32_t MALLEABILITY_TYPE;
@@ -41,7 +41,7 @@ uint16_t threshold_read_servers = 5;
 uint16_t BEST_PERFORMANCE_READ = 0; // if 1    then n_servers < threshold => SREAD, else if n_servers > threshold => SPLIT_READV
 // if 0 only one method of read applied specified in MULTIPLE_READ
 
-uint16_t MULTIPLE_READ = 0;	 // 1=vread with prefetch, 2=vread without prefetch, 3=vread_2x 4=imss_split_readv(distributed) else sread
+uint16_t MULTIPLE_READ = 0;  // 1=vread with prefetch, 2=vread without prefetch, 3=vread_2x 4=imss_split_readv(distributed) else sread
 uint16_t MULTIPLE_WRITE = 0; // 1=writev(only 1 server), 2=imss_split_writev(distributed) else swrite
 char prefetch_path[256];
 int32_t prefetch_first_block = -1;
@@ -1156,15 +1156,15 @@ extern int statvfs(const char *__restrict __file, struct statvfs *__restrict __b
 		// TODO: check the following. It is used to help benchmarks to show the correct FS information.
 		unsigned long block_size = IMSS_BLKSIZE * KB;
 		unsigned long total_size_bytes = 1024UL * 1024UL * 1024UL * 100UL; // Example: 100 GB fake capacity
-		unsigned long used_bytes = 0;									   // Replace with actual usage tracking if you have it
+		unsigned long used_bytes = 0;					   // Replace with actual usage tracking if you have it
 
 		__buf->f_bsize = block_size;  // Filesystem block size
 		__buf->f_frsize = block_size; // Fragment size (CRITICAL: df/mdtest use this multiplier)
 
 		// Calculate blocks
-		__buf->f_blocks = total_size_bytes / __buf->f_frsize;				// Total data blocks
+		__buf->f_blocks = total_size_bytes / __buf->f_frsize;		    // Total data blocks
 		__buf->f_bfree = (total_size_bytes - used_bytes) / __buf->f_frsize; // Free blocks
-		__buf->f_bavail = __buf->f_bfree;									// Free blocks for unprivileged users
+		__buf->f_bavail = __buf->f_bfree;				    // Free blocks for unprivileged users
 
 		// Populate Inode Information (For Inode Usage)
 		// fake high numbers to avoid running out
@@ -2646,7 +2646,7 @@ int openat(int dir_fd, const char *pathname, int flags, ...)
 		else if (is_absolute_path == 0) // pathname is relative.
 		{
 			if (dir_fd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
-			{						// TO CHECK!
+			{			// TO CHECK!
 				char *new_path = checkHerculesPath(pathname);
 				slog_live("[POSIX] is relative, current directory, 'openat', new_path=%s", new_path);
 				// pathname is interpreted relative to the current working directory of the calling process (like real_open).
@@ -4541,7 +4541,7 @@ int __fxstatat(int ver, int dir_fd, const char *pathname, struct stat *stat_buf,
 		else if (is_absolute_path == 0) // pathname is relative.
 		{
 			if (dir_fd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
-			{						// TO CHECK!
+			{			// TO CHECK!
 				// char *new_path = checkHerculesPath(pathname);
 				// slog_live("[POSIX] is relative, current directory, '__fxstatat', new_path=%s", new_path);
 				slog_live("[POSIX] is relative, current directory, '__fxstatat', pathname=%s", pathname);
@@ -4643,7 +4643,7 @@ int __fxstatat64(int ver, int dir_fd, const char *pathname, struct stat64 *stat_
 		else if (is_absolute_path == 0) // pathname is relative.
 		{
 			if (dir_fd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
-			{						// TO CHECK!
+			{			// TO CHECK!
 				// char *new_path = checkHerculesPath(pathname);
 				// slog_live("[POSIX] is relative, current directory, '__fxstatat', new_path=%s", new_path);
 				slog_live("[POSIX] is relative, current directory, '__fxstatat', pathname=%s", pathname);
@@ -4708,7 +4708,7 @@ int GeneralFAccessAt(int dir_fd, const char *pathname, int mode, int flags, char
 	else if (is_absolute_path == 0) // pathname is relative.
 	{
 		if (dir_fd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
-		{						// TO CHECK!
+		{			// TO CHECK!
 			slog_live("[POSIX] is relative, current directory, 'faccessat2', pathname=%s", pathname);
 			ret = access(pathname, mode);
 		}
@@ -4879,7 +4879,7 @@ int unlinkat(int dir_fd, const char *pathname, int flags)
 		else if (is_absolute_path == 0) // pathname is relative.
 		{
 			if (dir_fd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
-			{						// TO CHECK!
+			{			// TO CHECK!
 				// char *new_path = checkHerculesPath(pathname);
 				// slog_live("[POSIX] is relative, current directory, 'unlinkat', new_path=%s", new_path);
 				slog_live("[POSIX] is relative, current directory, 'unlinkat', pathname=%s", pathname);
@@ -4988,7 +4988,7 @@ extern int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char
 		else if (is_absolute_path == 0) // newpath is relative.
 		{
 			if (newdirfd == AT_FDCWD) // newdirfd is the special value AT_FDCWD.
-			{						  // TO CHECK!
+			{			  // TO CHECK!
 				slog_live("[POSIX] is relative, current directory, 'renameat2', newpath=%s", newpath);
 				// pathname is interpreted relative to the current working directory of the calling process (like real_open).
 				ret = rename(oldpath, newpath);
@@ -5248,8 +5248,8 @@ void StatReport(int fd, struct stat sb)
 {
 	slog_info("File descriptor: %d", fd);
 	slog_info("ID of containing device:  [%x,%x]",
-			  major(sb.st_dev),
-			  minor(sb.st_dev));
+		  major(sb.st_dev),
+		  minor(sb.st_dev));
 
 	slog_info("File type:                ");
 
@@ -5284,18 +5284,18 @@ void StatReport(int fd, struct stat sb)
 	slog_info("I-node number:            %ju", (uintmax_t)sb.st_ino);
 
 	slog_info("Mode:                     %jo (octal)",
-			  (uintmax_t)sb.st_mode);
+		  (uintmax_t)sb.st_mode);
 
 	slog_info("Link count:               %ju", (uintmax_t)sb.st_nlink);
 	slog_info("Ownership:                UID=%ju   GID=%ju",
-			  (uintmax_t)sb.st_uid, (uintmax_t)sb.st_gid);
+		  (uintmax_t)sb.st_uid, (uintmax_t)sb.st_gid);
 
 	slog_info("Preferred I/O block size: %jd bytes",
-			  (intmax_t)sb.st_blksize);
+		  (intmax_t)sb.st_blksize);
 	slog_info("File size:                %jd bytes",
-			  (intmax_t)sb.st_size);
+		  (intmax_t)sb.st_size);
 	slog_info("Blocks allocated:         %jd",
-			  (intmax_t)sb.st_blocks);
+		  (intmax_t)sb.st_blocks);
 
 	slog_info("Last status change:       %s", ctime(&sb.st_ctime));
 	slog_info("Last file access:         %s", ctime(&sb.st_atime));
@@ -5688,7 +5688,7 @@ int utimensat(int dirfd, const char *pathname, const struct timespec times[_Null
 		else if (is_absolute_path == 0) // pathname is relative.
 		{
 			if (dirfd == AT_FDCWD) // dir_fd is the special value AT_FDCWD.
-			{					   // TO CHECK!
+			{		       // TO CHECK!
 				// char *new_path = checkHerculesPath(pathname);
 				// slog_live("[POSIX] is relative, current directory, 'unlinkat', new_path=%s", new_path);
 				slog_live("[POSIX] is relative, current directory, 'utimensat', pathname=%s", pathname);

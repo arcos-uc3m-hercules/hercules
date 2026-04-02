@@ -1,15 +1,14 @@
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <pthread.h>
-#include <sys/signal.h>
-#include <inttypes.h>
-#include <unistd.h>
-#include "records.hpp"
 #include "map_ep.hpp"
 #include "memalloc.h"
 #include "metadata_stat.h"
+#include "records.hpp"
+#include <inttypes.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/signal.h>
+#include <unistd.h>
 // #include "directory.h"
 #include "policies.h"
 #include "utils.h"
@@ -236,7 +235,7 @@ int32_t main(int32_t argc, char **argv)
 		{
 			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
 			fprintf(stderr, "Number of hosts in %s are %d\n", args.alloc_data_hostfile, number_of_hosts);
-			slog_debug( "Number of hosts in %s are %d", args.alloc_data_hostfile, number_of_hosts);
+			slog_debug("Number of hosts in %s are %d", args.alloc_data_hostfile, number_of_hosts);
 		}
 		// TODO: put the following message on the workers.c, where malleability is applied.
 		// else
@@ -883,8 +882,8 @@ int32_t main(int32_t argc, char **argv)
 	// }
 
 	ret = ready(tmp_file_path, "OK");
-	fprintf(stdout, ANSI_COLOR_GREEN "[%s] %c-server %d is ready, status code=%d" ANSI_COLOR_RESET "\n" , args.data_hostname, args.type, args.id, ret);
-	slog_debug("[%s] %c-server %d is ready, status code=%d" , args.data_hostname, args.type, args.id, ret);
+	fprintf(stdout, ANSI_COLOR_GREEN "[%s] %c-server %d is ready, status code=%d" ANSI_COLOR_RESET "\n", args.data_hostname, args.type, args.id, ret);
+	slog_debug("[%s] %c-server %d is ready, status code=%d", args.data_hostname, args.type, args.id, ret);
 	// Wait for threads to finish.
 	for (int32_t i = 0; i < total_threads; i++)
 	{
@@ -935,7 +934,7 @@ int32_t main(int32_t argc, char **argv)
 				fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
 				slog_error("Failed to flush worker: %s\n", ucs_status_string(status));
 			}
-			slog_debug("Closing endpoing %d/%d", i , args.num_metadata_servers);
+			slog_debug("Closing endpoing %d/%d", i, args.num_metadata_servers);
 			close_ucx_endpoint(ucp_worker_meta, ep);
 			// close_ucx_endpoint(ucp_worker, metadata_endpoints[i]);
 		}
@@ -945,7 +944,7 @@ int32_t main(int32_t argc, char **argv)
 	// Release UCX resources used by the threads.
 	for (int i = 0; i < hercules_thread_pool_size; i++)
 	{
-		fprintf(stdout, "Releasing UCX resources for worker %d/%d\n", i+1, hercules_thread_pool_size);
+		fprintf(stdout, "Releasing UCX resources for worker %d/%d\n", i + 1, hercules_thread_pool_size);
 		slog_info("Releasing UCX resources for worker %d/%d", i, hercules_thread_pool_size);
 		// fprintf(stdout, "ucp_worker_progress for worker %d\n", i);
 		// ucp_worker_progress(ucp_worker_threads[i]);
@@ -1243,13 +1242,13 @@ void handle_signal_server(int signal)
 				slog_debug("Sending broadcast mutext_malleability\n");
 				pthread_cond_broadcast(&global_run_malleability_cond); // Wake up everyone
 				pthread_mutex_unlock(&mutext_malleability);
-				slog_debug( "Unlock mutext_malleability\n");
+				slog_debug("Unlock mutext_malleability\n");
 
 				// This file is readed by the hercules script to know if this server
 				// was correctly shutting down.
 				sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
 				ready(tmp_file_path, "LOCKED");
-				slog_debug( "Server %d has been unlocked\n", args.id);
+				slog_debug("Server %d has been unlocked\n", args.id);
 				global_finish_threads = 1;
 			}
 
@@ -1305,7 +1304,6 @@ void handle_signal_server(int signal)
 			break;
 		}
 
-		
 		// This file is readed by the hercules script to know if this server
 		// was correctly shutting down.
 		// sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);

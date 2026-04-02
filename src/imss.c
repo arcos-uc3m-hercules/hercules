@@ -1,29 +1,29 @@
-#include <cstdint>
-#include <netdb.h>
-#include <errno.h>
-#include <unistd.h>
-#include <stdint.h>
-#include <string.h>
-#include <stdlib.h>
-#include <sys/wait.h>
-#include <sys/types.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <sys/time.h>
-#include <sys/utsname.h>
-#include <time.h>
-#include <inttypes.h>
-#include <ucp/api/ucp.h>
-#include <ifaddrs.h>
+#include "imss.h"
 #include "comms.h"
 #include "crc.h"
-#include "imss.h"
 #include "map_ep.hpp"
-#include "slog.h"
-#include "workers.h"
 #include "policies.h"
 #include "shared_memory.h"
+#include "slog.h"
+#include "workers.h"
+#include <arpa/inet.h>
+#include <cstdint>
+#include <errno.h>
+#include <ifaddrs.h>
+#include <inttypes.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <ucp/api/ucp.h>
+#include <unistd.h>
 
 /**********************************************************************************/
 /******************************** GLOBAL VARIABLES ********************************/
@@ -33,7 +33,7 @@ size_t IMSS_ROOT_LEN = 0;
 
 // __thread
 /* Hercules objects. */
-int32_t id_current_dataset;		   // Dataset whose policy has been set last.
+int32_t id_current_dataset;	   // Dataset whose policy has been set last.
 dataset_info *curr_dataset = NULL; // Currently managed dataset.
 
 imss curr_imss;
@@ -47,13 +47,13 @@ uint32_t *stat_ids = NULL;
 // uint32_t NUM_DATA_SERVERS;
 int32_t N_SERVERS = -1; // Default
 
-GArray *imssd;			// Set of IMSS metadata and connection structures currently used.
-GArray *free_imssd;		// Set of free entries within the 'imssd' vector.
-int32_t imssd_pos;		// Next position within the vextor were a new IMSS will be inserted.
+GArray *imssd;		// Set of IMSS metadata and connection structures currently used.
+GArray *free_imssd;	// Set of free entries within the 'imssd' vector.
+int32_t imssd_pos;	// Next position within the vextor were a new IMSS will be inserted.
 int32_t imssd_max_size; // Maximum number of elements that could be introduced into the imss array.
 
 // GArray
-GHashTable *datasetd = NULL;				  // Set of dataset metadata structures.
+GHashTable *datasetd = NULL;		      // Set of dataset metadata structures.
 GHashTable *pool_hash_tables_datasetd = NULL; // Set of Hash tables.
 // GArray *free_datasetd;				   // Set of free entries within the 'datasetd' vector.
 // GHashTable *dataset_uri_map = NULL;
@@ -86,8 +86,8 @@ ucp_ep_h *stat_eps;
 
 /* TCP variables. */
 char client_node[512] = {0}; // Node name where the client is running.
-int32_t len_client_node;	 // Length of the previous node name.
-char client_ip[16] = {0};	 // IP number of the node where the client is taking execution.
+int32_t len_client_node;     // Length of the previous node name.
+char client_ip[16] = {0};    // IP number of the node where the client is taking execution.
 int matching_server_id = -1;
 
 // static ucp_address_t *local_addr_meta;
@@ -531,10 +531,10 @@ int32_t imss_comm_cleanup()
 
 // Method inserting an element into a certain control GArray vector.
 int32_t GInsert(int32_t *pos,
-				int32_t *max,
-				char *item,
-				GArray *garray_insert,
-				GArray *garray_free)
+		int32_t *max,
+		char *item,
+		GArray *garray_insert,
+		GArray *garray_free)
 {
 	// Position where the element will be inserted.
 	int32_t inserted_pos = -1;
@@ -570,9 +570,9 @@ int32_t GInsert(int32_t *pos,
 
 // Method inserting an element into a certain control GArray vector.
 int32_t Get_fd(int32_t *pos,
-			   int32_t *max,
-			   GArray *garray_insert,
-			   GArray *garray_free)
+	       int32_t *max,
+	       GArray *garray_insert,
+	       GArray *garray_free)
 {
 	// Position where the element will be inserted.
 	int32_t inserted_pos = -1;
@@ -644,7 +644,7 @@ int32_t find_imss(const char *imss_uri, imss *imss_)
 
 // Method deleting a certains IMSS in the vector
 int32_t delete_imss(char *imss_uri,
-					imss *imss_)
+		    imss *imss_)
 {
 	int32_t pos = find_imss(imss_uri, imss_);
 	if (pos != -1)
@@ -664,9 +664,9 @@ int32_t delete_imss(char *imss_uri,
 
 // Method creating a communication channel with the IMSS metadata server. Besides, the stat_imss method initializes a set of elements that will be used through the session.
 int32_t stat_init(char *stat_hostfile,
-				  uint64_t port,
-				  int32_t num_stat_servers,
-				  uint32_t rank)
+		  uint64_t port,
+		  int32_t num_stat_servers,
+		  uint32_t rank)
 {
 	slog_debug("[IMSS] Calling stat_init.");
 	// fprintf(stderr, "[IMSS] Calling stat_init.\n");
@@ -803,8 +803,8 @@ int32_t stat_init(char *stat_hostfile,
 		if (family == AF_INET)
 		{
 			s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in),
-							host, NI_MAXHOST,
-							NULL, 0, NI_NUMERICHOST);
+					host, NI_MAXHOST,
+					NULL, 0, NI_NUMERICHOST);
 			if (s != 0)
 			{
 				continue; // Error getting name, skip
@@ -904,7 +904,7 @@ int32_t stat_init(char *stat_hostfile,
 	status = ucp_worker_query(ucp_worker_meta, &worker_attr);
 	local_addr_len_meta = worker_attr.address_length;
 	local_addr_meta = worker_attr.address;
-	
+
 	// Get attributes of the particular worker address.
 	ucp_worker_address_attr_t attr;
 	attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
@@ -1374,15 +1374,13 @@ int32_t open_imss(char *imss_uri)
 	case 2:
 	{
 		imss check_imss = g_array_index(imssd, imss, found_in);
-		slog_debug("check_imss.conns.matching_server=%d", check_imss.conns.matching_server)
-		if (check_imss.conns.matching_server != -2)
+		slog_debug("check_imss.conns.matching_server=%d", check_imss.conns.matching_server) if (check_imss.conns.matching_server != -2)
 		{
 			// instance has been already created.
 			return -2;
 		}
-		slog_debug("freeing ips")
-		for (int32_t i = 0; i < check_imss.info.num_storages; i++)
-			free(check_imss.info.ips[i]);
+		slog_debug("freeing ips") for (int32_t i = 0; i < check_imss.info.num_storages; i++)
+		    free(check_imss.info.ips[i]);
 
 		free(check_imss.info.ips);
 		not_initialized = 1;
@@ -1769,18 +1767,18 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 	size_t num_elements_to_shift = imss_->info.num_storages - server_id_to_remove - 1;
 	// sort the ips array.
 	memmove(&imss_->info.ips[server_id_to_remove],
-			&imss_->info.ips[server_id_to_remove + 1],
-			num_elements_to_shift * sizeof(char *));
+		&imss_->info.ips[server_id_to_remove + 1],
+		num_elements_to_shift * sizeof(char *));
 
 	// sort the peer addresses array.
 	memmove(&imss_->conns.peer_addr[server_id_to_remove],
-			&imss_->conns.peer_addr[server_id_to_remove + 1],
-			num_elements_to_shift * sizeof(ucp_address_t *));
+		&imss_->conns.peer_addr[server_id_to_remove + 1],
+		num_elements_to_shift * sizeof(ucp_address_t *));
 
 	// sort the endpoints array.
 	memmove(&imss_->conns.eps[server_id_to_remove],
-			&imss_->conns.eps[server_id_to_remove + 1],
-			num_elements_to_shift * sizeof(ucp_ep_h));
+		&imss_->conns.eps[server_id_to_remove + 1],
+		num_elements_to_shift * sizeof(ucp_ep_h));
 
 	imss_->info.ips[imss_->info.num_storages - 1] = NULL;
 	imss_->conns.peer_addr[imss_->info.num_storages - 1] = NULL;
@@ -2165,18 +2163,18 @@ int32_t stat_imss_info()
 		size_t num_elements_to_shift = imss_->info.num_storages - server_id_to_remove - 1;
 		// sort the ips array.
 		memmove(&imss_->info.ips[server_id_to_remove],
-				&imss_->info.ips[server_id_to_remove + 1],
-				num_elements_to_shift * sizeof(char *));
+			&imss_->info.ips[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(char *));
 
 		// sort the peer addresses array.
 		memmove(&imss_->conns.peer_addr[server_id_to_remove],
-				&imss_->conns.peer_addr[server_id_to_remove + 1],
-				num_elements_to_shift * sizeof(ucp_address_t *));
+			&imss_->conns.peer_addr[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(ucp_address_t *));
 
 		// sort the endpoints array.
 		memmove(&imss_->conns.eps[server_id_to_remove],
-				&imss_->conns.eps[server_id_to_remove + 1],
-				num_elements_to_shift * sizeof(ucp_ep_h));
+			&imss_->conns.eps[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(ucp_ep_h));
 
 		imss_->info.ips[imss_->info.num_storages - 1] = NULL;
 		imss_->conns.peer_addr[imss_->info.num_storages - 1] = NULL;
@@ -2185,7 +2183,7 @@ int32_t stat_imss_info()
 		// slog_debug("imss_ add=%p", &imss_->info.num_storages);
 		slog_debug("imss_->info.num_storages=%d", imss_->info.num_storages);
 		imss_->info.num_storages = received_info_struct->num_storages; // current_number_of_servers; // imss_->info.num_storages - 1;
-																	   // imss_->info.num_active_storages = imss_->info.num_storages;
+									       // imss_->info.num_active_storages = imss_->info.num_storages;
 	}
 	curr_imss = *imss_;
 
@@ -2220,15 +2218,15 @@ char *get_deployed(char *endpoint)
 
 // Method creating a dataset and the environment enabling READ or WRITE operations over it.
 int32_t create_dataset(char *dataset_uri,
-					   char *policy,
-					   int32_t num_data_elem,
-					   int32_t data_elem_size,
-					   int32_t repl_factor,
-					   int32_t repl_type,
-					   int32_t n_servers,
-					   char *link,
-					   int opened,
-					   char file_type)
+		       char *policy,
+		       int32_t num_data_elem,
+		       int32_t data_elem_size,
+		       int32_t repl_factor,
+		       int32_t repl_type,
+		       int32_t n_servers,
+		       char *link,
+		       int opened,
+		       char file_type)
 {
 	int ret = 0;
 	ucp_ep_h ep;
@@ -2308,7 +2306,7 @@ int32_t create_dataset(char *dataset_uri,
 			}
 		}
 		if (ret == -2) // && ret != -3
-		{			   // case where parent directory does not exists.
+		{	       // case where parent directory does not exists.
 			/********** TO CHECK */
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
 			sprintf(err_msg, "Parent directory %s does not exists, required by %s", parent_dir, dataset_uri);
@@ -2764,7 +2762,7 @@ int32_t clear_dataset(const char *dataset_uri)
 	return 0;
 }
 
-int32_t send_performance_metrics(ucp_ep_h ep, const char  *dataset_uri, uint32_t m_srv)
+int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t m_srv)
 {
 	char formated_uri[REQUEST_SIZE] = {0};
 	int32_t ret = -1;
@@ -3082,9 +3080,8 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 
 	// MALLEABILITY_CONF_PERF is used to measure the performance when malleability is not enabled.
 	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED || CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_PERF) // TODO: add a new condition to check the Malleability type (e.g., memory usage, performance, ...)
-	{ // To send performance metrics.
+	{														 // To send performance metrics.
 		int status = send_performance_metrics(ep, dataset_uri, m_srv);
-
 	}
 
 	return ret;
@@ -3797,7 +3794,7 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 
 // Method renaming a dir_dir
 int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
-										  int32_t dataset_id, int32_t data_id)
+					  int32_t dataset_id, int32_t data_id)
 {
 	int32_t n_server;
 	// Server containing the corresponding data to be retrieved.
@@ -4134,13 +4131,13 @@ int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, i
 
 // Method retrieving multiple data
 int32_t readv_multiple(char *dataset_uri,
-					   int32_t dataset_id,
-					   int32_t curr_block,
-					   int32_t end_block,
-					   char *buffer,
-					   uint64_t BLOCKSIZE,
-					   int64_t start_offset,
-					   int64_t size)
+		       int32_t dataset_id,
+		       int32_t curr_block,
+		       int32_t end_block,
+		       char *buffer,
+		       uint64_t BLOCKSIZE,
+		       int64_t start_offset,
+		       int64_t size)
 {
 	// printf("readv size=%d",size);
 	int32_t n_server;
@@ -4253,8 +4250,8 @@ void *split_writev(void *th_argv)
 
 		// Key related to the requested data element.
 		sprintf(key_, "SET %d 0 [OP]=2 %s %ld %ld %d %s", curr_dataset->data_entity_size,
-				arguments->path, arguments->BLKSIZE, arguments->start_offset,
-				arguments->stats_size, arguments->msg);
+			arguments->path, arguments->BLKSIZE, arguments->start_offset,
+			arguments->stats_size, arguments->msg);
 
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
@@ -4317,8 +4314,8 @@ void *split_readv(void *th_argv)
 		// Send read request message specifying the block URI.
 		// printf("[SPLIT READV] 1-send_data");
 		sprintf(key_, "GET 9 0 %s %ld %ld %d %d",
-				arguments->path, arguments->BLKSIZE, arguments->start_offset,
-				arguments->stats_size, msg_length);
+			arguments->path, arguments->BLKSIZE, arguments->start_offset,
+			arguments->stats_size, msg_length);
 
 		ep = curr_imss.conns.eps[repl_servers[i]];
 
@@ -5690,8 +5687,8 @@ int32_t set_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, char *
 
 // Method retrieving the location of a specific data object.
 char **get_dataloc(const char *dataset,
-				   int32_t data_id,
-				   int32_t *num_storages)
+		   int32_t data_id,
+		   int32_t *num_storages)
 {
 	// Dataset structure of the one requested.
 	dataset_info *where_dataset;
