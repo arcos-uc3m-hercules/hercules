@@ -231,6 +231,7 @@ int32_t main(int32_t argc, char **argv)
 		// bind port number.
 		bind_port = args.stat_port;
 
+		imss_copy.num_storages = 0;
 		if (strlen(args.alloc_data_hostfile) != 0 && args.malleability > 0)
 		{
 			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);

@@ -48,6 +48,13 @@ typedef struct
     char curr_req[PATH_MAX]; // The original request string, used for logging
 } PendingRequestInfo;
 
+// Malleability actions.
+enum class scaling_action {
+    HOLD = 0,
+    SCALE_UP = 1,
+    SCALE_DOWN = -1
+};
+
 
 // Use a map to store metrics, mapping server_id to its metrics.
 // static std::map<int32_t, IOServerMetrics> backend_performance_metrics;
@@ -56,7 +63,7 @@ static std::map<std::string, IOServerMetrics> backend_performance_metrics;
 // static std::map<int32_t, std::vector<ElasticityMetric>> elasticity_records_history;
 static std::map<std::string, std::vector<ElasticityMetric>> elasticity_records_history;
 static int best_number_of_servers = 0;
-static int number_of_history_records = 0;
+static std::atomic<int> number_of_history_records{0};
 static int consecutive_scale_up_signals = 0;
 
 // static void PerformanceRecordsRemoveKey(int32_t server_id)
