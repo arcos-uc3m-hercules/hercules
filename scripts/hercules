@@ -782,6 +782,32 @@ then
         #readarray -t meta_hosts < <(head -n $HERCULES_NUM_METADATA hostfile)
         echo "Making metadata hostfile in ${HERCULES_METADATA_HOSTFILE}"
         head -n "${HERCULES_NUM_METADATA}" "${FULL_HOSTFILE}" > "${HERCULES_METADATA_HOSTFILE}"
+
+        if [[ "$MALLEABILITY" -eq 1 ]]; then
+            if [[ -z "${HERCULES_ALLOC_DATA_HOSTFILE}" ]]; then
+                echo "## Error: ALLOC_DATA_HOSTFILE was not defined and it is required when MALLEABILITY=1."
+                echo "## Be sure you defined ALLOC_DATA_HOSTFILE on the configuration file: ${FILE}"
+                STATUS="stop"
+                # StopAllMetadata
+                exit 1
+            fi
+            ## makes the data hostfile containing all the allocated nodes for data servers, this
+            ## nodes can be used on malleability extending operations.
+            echo "Making file ${HERCULES_ALLOC_DATA_HOSTFILE}"
+            if [[ ${UPPER_BOUND_MALLEABILITY} -lt ${HERCULES_NUM_DATA} ]]; then
+                echo "## Error: UPPER_BOUND_MALLEABILITY (${UPPER_BOUND_MALLEABILITY}) can not be less than HERCULES_NUM_DATA (${HERCULES_NUM_DATA})"
+                STATUS="stop"
+                # StopAllMetadata
+                exit 1
+            fi
+            tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${UPPER_BOUND_MALLEABILITY}" > "${HERCULES_ALLOC_DATA_HOSTFILE}"
+            if [[ $? -ne 0 ]]; then
+                echo "Error: Failed to create ${HERCULES_ALLOC_DATA_HOSTFILE}"
+                STATUS="stop"
+                # StopAllMetadata
+                exit 1
+            fi  
+        fi
     fi
     ## To create an array with the meta nodes.
     #printf "%s\n" ${meta_hosts[@]} > "$META_SERVER_FILE"
@@ -870,33 +896,6 @@ then
         # echo ${HERCULES_ALLOC_DATA_HOSTFILE}
         # echo ${MALLEABILITY}
         tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${HERCULES_NUM_DATA}" > "${HERCULES_DATA_HOSTFILE}"
-
-        if [[ "$MALLEABILITY" -eq 1 ]]; then
-            if [[ -z "${HERCULES_ALLOC_DATA_HOSTFILE}" ]]; then
-                echo "## Error: ALLOC_DATA_HOSTFILE was not defined and it is required when MALLEABILITY=1."
-                echo "## Be sure you defined ALLOC_DATA_HOSTFILE on the configuration file: ${FILE}"
-                STATUS="stop"
-                StopAllMetadata
-                exit 1
-            fi
-            ## makes the data hostfile containing all the allocated nodes for data servers, this
-            ## nodes can be used on malleability extending operations.
-            echo "Making file ${HERCULES_ALLOC_DATA_HOSTFILE}"
-            if [[ ${UPPER_BOUND_MALLEABILITY} -lt ${HERCULES_NUM_DATA} ]]; then
-                echo "## Error: UPPER_BOUND_MALLEABILITY (${UPPER_BOUND_MALLEABILITY}) can not be less than HERCULES_NUM_DATA (${HERCULES_NUM_DATA})"
-                STATUS="stop"
-                StopAllMetadata
-                exit 1
-            fi
-            tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${UPPER_BOUND_MALLEABILITY}" > "${HERCULES_ALLOC_DATA_HOSTFILE}"
-            if [[ $? -ne 0 ]]; then
-                echo "Error: Failed to create ${HERCULES_ALLOC_DATA_HOSTFILE}"
-                STATUS="stop"
-                StopAllMetadata
-                exit 1
-            fi  
-        fi
-        
     fi
     ## To create an array with the data nodes.
     readarray -t data_hosts < "${HERCULES_DATA_HOSTFILE}"
