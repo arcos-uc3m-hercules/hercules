@@ -4,6 +4,7 @@
 #include "hercules.hpp"
 #include "imss.h"
 #include "map_server_eps.hpp"
+#include "performance_records.hpp"
 #include "policies.h"
 #include "records.hpp"
 #include "shared_memory.h"
@@ -11,6 +12,7 @@
 #include <arpa/inet.h>
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <errno.h>
 #include <fcntl.h>
@@ -547,7 +549,7 @@ void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_s
  * @param arguments
  * @param id_server_to_remove
  */
-void Decomissioning_stage(p_argv *arguments, int id_server_to_remove)
+void decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 {
 	// p_argv *arguments = (p_argv *)th_argv;
 	// Check if malleability is enable from the configuration file and if malleability is not running.
@@ -607,30 +609,31 @@ void Decomissioning_stage(p_argv *arguments, int id_server_to_remove)
 
 void *run_malleability(void *th_argv)
 {
-	CommissioningThreadArgs *arguments = (CommissioningThreadArgs *)th_argv;
+	MalleabilityArgs *arguments = (MalleabilityArgs *)th_argv;
 #ifdef DPRINTF
-	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on, consecutive_scale_up_signals);
+	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire), consecutive_scale_up_signals);
 #endif
 	slog_debug("arguments->args->malleability:%d comissioning_on.load:%d", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire));
 	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
 	{
 		// Always check the performance trend.
-		scaling_action action = make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold);
-#ifdef DPRINTF
-		fprintf(stderr, "action=%d\n", action);
-#endif
+		int slowest_server_id;
+		scaling_action action = make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, &slowest_server_id);
+		// #ifdef DPRINTF
+		// 		fprintf(stderr, "action=%d\n", action);
+		// #endif
 		// pthread_mutex_lock(&mutext_malleability);
 
-		if (action == scaling_action::SCALE_UP)
-		{
-			consecutive_scale_up_signals++; // Increment counter if scaling is needed.
-			// fprintf(stderr, "Scale-up signal received. Consecutive count: %d\n", consecutive_scale_up_signals);
-			slog_debug("Scale-up signal received. Consecutive count: %d/%d", consecutive_scale_up_signals, arguments->args->malleability_tolerance);
-		}
-		else
-		{
-			consecutive_scale_up_signals = 0; // Reset counter if performance is fine.
-		}
+		// if (action == scaling_action::SCALE_UP)
+		// {
+		// 	consecutive_scale_up_signals++; // Increment counter if scaling up is needed.
+		// 	// fprintf(stderr, "Scale-up signal received. Consecutive count: %d\n", consecutive_scale_up_signals);
+		// 	slog_debug("Scale-up signal received. Consecutive count: %d/%d", consecutive_scale_up_signals, arguments->args->malleability_tolerance);
+		// }
+		// else
+		// {
+		// 	consecutive_scale_up_signals = 0; // Reset counter if performance is fine.
+		// }
 
 		// pthread_mutex_unlock(&mutext_malleability);
 
@@ -644,6 +647,16 @@ void *run_malleability(void *th_argv)
 			// fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
 			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
 		}
+
+		if (consecutive_scale_down_signals >= arguments->args->malleability_tolerance)
+		{
+			decomissioning_stage(arguments, slowest_server_id);
+		}
+		else
+		{
+			// fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
+			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
+		}
 	}
 	else
 	{
@@ -651,11 +664,12 @@ void *run_malleability(void *th_argv)
 		// just for testing.
 		if (arguments->args->malleability == MALLEABILITY_CONF_PERF)
 		{
-			make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold);
+			int slowest_server_id;
+			make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, &slowest_server_id);
 		}
-#ifdef DPRINTF
-		fprintf(stderr, "Testing block\n");
-#endif
+		// #ifdef DPRINTF
+		// 		fprintf(stderr, "Testing block\n");
+		// #endif
 	}
 
 	p_argv temp_p_argv_for_calls;
@@ -700,10 +714,11 @@ void *run_malleability(void *th_argv)
 	// fprintf(stderr, "Reponse sent to client=%lu\n", temp_p_argv_for_calls.worker_uid);
 	slog_debug("Reponse sent to client=%lu\n", temp_p_argv_for_calls.worker_uid);
 	free(arguments);
+	arguments = NULL;
 	pthread_exit(NULL);
 }
 
-void *comissioning_stage(CommissioningThreadArgs *arguments)
+void *comissioning_stage(MalleabilityArgs *arguments)
 {
 	consecutive_scale_up_signals = 0;
 	imss_info *imss_info_struct = curr_global_imss;
@@ -729,12 +744,12 @@ void *comissioning_stage(CommissioningThreadArgs *arguments)
 	node_to_use = NULL;
 	// Iterates over all hosts defined on the "hostfile" in order to find a
 	// hostname that is not already under use.
-	for (size_t j = 0; j < number_of_hosts; j++)
+	for (size_t j = 0; j < number_of_hosts; ++j)
 	{
 		found = 0;
 		// slog_debug("eps[%d] hostname=%s", j, imss_copy.ips[j]);
 		// fprintf(stderr, "eps[%d] hostname=%s\n", j, imss_copy.ips[j]);
-		for (size_t i = 0; i < imss_info_struct->num_storages; i++)
+		for (size_t i = 0; i < imss_info_struct->num_storages; ++i)
 		{
 			// check if the host is already on the struct.
 			if (!strcmp(imss_info_struct->ips[i], imss_copy.ips[j]))
@@ -873,7 +888,7 @@ double calculate_trend_slope(const std::vector<double> &y)
  * @brief Analyzes the metrics history to decide if scaling is needed.
  * @param history The map containing the metrics history for all servers.
  */
-scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double performance_threshold)
+scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double performance_threshold, int *slowest_server_id)
 {
 	pthread_mutex_lock(&mutext_malleability); // history is a shared resource.
 	if (analysis_window_size <= 0)
@@ -904,6 +919,8 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 	slog_debug("num_records=%d, analysis_window_size=%d", num_records, analysis_window_size);
 
 	// Calculate the aggregate system performance for the analysis window.
+	const ElasticityMetric *slowest_server = NULL;
+	double slowest_performance = 0.0;
 	std::vector<double> aggregate_performance_history;
 	for (size_t i = num_records - analysis_window_size; i < num_records; ++i)
 	{
@@ -936,6 +953,15 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 					   pair.second[i].write_performance / MB,
 					   pair.second[i].read_performance,
 					   pair.second[i].read_performance / MB);
+
+				if (!slowest_server)
+				{
+					slowest_server = &(pair.second[i]);
+				}
+				else if (pair.second[i].overall_performance < slowest_server->overall_performance)
+				{
+					slowest_server = &(pair.second[i]);
+				}
 
 				total_performance_at_point_i += pair.second[i].overall_performance;
 				active_servers_count++;
@@ -980,7 +1006,7 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 			moving_average / MB,
 			performance_threshold,
 			performance_threshold / MB,
-			number_active_storage_servers,
+			number_active_storage_servers.load(),
 			performance_sum,
 			performance_sum / MB);
 #endif
@@ -992,6 +1018,8 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 			   number_active_storage_servers.load(),
 			   performance_sum,
 			   performance_sum / MB);
+
+		consecutive_scale_up_signals++; // Increment counter if scaling up is needed.
 		return scaling_action::SCALE_UP;
 	}
 	if (moving_average > performance_threshold)
@@ -1002,7 +1030,7 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 			moving_average / MB,
 			performance_threshold,
 			performance_threshold / MB,
-			number_active_storage_servers,
+			number_active_storage_servers.load(),
 			performance_sum,
 			performance_sum / MB);
 #endif
@@ -1014,6 +1042,13 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 			   number_active_storage_servers.load(),
 			   performance_sum,
 			   performance_sum / MB);
+
+		consecutive_scale_down_signals++;
+		if (slowest_server)
+			*slowest_server_id = slowest_server->server_id;
+		else
+			slowest_server_id = NULL;
+
 		return scaling_action::SCALE_DOWN;
 	}
 
@@ -1022,11 +1057,43 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 	// 	fprintf(stderr, "DECISION: SCALE UP! Performance trend is strongly negative (%.2f), number of active servers=%d\n", slope, number_active_storage_servers);
 	// 	return true;
 	// }
+	if (consecutive_scale_up_signals > 0)
+		consecutive_scale_up_signals = 0;
+
+	if (consecutive_scale_down_signals > 0)
+		consecutive_scale_down_signals = 0;
+
 #ifdef DPRINTF
-	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)\n", moving_average, moving_average / MB, performance_threshold, performance_threshold / MB, number_active_storage_servers, performance_sum, performance_sum / MB);
+	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)\n", moving_average, moving_average / MB, performance_threshold, performance_threshold / MB, number_active_storage_servers.load(), performance_sum, performance_sum / MB);
 #endif
 	slog_debug("DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)", moving_average, moving_average / MB, performance_threshold, performance_threshold / MB, number_active_storage_servers.load(), performance_sum, performance_sum / MB);
 	return scaling_action::HOLD;
+}
+
+MalleabilityArgs *fill_malleability_args(p_argv *arguments)
+{
+	if (arguments == NULL)
+	{
+		slog_error("HERCULES_ERR_FILL_MALL_ARGS_NULL: arguments is NULL");
+		return NULL;
+	}
+
+	MalleabilityArgs *malleability_args = (MalleabilityArgs *)malloc(sizeof(MalleabilityArgs));
+	if (!malleability_args)
+	{
+		perror("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
+		slog_error("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
+		return NULL;
+	}
+	malleability_args->args = arguments->args;
+	malleability_args->hercules_info_struct = arguments->hercules_info_struct;
+	malleability_args->ucp_worker = arguments->ucp_worker;
+	malleability_args->server_ep = arguments->server_ep;
+	malleability_args->worker_uid = arguments->worker_uid;
+	malleability_args->thread_id = arguments->thread_id;
+	strncpy(malleability_args->curr_req, arguments->curr_req, PATH_MAX - 1);
+	malleability_args->curr_req[PATH_MAX - 1] = '\0';
+	return malleability_args;
 }
 
 void *get_performance_metrics(void *th_argv)
@@ -1171,27 +1238,18 @@ void *get_performance_metrics(void *th_argv)
 	// }
 
 	// Increase the number of servers.
-	pthread_t comissioning_stage_thread;
-	CommissioningThreadArgs *malleability_thread_args = (CommissioningThreadArgs *)malloc(sizeof(CommissioningThreadArgs));
-	if (!malleability_thread_args)
+	pthread_t malleability_stage_thread;
+	MalleabilityArgs *malleability_args = fill_malleability_args(arguments);
+	if (malleability_args == NULL)
 	{
-		perror("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
-		slog_error("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
-		return (void *)-1;
+		return NULL; // TODO: check if get_performance_metrics will be a thread.
 	}
-	p_argv *source_args = (p_argv *)arguments;
-	malleability_thread_args->args = source_args->args;
-	malleability_thread_args->hercules_info_struct = source_args->hercules_info_struct;
-	malleability_thread_args->ucp_worker = source_args->ucp_worker;
-	malleability_thread_args->server_ep = source_args->server_ep;
-	malleability_thread_args->worker_uid = source_args->worker_uid;
-	strncpy(malleability_thread_args->curr_req, source_args->curr_req, PATH_MAX);
 
-	if (pthread_create(&comissioning_stage_thread, NULL, run_malleability, (void *)malleability_thread_args) != 0)
+	if (pthread_create(&malleability_stage_thread, NULL, run_malleability, (void *)malleability_args) != 0)
 	{
 		perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
 		slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
-		free(malleability_thread_args);
+		free(malleability_args);
 		return (void *)-1;
 	}
 
@@ -1204,7 +1262,7 @@ void *get_performance_metrics(void *th_argv)
 	// 	return (void *)-1;
 	// }
 
-	if (pthread_detach(comissioning_stage_thread) != 0)
+	if (pthread_detach(malleability_stage_thread) != 0)
 	{
 		perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
 		slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
@@ -3240,7 +3298,21 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	else if (!strcmp(mode, MSG_REMOVE_SERVER))
 	{
 		slog_debug("Running decomissioning stage, number=%s", number);
-		Decomissioning_stage(arguments, atoi(number));
+		MalleabilityArgs *malleability_args = (MalleabilityArgs *)malloc(sizeof(MalleabilityArgs));
+		if (!malleability_args)
+		{
+			perror("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
+			slog_error("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
+			return -1;
+		}
+		p_argv *source_args = (p_argv *)arguments;
+		malleability_args->args = source_args->args;
+		malleability_args->hercules_info_struct = source_args->hercules_info_struct;
+		malleability_args->ucp_worker = source_args->ucp_worker;
+		malleability_args->server_ep = source_args->server_ep;
+		malleability_args->worker_uid = source_args->worker_uid;
+		strncpy(malleability_args->curr_req, source_args->curr_req, PATH_MAX);
+		decomissioning_stage(malleability_args, atoi(number));
 		return 0;
 	}
 
