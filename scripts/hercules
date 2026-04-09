@@ -485,42 +485,42 @@ if [[ "${VERBOSE}" -eq "1" ]]; then
     echo "Hercules path - $HERCULES_PATH"
 fi
 
+if [[ "$SLURM" -eq "1" && ( "${STATUS}" = "start" || "${STATUS}" = "add" ) ]]; then
+    echo "[+] Slurm is active."
+    ## If slurm is enabled, we concat the job id to the configuration file to create a new one.
+    CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
+    # Copy if the file does not exist.
+    if [[ ! -f "${CURR_HERCULES_CONF_FILE}" ]]; then
+        cp "${FILE}" "${CURR_HERCULES_CONF_FILE}"
+    fi
+else 
+    echo "[+] Slurm is not active."
+    CURR_HERCULES_CONF_FILE="${FILE}"
+fi
+
 ## Read configuration file.
-export HERCULES_MOUNT_POINT=$(cat "${FILE}" | grep "\<MOUNT_POINT\>" | head -1 | awk '{print $3}')
-META_PORT=$(cat "${FILE}" | grep "\<METADATA_PORT\>" | awk '{print $3}')
-DATA_PORT=$(cat "${FILE}" | grep "\<DATA_PORT\>" | awk '{print $3}')
-MALLEABILITY=$(cat "${FILE}" | grep "\<MALLEABILITY\>" | awk '{print $3}')
-export HERCULES_NUM_METADATA=$(cat "${FILE}" | grep "\<NUM_META_SERVERS\>" | awk '{print $3}')
-export HERCULES_NUM_DATA=$(cat "${FILE}" | grep "\<NUM_DATA_SERVERS\>" | awk '{print $3}')
-NUM_NODES_FOR_CLIENTS=$(cat "${FILE}" | grep "\<NUM_NODES_FOR_CLIENTS\>" | awk '{print $3}')
-NUM_CLIENTS_PER_NODE=$(cat "${FILE}" | grep "\<NUM_CLIENTS_PER_NODE\>" | awk '{print $3}')
-ATTACHED=$(cat "${FILE}" | grep "\<ATTACHED\>" | awk '{print $3}')
-HERCULES_BLOCK_SIZE=$(cat "${FILE}" | grep "\<BLOCK_SIZE\>" | awk '{print $3}')
-STORAGE_SIZE=$(cat "${FILE}" | grep "\<STORAGE_SIZE\>" | awk '{print $3}')
-HERCULES_DATA_HOSTFILE=$(grep "^DATA_HOSTFILE[[:space:]]*=" "${FILE}" | awk '{print $3}')
-HERCULES_ALLOC_DATA_HOSTFILE=$(grep "^ALLOC_DATA_HOSTFILE[[:space:]]*=" "${FILE}" | awk '{print $3}')
-HERCULES_METADATA_HOSTFILE=$(cat "${FILE}" | grep "\<METADATA_HOSTFILE\>" | awk '{print $3}')
-INIT_HERCULES_NUM_DATA=$(cat "${FILE}" | grep "\<INIT_NUM_DATA_SERVERS\>" | awk '{print $3}')
-UPPER_BOUND_MALLEABILITY=$(cat "${FILE}" | grep "\<UPPER_BOUND_MALLEABILITY\>" | awk '{print $3}')
+export HERCULES_MOUNT_POINT=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<MOUNT_POINT\>" | head -1 | awk '{print $3}')
+META_PORT=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<METADATA_PORT\>" | awk '{print $3}')
+DATA_PORT=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<DATA_PORT\>" | awk '{print $3}')
+MALLEABILITY=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<MALLEABILITY\>" | awk '{print $3}')
+export HERCULES_NUM_METADATA=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<NUM_META_SERVERS\>" | awk '{print $3}')
+export HERCULES_NUM_DATA=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<NUM_DATA_SERVERS\>" | awk '{print $3}')
+NUM_NODES_FOR_CLIENTS=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<NUM_NODES_FOR_CLIENTS\>" | awk '{print $3}')
+NUM_CLIENTS_PER_NODE=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<NUM_CLIENTS_PER_NODE\>" | awk '{print $3}')
+ATTACHED=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<ATTACHED\>" | awk '{print $3}')
+HERCULES_BLOCK_SIZE=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<BLOCK_SIZE\>" | awk '{print $3}')
+STORAGE_SIZE=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<STORAGE_SIZE\>" | awk '{print $3}')
+HERCULES_DATA_HOSTFILE=$(grep "^DATA_HOSTFILE[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
+HERCULES_ALLOC_DATA_HOSTFILE=$(grep "^ALLOC_DATA_HOSTFILE[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
+HERCULES_METADATA_HOSTFILE=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<METADATA_HOSTFILE\>" | awk '{print $3}')
+INIT_HERCULES_NUM_DATA=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<INIT_NUM_DATA_SERVERS\>" | awk '{print $3}')
+UPPER_BOUND_MALLEABILITY=$(cat "${CURR_HERCULES_CONF_FILE}" | grep "\<UPPER_BOUND_MALLEABILITY\>" | awk '{print $3}')
 
 if [ -z "$INIT_HERCULES_NUM_DATA" ] || [ "$INIT_HERCULES_NUM_DATA" = "0" ] ; then
     INIT_HERCULES_NUM_DATA=$HERCULES_NUM_DATA
     echo "INIT_HERCULES_NUM_DATA = ${INIT_HERCULES_NUM_DATA}"
 fi
 
-# set -x
-if [[ "$SLURM" -eq "1" && ( "${STATUS}" = "start" || "${STATUS}" = "add" ) ]]; then
-    echo "[+] Slurm is active."
-    ## If slurm is enabled, we concat the job id to the configuration file to create a new one.
-    CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
-    # Copy if the file does not exist.
-    # if [[ ! -f "${CURR_HERCULES_CONF_FILE}" ]]; then
-        cp "${FILE}" "${CURR_HERCULES_CONF_FILE}"
-    # then
-else 
-    echo "[+] Slurm is not active."
-    CURR_HERCULES_CONF_FILE="${FILE}"
-fi
 
 export HERCULES_CONF="${CURR_HERCULES_CONF_FILE}"
 echo "Temporal configuration file ${CURR_HERCULES_CONF_FILE}"
@@ -632,6 +632,13 @@ fi
 ## Checks if the user wants to add more servers.
 if [[ "${STATUS}" = "add" ]];
 then
+
+    if [[ ! "$MALLEABILITY" -eq "1" ]]; then
+        echo "Malleability must be enabled on the configuration file to use this option."
+        echo "MALLEABILITY = 1"
+        exit 1
+    fi
+
     ## Adds data and metadata servers.
     if [[ "${VERBOSE}" -eq "1" ]]; then
         echo "Starting comissioning state."
