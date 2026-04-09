@@ -33,7 +33,7 @@ bool double_are_equal(double a, double b);
  * @brief Checks if a string is a valid integer number.
  * 
  * @param str Input string to be checked.
- * @param out_val 
+ * @param out_val Int pointer where the value will be stored if the "str" is valid.
  * @return int 1 if the string is a valid integer number, 0 on other case.
  */
 int Is_valid_integer(const char *str, int *out_val);

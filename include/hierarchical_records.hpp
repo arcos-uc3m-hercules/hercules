@@ -21,10 +21,10 @@ typedef std::map<std::string, std::shared_ptr<map_records>> HierarchicalMap;
 class HierarchicalRecords
 {
 public:
-	HierarchicalMap *hiermap;
 	HierarchicalRecords(const std::string &root);
 	~HierarchicalRecords();
 	void HierarchicalMapDestroy(void *map);
+	std::vector<std::string> HierarchicalMapGetAllDatasetKeys();
 	size_t HierarchicalMapGetSize();
 	int HierarchicalMapPut(std::string key, void *address, uint64_t length, int reused_buffer, GNode *gnode, int is_zero_block);
 	int32_t HierarchicalMapDeleteEntry(const std::string &key);
@@ -45,6 +45,8 @@ public:
 	int32_t HierarchicalMapCleanGarbageCollector();
 
 private:
+	HierarchicalMap *hiermap;
+
 	std::shared_ptr<map_records> get_child_unsafe(const char *k);
 	std::shared_ptr<map_records> get_dir_unsafe(const char *k);
 	int InsertDirectory(const std::string &key);

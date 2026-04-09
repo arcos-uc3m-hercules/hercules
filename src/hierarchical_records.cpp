@@ -43,6 +43,15 @@ HierarchicalRecords::~HierarchicalRecords()
 	}
 }
 
+std::vector<std::string> HierarchicalRecords::HierarchicalMapGetAllDatasetKeys() {
+    std::vector<std::string> keys;
+	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+    for (const auto& pair : *(this->hiermap)) {
+        keys.push_back(pair.first);
+    }
+    return keys;
+}
+
 size_t HierarchicalRecords::HierarchicalMapGetSize()
 {
 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
