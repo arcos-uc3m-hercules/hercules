@@ -31,6 +31,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include "utils.h"
 
 // void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
@@ -403,15 +404,20 @@ void *move_blocks_2_server(void *th_argv)
 	char key_[REQUEST_SIZE] = {0};
 
 	// Map to use.
-	HierarchicalMap *hiermap = hierarchical_map->hiermap;
+	// HierarchicalMap *hiermap = hierarchical_map->hiermap;
+	// Get all the keys of this server.
+	std::vector<std::string> block_keys = hierarchical_map->HierarchicalMapGetAllDatasetKeys();
 
 	// fprintf(stderr, "--- Root Map ---\n");
 	slog_debug("--- Root Map ---");
 	int number_of_blocks_sent = 0;
-	for (const auto &pair : *hiermap)
+	// for (const auto &pair : *hiermap)
+	for (const std::string &key : block_keys)
 	{
-		const std::string &key = pair.first;
-		const std::shared_ptr<map_records> &value = pair.second;
+		// const std::string &key = pair.first;
+		// const std::shared_ptr<map_records> &value = pair.second;
+		// Get the "shared_ptr" of this "key".
+		std::shared_ptr<map_records> value = hierarchical_map->HierarchicalMapGetDir(key.c_str());
 		// fprintf(stderr, "Key: %s\n", key.c_str());
 		slog_debug("Dataset Key: %s", key.c_str());
 		// Check if the shared pointer is not null before dereferencing
@@ -428,11 +434,22 @@ void *move_blocks_2_server(void *th_argv)
 				const std::string &inner_key = inner_pair.first;
 				const BufferValue &inner_value = inner_pair.second;
 				// fprintf(stderr, "Sub Key %s\n", inner_key.c_str());
-				int pos = inner_key.find('$') + 1;													      // +1 to skip '$' on the block number.
-				std::string block = inner_key.substr(pos, inner_key.length() + 1);									      // substract the block number from the key.
-				int block_number = stoi(block, 0, 10);													      //  string to number.
-				pos -= 1;																      // -1 to skip '$' on the data uri.
+				size_t pos = inner_key.find('$') + 1;													      // +1 to skip '$' on the block number.
+				if (pos == std::string::npos) 
+                {
+                    slog_error("llave malformada: %s", inner_key.c_str());
+                    continue; 
+                }
+
 				std::string data_uri = inner_key.substr(0, pos);											      // substract the data uri from the key.
+				std::string block = inner_key.substr(pos + 1, std::string::npos);									      // substract the block number from the key.
+				
+				int block_number = 0;
+				if(!Is_valid_integer(block.c_str(), &block_number))
+				{
+					slog_error("Invalid block '%s' extracted from '%s'", block.c_str(), inner_key.c_str());
+					continue;
+				}
 				next_server = find_server(number_active_storage_servers, block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
 
 				// next_server = (next_server + 0 * (number_active_storage_servers / 1)) % number_active_storage_servers;
@@ -454,8 +471,8 @@ void *move_blocks_2_server(void *th_argv)
 				// 	// here we can send key.c_str() directly to reduce the number of operations.
 				if (set_data_server(data_uri.c_str(), block_number, inner_value.data, inner_value.size, 0, next_server) < 0)
 				{
-					slog_error("ERR_HERCULES_SET_DATA_IN_SERVER\n");
-					perror("ERR_HERCULES_SET_DATA_IN_SERVER");
+					slog_error("HERCULES_ERR_SET_DATA_IN_SERVER\n");
+					perror("HERCULES_ERR_SET_DATA_IN_SERVER");
 					// TODO: do not return, continue with the following blocks.
 					return NULL;
 				}
@@ -494,6 +511,8 @@ void *move_blocks_2_server(void *th_argv)
 	pthread_mutex_unlock(&mutex_malleability);
 
 	slog_debug("Ending move_blocks_2_server\n");
+
+	delete arguments;
 
 	pthread_exit(NULL);
 }
@@ -557,6 +576,7 @@ void decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 	int expected_status = MALLEABILITY_OFF;
 	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && malleability_status.compare_exchange_strong(expected_status, MALLEABILITY_INPROGRESS, std::memory_order_acq_rel))
 	{
+		fprintf(stderr, "[INFO] Stopping %d server.", id_server_to_remove);
 		// print all records.
 		int index = 0;
 		// removes the server from the ips list.
@@ -644,7 +664,7 @@ void *run_malleability(void *th_argv)
 		}
 		else
 		{
-			// fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
+			fprintf(stdout, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
 			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
 		}
 
