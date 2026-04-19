@@ -9,6 +9,7 @@
 #include "records.hpp"
 #include "shared_memory.h"
 #include "slog.h"
+#include "utils.h"
 #include <arpa/inet.h>
 #include <atomic>
 #include <condition_variable>
@@ -31,7 +32,6 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include "utils.h"
 
 // void *map_server_eps = NULL;
 // Get a copy of all endpoints addess.
@@ -434,23 +434,23 @@ void *move_blocks_2_server(void *th_argv)
 				const std::string &inner_key = inner_pair.first;
 				const BufferValue &inner_value = inner_pair.second;
 				// fprintf(stderr, "Sub Key %s\n", inner_key.c_str());
-				size_t pos = inner_key.find('$') + 1;													      // +1 to skip '$' on the block number.
-				if (pos == std::string::npos) 
-                {
-                    slog_error("llave malformada: %s", inner_key.c_str());
-                    continue; 
-                }
+				size_t pos = inner_key.find('$') + 1; // +1 to skip '$' on the block number.
+				if (pos == std::string::npos)
+				{
+					slog_error("llave malformada: %s", inner_key.c_str());
+					continue;
+				}
 
-				std::string data_uri = inner_key.substr(0, pos);											      // substract the data uri from the key.
-				std::string block = inner_key.substr(pos + 1, std::string::npos);									      // substract the block number from the key.
-				
+				std::string data_uri = inner_key.substr(0, pos);		  // substract the data uri from the key.
+				std::string block = inner_key.substr(pos + 1, std::string::npos); // substract the block number from the key.
+
 				int block_number = 0;
-				if(!Is_valid_integer(block.c_str(), &block_number))
+				if (!Is_valid_integer(block.c_str(), &block_number))
 				{
 					slog_error("Invalid block '%s' extracted from '%s'", block.c_str(), inner_key.c_str());
 					continue;
 				}
-				next_server = find_server(number_active_storage_servers, block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
+				next_server = find_server(number_active_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
 
 				// next_server = (next_server + 0 * (number_active_storage_servers / 1)) % number_active_storage_servers;
 				// TODO: check replication factor.
@@ -519,8 +519,8 @@ void *move_blocks_2_server(void *th_argv)
 
 size_t Update_ips_list(int id_server_to_remove)
 {
-	slog_debug("id_server_to_remove=%d", id_server_to_remove)
-	    imss_info *imss_info_struct = curr_global_imss;
+	slog_debug("id_server_to_remove=%d", id_server_to_remove);
+	imss_info *imss_info_struct = curr_global_imss;
 	if (imss_info_struct->num_storages <= 0)
 	{
 		return 0;
@@ -529,14 +529,15 @@ size_t Update_ips_list(int id_server_to_remove)
 	slog_debug("Stopping server %d:%s", id_server_to_remove, imss_info_struct->ips[id_server_to_remove]);
 	// fprintf(stderr, "At this time, the slowest server is %d:%s\n", id_server_to_remove, element_to_delete);
 	free(element_to_delete);
+	element_to_delete = NULL;
 	size_t num_elements_to_shift = imss_info_struct->num_storages - id_server_to_remove - 1;
 
 	// imss_info_struct->ips[imss_info_struct->num_storages - 1] = NULL;
 
 	// TODO: after removing memory protect from all the this block, we have to protect next pointer.
 	imss_info_struct->num_storages--;
-	number_active_storage_servers = imss_info_struct->num_storages;
-	imss_info_struct->num_active_storages = number_active_storage_servers;
+	number_active_storage_servers.store(imss_info_struct->num_storages);
+	imss_info_struct->num_active_storages = number_active_storage_servers.load();
 
 	// move the pointers.
 	memmove(&imss_info_struct->ips[id_server_to_remove],
@@ -558,7 +559,7 @@ void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_s
 	memmove(&data_endpoints[id_server_to_remove],
 		&data_endpoints[id_server_to_remove + 1],
 		num_elements_to_shift * sizeof(char *));
-	data_endpoints[number_active_storage_servers] = NULL;
+	data_endpoints[number_active_storage_servers.load()] = NULL;
 	return;
 }
 
@@ -576,21 +577,19 @@ void decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 	int expected_status = MALLEABILITY_OFF;
 	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && malleability_status.compare_exchange_strong(expected_status, MALLEABILITY_INPROGRESS, std::memory_order_acq_rel))
 	{
-		fprintf(stderr, "[INFO] Stopping %d server.", id_server_to_remove);
+		fprintf(stderr, "[INFO] Stopping %d server.\n", id_server_to_remove);
+		slog_debug("[INFO] Stopping %d server.", id_server_to_remove);
 		// print all records.
 		int index = 0;
 		// removes the server from the ips list.
 		size_t num_elements_to_shift = Update_ips_list(id_server_to_remove);
-		arguments->args->num_data_servers = number_active_storage_servers;
-
-		// malleability_status.store(MALLEABILITY_INPROGRESS, std::memory_order_release);
-		// number_active_storage_servers = imss_info_struct->num_storages;
+		arguments->args->num_data_servers = number_active_storage_servers.load();
 
 		char request[REQUEST_SIZE] = {0};
 		int ret = 0;
 		int32_t new_id = 0;
 		// fprintf(stderr, "Sending %s to server ID %d\n", request, id_server_to_remove);
-		for (size_t i = 0; i < number_active_storage_servers + 1; i++)
+		for (size_t i = 0; i < number_active_storage_servers.load() + 1; i++)
 		{
 			// Send the request to all servers.
 			if (i == id_server_to_remove)
@@ -602,7 +601,8 @@ void decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 				sprintf(request, "REORDERSERVER %" PRId32 " %" PRId32 " %d", number_active_storage_servers.load(), new_id, id_server_to_remove);
 				new_id++;
 			}
-			slog_debug("Sending %s to server ID %d, number of active storage servers=%d", request, id_server_to_remove, number_active_storage_servers.load());
+			slog_debug("Sending %s to server ID %d, number of active storage servers=%d", request, i, number_active_storage_servers.load());
+			slog_debug("Thread id %d", arguments->thread_id);
 			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
 			if (ret == 0)
 			{
@@ -804,12 +804,12 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		// AddIPS(imss_info_struct, node_to_use, strlen(node_to_use));
 
 		// new_number_data_servers = imss_info_struct->num_storages;
-		number_active_storage_servers = imss_info_struct->num_storages + 1;
-		imss_info_struct->num_active_storages = number_active_storage_servers;
-		arguments->args->num_data_servers = number_active_storage_servers;
+		number_active_storage_servers.store(imss_info_struct->num_storages + 1);
+		imss_info_struct->num_active_storages = number_active_storage_servers.load();
+		arguments->args->num_data_servers = number_active_storage_servers.load();
 		// Set comissioning ON to avoid doing twice at same time.
 		comissioning_on = true;
-		id_server_to_modify = number_active_storage_servers - 1;
+		id_server_to_modify = number_active_storage_servers.load() - 1;
 
 		slog_debug("number_active_storage_servers=%d", number_active_storage_servers.load());
 
@@ -1345,7 +1345,7 @@ void *hercules_ucx_server(void *th_argv)
 	fprintf(stderr, "Thread %d using worker at address %p\n", arguments->thread_id, (void *)arguments->ucp_worker);
 
 	// set the initial value to the global "active number of servers".
-	number_active_storage_servers = arguments->args->num_data_servers;
+	number_active_storage_servers.store(arguments->args->num_data_servers);
 
 	switch (arguments->args->type)
 	{
@@ -1681,8 +1681,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		}
 		else
 		{
-			slog_error("HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %d/2", items_read);
-			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %d/2\n", items_read);
+			slog_error("HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %s: expecting 2 fields but %d were receiving.", req, items_read);
+			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %s: expecting 2 fields but %d were receiving\n", req, items_read);
+			return -1;
 		}
 
 		pthread_t thread;
@@ -1722,14 +1723,15 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		int32_t new_id = 0;
 		uint32_t num_servers = 0;
 		int items_read = sscanf(req, "%s %" PRIu32 " %" PRIu32 " %d", mode, &num_servers, &new_id, &id_server_to_modify);
-		if (items_read == 3)
+		if (items_read == 4)
 		{
 			number_active_storage_servers.store(num_servers);
 		}
 		else
 		{
-			slog_error("HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %d/3", items_read);
-			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %d/3\n", items_read);
+			slog_error("HERCULES_ERR_SRV_WORKER_HELPER_REORDERSERVER: Error reading the request %s: expecting 3 fields but %d were receiving.", req, items_read);
+			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_REORDERSERVER: Error reading the request %s: expecting 3 fields but %d were receiving.", req, items_read);
+			return -1;
 		}
 
 		slog_debug("mode=%s, number_active_storage_servers=%" PRIu32 ", new_id=%" PRIu32 "", mode, number_active_storage_servers.load(), new_id);
@@ -3306,6 +3308,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		// num_storages is increased inside AddIPS.
 		fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
 		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname));
+		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages)
+		    number_active_storage_servers.store(imss_info_struct->num_storages);
+		slog_debug("number_active_storage_servers=%d\n", number_active_storage_servers.load());
 
 		// signal to the Comissioning thread.
 		pthread_mutex_lock(&server_ready_mutex);
@@ -3318,20 +3323,25 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	else if (!strcmp(mode, MSG_REMOVE_SERVER))
 	{
 		slog_debug("Running decomissioning stage, number=%s", number);
-		MalleabilityArgs *malleability_args = (MalleabilityArgs *)malloc(sizeof(MalleabilityArgs));
-		if (!malleability_args)
+		// MalleabilityArgs *malleability_args = (MalleabilityArgs *)malloc(sizeof(MalleabilityArgs));
+		// if (!malleability_args)
+		// {
+		// 	perror("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
+		// 	slog_error("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
+		// 	return -1;
+		// }
+		// p_argv *source_args = (p_argv *)arguments;
+		// malleability_args->args = source_args->args;
+		// malleability_args->hercules_info_struct = source_args->hercules_info_struct;
+		// malleability_args->ucp_worker = source_args->ucp_worker;
+		// malleability_args->server_ep = source_args->server_ep;
+		// malleability_args->worker_uid = source_args->worker_uid;
+		// strncpy(malleability_args->curr_req, source_args->curr_req, PATH_MAX);
+		MalleabilityArgs *malleability_args = fill_malleability_args(arguments);
+		if (malleability_args == NULL)
 		{
-			perror("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
-			slog_error("HERCULES_ERR_MALLEABILITY_MEM_ERR_COMISSIONING_STATE_ARGS");
-			return -1;
+			return -1; // TODO: check if get_performance_metrics will be a thread.
 		}
-		p_argv *source_args = (p_argv *)arguments;
-		malleability_args->args = source_args->args;
-		malleability_args->hercules_info_struct = source_args->hercules_info_struct;
-		malleability_args->ucp_worker = source_args->ucp_worker;
-		malleability_args->server_ep = source_args->server_ep;
-		malleability_args->worker_uid = source_args->worker_uid;
-		strncpy(malleability_args->curr_req, source_args->curr_req, PATH_MAX);
 		decomissioning_stage(malleability_args, atoi(number));
 		return 0;
 	}
