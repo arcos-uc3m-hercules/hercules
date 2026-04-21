@@ -38,6 +38,7 @@
 imss_info imss_copy = {0};
 imss_info *curr_global_imss = NULL;
 int number_of_hosts = 0;
+char tmp_file_action[20];
 
 // Lock dealing when cleaning blocks
 pthread_mutex_t mutex_snapshot = PTHREAD_MUTEX_INITIALIZER;
@@ -339,10 +340,12 @@ int Shutdown_server()
 				// no more request are pending.
 				// future requests will be regeted.
 				// we have to control this case.
+				slog_debug("Breaking the shutdown loop.");
+				pthread_mutex_unlock(&mutex_malleability);
 				break;
 			}
-
 			pthread_mutex_unlock(&mutex_malleability);
+			slog_debug("Calling Attend_pending_requests");
 			Attend_pending_requests();
 		}
 		else
@@ -370,7 +373,7 @@ void *move_blocks_2_server(void *th_argv)
 	uint32_t server_id = arguments->args->id;
 	const char *imss_uri = arguments->args->imss_uri;
 	// fprintf(stderr, "[move_blocks_2_server] new number of active storage servers=%d\n", number_active_storage_servers);
-	slog_debug("[move_blocks_2_server] new number of active storage servers=%d", number_active_storage_servers.load());
+	slog_debug("new number of active storage servers=%d", number_active_storage_servers.load());
 
 	slog_debug("Connecting to data servers");
 	int32_t imss_found_in = -1;
@@ -627,7 +630,13 @@ void decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 	return;
 }
 
-void *run_malleability(void *th_argv)
+/**
+ * @brief Malleability thread to take the decision to increase or decrease the number of data servers.
+ * 
+ * @param th_argv MalleabilityArgs
+ * @return void* 
+ */
+void *run_malleability(void *th_argv) 
 {
 	MalleabilityArgs *arguments = (MalleabilityArgs *)th_argv;
 #ifdef DPRINTF
@@ -636,6 +645,8 @@ void *run_malleability(void *th_argv)
 	slog_debug("arguments->args->malleability:%d comissioning_on.load:%d", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire));
 	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
 	{
+		// Set comissioning ON to avoid doing twice at same time.
+		comissioning_on = true;
 		// Always check the performance trend.
 		int slowest_server_id;
 		scaling_action action = make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, &slowest_server_id);
@@ -677,6 +688,7 @@ void *run_malleability(void *th_argv)
 			// fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
 			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
 		}
+		comissioning_on = false;
 	}
 	else
 	{
@@ -807,8 +819,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		number_active_storage_servers.store(imss_info_struct->num_storages + 1);
 		imss_info_struct->num_active_storages = number_active_storage_servers.load();
 		arguments->args->num_data_servers = number_active_storage_servers.load();
-		// Set comissioning ON to avoid doing twice at same time.
-		comissioning_on = true;
+		
 		id_server_to_modify = number_active_storage_servers.load() - 1;
 
 		slog_debug("number_active_storage_servers=%d", number_active_storage_servers.load());
@@ -869,7 +880,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			pthread_mutex_unlock(&server_ready_mutex);
 
 			slog_debug("Signal received.");
-			comissioning_on = false;
+			// comissioning_on = false;
 		}
 	}
 
@@ -1551,6 +1562,7 @@ int CheckForMalleability(const p_argv *arguments, const char *req)
 		pthread_mutex_lock(&mutex_malleability);
 		if (malleability_status.load(std::memory_order_relaxed) != MALLEABILITY_INPROGRESS)
 		{
+			slog_debug("Sending signal to global_run_malleability_cond, malleability is not in progress.");
 			pthread_cond_signal(&global_run_malleability_cond);
 			pthread_mutex_unlock(&mutex_malleability);
 			return 0;
@@ -1567,6 +1579,7 @@ int CheckForMalleability(const p_argv *arguments, const char *req)
 		pending_info.curr_req[PATH_MAX - 1] = '\0';
 		// push the data into the vector.
 		pending_requests.push_back(pending_info);
+		slog_debug("Sending signal to global_run_malleability_cond, malleability is in progress,")
 		pthread_cond_signal(&global_run_malleability_cond);
 		pthread_mutex_unlock(&mutex_malleability);
 		// fprintf(stderr, "+ Request saved, req=%s\n", req);
@@ -1704,6 +1717,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			slog_error("HERCULES_ERR_SRV_WORKER_DETACH_THREAD_MOVE_BLOCKS_2_SERVER");
 			return 1;
 		}
+
+		sprintf(tmp_file_action, "remove");
+		fprintf(stdout, "Action defined: %s\n", tmp_file_action);
 
 		// After moving all data, delete this server.
 		// Shutdown or close the socket used by the dispatcher pointed
@@ -4497,7 +4513,7 @@ int ready(char *tmp_file_path, const char *msg)
 		perror("Error getting the current working directory.");
 		return -1;
 	}
-	fprintf(stderr, "%s\n", tmp_file_path);
+	fprintf(stderr, "Making temporal file: %s\n", tmp_file_path);
 	tmp_file = fopen(tmp_file_path, "w+");
 	if (tmp_file == NULL)
 	{

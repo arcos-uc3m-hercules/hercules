@@ -75,7 +75,7 @@ extern pthread_cond_t global_run_shutdown_cond;
 #define RAM_STORAGE_USE_PCT 0.75f // percentage of free system RAM to be used for storage
 
 char main_err_call_arg[] = "main server";
-char action[20];
+extern char tmp_file_action[20];
 
 /**
  * @brief Re-distribute the blocks of this server to another servers
@@ -101,7 +101,7 @@ char action[20];
 // int wakeup_server();
 
 /**
- * @brief Defines the actions to be doing when the
+ * @brief Defines the tmp_file_actions to be doing when the
  * server receives a signal from the hercules script.
  * SIGUSR1 is used to srink and SIGUSR2 is used to
  * increase the number of servers.
@@ -238,10 +238,10 @@ int32_t main(int32_t argc, char **argv)
 			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
 			fprintf(stderr, "Number of hosts in %s are %d\n", args.alloc_data_hostfile, number_of_hosts);
 			slog_debug("Number of hosts in %s are %d", args.alloc_data_hostfile, number_of_hosts);
-			if (number_of_hosts == -1) 
+			if (number_of_hosts == -1)
 			{ // error while reading the hostfile.
 				// TODO: to stop all launched servers.
-				
+
 				exit(-1);
 			}
 		}
@@ -1016,7 +1016,7 @@ int32_t main(int32_t argc, char **argv)
 	ucp_worker_destroy(ucp_worker);
 	ucp_cleanup(ucp_context);
 
-	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
+	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, tmp_file_action);
 	// fprintf(stdout, "Creating the file %s\n", tmp_file_path);
 	slog_info("Creating the file %s", tmp_file_path);
 	ready(tmp_file_path, "OK");
@@ -1188,10 +1188,11 @@ void handle_signal_server(int signal)
 		switch (pkill_operation)
 		{
 		case 1: // finish data server processes (shutdown).
+		{
 			// "global_finish_threads" is a gloabl variable readed by the
 			// dispatcher and workers threads. 1 indicates those threads
 			// must finish their execution.
-			sprintf(action, "stop");
+			sprintf(tmp_file_action, "stop");
 
 			// if (args.type == TYPE_METADATA_SERVER || global_finish_checkpoint == 1)
 			if (args.type == TYPE_METADATA_SERVER)
@@ -1254,7 +1255,7 @@ void handle_signal_server(int signal)
 
 				// This file is readed by the hercules script to know if this server
 				// was correctly shutting down.
-				sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
+				sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, tmp_file_action);
 				ready(tmp_file_path, "LOCKED");
 				slog_debug("Server %d has been unlocked\n", args.id);
 				global_finish_threads = 1;
@@ -1277,8 +1278,9 @@ void handle_signal_server(int signal)
 
 			// global_finish_threads = 1;
 			break;
+		}
 		default: // suspend the data server.
-			sprintf(action, "remove");
+			sprintf(tmp_file_action, "remove");
 			// TODO: Data servers processes will still running to be reused on
 			// the future. On shrink process, this server won't be used,
 			// but backend processes will be still running.
@@ -1314,7 +1316,7 @@ void handle_signal_server(int signal)
 
 		// This file is readed by the hercules script to know if this server
 		// was correctly shutting down.
-		// sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, action);
+		// sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, tmp_file_action);
 		// ready(tmp_file_path, "OK");
 	}
 	// if (signal == SIGUSR2) // wake up this server.
