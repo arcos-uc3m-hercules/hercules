@@ -24,7 +24,8 @@ public:
 	HierarchicalRecords(const std::string &root);
 	~HierarchicalRecords();
 	void HierarchicalMapDestroy(void *map);
-	std::vector<std::string> HierarchicalMapGetAllDatasetKeys();
+	std::vector<std::string> HierarchicalMapGetAllDirectories();
+	std::vector<std::string> HierarchicalMapGetAllBlocks();
 	size_t HierarchicalMapGetSize();
 	int HierarchicalMapPut(std::string key, void *address, uint64_t length, int reused_buffer, GNode *gnode, int is_zero_block);
 	int32_t HierarchicalMapDeleteEntry(const std::string &key);

@@ -43,12 +43,32 @@ HierarchicalRecords::~HierarchicalRecords()
 	}
 }
 
-std::vector<std::string> HierarchicalRecords::HierarchicalMapGetAllDatasetKeys() {
+std::vector<std::string> HierarchicalRecords::HierarchicalMapGetAllDirectories() {
     std::vector<std::string> keys;
 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
     for (const auto& pair : *(this->hiermap)) {
         keys.push_back(pair.first);
     }
+    return keys;
+}
+
+std::vector<std::string> HierarchicalRecords::HierarchicalMapGetAllBlocks() {
+    std::vector<std::string> keys;
+    std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+    
+    // iterates root directories.
+    for (const auto& dir_pair : *(this->hiermap)) {
+        
+        // child map.
+        std::shared_ptr<map_records> children_map = dir_pair.second;
+        
+        if (children_map != nullptr) {
+            for (auto const &[filename, record_value] : *children_map) {
+                keys.push_back(filename);
+            }
+        }
+    }
+    
     return keys;
 }
 
