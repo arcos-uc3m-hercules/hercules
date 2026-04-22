@@ -4,6 +4,7 @@
 #include "hercules.hpp"
 #include "hierarchical_map.hpp"
 #include "mapprefetch.hpp"
+#include "slog.h"
 #include <errno.h>
 #include <inttypes.h>
 #include <libgen.h>

@@ -77,12 +77,6 @@ extern pthread_cond_t global_run_shutdown_cond;
 char main_err_call_arg[] = "main server";
 extern char tmp_file_action[20];
 
-/**
- * @brief Re-distribute the blocks of this server to another servers
- * following the distribution policy choose by the user.
- * @return 0 on success, on error -1 is returned.
- */
-// int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri, std::shared_ptr<map_records> map);
 
 /**
  * @brief Comunicates data servers to metadata servers to
@@ -1055,82 +1049,7 @@ int32_t main(int32_t argc, char **argv)
 // 	return 0;
 // }
 
-// int move_blocks_2_server(uint64_t stat_port, uint32_t server_id, char *imss_uri, std::shared_ptr<map_records> map)
-// {
-// 	// Creates endpoints to all data servers. It is use in case of
-// 	// malleability to move blocks between data servers.
-// 	slog_debug("Connecting to data servers\n");
-// 	open_imss(imss_uri);
-// 	if (number_active_storage_serversX < 0)
-// 	{
-// 		slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-// 		return -1;
-// 	}
 
-// 	// Here data server should to move the datablocks.
-// 	// print all key/value elements.
-// 	double time_taken;
-// 	time_t t = clock();
-// 	void *address_ = NULL;
-// 	uint64_t block_size = -1;
-// 	int curr_map_size = 0;
-// 	const char *uri_ = NULL;
-// 	size_t size = 0;
-// 	char key_[REQUEST_SIZE] = {0};
-// 	// Get the number of blocks stored by this data server.
-// 	int number_of_blocks_2_move = map->size();
-
-// 	slog_info("Server %d, has %d blocks, active storage servers=%lu", args.id, map->size(), number_active_storage_serversX);
-// 	while ((curr_map_size = map->size()) > 0 && number_active_storage_serversX > 0)
-// 	{
-// 		std::string key;
-// 		// get next key (block identifier) with the format <block_name>$<block_number>
-// 		// for example "myfile$199", where block_name = myfile, and block_number = 199.
-// 		key = map->get_head_element();
-
-// 		// get the element data and store it in "address_".
-// 		map->get(key, &address_, &block_size);
-// 		// fprintf(stderr, "**** curr_map_size=%d, head element=%s, block_size=%ld\n", curr_map_size, key.c_str(), block_size);
-// 		slog_debug("**** curr_map_size=%d, head element=%s, block_size=%ld\n", curr_map_size, key.c_str(), block_size);
-
-// 		int pos = key.find('$') + 1;						   // +1 to skip '$' on the block number.
-// 		std::string block = key.substr(pos, key.length() + 1); // substract the block number from the key.
-// 		int block_number = stoi(block, 0, 10);				   //  string to number.
-// 		pos -= 1;											   // -1 to skip '$' on the data uri.
-// 		std::string data_uri = key.substr(0, pos);			   // substract the data uri from the key.
-// 		slog_debug("key='%s',\turi='%s',\tblock='%s'\n", key.c_str(), data_uri.c_str(), block.c_str());
-// 		int next_server = find_server(number_active_storage_serversX, block_number, data_uri.c_str(), 0, args.type, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
-
-// 		slog_info("key='%s',\turi='%s%s',\tfrom server %d to server %d,\tactive servers=%lu\n", key.c_str(), data_uri.c_str(), block.c_str(), server_id, next_server, number_active_storage_serversX);
-// 		slog_debug("new server=%d, curr_server=%d\n", next_server, server_id);
-
-// 		// here we can send key.c_str() directly to reduce the number of operations.
-// 		if (set_data_server(data_uri.c_str(), block_number, address_, block_size, 0, next_server) < 0)
-// 		{
-// 			slog_error("ERR_HERCULES_SET_DATA_IN_SERVER\n");
-// 			perror("ERR_HERCULES_SET_DATA_IN_SERVER");
-// 			return -1;
-// 		}
-
-// 		// delete the element from the map.
-// 		map->erase_head_element();
-// 		// get new map size to print it.
-// 		curr_map_size = map->size();
-// 		// fprintf(stderr, "**** curr_map_size=%d\n", curr_map_size);
-// 		slog_debug("**** curr_map_size=%d\n", curr_map_size);
-// 	}
-
-// 	t = clock() - t;
-// 	time_taken = ((double)t) / (CLOCKS_PER_SEC);
-
-// 	if (number_active_storage_serversX > 0)
-// 	{
-// 		// fprintf(stderr, "[HS] Data movement %d blocks %lu %f sec.\n", number_of_blocks_2_move, number_active_storage_serversX, time_taken);
-// 		fprintf(stderr, "\033[0;34m [HS] Server %d has moved %d blocks to %lu servers in %f sec. \033[0m\n", args.id, number_of_blocks_2_move, number_active_storage_serversX, time_taken);
-// 	}
-
-// 	return 0;
-// }
 
 void handle_signal_server(int signal)
 {
@@ -1289,17 +1208,6 @@ void handle_signal_server(int signal)
 			// Malleability is performed only when remove option is used.
 			if (args.type == TYPE_DATA_SERVER && args.malleability == 1)
 			{
-				// ret = stop_server();
-				// if (ret == 0) // success.
-				// {
-				// 	ret = move_blocks_2_server(args.stat_port, args.id, args.imss_uri, g_map);
-				// 	if (ret < 0) // error.
-				// 	{
-				// 		// TODO: if "move_blocks_2_server" fails, try again?
-				// 	}
-				// }
-				// Shutdown_server();
-
 				char formated_uri[REQUEST_SIZE] = {0};
 				sprintf(formated_uri, "%" PRIu32 " %s %d", DECOMISSIONING_OP, MSG_REMOVE_SERVER, args.id);
 				slog_info("Request: %s", formated_uri);

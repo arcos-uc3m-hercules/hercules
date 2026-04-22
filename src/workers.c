@@ -465,7 +465,7 @@ void *move_blocks_2_server(void *th_argv)
 				if (next_server == server_id)
 				{
 					fprintf(stderr, "[SKIP] BLOCK %ld TO %d SERVER\n", block_number, next_server);
-					slog_debug("[SKIP] BLOCK %d TO %d SERVER", block_number, next_server);
+					slog_debug("[SKIP] BLOCK %d TO SERVER %d ", block_number, next_server);
 					continue;
 				}
 

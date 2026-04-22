@@ -1,17 +1,18 @@
-#include <string.h>
-#include <stdlib.h>
 #include "imss.h"
+#include <cstdio>
+#include <stdlib.h>
+#include <string.h>
 // #include "queue.h"
 #include "comms.h"
 #include "map_ep.hpp"
 #include "slog.h"
 #include <errno.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <inttypes.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 static sa_family_t ai_family = AF_INET;
 
@@ -39,9 +40,9 @@ extern "C"
 		ucp_mem_h memh_p;
 
 		params.field_mask = UCP_MEM_MAP_PARAM_FIELD_ADDRESS |
-							UCP_MEM_MAP_PARAM_FIELD_LENGTH |
-							UCP_MEM_MAP_PARAM_FIELD_FLAGS |
-							UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE;
+				    UCP_MEM_MAP_PARAM_FIELD_LENGTH |
+				    UCP_MEM_MAP_PARAM_FIELD_FLAGS |
+				    UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE;
 		params.address = NULL;
 		params.memory_type = UCS_MEMORY_TYPE_HOST;
 		params.length = length;
@@ -149,10 +150,10 @@ extern "C"
 		// ucp_config_print(config, stdout, NULL, UCS_CONFIG_PRINT_CONFIG);
 
 		ucp_params.field_mask = UCP_PARAM_FIELD_FEATURES |
-								UCP_PARAM_FIELD_REQUEST_SIZE |
-								UCP_PARAM_FIELD_REQUEST_INIT |
-								UCP_PARAM_FIELD_NAME |
-								UCP_PARAM_FIELD_MT_WORKERS_SHARED;
+					UCP_PARAM_FIELD_REQUEST_SIZE |
+					UCP_PARAM_FIELD_REQUEST_INIT |
+					UCP_PARAM_FIELD_NAME |
+					UCP_PARAM_FIELD_MT_WORKERS_SHARED;
 		ucp_params.features = UCP_FEATURE_TAG;
 		// ucp_params.features |= UCP_FEATURE_WAKEUP;
 		ucp_params.request_size = sizeof(struct ucx_context);
@@ -230,8 +231,8 @@ extern "C"
 		// ucp_worker_progress(ucp_worker);
 		// send_param.flags = UCP_OP_ATTR_FLAG_NO_IMM_CMPL; // Ensure async progress
 		send_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FIELD_USER_DATA |
-								  UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+					  UCP_OP_ATTR_FIELD_USER_DATA |
+					  UCP_OP_ATTR_FIELD_MEMORY_TYPE;
 		// UCP_OP_ATTR_FIELD_FLAGS;
 		send_param.cb.send = send_handler_data;
 		send_param.user_data = &ctx;
@@ -251,9 +252,11 @@ extern "C"
 		if (UCS_PTR_IS_ERR(request))
 		{
 			// slog_fatal("[COMM] Error sending to endpoint.");
-			slog_fatal("HERCULES_ERR_SEND_DATA");
+			char err_msg[MAX_ERR_MSG_LEN] = {0};
+			sprintf(err_msg, "HERCULES_ERR_SEND_DATA: %" PRIu64, from);
+			slog_fatal("%s", err_msg);
 			// fprintf(stderr, "HERCULES_ERR_SEND_DATA\n");
-			perror("HERCULES_ERR_SEND_DATA");
+			perror(err_msg);
 			return 0;
 		}
 
@@ -299,7 +302,7 @@ extern "C"
 	 * @param user_data Pointer to our ServerRecvRequest structure.
 	 */
 	void server_recv_completion_callback(void *request, ucs_status_t status,
-										 const ucp_tag_recv_info_t *info, void *user_data)
+					     const ucp_tag_recv_info_t *info, void *user_data)
 	{
 		ServerRecvRequest *completed_req = (ServerRecvRequest *)user_data;
 
@@ -349,7 +352,7 @@ extern "C"
 	{
 		ucp_request_param_t recv_param;
 		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FIELD_USER_DATA;
+					  UCP_OP_ATTR_FIELD_USER_DATA;
 
 		recv_param.cb.recv = server_recv_completion_callback;
 		recv_param.user_data = tracking_struct;
@@ -385,7 +388,7 @@ extern "C"
 		//	ctx.buffer= bb;
 
 		send_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FIELD_USER_DATA;
+					  UCP_OP_ATTR_FIELD_USER_DATA;
 		send_param.cb.send = send_handler_data;
 		send_param.datatype = ucp_dt_make_contig(1);
 		send_param.memory_type = UCS_MEMORY_TYPE_HOST;
@@ -451,9 +454,9 @@ extern "C"
 		ctx.buffer = (void *)msg;
 
 		send_param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
-								  UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
-								  UCP_OP_ATTR_FIELD_USER_DATA;
+					  UCP_OP_ATTR_FIELD_CALLBACK |
+					  UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+					  UCP_OP_ATTR_FIELD_USER_DATA;
 
 		send_param.datatype = ucp_dt_make_contig(1);
 		send_param.cb.send = send_handler_req;
@@ -548,8 +551,8 @@ extern "C"
 		// 						  UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
 		// 						  UCP_OP_ATTR_FIELD_USER_DATA;
 		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FIELD_DATATYPE |
-								  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+					  UCP_OP_ATTR_FIELD_DATATYPE |
+					  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
 		recv_param.datatype = ucp_dt_make_contig(1);
 		recv_param.cb.recv = recv_handler;
 
@@ -621,7 +624,7 @@ extern "C"
 		ucs_status_ptr_t status_ptr;
 
 		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FIELD_DATATYPE;
+					  UCP_OP_ATTR_FIELD_DATATYPE;
 		recv_param.datatype = ucp_dt_make_contig(1);
 		recv_param.cb.recv = recv_handler;
 
@@ -648,8 +651,8 @@ extern "C"
 		async = 1;
 
 		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
-								  UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+					  UCP_OP_ATTR_FIELD_CALLBACK |
+					  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
 		// UCP_OP_ATTR_FIELD_USER_DATA;
 
 		recv_param.datatype = ucp_dt_make_contig(1);
@@ -738,9 +741,9 @@ extern "C"
 		   }
 		 */
 		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE |
-								  UCP_OP_ATTR_FIELD_CALLBACK |
-								  UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
-								  UCP_OP_ATTR_FIELD_USER_DATA;
+					  UCP_OP_ATTR_FIELD_CALLBACK |
+					  UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+					  UCP_OP_ATTR_FIELD_USER_DATA;
 
 		recv_param.datatype = ucp_dt_make_contig(1);
 		recv_param.cb.recv = recv_handler;
@@ -848,7 +851,7 @@ extern "C"
 	}
 
 	void recv_handler(void *request, ucs_status_t status,
-					  const ucp_tag_recv_info_t *info, void *user_data)
+			  const ucp_tag_recv_info_t *info, void *user_data)
 	{
 		struct ucx_context *context = (struct ucx_context *)request;
 		//	slog_info("[COMM] recv_handler");
@@ -1010,9 +1013,9 @@ extern "C"
 		 * to this ep's creation */
 		// ucs_status_t *ep_status_cb = (ucs_status_t *)malloc(sizeof(ucs_status_t));
 		ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
-							   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
-							   UCP_EP_PARAM_FIELD_ERR_HANDLER |
-							   UCP_EP_PARAM_FIELD_USER_DATA;
+				       UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
+				       UCP_EP_PARAM_FIELD_ERR_HANDLER |
+				       UCP_EP_PARAM_FIELD_USER_DATA;
 		ep_params.address = peer_addr;
 		ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
 		// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
@@ -1688,7 +1691,7 @@ extern "C"
 			else
 			{
 				ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval,
-								 sizeof(optval));
+						 sizeof(optval));
 				CHKERR_JUMP(ret < 0, "server setsockopt()", err_close_sockfd);
 
 				if (bind(sockfd, t->ai_addr, t->ai_addrlen) == 0)
@@ -1709,8 +1712,8 @@ extern "C"
 		}
 
 		CHKERR_ACTION(sockfd < 0,
-					  (server) ? "open client socket" : "open server socket",
-					  (void)sockfd /* no action */);
+			      (server) ? "open client socket" : "open server socket",
+			      (void)sockfd /* no action */);
 
 	out_free_res:
 		freeaddrinfo(res);
