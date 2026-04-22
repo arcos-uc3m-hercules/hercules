@@ -2936,22 +2936,22 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 	{
 		// // when the metadata server response with an ID != -1 it means
 		// // that server will be shutting down or a new one will be added.
-		// if (new_number_of_data_servers < curr_imss.info.num_storages)
-		// { // Decomissioning.
-		// 	// fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from close_dataset.\n");
-		// 	slog_debug("Calling ReleaseSpecificDataServerNetworkResources from close_dataset.");
-		// 	ReleaseSpecificDataServerNetworkResources("imss://", 1, id_modified_server, new_number_of_data_servers);
-		// 	SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
-		// }
-		// else
-		// if (new_number_of_data_servers > curr_imss.info.num_storages)
+		if (new_number_of_data_servers < curr_imss.info.num_storages)
+		{ // Decomissioning.
+			// fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from close_dataset.\n");
+			slog_debug("Calling ReleaseSpecificDataServerNetworkResources from close_dataset.");
+			ReleaseSpecificDataServerNetworkResources("imss://", 1, id_modified_server, new_number_of_data_servers);
+			SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+		}
+		else
+		if (new_number_of_data_servers > curr_imss.info.num_storages)
 		{
 			// fprintf(stderr, "read | write, num servers=%d\n", new_number_of_data_servers);
 			PrintIntervals(curr_dataset);
 			// release_network_resources(args.imss_uri, 1, process_rank);
 			// imss_comm_cleanup();
 			// init_network_resources(args.meta_hostfile, args.stat_port, args.num_metadata_servers, process_rank, args.imss_uri);
-			slog_debug("&(my_imss)->num_storages=%p", &curr_imss.info.num_storages);
+			slog_debug("&(my_imss)->num_storages=%d, address=%p", curr_imss.info.num_storages, &curr_imss.info.num_storages);
 			char *token = strtok(list_of_active_nodes, ",");
 			while (token != NULL)
 			{
@@ -4798,6 +4798,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			fprintf(stderr, "%s\n", err_msg);
 			slog_error("%s", err_msg);
 			errno = ENOENT;
+			return -1;
 			// free(response_buffer);
 		}
 		else if (!strncmp(MSG_MALLEABILITY_DATASERVERS, (const char *)response_buffer, strlen(MSG_MALLEABILITY_DATASERVERS)))
@@ -4871,7 +4872,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 }
 
 // Method retrieving a data element associated to a certain dataset.
-// ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request)
 ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_id, void **buffer_prefetch, size_t total_read_size, size_t num_blocks_to_read)
 {
 	slog_debug("dataset_uri=%s, dataset_id=%d, data_id=%d", dataset_uri, dataset_id, data_id);
@@ -6135,7 +6135,9 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 		slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
 		return -1;
 	}
-	slog_live("[IMSS][completed] BLOCK %d SENT TO %d SERVER with Request: %s (%d)", data_id, n_server_, key_, size);
+	slog_live("[IMSS][completed] BLOCK %d SENT TO SERVER %d with Request: %s (%d)", data_id, n_server_, key_, size);
+
+	wait_ack(ucp_worker_data, local_data_uid, ep, SYNC);
 
 	pthread_mutex_unlock(&lock_network);
 	return 1;

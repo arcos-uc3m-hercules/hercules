@@ -154,5 +154,13 @@ int ShutdownServer();
 // void Decomissioning_stage(p_argv *arguments, int id_server_to_remove);
 void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift);
 size_t update_ips_list(int id_server_to_remove);
+/**
+ * @brief Re-distribute the blocks of this server to another servers
+ * following the distribution policy choose by the user.
+ * @return 0 on success, on error -1 is returned.
+ */
+void *move_blocks_2_server(void *th_argv);
+
+
 
 #endif
