@@ -143,16 +143,16 @@ int ready(char *tmp_file_path, const char *msg);
 int ReadHostfile(char *deployfile, imss_info *my_imss);
 int AddIPS(imss_info *my_imss, char *line, int32_t n_chars);
 int CheckForMalleability(const p_argv *arguments, const char *req);
-scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double minimum_performance_threshold, int *slowest_server_id);
+scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double minimum_performance_threshold, const ElasticityMetric *&slowest_server);
 
 // Malleability functions.
 void *get_performance_metrics(void *th_argv);
 void *run_malleability(void *th_argv);
 void *comissioning_stage(MalleabilityArgs *arguments);
-void decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove);
+int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove);
 int ShutdownServer();
 // void Decomissioning_stage(p_argv *arguments, int id_server_to_remove);
 void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift);
-size_t Update_ips_list(int id_server_to_remove);
+size_t update_ips_list(int id_server_to_remove);
 
 #endif

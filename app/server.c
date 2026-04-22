@@ -1164,7 +1164,7 @@ void handle_signal_server(int signal)
 		{
 			buf[b_read] = '\0';
 			// pkill_operation = atoi(buf);
-			if (Is_valid_integer(buf, &pkill_operation))
+			if (is_valid_integer(buf, &pkill_operation))
 			{
 				slog_debug("Valid integer read: %d", pkill_operation);
 			}

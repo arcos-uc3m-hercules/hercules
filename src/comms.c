@@ -252,7 +252,7 @@ extern "C"
 		{
 			// slog_fatal("[COMM] Error sending to endpoint.");
 			slog_fatal("HERCULES_ERR_SEND_DATA");
-			fprintf(stderr, "HERCULES_ERR_SEND_DATA\n");
+			// fprintf(stderr, "HERCULES_ERR_SEND_DATA\n");
 			perror("HERCULES_ERR_SEND_DATA");
 			return 0;
 		}

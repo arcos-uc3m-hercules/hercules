@@ -33,9 +33,18 @@ bool double_are_equal(double a, double b);
  * @brief Checks if a string is a valid integer number.
  * 
  * @param str Input string to be checked.
- * @param out_val Int pointer where the value will be stored if the "str" is valid.
+ * @param out_val int pointer where the value will be stored if the "str" is valid.
  * @return int 1 if the string is a valid integer number, 0 on other case.
  */
-int Is_valid_integer(const char *str, int *out_val);
+int is_valid_integer(const char *str, int *out_val);
+
+/**
+ * @brief Checks if a string is a valid long integer number.
+ * 
+ * @param str Input string to be checked.
+ * @param out_val long pointer where the value will be stored if the "str" is valid.
+ * @return int 1 if the string is a valid integer number, 0 on other case.
+ */
+int is_valid_long(const char *str, long *out_val);
 
 #endif

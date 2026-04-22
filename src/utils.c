@@ -22,7 +22,7 @@ bool double_are_equal(double a, double b){
     return fabs(a - b) < epsilon;
 }
 
-int Is_valid_integer(const char *str, int *out_val)
+int is_valid_integer(const char *str, int *out_val)
 {
     char *endptr = NULL;
     errno = 0;
@@ -51,3 +51,34 @@ int Is_valid_integer(const char *str, int *out_val)
     return 1;
 }
 
+
+int is_valid_long(const char *str, long *out_val)
+{
+    if (str == NULL || *str == '\0') {
+        return 0;
+    }
+
+    char *endptr = NULL;
+    errno = 0;
+    
+    // strtol checks for limits.
+    long val = strtol(str, &endptr, 10);
+
+    // Check for overflow or underflow as reported by errno
+    if (errno == ERANGE) {
+        return 0;
+    }
+
+    // Verify that at least one digit was processed
+    if (endptr == str) {
+        return 0;
+    }
+
+    // Ensure the string ends correctly
+    if (*endptr != '\0' && *endptr != '\n') {
+        return 0;
+    }
+
+    *out_val = val;
+    return 1;
+}

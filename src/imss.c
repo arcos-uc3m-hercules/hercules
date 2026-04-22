@@ -7,6 +7,7 @@
 #include "slog.h"
 #include "workers.h"
 #include <arpa/inet.h>
+#include <cstddef>
 #include <cstdint>
 #include <errno.h>
 #include <ifaddrs.h>
@@ -4799,34 +4800,34 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			errno = ENOENT;
 			// free(response_buffer);
 		}
-		// else if (!strncmp(MSG_MALLEABILITY_DATASERVERS, (const char *)response_buffer, strlen(MSG_MALLEABILITY_DATASERVERS)))
-		// { // remote server is on decommissioning stage.
-		// 	slog_debug(" result=%s, msg_length=%d", response_buffer, msg_length);
-		// 	char message[PATH_MAX] = {'\0'};
-		// 	int32_t new_number_of_data_servers = 0;
-		// 	int32_t id_server_to_remove = 0;
-		// 	// get the server id to remove.
-		// 	sscanf((const char *)response_buffer, "%s %" PRId32 "%" PRId32 "", message, &new_number_of_data_servers, &id_server_to_remove);
-		// 	slog_debug("message=%s, new_number_of_data_servers=%" PRId32 ", id_server_to_remove=%" PRId32 "", message, new_number_of_data_servers, id_server_to_remove);
-		// 	pthread_mutex_unlock(&lock_network);
-		// 	// sort the array of ips and endpoints according to the new data servers number.
-		// 	if (id_server_to_remove != -1)
-		// 	{
-		// 		// when the metadata server response with an ID != -1 it means
-		// 		// that server will be shutting down.
-		// 		// fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from get_ndata.\n Pending request=%s to server %d\n", key_, server_id);
-		// 		slog_debug("Calling ReleaseSpecificDataServerNetworkResources from get_ndata. Pending request=%s to server %d", key_, server_id);
-		// 		ReleaseSpecificDataServerNetworkResources("imss://", 1, id_server_to_remove, new_number_of_data_servers);
-		// 		SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+		else if (!strncmp(MSG_MALLEABILITY_DATASERVERS, (const char *)response_buffer, strlen(MSG_MALLEABILITY_DATASERVERS)))
+		{ // remote server is on decommissioning stage.
+			slog_debug(" result=%s, msg_length=%d", response_buffer, msg_length);
+			char message[PATH_MAX] = {'\0'};
+			int32_t new_number_of_data_servers = 0;
+			int32_t id_server_to_remove = 0;
+			// get the server id to remove.
+			sscanf((const char *)response_buffer, "%s %" PRId32 "%" PRId32 "", message, &new_number_of_data_servers, &id_server_to_remove);
+			slog_debug("message=%s, new_number_of_data_servers=%" PRId32 ", id_server_to_remove=%" PRId32 "", message, new_number_of_data_servers, id_server_to_remove);
+			pthread_mutex_unlock(&lock_network);
+			// sort the array of ips and endpoints according to the new data servers number.
+			if (id_server_to_remove != -1)
+			{
+				// when the metadata server response with an ID != -1 it means
+				// that server will be shutting down.
+				// fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from get_ndata.\n Pending request=%s to server %d\n", key_, server_id);
+				slog_debug("Calling ReleaseSpecificDataServerNetworkResources from get_ndata. Pending request=%s to server %d", key_, server_id);
+				ReleaseSpecificDataServerNetworkResources("imss://", 1, id_server_to_remove, new_number_of_data_servers);
+				SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
 
-		// 		// to try the same operation.
-		// 		return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset);
-		// 	}
-		// 	else
-		// 	{ // in this case we always have to receive a valid id bigger than -1.
-		// 		return -1;
-		// 	}
-		// }
+				// to try the same operation.
+				return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request);
+			}
+			else
+			{ // in this case we always have to receive a valid id bigger than -1.
+				return -1;
+			}
+		}
 		else
 		{
 			slog_info("OK!, length=%ld", size_received_data);
@@ -4865,7 +4866,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	}
 	pthread_mutex_unlock(&lock_network);
 	fprintf(stderr, "[get_ndata] Unkown error\n");
-	slog_error("[get_ndata] Unkown error");
+	slog_error("Unkown error");
 	return -1;
 }
 
@@ -6426,7 +6427,6 @@ int32_t Close_file(int fd, const char *err_msg_to_print)
 	{
 		return -1;
 	}
-
 	int ret = -1;
 	ret = close(fd);
 	if (ret < 0)

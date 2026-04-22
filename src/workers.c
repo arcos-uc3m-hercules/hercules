@@ -391,7 +391,7 @@ void *move_blocks_2_server(void *th_argv)
 	}
 	else
 	{ // update current struct.
-		size_t num_elements_to_shift = Update_ips_list(id_server_to_modify);
+		size_t num_elements_to_shift = update_ips_list(id_server_to_modify);
 		Update_data_endpoint_list(id_server_to_modify, num_elements_to_shift);
 	}
 
@@ -435,20 +435,21 @@ void *move_blocks_2_server(void *th_argv)
 			{
 				number_of_blocks_sent++;
 				const std::string &inner_key = inner_pair.first;
+				slog_debug("key: %s", inner_key.c_str());
 				const BufferValue &inner_value = inner_pair.second;
 				// fprintf(stderr, "Sub Key %s\n", inner_key.c_str());
-				size_t pos = inner_key.find('$') + 1; // +1 to skip '$' on the block number.
+				size_t pos = inner_key.find('$'); // +1 to skip '$' on the block number.
 				if (pos == std::string::npos)
 				{
-					slog_error("llave malformada: %s", inner_key.c_str());
+					slog_error("Invalid key: %s", inner_key.c_str());
 					continue;
 				}
 
 				std::string data_uri = inner_key.substr(0, pos);		  // substract the data uri from the key.
 				std::string block = inner_key.substr(pos + 1, std::string::npos); // substract the block number from the key.
 
-				int block_number = 0;
-				if (!Is_valid_integer(block.c_str(), &block_number))
+				long block_number = 0;
+				if (!is_valid_long(block.c_str(), &block_number))
 				{
 					slog_error("Invalid block '%s' extracted from '%s'", block.c_str(), inner_key.c_str());
 					continue;
@@ -463,7 +464,7 @@ void *move_blocks_2_server(void *th_argv)
 				// if (id_server_to_modify == -1 && next_server == server_id)
 				if (next_server == server_id)
 				{
-					fprintf(stderr, "[SKIP] BLOCK %d TO %d SERVER\n", block_number, next_server);
+					fprintf(stderr, "[SKIP] BLOCK %ld TO %d SERVER\n", block_number, next_server);
 					slog_debug("[SKIP] BLOCK %d TO %d SERVER", block_number, next_server);
 					continue;
 				}
@@ -520,7 +521,7 @@ void *move_blocks_2_server(void *th_argv)
 	pthread_exit(NULL);
 }
 
-size_t Update_ips_list(int id_server_to_remove)
+size_t update_ips_list(int id_server_to_remove)
 {
 	slog_debug("id_server_to_remove=%d", id_server_to_remove);
 	imss_info *imss_info_struct = curr_global_imss;
@@ -572,7 +573,7 @@ void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_s
  * @param arguments
  * @param id_server_to_remove
  */
-void decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
+int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 {
 	// p_argv *arguments = (p_argv *)th_argv;
 	// Check if malleability is enable from the configuration file and if malleability is not running.
@@ -585,7 +586,7 @@ void decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		// print all records.
 		int index = 0;
 		// removes the server from the ips list.
-		size_t num_elements_to_shift = Update_ips_list(id_server_to_remove);
+		size_t num_elements_to_shift = update_ips_list(id_server_to_remove);
 		arguments->args->num_data_servers = number_active_storage_servers.load();
 
 		char request[REQUEST_SIZE] = {0};
@@ -626,47 +627,34 @@ void decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		// pero para nuevos datasets debería funcionar.
 
 		id_server_to_modify = id_server_to_remove;
+		return 1;
 	}
-	return;
+	// server has not been removed because malleability is not enabled.
+	return 0;
 }
 
 /**
  * @brief Malleability thread to take the decision to increase or decrease the number of data servers.
- * 
+ *
  * @param th_argv MalleabilityArgs
- * @return void* 
+ * @return void*
  */
-void *run_malleability(void *th_argv) 
+void *run_malleability(void *th_argv)
 {
 	MalleabilityArgs *arguments = (MalleabilityArgs *)th_argv;
 #ifdef DPRINTF
 	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire), consecutive_scale_up_signals);
 #endif
 	slog_debug("arguments->args->malleability:%d comissioning_on.load:%d", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire));
+	const ElasticityMetric *slowest_server = NULL;
 	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
 	{
 		// Set comissioning ON to avoid doing twice at same time.
 		comissioning_on = true;
 		// Always check the performance trend.
-		int slowest_server_id;
-		scaling_action action = make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, &slowest_server_id);
-		// #ifdef DPRINTF
-		// 		fprintf(stderr, "action=%d\n", action);
-		// #endif
-		// pthread_mutex_lock(&mutext_malleability);
-
-		// if (action == scaling_action::SCALE_UP)
-		// {
-		// 	consecutive_scale_up_signals++; // Increment counter if scaling up is needed.
-		// 	// fprintf(stderr, "Scale-up signal received. Consecutive count: %d\n", consecutive_scale_up_signals);
-		// 	slog_debug("Scale-up signal received. Consecutive count: %d/%d", consecutive_scale_up_signals, arguments->args->malleability_tolerance);
-		// }
-		// else
-		// {
-		// 	consecutive_scale_up_signals = 0; // Reset counter if performance is fine.
-		// }
-
-		// pthread_mutex_unlock(&mutext_malleability);
+		// int slowest_server_id;
+		pthread_mutex_lock(&mutext_malleability);
+		scaling_action action = make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
 
 		// Only trigger the actual scaling operation if the threshold is met.
 		if (consecutive_scale_up_signals >= arguments->args->malleability_tolerance)
@@ -681,13 +669,37 @@ void *run_malleability(void *th_argv)
 
 		if (consecutive_scale_down_signals >= arguments->args->malleability_tolerance)
 		{
-			decomissioning_stage(arguments, slowest_server_id);
+			if (slowest_server != NULL)
+			{
+				std::string key_to_remove = slowest_server->server_hostname;
+				int target_id = slowest_server->server_id;
+				int ret = decomissioning_stage(arguments, target_id);
+				if (ret)
+				{
+					size_t erased_elements = elasticity_records_history.erase(key_to_remove);
+
+					if (erased_elements > 0)
+					{
+						slog_debug("Server %s has been deleted from the elasticity records history.", key_to_remove.c_str());
+					}
+					else
+					{
+						slog_error("Server %s has NOT been deleted from the elasticity records history.", key_to_remove.c_str());
+					}
+				}
+			}
+			else
+			{
+				fprintf(stderr, "HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
+				slog_error("HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
+			}
 		}
 		else
 		{
 			// fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
 			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
 		}
+		pthread_mutex_unlock(&mutext_malleability);
 		comissioning_on = false;
 	}
 	else
@@ -696,8 +708,10 @@ void *run_malleability(void *th_argv)
 		// just for testing.
 		if (arguments->args->malleability == MALLEABILITY_CONF_PERF)
 		{
-			int slowest_server_id;
-			make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, &slowest_server_id);
+			// int slowest_server_id;
+			pthread_mutex_lock(&mutext_malleability);
+			make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
+			pthread_mutex_unlock(&mutext_malleability);
 		}
 		// #ifdef DPRINTF
 		// 		fprintf(stderr, "Testing block\n");
@@ -819,7 +833,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		number_active_storage_servers.store(imss_info_struct->num_storages + 1);
 		imss_info_struct->num_active_storages = number_active_storage_servers.load();
 		arguments->args->num_data_servers = number_active_storage_servers.load();
-		
+
 		id_server_to_modify = number_active_storage_servers.load() - 1;
 
 		slog_debug("number_active_storage_servers=%d", number_active_storage_servers.load());
@@ -919,9 +933,9 @@ double calculate_trend_slope(const std::vector<double> &y)
  * @brief Analyzes the metrics history to decide if scaling is needed.
  * @param history The map containing the metrics history for all servers.
  */
-scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double performance_threshold, int *slowest_server_id)
+scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double performance_threshold, const ElasticityMetric *&slowest_server)
 {
-	pthread_mutex_lock(&mutext_malleability); // history is a shared resource.
+	// pthread_mutex_lock(&mutext_malleability); // history is a shared resource.
 	if (analysis_window_size <= 0)
 	{
 		analysis_window_size = DEFAULT_ANALYSIS_WINDOW_SIZE;
@@ -933,7 +947,7 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 	slog_debug("analysis_window_size=%" PRId32 ", performance_threshold=%f, history.empty()=%d", analysis_window_size, performance_threshold, history.empty());
 	if (history.empty())
 	{
-		pthread_mutex_unlock(&mutext_malleability);
+		// pthread_mutex_unlock(&mutext_malleability);
 		return scaling_action::HOLD;
 	}
 
@@ -943,14 +957,15 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 	{
 		fprintf(stderr, "Not enough data to make a decision. Need %d records, have %zu.\n", analysis_window_size, num_records);
 		slog_debug("Not enough data to make a decision. Need %d records, have %zu.", analysis_window_size, num_records);
-		pthread_mutex_unlock(&mutext_malleability);
+		// pthread_mutex_unlock(&mutext_malleability);
 		return scaling_action::HOLD;
 	}
 
 	slog_debug("num_records=%d, analysis_window_size=%d", num_records, analysis_window_size);
 
 	// Calculate the aggregate system performance for the analysis window.
-	const ElasticityMetric *slowest_server = NULL;
+	// const ElasticityMetric *slowest_server = NULL;
+	slowest_server = NULL;
 	double slowest_performance = 0.0;
 	std::vector<double> aggregate_performance_history;
 	for (size_t i = num_records - analysis_window_size; i < num_records; ++i)
@@ -1005,7 +1020,7 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 			aggregate_performance_history.push_back(total_performance_at_point_i);
 		}
 	}
-	pthread_mutex_unlock(&mutext_malleability);
+	// pthread_mutex_unlock(&mutext_malleability);
 
 	if (aggregate_performance_history.empty())
 	{
@@ -1029,31 +1044,32 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 	// slog_debug("Elasticity analysis: Performance Trend Slope = %.2f", slope);
 
 	// Decision Logic.
-	if (moving_average < performance_threshold)
-	{
-#ifdef DPRINTF
-		fprintf(stderr, "DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s) \n",
-			moving_average,
-			moving_average / MB,
-			performance_threshold,
-			performance_threshold / MB,
-			number_active_storage_servers.load(),
-			performance_sum,
-			performance_sum / MB);
-#endif
-		slog_debug("DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)",
-			   moving_average,
-			   moving_average / MB,
-			   performance_threshold,
-			   performance_threshold / MB,
-			   number_active_storage_servers.load(),
-			   performance_sum,
-			   performance_sum / MB);
+	// 	if (moving_average < performance_threshold)
+	// 	{
+	// #ifdef DPRINTF
+	// 		fprintf(stderr, "DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s) \n",
+	// 			moving_average,
+	// 			moving_average / MB,
+	// 			performance_threshold,
+	// 			performance_threshold / MB,
+	// 			number_active_storage_servers.load(),
+	// 			performance_sum,
+	// 			performance_sum / MB);
+	// #endif
+	// 		slog_debug("DECISION: SCALE UP! Moving average %.2f bytes (%.2f MB/s) is below threshold %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)",
+	// 			   moving_average,
+	// 			   moving_average / MB,
+	// 			   performance_threshold,
+	// 			   performance_threshold / MB,
+	// 			   number_active_storage_servers.load(),
+	// 			   performance_sum,
+	// 			   performance_sum / MB);
 
-		consecutive_scale_up_signals++; // Increment counter if scaling up is needed.
-		return scaling_action::SCALE_UP;
-	}
-	if (moving_average > performance_threshold)
+	// 		consecutive_scale_up_signals++; // Increment counter if scaling up is needed.
+	// 		return scaling_action::SCALE_UP; // TODO: devolver
+	// 	}
+	// if (moving_average > performance_threshold)
+	if (true)
 	{
 #ifdef DPRINTF
 		fprintf(stderr, "DECISION: SCALE DOWN! Moving average %.2f bytes (%.2f MB/s) is above threshold %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s) \n",
@@ -1075,10 +1091,10 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 			   performance_sum / MB);
 
 		consecutive_scale_down_signals++;
-		if (slowest_server)
-			*slowest_server_id = slowest_server->server_id;
-		else
-			slowest_server_id = NULL;
+		// if (slowest_server)
+		// 	*slowest_server_id = slowest_server->server_id;
+		// else
+		// 	slowest_server_id = NULL;
 
 		return scaling_action::SCALE_DOWN;
 	}
@@ -1098,7 +1114,8 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)\n", moving_average, moving_average / MB, performance_threshold, performance_threshold / MB, number_active_storage_servers.load(), performance_sum, performance_sum / MB);
 #endif
 	slog_debug("DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, performance_sum=%.2f bytes (%.2f MB/s)", moving_average, moving_average / MB, performance_threshold, performance_threshold / MB, number_active_storage_servers.load(), performance_sum, performance_sum / MB);
-	return scaling_action::HOLD;
+	// return scaling_action::HOLD; // TODO: devolver
+	return scaling_action::SCALE_DOWN;
 }
 
 MalleabilityArgs *fill_malleability_args(p_argv *arguments)
@@ -1580,7 +1597,7 @@ int CheckForMalleability(const p_argv *arguments, const char *req)
 		// push the data into the vector.
 		pending_requests.push_back(pending_info);
 		slog_debug("Sending signal to global_run_malleability_cond, malleability is in progress,")
-		pthread_cond_signal(&global_run_malleability_cond);
+		    pthread_cond_signal(&global_run_malleability_cond);
 		pthread_mutex_unlock(&mutex_malleability);
 		// fprintf(stderr, "+ Request saved, req=%s\n", req);
 		slog_debug("+ Request saved, req=%s", req);
