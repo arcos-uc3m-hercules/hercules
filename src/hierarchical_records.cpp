@@ -573,6 +573,7 @@ int32_t HierarchicalRecords::BackEndHierarchicalMapRenameDirDir(std::string old_
 int32_t HierarchicalRecords::HierarchicalMapPutInGarbageCollector(const std::string &key)
 {
 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+	slog_debug("Running HierarchicalMapPutInGarbageCollector");
 
 	// Find the hash map of this dir.
 	char first_parent_dir[PATH_MAX] = {0};

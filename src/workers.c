@@ -298,9 +298,6 @@ void Attend_pending_requests()
 		// fprintf(stderr, "Replying to pending request %s, pool size=%zu\n", pending_info.curr_req, requests_to_attend.size());
 		slog_info("Replying to pending request %s, pool size=%zu", pending_info.curr_req, requests_to_attend.size());
 		ret = SendConfirmationMessage(&pending_argument, response);
-		// pending_requests.pop_back();
-		// pthread_cond_signal(&global_run_malleability_cond);
-		// pthread_mutex_unlock(&mutex_malleability);
 		if (ret == 0)
 		{
 			perror("HERCULES_ERR_CHECK_FOR_MALLEABITY_SEND_DATASERVERS");
@@ -321,14 +318,8 @@ int Shutdown_server()
 		return 0;
 	}
 
-	// sleep(3);
 	while (1)
 	{
-		// pthread_cond_signal(&global_run_malleability_cond);
-		// fprintf(stderr, "Shutdown_server is lock..., waiting connections=%ld\n", map_server_eps_get_size(map_server_eps));
-		// pthread_cond_broadcast(&global_run_malleability_cond);
-		// pthread_cond_wait(&global_run_shutdown_cond, &mutex_malleability);
-		// fprintf(stderr, "[Shutdown] There are %zu pending requests\n", pending_requests.size());
 		slog_debug("There are %d pending requests", pending_requests.size());
 		slog_info("malleability_status=%d", malleability_status.load());
 		if (malleability_status.load(std::memory_order_acquire) == MALLEABILITY_COMPLETE)
@@ -409,7 +400,7 @@ void *move_blocks_2_server(void *th_argv)
 	// Map to use.
 	// HierarchicalMap *hiermap = hierarchical_map->hiermap;
 	// Get all the keys of this server.
-	std::vector<std::string> block_keys = hierarchical_map->HierarchicalMapGetAllDatasetKeys();
+	std::vector<std::string> block_keys = hierarchical_map->HierarchicalMapGetAllDirectories();
 
 	// fprintf(stderr, "--- Root Map ---\n");
 	slog_debug("--- Root Map ---");
@@ -583,6 +574,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 	{
 		fprintf(stderr, "[INFO] Stopping %d server.\n", id_server_to_remove);
 		slog_debug("[INFO] Stopping %d server.", id_server_to_remove);
+		is_new_server_ready = false;
 		// print all records.
 		int index = 0;
 		// removes the server from the ips list.
@@ -627,8 +619,26 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		// pero para nuevos datasets debería funcionar.
 
 		id_server_to_modify = id_server_to_remove;
+		slog_debug("Set: id_server_to_modify=%" PRId32, id_server_to_modify);
+		// set the global id, used when attending pending requests.
+
+		slog_debug("Waiting for the signal from the main thread (SETSERVER).");
+
+		// block waiting for the "SETSERVER" message on the main thread.
+		pthread_mutex_lock(&server_ready_mutex);
+
+		while (!is_new_server_ready)
+		{
+			slog_debug("Sleeping decomissiong stage");
+			pthread_cond_wait(&server_ready_cond, &server_ready_mutex);
+		}
+		is_new_server_ready = false;
+		pthread_mutex_unlock(&server_ready_mutex);
+
+		slog_debug("Signal received.");
 		return 1;
 	}
+	slog_debug("Decomissioning was not perform.");
 	// server has not been removed because malleability is not enabled.
 	return 0;
 }
@@ -647,7 +657,7 @@ void *run_malleability(void *th_argv)
 #endif
 	slog_debug("arguments->args->malleability:%d comissioning_on.load:%d", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire));
 	const ElasticityMetric *slowest_server = NULL;
-	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
+	// if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
 	{
 		// Set comissioning ON to avoid doing twice at same time.
 		comissioning_on = true;
@@ -655,6 +665,7 @@ void *run_malleability(void *th_argv)
 		// int slowest_server_id;
 		pthread_mutex_lock(&mutext_malleability);
 		scaling_action action = make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
+		pthread_mutex_unlock(&mutext_malleability);
 
 		// Only trigger the actual scaling operation if the threshold is met.
 		if (consecutive_scale_up_signals >= arguments->args->malleability_tolerance)
@@ -664,7 +675,7 @@ void *run_malleability(void *th_argv)
 		else
 		{
 			fprintf(stdout, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
-			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
+			slog_debug("SCALE_UP: Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
 		}
 
 		if (consecutive_scale_down_signals >= arguments->args->malleability_tolerance)
@@ -697,25 +708,9 @@ void *run_malleability(void *th_argv)
 		else
 		{
 			// fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
-			slog_debug("Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
+			slog_debug("SCALE_DOWN: Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
 		}
-		pthread_mutex_unlock(&mutext_malleability);
 		comissioning_on = false;
-	}
-	else
-	{
-		slog_debug("Malleability is not enabled or is in progress by another thread.");
-		// just for testing.
-		if (arguments->args->malleability == MALLEABILITY_CONF_PERF)
-		{
-			// int slowest_server_id;
-			pthread_mutex_lock(&mutext_malleability);
-			make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
-			pthread_mutex_unlock(&mutext_malleability);
-		}
-		// #ifdef DPRINTF
-		// 		fprintf(stderr, "Testing block\n");
-		// #endif
 	}
 
 	p_argv temp_p_argv_for_calls;
@@ -747,7 +742,6 @@ void *run_malleability(void *th_argv)
 	}
 	slog_debug("List to send: %s", list_of_active_nodes);
 
-	// sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers, id_server_to_modify, node_to_use);
 	sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers.load(), id_server_to_modify, list_of_active_nodes);
 	int ret = -1;
 	ret = SendConfirmationMessage(&temp_p_argv_for_calls, response);
@@ -879,7 +873,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		{ // parent
 			slog_debug("Child process run with PID %d", pid);
 			// waitpid is not here to avoid blocking the parent process.
-			int status;
+			// int status;
 
 			slog_debug("Waiting for the signal from the main thread (SETSERVER).");
 
@@ -1252,11 +1246,11 @@ void *get_performance_metrics(void *th_argv)
 		slog_debug("%s\t %d\t %f\t %f\t %f\t %d", received_metrics.server_hostname.c_str(), received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, current_record);
 
 		// Add the new record to the history for the specific server ID.
+		// slog_debug("Pushing into elasticity_records_history")
 		pthread_mutex_lock(&mutext_malleability);
 		elasticity_records_history[received_metrics.server_hostname].push_back(received_metrics);
 		pthread_mutex_unlock(&mutext_malleability);
-
-		// metric_recorded = 0;
+		// slog_debug("Element has been pushed");
 	}
 
 	// checks if the struct is not pointing to the hercules instance.
@@ -1281,24 +1275,56 @@ void *get_performance_metrics(void *th_argv)
 	}
 	pthread_mutex_unlock(&mutext_malleability);
 
-	// 	// remove the records for this server.
-	// 	elasticity_records_history.erase(element_to_delete);
-	// }
-
 	// Increase the number of servers.
 	pthread_t malleability_stage_thread;
 	MalleabilityArgs *malleability_args = fill_malleability_args(arguments);
 	if (malleability_args == NULL)
 	{
+		slog_error("Malleability args is NULL");
 		return NULL; // TODO: check if get_performance_metrics will be a thread.
 	}
 
-	if (pthread_create(&malleability_stage_thread, NULL, run_malleability, (void *)malleability_args) != 0)
+	// We check that the malleability has not been activated before by another thread.
+	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
 	{
-		perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
-		slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
-		free(malleability_args);
-		return (void *)-1;
+		comissioning_on = true;
+		if (pthread_create(&malleability_stage_thread, NULL, run_malleability, (void *)malleability_args) != 0)
+		{
+			perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
+			slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
+			free(malleability_args);
+			return (void *)-1;
+		}
+		if (pthread_detach(malleability_stage_thread) != 0)
+		{
+			perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
+			slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
+			return (void *)-1;
+		}
+	}
+	else
+	{
+		slog_debug("Malleability is not enabled or is in progress by another thread.");
+		// just for testing.
+		if (arguments->args->malleability == MALLEABILITY_CONF_PERF)
+		{
+			// int slowest_server_id;
+			const ElasticityMetric *slowest_server = NULL;
+			pthread_mutex_lock(&mutext_malleability);
+			make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
+			pthread_mutex_unlock(&mutext_malleability);
+		}
+		else
+		{
+			int ret = CheckForMalleability(arguments, arguments->curr_req);
+			if (ret != 0)
+			{ // request was saved to be attended after malleability.
+				return NULL;
+			}
+		}
+		// #ifdef DPRINTF
+		// 		fprintf(stderr, "Testing block\n");
+		// #endif
 	}
 
 	// TO FIX: making a parallel thread is throwing an IOR WARNING on write operations.
@@ -1309,13 +1335,6 @@ void *get_performance_metrics(void *th_argv)
 	// 	slog_error("HERCULES_ERR_MALLEABILITY_PTHREAD_JOIN_COMISSIONING_STAGE");
 	// 	return (void *)-1;
 	// }
-
-	if (pthread_detach(malleability_stage_thread) != 0)
-	{
-		perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
-		slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
-		return (void *)-1;
-	}
 
 	return NULL;
 }
@@ -1577,6 +1596,7 @@ int CheckForMalleability(const p_argv *arguments, const char *req)
 	if (malleability_status.load(std::memory_order_acquire) == MALLEABILITY_INPROGRESS)
 	{
 		pthread_mutex_lock(&mutex_malleability);
+		slog_debug("Malleability is in progress.");
 		if (malleability_status.load(std::memory_order_relaxed) != MALLEABILITY_INPROGRESS)
 		{
 			slog_debug("Sending signal to global_run_malleability_cond, malleability is not in progress.");
@@ -1596,13 +1616,13 @@ int CheckForMalleability(const p_argv *arguments, const char *req)
 		pending_info.curr_req[PATH_MAX - 1] = '\0';
 		// push the data into the vector.
 		pending_requests.push_back(pending_info);
-		slog_debug("Sending signal to global_run_malleability_cond, malleability is in progress,")
-		    pthread_cond_signal(&global_run_malleability_cond);
+		slog_debug("Sending signal to global_run_malleability_cond, malleability is in progress.");
+		pthread_cond_signal(&global_run_malleability_cond);
 		pthread_mutex_unlock(&mutex_malleability);
-		// fprintf(stderr, "+ Request saved, req=%s\n", req);
 		slog_debug("+ Request saved, req=%s", req);
 		return 1;
 	}
+	slog_debug("Malleability is not in progress.")
 	return 0;
 }
 
@@ -1699,7 +1719,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	else if (!strcmp(mode, "STOPSERVER"))
 	{
 		// TODO: move this to the correct case.
-		// malleability_status = MALLEABILITY_INPROGRESS;
 		malleability_status.store(MALLEABILITY_INPROGRESS, std::memory_order_release);
 		global_finish_dispatcher = FINISH_SERVER_STATUS;
 		id_server_to_modify = arguments->args->id;
@@ -3199,7 +3218,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	// Obtain the current map class element from the set of arguments.
 	std::shared_ptr<map_records> map = arguments->map;
-	// void *hierarchical_map = arguments->hierarchical_map;
 	HierarchicalRecords *hierarchical_map = arguments->hierarchical_map;
 
 	uint16_t current_offset = 0;
@@ -3213,8 +3231,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	uint32_t operation = 0; // Hercules instance or dataset structure.
 	char mode[MODE_SIZE] = {0};
-	// int32_t req_size = 0;
-	// char raw_msg[req_size + 1] = {0};
 	char number[16] = {0};
 	char uri_[URI_] = {0};
 	int extra_info = 0;
@@ -3236,6 +3252,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			Attend_pending_requests();
 			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
 			acks_received = 0;
+			// signal to the deomissioning thread.
+			pthread_mutex_lock(&server_ready_mutex);
+			is_new_server_ready = true;
+			pthread_cond_signal(&server_ready_cond);
+			pthread_mutex_unlock(&server_ready_mutex);
 		}
 		return 0;
 	}
@@ -3254,6 +3275,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	{
 		more = SET_OP;
 		is_performance_operation = PERFORMANCE_OP;
+		ret = CheckForMalleability(arguments, req);
+		if (ret != 0)
+		{ // request was saved to be attended after malleability.
+			return 1;
+		}
 	}
 	else if (!strcmp(mode, "SETSERVER"))
 	{
@@ -3341,8 +3367,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		// num_storages is increased inside AddIPS.
 		fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
 		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname));
-		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages)
-		    number_active_storage_servers.store(imss_info_struct->num_storages);
+		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
+		number_active_storage_servers.store(imss_info_struct->num_storages);
 		slog_debug("number_active_storage_servers=%d\n", number_active_storage_servers.load());
 
 		// signal to the Comissioning thread.

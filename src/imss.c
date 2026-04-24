@@ -2941,6 +2941,8 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 			// fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from close_dataset.\n");
 			slog_debug("Calling ReleaseSpecificDataServerNetworkResources from close_dataset.");
 			ReleaseSpecificDataServerNetworkResources("imss://", 1, id_modified_server, new_number_of_data_servers);
+			PrintIntervals(curr_dataset);
+			SetInterval(curr_dataset, new_number_of_data_servers, 0, 0);
 			SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
 		}
 		else
@@ -4495,6 +4497,7 @@ IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval,
 		// expected interval is equals or is between the compared one.
 		if (left_interval >= curr_interval->left_interval && right_interval <= curr_interval->right_interval)
 		{
+			slog_debug("Interval [%d,%d] found", curr_interval->left_interval, curr_interval->right_interval);
 			return curr_interval;
 		}
 
@@ -4502,6 +4505,7 @@ IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval,
 		{
 		}
 	}
+	slog_debug("Interval [%d,%d] NOT found", left_interval, right_interval);
 	return NULL;
 }
 
@@ -4540,10 +4544,10 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 	else
 	{
 		// fprintf(stderr, "Updating interval [%d, %d]=%d-->[%d, %d]=%d\n", entry->left_interval, entry->right_interval, entry->value, left_interval, right_interval, value);
-		if (left_interval == 0 && right_interval == 0)
-		{ // skip updating block zero.
-			return;
-		}
+		// if (left_interval == 0 && right_interval == 0)
+		// { // skip updating block zero.
+		// 	return;
+		// }
 
 		slog_debug("Updating interval [%d, %d]=%d-->[%d, %d]=%d", entry->left_interval, entry->right_interval, entry->value, left_interval, right_interval, value);
 		entry->right_interval = right_interval;
@@ -4794,7 +4798,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		if (!strncmp((const char *)response_buffer, "$ERRIMSS_NO_KEY_AVAIL$", 22))
 		{ // key not avaiable on the remote server.
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			sprintf(err_msg, "HERCULES_ERR_GET_NDATA_NO_KEY_AVAIL (%s), %s to server %d (%s), curr_imss_storages=%d", response_buffer, key_, server_id, curr_imss.info.ips[i], curr_imss_storages);
+			sprintf(err_msg, "HERCULES_ERR_GET_NDATA_NO_KEY_AVAIL (%s), %s to server %d (%s), curr_imss_storages=%d", (char *)response_buffer, key_, server_id, curr_imss.info.ips[i], curr_imss_storages);
 			fprintf(stderr, "%s\n", err_msg);
 			slog_error("%s", err_msg);
 			errno = ENOENT;
@@ -4819,6 +4823,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 				// fprintf(stderr, "Calling ReleaseSpecificDataServerNetworkResources from get_ndata.\n Pending request=%s to server %d\n", key_, server_id);
 				slog_debug("Calling ReleaseSpecificDataServerNetworkResources from get_ndata. Pending request=%s to server %d", key_, server_id);
 				ReleaseSpecificDataServerNetworkResources("imss://", 1, id_server_to_remove, new_number_of_data_servers);
+				PrintIntervals(curr_dataset);
+				SetInterval(curr_dataset, new_number_of_data_servers, 0, 0);
 				SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
 
 				// to try the same operation.

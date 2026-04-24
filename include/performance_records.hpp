@@ -1,6 +1,7 @@
 #ifndef H_PERFORMANCE_RECORDS
 #define H_PERFORMANCE_RECORDS
 
+#include "slog.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
@@ -71,6 +72,7 @@ static unsigned int consecutive_scale_down_signals = 0;
 static void PerformanceRecordsRemoveKey(char *server_hostname)
 {
     // backend_performance_metrics.erase(server_id);
+    slog_debug("Removing server hostname %s", server_hostname);
     backend_performance_metrics.erase(server_hostname);
 }
 
