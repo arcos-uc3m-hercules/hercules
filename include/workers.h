@@ -74,7 +74,8 @@ typedef struct
 	char my_uri[URI_];
 	char *tmp_file_path;
 	// Pointer to the corresponding buffer region assigned to a thread.
-	char *pt;
+	// char *pt;
+	bool status;
 } p_argv;
 
 // Structure to pass arguments to the client handling thread (Dispatcher).
@@ -154,6 +155,8 @@ int ShutdownServer();
 // void Decomissioning_stage(p_argv *arguments, int id_server_to_remove);
 void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift);
 size_t update_ips_list(int id_server_to_remove);
+int send_node_list_2_frontend(p_argv temp_p_argv_for_calls);
+
 /**
  * @brief Re-distribute the blocks of this server to another servers
  * following the distribution policy choose by the user.

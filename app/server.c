@@ -676,6 +676,7 @@ int32_t main(int32_t argc, char **argv)
 		arguments[i].tmp_file_path = tmp_file_path;
 		arguments[i].hercules_thread_pool_size = hercules_thread_pool_size;
 		arguments[i].hercules_info_struct = NULL;
+		arguments[i].status = true;
 
 		// Add the instance URI to the thread arguments.
 		strcpy(arguments[i].my_uri, args.imss_uri);

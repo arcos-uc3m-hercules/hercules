@@ -476,7 +476,7 @@ extern "C"
 		}
 		else
 		{
-			while (((status = ucp_request_check_status(request)) == UCS_INPROGRESS))
+			while ((status = ucp_request_check_status(request)) == UCS_INPROGRESS)
 			{
 				ucp_worker_progress(ucp_worker);
 			}
@@ -490,7 +490,6 @@ extern "C"
 			// 	ep_close(ucp_worker, ep, UCP_EP_CLOSE_FLAG_FORCE);
 			slog_fatal("[COMM][send_req] Connection error, request=%s", req);
 			fprintf(stderr, "[COMM][send_req] Connection error, request=%s\n", req);
-			// return -1;
 			return 0;
 		}
 

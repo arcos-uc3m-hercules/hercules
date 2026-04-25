@@ -4628,8 +4628,9 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	for (int32_t i = 0; i < replication_factor; i++)
 	{
 		// Server storing the current data block.
+		// TODO: check if num_active_storages is still in use.
 		n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
-		slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset->n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset->n_servers, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
+		slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset->n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset->n_servers, curr_imss_storages, curr_imss.info.num_active_storages);
 
 		repl_servers[i] = n_server_;
 
@@ -4697,6 +4698,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		{
 			perror("HERCULES_ERR_GET_NDATA_SEND_REQ");
 			slog_error("HERCULES_ERR_GET_NDATA_SEND_REQ");
+
 			pthread_mutex_unlock(&lock_network);
 			return -2;
 		}
@@ -4974,8 +4976,8 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
 		if (size_sent_req == 0)
 		{
-			perror("HERCULES_ERR_GET_NDATA_SEND_REQ");
-			slog_error("HERCULES_ERR_GET_NDATA_SEND_REQ");
+			perror("HERCULES_ERR_GET_NDATA_PREFETCH_SEND_REQ");
+			slog_error("HERCULES_ERR_GET_NDATA_PREFETCH_SEND_REQ");
 			pthread_mutex_unlock(&lock_network);
 			return -2;
 		}
@@ -5154,8 +5156,8 @@ ssize_t start_block_request(char *dataset_uri, int32_t dataset_id, int32_t data_
 		size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
 		if (size_sent_req == 0)
 		{
-			perror("HERCULES_ERR_GET_NDATA_SEND_REQ");
-			slog_error("HERCULES_ERR_GET_NDATA_SEND_REQ");
+			perror("HERCULES_ERR_START_BLOCK_REQUEST_SEND_REQ");
+			slog_error("HERCULES_ERR_START_BLOCK_REQUEST_SEND_REQ");
 			pthread_mutex_unlock(&lock_network);
 			return -2;
 		}
@@ -6118,9 +6120,8 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 	uint32_t n_server_ = next_server; // (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
 
 	sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
-	slog_live("[IMSS] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)", data_id, n_server_, key_, size);
+	slog_live("[IMSS] BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%lu)", data_id, n_server_, curr_imss.info.ips[n_server_], key_, size);
 	// fprintf(stderr, "[IMSS] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)\n", data_id, n_server_, key_, size);
-
 	ep = curr_imss.conns.eps[n_server_];
 	// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id)
 	// in a dataset (curr_dataset->uri).
