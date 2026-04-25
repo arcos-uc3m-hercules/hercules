@@ -339,11 +339,6 @@ extern "C"
 		int fd = -1;
 		struct stat stats;
 		char *aux = NULL;
-		// switch (type)
-		// {
-		// case TYPE_HERCULES_INSTANCE:
-		// {
-		// 	slog_debug("n_ent=%d", n_ent);
 		if (!strcmp(imss_path, IMSS_ROOT))
 		{
 			stbuf->st_size = 4;
@@ -433,7 +428,7 @@ extern "C"
 			// if ((n_ent = get_dir(imss_path, &refs)) != -1)
 			{
 				stbuf->st_size = 4;
-				slog_debug("is a directy, setting st_nlink to 1");
+				slog_debug("is a directory, setting st_nlink to 1");
 				stbuf->st_nlink = 1;
 				stbuf->st_mode = S_IFDIR | 0775;
 				// free all memory in refs.
