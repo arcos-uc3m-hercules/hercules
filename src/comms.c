@@ -77,12 +77,6 @@ extern "C"
 	// 	return UCS_OK;
 	// }
 
-	typedef struct
-	{
-		ucs_status_t status;
-		char msg[200];
-	} client_ep_context_t;
-
 	/**
 	 * Create a ucp worker on the given ucp context.
 	 */
@@ -511,7 +505,38 @@ extern "C"
 			/* Probing incoming events in non-block mode */
 			msg_tag = ucp_tag_probe_nb(ucp_worker, dest, tag_mask, 0, &info_tag);
 		} while (msg_tag == NULL);
-		slog_debug("message of size %ld is coming", info_tag.length);
+		slog_debug("message of size %ld is coming from %" PRIu64, info_tag.length, info_tag.sender_tag);
+
+		return info_tag.length;
+	}
+
+	/**
+	 * @brief Get the recv data length with checking if the callback error catch something.
+	 * 
+	 */
+	size_t get_recv_data_length_with_cb(ucp_worker_h ucp_worker, uint64_t dest, client_ep_context_t *ep_context)
+	{
+		ucp_tag_recv_info_t info_tag;
+		ucp_tag_message_h msg_tag;
+
+		slog_debug("waiting for a message");
+		do
+		{
+			ucp_worker_progress(ucp_worker);
+
+			/* Check if the callback changes the status.*/
+			if (ep_context->status != UCS_OK)
+			{
+				slog_error("An error was detect in the endpoint: %s", ucs_status_string(ep_context->status));
+				return (size_t)-1;
+			}
+
+			/* Probing incoming events in non-block mode */
+			msg_tag = ucp_tag_probe_nb(ucp_worker, dest, tag_mask, 0, &info_tag);
+
+		} while (msg_tag == NULL);
+
+		slog_debug("message of size %ld is coming from %" PRIu64, info_tag.length, info_tag.sender_tag);
 
 		return info_tag.length;
 	}
@@ -882,10 +907,11 @@ extern "C"
 		// slog_error("[COMM] Client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
 		// fprintf(stderr, "client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
 		slog_error("[err_cb_client][%s] failure handler called with status %d (%s)", arg_struct->msg, status, ucs_status_string(status));
-		fprintf(stderr, "[err_cb_client][%s] failure handler called with status %d (%s)\n", arg_struct->msg, status, ucs_status_string(status));
+		// fprintf(stderr, "[err_cb_client][%s] failure handler called with status %d (%s)\n", arg_struct->msg, status, ucs_status_string(status));
 		if (status == UCS_ERR_ENDPOINT_TIMEOUT)
 		{
-			fprintf(stderr, "[err_cb_client][%s] endpoint timeout error.\n", arg_struct->msg);
+			slog_error("[err_cb_client][%s] endpoint timeout error.", arg_struct->msg);
+			// fprintf(stderr, "[err_cb_client][%s] endpoint timeout error.\n", arg_struct->msg);
 			// ep_err_detected = 1;
 		}
 		// *arg_status = status;
@@ -1019,7 +1045,8 @@ extern "C"
 		ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
 		// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 		ep_params.err_handler.cb = err_cb_client;
-		// ep_params.err_handler.arg = (void *)user_data_args;;
+		ep_params.err_handler.arg = (void *)user_data_args;
+		;
 		// ep_params.err_handler.arg = &server_status;
 		ep_params.user_data = (void *)user_data_args;
 
@@ -1033,6 +1060,63 @@ extern "C"
 			fprintf(stderr, "failed to create an endpoint on the data server: (%s)\n", ucs_status_string(status));
 			slog_error("failed to create an endpoint on the data server: (%s)", ucs_status_string(status));
 			free(user_data_args);
+		}
+
+		slog_debug("[COMM] Created client endpoint");
+		return status;
+	}
+
+	ucs_status_t client_create_ep_data_with_context(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, const char *user_data, client_ep_context_t **user_data_args)
+	{
+		slog_debug("creating endpoing, user_data=%s", user_data);
+		ucp_ep_params_t ep_params;
+		ucs_status_t status;
+		ucs_status_t ep_status = UCS_OK;
+
+		client_ep_context_t *user_data_args_aux = (client_ep_context_t *)malloc(sizeof(client_ep_context_t));
+		if (user_data_args_aux == NULL)
+		{
+			slog_error("failed to allocate memory for user_data_args\n");
+			fprintf(stderr, "failed to allocate memory for user_data_args\n");
+			return UCS_ERR_NO_MEMORY;
+		}
+		user_data_args_aux->status = UCS_OK;
+		memset(user_data_args_aux->msg, 0, sizeof(user_data_args_aux->msg));
+		strncpy(user_data_args_aux->msg, user_data, sizeof(user_data_args_aux->msg) - 1);
+		user_data_args_aux->msg[sizeof(user_data_args_aux->msg) - 1] = '\0';
+
+		if (user_data_args != NULL)
+		{
+			*user_data_args = user_data_args_aux;
+		}
+
+		/* Server creates an ep to the client on the data worker.
+		 * This is not the worker the listener was created on.
+		 * The client side should have initiated the connection, leading
+		 * to this ep's creation */
+		ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
+				       UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
+				       UCP_EP_PARAM_FIELD_ERR_HANDLER |
+				       UCP_EP_PARAM_FIELD_USER_DATA;
+		ep_params.address = peer_addr;
+		ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
+		// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+		ep_params.err_handler.cb = err_cb_client;
+		ep_params.err_handler.arg = (void *)user_data_args_aux;
+		;
+		// ep_params.err_handler.arg = &server_status;
+		ep_params.user_data = (void *)user_data_args_aux;
+
+		// ucp_worker_print_info(worker, stderr);
+		slog_debug("calling ucp_ep_create");
+		print_worker_pointer(worker);
+		status = ucp_ep_create(worker, &ep_params, ep);
+		slog_debug("ucp_ep_create passed");
+		if (status != UCS_OK)
+		{
+			fprintf(stderr, "failed to create an endpoint on the data server: (%s)\n", ucs_status_string(status));
+			slog_error("failed to create an endpoint on the data server: (%s)", ucs_status_string(status));
+			free(user_data_args_aux);
 		}
 
 		slog_debug("[COMM] Created client endpoint");

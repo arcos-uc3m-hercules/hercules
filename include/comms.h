@@ -202,6 +202,12 @@ typedef struct worker_info
     char server_type;
 } worker_info_t;
 
+typedef struct
+{
+	ucs_status_t status;
+	char msg[200];
+} client_ep_context_t;
+
 #define CHKERR_ACTION(_cond, _msg, _action)          \
     do                                               \
     {                                                \
@@ -238,6 +244,7 @@ extern "C"
     size_t isend_data(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from);
     void *isend_data2(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from, ServerSendRequest *tracking_struct);
     size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest);
+	size_t get_recv_data_length_with_cb(ucp_worker_h ucp_worker, uint64_t dest, client_ep_context_t *ep_context);
     size_t get_recv_data_length_2(ucp_worker_h ucp_worker, uint64_t dest, ucp_tag_recv_info_t *info_tag, ucp_tag_message_h *msg_tag);
     void *start_recv_data_async(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest);
     size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async);
@@ -262,6 +269,7 @@ extern "C"
     // ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr);
     // ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, int *);
     ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, const char *user_data);
+    ucs_status_t client_create_ep_data_with_context(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, const char *user_data, client_ep_context_t **user_data_args);
     void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
     void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
     // Method sending a data structure with dynamic memory allocation fields.

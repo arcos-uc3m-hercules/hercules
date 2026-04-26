@@ -903,9 +903,6 @@ extern "C"
 		// total_amount_read += byte_count;
 		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, byte_count);
 
-		// performance =
-
-		// free(rpath);
 		return byte_count;
 	}
 

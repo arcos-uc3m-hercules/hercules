@@ -133,6 +133,8 @@ typedef struct
 	int32_t matching_server;
 	ucp_ep_h *eps;
 	uint32_t *id;
+	// Array to store the contexts of each endpoint.
+    client_ep_context_t **ep_contexts;
 } imss_conn;
 
 // Structure merging the previous couple.

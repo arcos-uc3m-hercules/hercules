@@ -1517,7 +1517,7 @@ void *hercules_ucx_server(void *th_argv)
 		double time_taken;
 		t = clock();
 
-		slog_debug("Message length=%ld bytes.", info_tag.length);
+		slog_debug("Message length=%ld bytes from %" PRIu64, info_tag.length, info_tag.sender_tag);
 		msg = (msg_req_t *)malloc(info_tag.length);
 		if (msg == NULL)
 		{
@@ -3350,12 +3350,12 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	{
 		more = SET_OP;
 		is_performance_operation = PERFORMANCE_OP;
-		ret = CheckForMalleability(arguments, req);
-		if (ret != 0)
-		{ // request was saved to be attended after malleability.
-			SendConfirmationMessage(arguments, MSG_OK_OP);
-			return 1;
-		}
+		// ret = CheckForMalleability(arguments, req);
+		// if (ret != 0)
+		// { // request was saved to be attended after malleability.
+		// 	SendConfirmationMessage(arguments, MSG_OK_OP);
+		// 	return 1;
+		// }
 	}
 	else if (!strcmp(mode, "SETSERVER"))
 	{
@@ -4203,6 +4203,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				switch (num_input_read)
 				{
 				case 4: // we expect to get 4 values in a normal case.
+				{
 					// we look for extra information.
 					if (req[num_characters_read] != '\0')
 					{
@@ -4213,9 +4214,10 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					}
 					else
 					{
-						slog_live("No extra characters found.\n");
+						slog_live("No extra characters found.");
 					}
 					break;
+				}
 				default:
 					break;
 				}
@@ -4266,7 +4268,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				else
 				{
-					// pthread_mutex_lock(&lock_network);
+					pthread_mutex_lock(&lock_network);
 					size_t length = -1;
 					length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
 					if (length == 0)
@@ -4274,7 +4276,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_UPDATE_DATASET");
 						perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_UPDATE_DATASET");
 						// pthread_mutex_unlock(&memory_protect);
-						// pthread_mutex_unlock(&lock_network);
+						pthread_mutex_unlock(&lock_network);
 						return -1;
 					}
 
@@ -4285,7 +4287,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						perror("HERCULES_ERR_STAT_MEMORY_ALLOC");
 						slog_error("HERCULES_ERR_STAT_MEMORY_ALLOC");
 						// pthread_mutex_unlock(&memory_protect);
-						// pthread_mutex_unlock(&lock_network);
+						pthread_mutex_unlock(&lock_network);
 						return -1;
 					}
 					// Receive the block into the buffer.
@@ -4295,9 +4297,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 						perror("HERCULES_ERR_STAT_SET_OP_RECV_STREAM");
 						slog_error("HERCULES_ERR_STAT_SET_OP_RECV_STREAM");
 						// pthread_mutex_unlock(&memory_protect);
-						// pthread_mutex_unlock(&lock_network);
+						pthread_mutex_unlock(&lock_network);
 						return -1;
 					}
+
+					pthread_mutex_unlock(&lock_network);
 
 					// prev. dataset.
 					slog_debug("Updating dataset,\n printing intervals of prev. dataset.");
