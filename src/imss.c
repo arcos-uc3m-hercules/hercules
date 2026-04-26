@@ -2763,9 +2763,10 @@ int32_t clear_dataset(const char *dataset_uri)
 	return 0;
 }
 
-int32_t wait_malleability_changes(ucp_worker_h ucp_worker_data, uint64_t local_data_uid, ucp_ep_h ep)
+
+int32_t wait_malleability_changes(ucp_worker_h ucp_worker, uint64_t local_data_uid, ucp_ep_h ep)
 {
-	int32_t ret = -1;
+	int32_t ret = -1, changes_found = 1;
 	size_t msg_length = 0;
 
 	time_t init_malleability_t = clock();
@@ -2779,7 +2780,7 @@ int32_t wait_malleability_changes(ucp_worker_h ucp_worker_data, uint64_t local_d
 	slog_debug("get_recv_data_length, msg_length=%lu", msg_length);
 	if (msg_length == 0)
 	{
-		pthread_mutex_unlock(&lock_network);
+		// pthread_mutex_unlock(&lock_network);
 		perror("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
 		slog_error("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
 		return -1;
@@ -2790,7 +2791,7 @@ int32_t wait_malleability_changes(ucp_worker_h ucp_worker_data, uint64_t local_d
 	slog_debug(" after recv_data, msg_length=%lu", msg_length);
 	if (msg_length == 0)
 	{
-		pthread_mutex_unlock(&lock_network);
+		// pthread_mutex_unlock(&lock_network);
 		perror("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
 		slog_error("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
 		free(result);
@@ -2862,13 +2863,57 @@ int32_t wait_malleability_changes(ucp_worker_h ucp_worker_data, uint64_t local_d
 			fprintf(stderr, "read | write, New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d\n", malleability_time_taken, id_modified_server, new_number_of_data_servers);
 #endif
 			slog_debug("New server has been added to the deployment in %f seconds. ID=%d, new_number_of_data_servers=%d", malleability_time_taken, id_modified_server, new_number_of_data_servers);
+		} else 
+		{
+			changes_found = 0;
 		}
 	}
 
 
 	free(result);
 	result = NULL;
+	return changes_found;
 }
+
+int32_t get_malleability_changes(const char *dataset_uri)
+{
+	char formated_uri[REQUEST_SIZE] = {0};
+	int32_t ret = -1;
+	size_t msg_length = 0;
+	ucp_ep_h ep;
+
+	// Discover the metadata server that handles the dataset.
+	char first_parent_dir[URI_] = {0};
+	uint32_t m_srv = 0;
+	int first_parent_offset = find_first_parent_dir((char *)dataset_uri, first_parent_dir);
+	slog_debug("dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", dataset_uri, first_parent_dir, first_parent_offset);
+	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
+	
+	ep = stat_eps[m_srv];
+
+	sprintf(formated_uri, "%" PRIu32 " GETMALLEABILITY %d %s", stat_ids[m_srv], PERFORMANCE_OP, dataset_uri);
+
+	pthread_mutex_lock(&lock_network);
+
+	slog_debug("[IMSS] formated_uri='%s'", formated_uri);
+	msg_length = send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri);
+	slog_debug("[IMSS] after send_req, ret=%lu", msg_length);
+	if (msg_length == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_SEND_REQ_CLOSE_DATASET");
+		perror("HERCULES_ERR_SEND_REQ_CLOSE_DATASET");
+		return -1;
+	}
+
+	// wait_ack(ucp_worker_meta, local_meta_uid, ep, SYNC);
+
+	int changes_found = wait_malleability_changes(ucp_worker_meta, local_meta_uid, ep);
+
+	pthread_mutex_unlock(&lock_network);
+	return changes_found;
+}
+
 
 
 int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t m_srv)
@@ -2989,7 +3034,7 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 	slog_debug("Sending %lu bytes", total_size);
 	if (send_data(ucp_worker_meta, ep, buffer_metrics_ser.data(), total_size, local_meta_uid) == 0)
 	{
-		pthread_mutex_unlock(&lock_network);
+		// pthread_mutex_unlock(&lock_network);
 		perror("ERR_HERCULES_SPLIT_READV_SEND_DATA");
 		slog_error("ERR_HERCULES_SPLIT_READV_SEND_DATA");
 		pthread_exit(NULL);
@@ -4703,6 +4748,12 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			// uint64_t ret_ds = 0;
 			// open_dataset(dataset_uri, 1);
 			pthread_mutex_unlock(&lock_network);
+			if(get_malleability_changes(dataset_uri) == 1)
+			{
+				// changes found, malleability was applied.
+				// to try the same operation.
+				return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request);
+			}
 			return -2;
 		}
 
@@ -4807,6 +4858,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			fprintf(stderr, "%s\n", err_msg);
 			slog_error("%s", err_msg);
 			errno = ENOENT;
+			pthread_mutex_unlock(&lock_network);
 			return -1;
 			// free(response_buffer);
 		}

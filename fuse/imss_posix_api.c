@@ -2350,8 +2350,6 @@ extern "C"
 			HierarchicalMapErase(hierarchical_map, path);
 		}
 
-		// Sends the performance metrics to the metadata server.
-
 		// TODO: Tell data server the file is ready to be copied to disk.
 
 		return ret;

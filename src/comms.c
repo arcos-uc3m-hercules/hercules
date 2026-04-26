@@ -589,7 +589,7 @@ extern "C"
 		{
 			perror("ERR_HERCULES_GET_DATA_ACK_INVALID_MSG_LENGTH");
 			slog_error("ERR_HERCULES_GET_DATA_ACK_INVALID_MSG_LENGTH");
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 			return -ECANCELED;
 		}
 
@@ -598,7 +598,7 @@ extern "C"
 		{
 			perror("ERR_HERCULES_GET_DATA_ACK_MEMORY_ALLOCATION");
 			slog_error("ERR_HERCULES_GET_DATA_ACK_MEMORY_ALLOCATION");
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 			return -ECANCELED;
 		}
 		size_t size_received_data = recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async);
@@ -606,7 +606,7 @@ extern "C"
 		if (!strncmp(response_buffer, MSG_SPACE_OP, strlen(response_buffer)))
 		{
 			free(response_buffer);
-			pthread_mutex_unlock(&lock_network);
+			// pthread_mutex_unlock(&lock_network);
 			return -EAGAIN;
 		}
 		slog_debug("msg=%s", response_buffer);

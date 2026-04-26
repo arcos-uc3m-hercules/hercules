@@ -661,7 +661,7 @@ void *run_malleability(void *th_argv)
 	MalleabilityArgs *arguments = (MalleabilityArgs *)th_argv;
 #ifdef DPRINTF
 	slog_debug("Waiting for the mutex to be free")
-	pthread_mutex_lock(&mutext_malleability);
+	    pthread_mutex_lock(&mutext_malleability);
 
 	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire), consecutive_scale_up_signals);
 #endif
@@ -3335,6 +3335,16 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	else if (!strcmp(mode, "SET"))
 	{
 		more = SET_OP;
+	}
+	else if (!strcmp(mode, "GETMALLEABILITY")) // changes this later.
+	{
+		p_argv temp_p_argv_for_calls;
+		temp_p_argv_for_calls.ucp_worker = arguments->ucp_worker;
+		temp_p_argv_for_calls.server_ep = arguments->server_ep;
+		temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
+		strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
+		send_node_list_2_frontend(temp_p_argv_for_calls);
+		return 1;
 	}
 	else if (!strcmp(mode, "SETPERFORMANCE"))
 	{
