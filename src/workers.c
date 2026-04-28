@@ -604,7 +604,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 				sprintf(request, "REORDERSERVER %" PRId32 " %" PRId32 " %d", number_active_storage_servers.load(), new_id, id_server_to_remove);
 				new_id++;
 			}
-			slog_debug("Sending %s to server ID %d, number of active storage servers=%d", request, i, number_active_storage_servers.load());
+			slog_debug("Sending %s to server ID %d (%s), number of active storage servers=%d", request, i, data_endpoints[i], number_active_storage_servers.load());
 			slog_debug("Thread id %d", arguments->thread_id);
 			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
 			if (ret == 0)
@@ -660,8 +660,8 @@ void *run_malleability(void *th_argv)
 {
 	MalleabilityArgs *arguments = (MalleabilityArgs *)th_argv;
 #ifdef DPRINTF
-	slog_debug("Waiting for the mutex to be free")
-	    pthread_mutex_lock(&mutext_malleability);
+	slog_debug("Waiting for the mutex to be free");
+	pthread_mutex_lock(&mutext_malleability);
 
 	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire), consecutive_scale_up_signals);
 #endif
@@ -2622,6 +2622,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		int ret = 0;
 		int is_block_zero = 0;
 		int32_t insert_successful = -1;
+		int32_t server_n_used_in_frontend = to_read;
+
 		// Checks if it is data for the Snapshot operation or regular data.
 		if (snapshot_op)
 		{
@@ -2629,6 +2631,24 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		}
 		else
 		{
+			// check if the frondend used the correct number of storage servers.
+			// if not, we need to tell it the new configuration.
+			if (server_n_used_in_frontend != number_active_storage_servers.load())
+			{
+				slog_warn("HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers.");
+				// TODO: client does not know at this moment that the block does not corresponding to this server.
+				// We will receive the data but we will not store it, just to progress and then we will tell the
+				// client the new configuration if this deployment.
+
+				p_argv temp_p_argv_for_calls;
+				temp_p_argv_for_calls.ucp_worker = arguments->ucp_worker;
+				temp_p_argv_for_calls.server_ep = arguments->server_ep;
+				temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
+				strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
+				send_node_list_2_frontend(temp_p_argv_for_calls); // Update the server list in the frontend.
+				return -1;
+			}
+			SendConfirmationMessage(arguments, MSG_OK_OP); // OK ack.
 			ret = TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "Does it exist? map->get", int, arguments->thread_id);
 		}
 
@@ -2827,7 +2847,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// Include the new record in the tracking structure.
 				if (insert_successful != 0)
 				{
-					if (insert_successful == 2)
+					if (insert_successful == 2) // TODO_ check where to move this confirmation messages.
 					{
 						SendConfirmationMessage(arguments, MSG_SPACE_OP);
 					}
@@ -2852,7 +2872,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				pthread_mutex_unlock(&memory_protect);
 				free(buffer);
 			}
-			SendConfirmationMessage(arguments, MSG_OK_OP);
 		}
 		// if the block was already stored:
 		else
@@ -3071,7 +3090,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					// free(sh_memory_struct);
 				}
 			}
-			SendConfirmationMessage(arguments, MSG_OK_OP);
+			// SendConfirmationMessage(arguments, MSG_OK_OP);
 		}
 		break;
 	}
