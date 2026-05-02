@@ -1806,7 +1806,7 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 	curr_imss = *imss_;
 	for (size_t j = 0; j < current_number_of_servers; j++)
 	{
-		slog_debug("eps[%d]=%s, address=%p", j, imss_->conns.eps[j], imss_->conns.eps[j]);
+		slog_debug("eps[%d]=%s, endpoint address=%p", j, imss_->info.ips[j], imss_->conns.eps[j]);
 	}
 
 	// PerformanceRecordsRemoveKey(server_id_to_remove);
@@ -6236,7 +6236,7 @@ int32_t split_location_servers(char *dataset_uri, int **list_servers, int32_t da
 	return 0;
 }
 
-int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server)
+int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server, uint32_t num_of_servers)
 {
 
 	pthread_mutex_lock(&lock_network);
@@ -6246,7 +6246,8 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 	// Server receiving the current data block.
 	uint32_t n_server_ = next_server; // (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
 
-	sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
+	// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
+	sprintf(key_, "SET %lu %ld %s$%d %" PRIu32, size, offset, data_uri, data_id, num_of_servers);
 	slog_live("[IMSS] BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%lu)", data_id, n_server_, curr_imss.info.ips[n_server_], key_, size);
 	// fprintf(stderr, "[IMSS] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)\n", data_id, n_server_, key_, size);
 	ep = curr_imss.conns.eps[n_server_];

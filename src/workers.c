@@ -465,7 +465,7 @@ void *move_blocks_2_server(void *th_argv)
 				// 	slog_debug("new server=%d, curr_server=%d\n", next_server, server_id);
 
 				// 	// here we can send key.c_str() directly to reduce the number of operations.
-				if (set_data_server(data_uri.c_str(), block_number, inner_value.data, inner_value.size, 0, next_server) < 0)
+				if (set_data_server(data_uri.c_str(), block_number, inner_value.data, inner_value.size, 0, next_server, number_active_storage_servers.load()) < 0)
 				{
 					slog_error("HERCULES_ERR_SET_DATA_IN_SERVER\n");
 					perror("HERCULES_ERR_SET_DATA_IN_SERVER");
