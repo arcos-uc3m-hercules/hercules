@@ -901,21 +901,23 @@ extern "C"
 		// *server_status = 0;
 		// ucs_status_t *arg_status = (ucs_status_t *)arg;
 		client_ep_context_t *arg_struct = (client_ep_context_t *)arg;
-		// if (status != UCS_ERR_CONNECTION_RESET && status != UCS_ERR_ENDPOINT_TIMEOUT)
-		// {
-		// }
+		if (status != UCS_ERR_CONNECTION_RESET && status != UCS_ERR_ENDPOINT_TIMEOUT)
+		{
+			slog_error("[err_cb_client][%s] failure handler called with status %d (%s)", arg_struct->msg, status, ucs_status_string(status));
+		}
+		if (arg_struct != NULL) {
+			(*arg_struct).status = status;
+		}
 		// slog_error("[COMM] Client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
 		// fprintf(stderr, "client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
-		slog_error("[err_cb_client][%s] failure handler called with status %d (%s)", arg_struct->msg, status, ucs_status_string(status));
 		// fprintf(stderr, "[err_cb_client][%s] failure handler called with status %d (%s)\n", arg_struct->msg, status, ucs_status_string(status));
-		if (status == UCS_ERR_ENDPOINT_TIMEOUT)
-		{
-			slog_error("[err_cb_client][%s] endpoint timeout error.", arg_struct->msg);
+		// if (status == UCS_ERR_ENDPOINT_TIMEOUT)
+		// {
+			// slog_error("[err_cb_client][%s] endpoint timeout error.", arg_struct->msg);
 			// fprintf(stderr, "[err_cb_client][%s] endpoint timeout error.\n", arg_struct->msg);
 			// ep_err_detected = 1;
-		}
+		// }
 		// *arg_status = status;
-		(*arg_struct).status = status;
 		// arg_struct->status = status;
 	}
 
@@ -1103,7 +1105,6 @@ extern "C"
 		// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 		ep_params.err_handler.cb = err_cb_client;
 		ep_params.err_handler.arg = (void *)user_data_args_aux;
-		;
 		// ep_params.err_handler.arg = &server_status;
 		ep_params.user_data = (void *)user_data_args_aux;
 

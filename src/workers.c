@@ -374,6 +374,7 @@ void *move_blocks_2_server(void *th_argv)
 	curr_global_imss_info = &curr_imss.info;
 	if (imss_found_in == -1)
 	{ // request the metadata.
+		slog_debug("imss structure not found, requesting to the metadata server");
 		int32_t open_ret = open_imss((char *)arguments->args->imss_uri);
 		if (open_ret < 0)
 		{
@@ -384,8 +385,10 @@ void *move_blocks_2_server(void *th_argv)
 	}
 	else
 	{ // update current struct.
-		size_t num_elements_to_shift = update_ips_list(id_server_to_modify);
-		Update_data_endpoint_list(id_server_to_modify, num_elements_to_shift);
+		slog_debug("imss strcture found, updating.");
+		// size_t num_elements_to_shift = update_ips_list(id_server_to_modify);
+		// Update_data_endpoint_list(id_server_to_modify, num_elements_to_shift);
+		ReleaseSpecificDataServerNetworkResources(imss_uri, 1, id_server_to_modify, number_active_storage_servers.load());
 	}
 
 	// Here data server should to move the datablocks.
@@ -519,6 +522,7 @@ size_t update_ips_list(int id_server_to_remove)
 	imss_info *imss_info_struct = curr_global_imss_info;
 	if (imss_info_struct->num_storages <= 0)
 	{
+		slog_warn("HERCULES_ERR_UPDATE_IPS_LIST_INV_NUM_STORAGE")
 		return 0;
 	}
 	char *element_to_delete = imss_info_struct->ips[id_server_to_remove];
@@ -550,11 +554,20 @@ void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_s
 {
 	if (num_elements_to_shift <= 0)
 	{
+		slog_warn("HERCULES_ERR_UPDATE_DATA_ENDPOINTS_LIST: Invalid num elements to shift");
 		return;
 	}
+
+	if (id_server_to_remove < 0 || id_server_to_remove > number_active_storage_servers.load())
+	{
+		slog_warn("HERCULES_ERR_UPDATE_DATA_ENDPOINTS_LIST: Invalid id server to remove");
+		return;
+	}
+	
 	memmove(&data_endpoints[id_server_to_remove],
 		&data_endpoints[id_server_to_remove + 1],
 		num_elements_to_shift * sizeof(char *));
+
 	data_endpoints[number_active_storage_servers.load()] = NULL;
 	return;
 }

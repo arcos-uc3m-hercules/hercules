@@ -1726,7 +1726,7 @@ int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t 
 	return 0;
 }
 
-int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_parent, int server_id_to_remove, int current_number_of_servers)
+int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_parent, int server_id_to_remove, int new_number_of_servers)
 {
 	imss local_imss_;
 	imss *imss_;
@@ -1740,19 +1740,27 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 	}
 	// get the pointer to modify it.
 	imss_ = &g_array_index(imssd, imss, imss_position);
-	// fprintf(stderr, "Removing server with ID %d, new number of servers is %d, previous number was %d\n", server_id_to_remove, current_number_of_servers, imss_->info.num_active_storages);
-	slog_debug("Removing server with ID %d, new number of servers is %d, previous number was %d", server_id_to_remove, current_number_of_servers, imss_->info.num_storages);
+
+	/* Validate bounds to prevent underflow in memmove calculation */
+	if (server_id_to_remove < 0 || (uint32_t)server_id_to_remove >= imss_->info.num_storages)
+	{
+		slog_error("Invalid server_id_to_remove: %d", server_id_to_remove);
+		return -1;
+	}
+
+	// fprintf(stderr, "Removing server with ID %d, new number of servers is %d, previous number was %d\n", server_id_to_remove, new_number_of_servers, imss_->info.num_active_storages);
+	slog_debug("Removing server with ID %d, new number of servers is %d, previous number was %d", server_id_to_remove, new_number_of_servers, imss_->info.num_storages);
 
 	// Release the set of connections to the corresponding IMSS.
 	slog_live("imss_position=%d, num_storages=%d", imss_position, imss_->info.num_storages);
 	ucp_ep_h ep;
 	// for (int32_t i = 0; i < imss_.info.num_storages; i++)
-	int i = server_id_to_remove;
-	// ep = imss_->conns.eps[i];
+	// int id = server_id_to_remove;
+	// ep = imss_->conns.eps[id];
 	// if (is_parent)
 	// {
 	// 	flush_ep(ucp_worker_data, ep);
-	// 	slog_live("release_msg=%s to server %d", release_msg_data, i);
+	// 	slog_live("release_msg=%s to server %d", release_msg_data, id);
 	// 	// close the endpoint in the server side.
 	// 	if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, release_msg_data) == 0)
 	// 	{
@@ -1762,49 +1770,70 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 	// 	}
 	// }
 	// close_ucx_endpoint(ucp_worker_data, ep);
-	PerformanceRecordsRemoveKey(imss_->info.ips[server_id_to_remove]);
-
-	free(imss_->info.ips[i]);
-	free(imss_->conns.peer_addr[i]);
-	// free(imss_->conns.eps[server_id_to_remove]);
-	if (imss_->conns.ep_contexts[i] != NULL)
+	int ret = PerformanceRecordsRemoveKey(imss_->info.ips[server_id_to_remove]);
+	if (ret == -1)
 	{
-		free(imss_->conns.ep_contexts[i]);
+		slog_error("Failed to remove performance records for server %d", server_id_to_remove);
+		return ret;
 	}
 
+	/* Release UCX endpoint resources */
+	if (imss_->conns.eps[server_id_to_remove] != NULL)
+	{
+		imss_->conns.eps[server_id_to_remove] = NULL;
+	}
+
+	free(imss_->info.ips[server_id_to_remove]);
+	imss_->info.ips[server_id_to_remove] = NULL;
+	slog_debug("ips[%d] freed.", server_id_to_remove);
+
+	free(imss_->conns.peer_addr[server_id_to_remove]);
+	imss_->conns.peer_addr[server_id_to_remove] = NULL;
+	slog_debug("peer_addr[%d] freed.", server_id_to_remove);
+
+	free(imss_->conns.ep_contexts[server_id_to_remove]);
+	imss_->conns.ep_contexts[server_id_to_remove] = NULL;
+
 	size_t num_elements_to_shift = imss_->info.num_storages - server_id_to_remove - 1;
-	// sort the ips array.
-	memmove(&imss_->info.ips[server_id_to_remove],
-		&imss_->info.ips[server_id_to_remove + 1],
-		num_elements_to_shift * sizeof(char *));
+	slog_debug("num_elements_to_shift=%d", num_elements_to_shift);
+	if (num_elements_to_shift > 0)
+	{
+		slog_debug("Sorting arrays");
+		// sort the ips array.
+		memmove(&imss_->info.ips[server_id_to_remove],
+			&imss_->info.ips[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(char *));
 
-	// sort the peer addresses array.
-	memmove(&imss_->conns.peer_addr[server_id_to_remove],
-		&imss_->conns.peer_addr[server_id_to_remove + 1],
-		num_elements_to_shift * sizeof(ucp_address_t *));
+		// sort the peer addresses array.
+		memmove(&imss_->conns.peer_addr[server_id_to_remove],
+			&imss_->conns.peer_addr[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(ucp_address_t *));
 
-	// sort the endpoints array.
-	memmove(&imss_->conns.eps[server_id_to_remove],
-		&imss_->conns.eps[server_id_to_remove + 1],
-		num_elements_to_shift * sizeof(ucp_ep_h));
+		// sort the endpoints array.
+		memmove(&imss_->conns.eps[server_id_to_remove],
+			&imss_->conns.eps[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(ucp_ep_h));
 
-	// sort the contexts array.
-	memmove(&imss_->conns.ep_contexts[server_id_to_remove],
-		&imss_->conns.ep_contexts[server_id_to_remove + 1],
-		num_elements_to_shift * sizeof(client_ep_context_t *));
+		// sort the contexts array.
+		memmove(&imss_->conns.ep_contexts[server_id_to_remove],
+			&imss_->conns.ep_contexts[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(client_ep_context_t *));
+	}
 
-	imss_->info.ips[imss_->info.num_storages - 1] = NULL;
-	imss_->conns.peer_addr[imss_->info.num_storages - 1] = NULL;
-	imss_->conns.eps[imss_->info.num_storages - 1] = NULL;
-	imss_->conns.ep_contexts[imss_->info.num_storages - 1] = NULL;
+	// Null the last slot in the array.
+	uint32_t last_idx = imss_->info.num_storages - 1;
+	imss_->info.ips[last_idx] = NULL;
+	imss_->conns.peer_addr[last_idx] = NULL;
+	imss_->conns.eps[last_idx] = NULL;
+	imss_->conns.ep_contexts[last_idx] = NULL;
 
 	// slog_debug("imss_ add=%p", &imss_->info.num_active_storages);
 	slog_debug("imss_->info.num_storages=%d", imss_->info.num_storages);
-	imss_->info.num_storages = current_number_of_servers; // imss_->info.num_storages - 1;
+	imss_->info.num_storages = new_number_of_servers; // imss_->info.num_storages - 1;
 	imss_->info.num_active_storages = imss_->info.num_storages;
 	// imss_->info.num_active_storages = imss_->info.num_active_storages - 1;
 	curr_imss = *imss_;
-	for (size_t j = 0; j < current_number_of_servers; j++)
+	for (size_t j = 0; j < new_number_of_servers; j++)
 	{
 		slog_debug("eps[%d]=%s, endpoint address=%p", j, imss_->info.ips[j], imss_->conns.eps[j]);
 	}
@@ -3209,7 +3238,7 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id)
 		// Key related to the requested data element.
 		// adds the "n_open" to tell the metadata how many processes has the file open.
 		sprintf(key_, "GET %d 0 %s$0 %d", UNLINK_OP, dataset_uri, curr_dataset->n_open);
-		slog_debug("Request to data %d (%s) - %s", i, curr_imss.conns.eps[i], key_);
+		slog_debug("Request to data %d (%s) - %s", i, curr_imss.info.ips[i], key_);
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -4790,15 +4819,13 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		clock_t t;
 		double time_taken = 0.0;
 		t = clock();
-		// client_ep_context_t mi_contexto;
-		// mi_contexto.status = UCS_OK;
-		client_ep_context_t *mi_contexto = curr_imss.conns.ep_contexts[server_id];
-		if (mi_contexto != NULL)
+		client_ep_context_t *this_context = curr_imss.conns.ep_contexts[server_id];
+		if (this_context != NULL)
 		{
-			mi_contexto->status = UCS_OK;
+			this_context->status = UCS_OK;
 		}
 
-		msg_length = TIMING(get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, mi_contexto), "get_recv_data_length", size_t, process_rank);
+		msg_length = TIMING(get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context), "get_recv_data_length", size_t, process_rank);
 		t = clock() - t;
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 		// ucp_tag_recv_info_t info_tag;
@@ -6241,10 +6268,10 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE] = {0};
-
-	ucp_ep_h ep;
 	// Server receiving the current data block.
 	uint32_t n_server_ = next_server; // (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
+
+	ucp_ep_h ep;
 
 	// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
 	sprintf(key_, "SET %lu %ld %s$%d %" PRIu32, size, offset, data_uri, data_id, num_of_servers);

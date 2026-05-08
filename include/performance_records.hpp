@@ -69,11 +69,22 @@ static unsigned int consecutive_scale_up_signals = 0;
 static unsigned int consecutive_scale_down_signals = 0;
 
 // static void PerformanceRecordsRemoveKey(int32_t server_id)
-static void PerformanceRecordsRemoveKey(char *server_hostname)
+static int PerformanceRecordsRemoveKey(char *server_hostname)
 {
+    if (server_hostname == nullptr) {
+        slog_error("HERCULES_ERR_PERFORMANCE_RECORDS_REMOVE_KEY: Invalid server hostname");
+        return -1;
+    }
     // backend_performance_metrics.erase(server_id);
     slog_debug("Removing server hostname %s", server_hostname);
-    backend_performance_metrics.erase(server_hostname);
+    size_t elements_removed = backend_performance_metrics.erase(server_hostname);
+    if (elements_removed > 0) {
+        slog_debug("%s deleted.", server_hostname);
+        return 0;
+    } else {
+        slog_debug("%s does not exist.", server_hostname);
+        return -1;
+    }
 }
 
 #endif // H_PERFORMANCE_RECORDS
