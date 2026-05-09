@@ -459,7 +459,7 @@ void *move_blocks_2_server(void *th_argv)
 				// if (id_server_to_modify == -1 && next_server == server_id)
 				if (next_server == server_id && arguments->status == true)
 				{
-					fprintf(stderr, "[SKIP] BLOCK %ld TO %d SERVER\n", block_number, next_server);
+					// fprintf(stderr, "[SKIP] BLOCK %ld TO %d SERVER\n", block_number, next_server);
 					slog_debug("[SKIP] BLOCK %d TO SERVER %d ", block_number, next_server);
 					continue;
 				}
@@ -2229,8 +2229,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				{
 					perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
 					slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
-					return -1;
 				}
+				return -1;
 			}
 
 			struct stat *header = (struct stat *)address_;

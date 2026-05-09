@@ -1714,7 +1714,6 @@ int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t 
 		exit(1);
 	}
 
-	// remove_dataset_entry(datasetd, imss_root);
 	int32_t num_active_storages = open_imss(imss_root);
 	if (num_active_storages < 0)
 	{
@@ -1770,12 +1769,13 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 	// 	}
 	// }
 	// close_ucx_endpoint(ucp_worker_data, ep);
+	// TODO: data servers does not have to call this function, only the metadata server and clients.
 	int ret = PerformanceRecordsRemoveKey(imss_->info.ips[server_id_to_remove]);
-	if (ret == -1)
-	{
-		slog_error("Failed to remove performance records for server %d", server_id_to_remove);
-		return ret;
-	}
+	// if (ret == -1)
+	// {
+	// 	slog_error("Failed to remove performance records for server %d", server_id_to_remove);
+	// 	return ret;
+	// }
 
 	/* Release UCX endpoint resources */
 	if (imss_->conns.eps[server_id_to_remove] != NULL)
@@ -2771,6 +2771,8 @@ int32_t release_dataset(const char *dataset_uri)
 	// 	perror("HERCULES_ERR_RELDATASET_BAD_DESCRIPTOR");
 	// 	return -1;
 	// }
+
+	// ClearIntervalsStructure(curr_dataset);
 
 	// Dataset to be released.
 	// dataset_info rel_dataset = g_array_index(datasetd, dataset_info, dataset_id);
