@@ -242,6 +242,16 @@ extern "C"
 		// t = clock() - t;
 		// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 		// fprintf(stderr,"********** send data %lu time = %lf\n", msg_len, time_taken);
+		if (status != UCS_OK)
+        {
+            // slog_fatal("[COMM] Error sending to endpoint.");
+            char err_msg[MAX_ERR_MSG_LEN] = {0};
+            sprintf(err_msg, "HERCULES_ERR_SEND_DATA: %" PRIu64, from);
+            slog_fatal("%s", err_msg);
+            // fprintf(stderr, "HERCULES_ERR_SEND_DATA\n");
+            perror(err_msg);
+            return 0;
+        }
 
 		if (UCS_PTR_IS_ERR(request))
 		{

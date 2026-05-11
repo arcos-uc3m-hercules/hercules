@@ -385,7 +385,7 @@ void *move_blocks_2_server(void *th_argv)
 	}
 	else
 	{ // update current struct.
-		slog_debug("imss strcture found, updating.");
+		slog_debug("imss structure found, updating.");
 		// size_t num_elements_to_shift = update_ips_list(id_server_to_modify);
 		// Update_data_endpoint_list(id_server_to_modify, num_elements_to_shift);
 		ReleaseSpecificDataServerNetworkResources(imss_uri, 1, id_server_to_modify, number_active_storage_servers.load());
@@ -595,6 +595,13 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 			slog_error("HERCULES_ERR_DECOMISSIONING_STAGE_INVALID_SERVVER_ID_TO_REMOVE");
 			return 0;
 		}
+		// Avoid reducing the number of servers to less than 1.
+		if (number_active_storage_servers.load()-1 <= 0) {
+			fprintf(stdout, "[INFO] The number of servers cannot be less than 1. Canceling decomissioning stage.\n");
+			slog_debug("[INFO] The number of servers cannot be less than 1. Canceling decomissioning stage.");
+			return 0;
+		}
+
 		is_new_server_ready = false;
 		int index = 0;
 		// removes the server from the ips list.
@@ -617,7 +624,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 				sprintf(request, "REORDERSERVER %" PRId32 " %" PRId32 " %d", number_active_storage_servers.load(), new_id, id_server_to_remove);
 				new_id++;
 			}
-			slog_debug("Sending %s to server ID %d (%s), number of active storage servers=%d", request, i, data_endpoints[i], number_active_storage_servers.load());
+			slog_debug("Sending %s to server ID %d (%s), number of active storage servers=%d", request, i, curr_global_imss_info->ips[i], number_active_storage_servers.load());
 			slog_debug("Thread id %d", arguments->thread_id);
 			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
 			if (ret == 0)

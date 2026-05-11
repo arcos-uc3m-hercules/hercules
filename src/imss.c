@@ -1097,10 +1097,10 @@ int32_t stat_release()
 		slog_error("Failed to flush worker: %s\n", ucs_status_string(status));
 	}
 	// close the metadata endpoints.
-	for (int32_t i = 0; i < n_stat_servers; i++)
+	for (uint32_t i = 0; i < n_stat_servers; i++)
 	{
 		ep = stat_eps[i];
-		slog_debug("Closing endpoing %d/%d", i / n_stat_servers);
+		slog_debug("Closing endpoing %" PRIu32 "/%" PRIu32, i / n_stat_servers);
 		close_ucx_endpoint(ucp_worker_meta, ep);
 		free(stat_addr[i]);
 	}
@@ -1752,7 +1752,7 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 
 	// Release the set of connections to the corresponding IMSS.
 	slog_live("imss_position=%d, num_storages=%d", imss_position, imss_->info.num_storages);
-	ucp_ep_h ep;
+	// ucp_ep_h ep;
 	// for (int32_t i = 0; i < imss_.info.num_storages; i++)
 	// int id = server_id_to_remove;
 	// ep = imss_->conns.eps[id];
@@ -1777,11 +1777,32 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 	// 	return ret;
 	// }
 
-	/* Release UCX endpoint resources */
-	if (imss_->conns.eps[server_id_to_remove] != NULL)
-	{
-		imss_->conns.eps[server_id_to_remove] = NULL;
-	}
+	// Release UCX endpoint resources
+	// if (imss_->conns.eps[server_id_to_remove] != NULL)
+	// {
+	// 	imss_->conns.eps[server_id_to_remove] = NULL;
+	// }
+	ucp_ep_h ep = imss_->conns.eps[server_id_to_remove];
+	if (ep != NULL)
+    {
+        void *close_req = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
+        if (UCS_PTR_IS_PTR(close_req))
+        {
+            ucs_status_t status;
+            do {
+                ucp_worker_progress(ucp_worker_data);
+                status = ucp_request_check_status(close_req);
+            } while (status == UCS_INPROGRESS);
+            ucp_request_free(close_req);
+        }
+        else if (UCS_PTR_STATUS(close_req) != UCS_OK)
+        {
+            slog_error("Failed to close endpoint cleanly");
+        }
+        
+        imss_->conns.eps[server_id_to_remove] = NULL;
+    }
+
 
 	free(imss_->info.ips[server_id_to_remove]);
 	imss_->info.ips[server_id_to_remove] = NULL;
@@ -1818,6 +1839,11 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 		memmove(&imss_->conns.ep_contexts[server_id_to_remove],
 			&imss_->conns.ep_contexts[server_id_to_remove + 1],
 			num_elements_to_shift * sizeof(client_ep_context_t *));
+
+		// sort the ids array.
+		memmove(&imss_->conns.id[server_id_to_remove],
+            &imss_->conns.id[server_id_to_remove + 1],
+            num_elements_to_shift * sizeof(uint32_t));
 	}
 
 	// Null the last slot in the array.
@@ -1826,6 +1852,7 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 	imss_->conns.peer_addr[last_idx] = NULL;
 	imss_->conns.eps[last_idx] = NULL;
 	imss_->conns.ep_contexts[last_idx] = NULL;
+	imss_->conns.id[last_idx] = 0;
 
 	// slog_debug("imss_ add=%p", &imss_->info.num_active_storages);
 	slog_debug("imss_->info.num_storages=%d", imss_->info.num_storages);
@@ -4837,7 +4864,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		if (msg_length == (size_t)-1)
 		{
 			perror("ERR_HERCULES_GET_NDATA_CONNECTION_LOST");
-			slog_error("ERR_HERCULES_GET_NDATA_CONNECTION_LOST: El servidor remoto se ha caído o desconectado.");
+			slog_error("ERR_HERCULES_GET_NDATA_CONNECTION_LOST: The remote server has disconnected.");
 			pthread_mutex_unlock(&lock_network);
 			if (get_malleability_changes(dataset_uri) == 1)
 			{
