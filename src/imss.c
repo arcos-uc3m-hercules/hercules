@@ -1443,6 +1443,8 @@ int32_t open_imss(char *imss_uri)
 		slog_live("ip_address=%s:%d, local_data_uid=%d", new_imss.info.ips[i], new_imss.info.conn_port, local_data_uid);
 		// fprintf(stderr, "ip_address=%s:%d\n", new_imss.info.ips[i], new_imss.info.conn_port);
 
+		slog_info("Request: %s", request);
+
 		if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
 		{
 			perror("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
@@ -1638,6 +1640,8 @@ int32_t AddBackEndServer2Imss(char *imss_uri)
 	slog_live("ip_address=%s:%d", curr_imss.info.ips[i], curr_imss.info.conn_port);
 	// fprintf(stderr, "ip_address=%s:%d\n", curr_imss.info.ips[i], curr_imss.info.conn_port);
 
+	slog_live("Sending request %s", request);
+
 	if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
 	{
 		perror("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
@@ -1784,25 +1788,25 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 	// }
 	ucp_ep_h ep = imss_->conns.eps[server_id_to_remove];
 	if (ep != NULL)
-    {
-        void *close_req = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
-        if (UCS_PTR_IS_PTR(close_req))
-        {
-            ucs_status_t status;
-            do {
-                ucp_worker_progress(ucp_worker_data);
-                status = ucp_request_check_status(close_req);
-            } while (status == UCS_INPROGRESS);
-            ucp_request_free(close_req);
-        }
-        else if (UCS_PTR_STATUS(close_req) != UCS_OK)
-        {
-            slog_error("Failed to close endpoint cleanly");
-        }
-        
-        imss_->conns.eps[server_id_to_remove] = NULL;
-    }
+	{
+		void *close_req = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
+		if (UCS_PTR_IS_PTR(close_req))
+		{
+			ucs_status_t status;
+			do
+			{
+				ucp_worker_progress(ucp_worker_data);
+				status = ucp_request_check_status(close_req);
+			} while (status == UCS_INPROGRESS);
+			ucp_request_free(close_req);
+		}
+		else if (UCS_PTR_STATUS(close_req) != UCS_OK)
+		{
+			slog_error("Failed to close endpoint cleanly");
+		}
 
+		imss_->conns.eps[server_id_to_remove] = NULL;
+	}
 
 	free(imss_->info.ips[server_id_to_remove]);
 	imss_->info.ips[server_id_to_remove] = NULL;
@@ -1842,8 +1846,8 @@ int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_p
 
 		// sort the ids array.
 		memmove(&imss_->conns.id[server_id_to_remove],
-            &imss_->conns.id[server_id_to_remove + 1],
-            num_elements_to_shift * sizeof(uint32_t));
+			&imss_->conns.id[server_id_to_remove + 1],
+			num_elements_to_shift * sizeof(uint32_t));
 	}
 
 	// Null the last slot in the array.
@@ -2954,9 +2958,9 @@ int32_t wait_malleability_changes(ucp_worker_h ucp_worker, uint64_t local_data_u
 		end_malleability_t = clock() - init_malleability_t;
 		malleability_time_taken = ((double)end_malleability_t) / CLOCKS_PER_SEC; // in seconds
 #ifdef DPRINTF
-		fprintf(stderr, "read | write, New server has been added to the deployment in %f seconds\n", malleability_time_taken);
+		fprintf(stderr, "read | write, Malleability changes han been applied in %f seconds\n", malleability_time_taken);
 #endif
-		slog_debug("New server has been added to the deployment in %f seconds.", malleability_time_taken);
+		slog_debug("Malleability changes han been applied in %f seconds.", malleability_time_taken);
 	}
 	free(result);
 	result = NULL;
@@ -3231,25 +3235,24 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id)
 {
 	int32_t n_server = 0;
 	int ret = -1;
+
 	// Server containing the corresponding data to be retrieved.
 	if ((n_server = get_data_location((char *)dataset_uri, dataset_id, dataset_id, GET)) == -1)
 		return -1;
 
 	// Servers that the data block is going to be requested to.
-	int32_t repl_servers[curr_dataset->repl_factor];
+	int32_t replication_factor = curr_dataset->repl_factor;
+	int32_t repl_servers[replication_factor];
 	int32_t curr_imss_storages = curr_imss.info.num_storages;
 
 	// Retrieve the corresponding connections to the previous servers.
-	for (int32_t i = 0; i < curr_dataset->repl_factor; i++)
+	for (int32_t i = 0; i < replication_factor; i++)
 	{
-		// Server storing the current data block.
-		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
+		uint32_t n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
 		repl_servers[i] = n_server_;
 
-		// Check if the current connection is the local one (if there is).
 		if (repl_servers[i] == curr_dataset->local_conn)
 		{
-			// Move the local connection to the first one to be requested.
 			int32_t aux_conn = repl_servers[0];
 			repl_servers[0] = repl_servers[i];
 			repl_servers[i] = aux_conn;
@@ -3260,23 +3263,52 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id)
 	char key_[REQUEST_SIZE] = {0};
 
 	// Request the concerned block to the involved servers.
-	for (int32_t i = 0; i < curr_dataset->repl_factor; i++)
+	for (int32_t i = 0; i < replication_factor; i++)
 	{
-		ucp_ep_h ep = curr_imss.conns.eps[repl_servers[i]];
+		int32_t server_id = repl_servers[i];
+		ucp_ep_h ep = curr_imss.conns.eps[server_id];
 
-		// Key related to the requested data element.
-		// adds the "n_open" to tell the metadata how many processes has the file open.
+		// Format the unlink request.
 		sprintf(key_, "GET %d 0 %s$0 %d", UNLINK_OP, dataset_uri, curr_dataset->n_open);
-		slog_debug("Request to data %d (%s) - %s", i, curr_imss.info.ips[i], key_);
-		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
+		slog_debug("Request to data %d (%s) - %s", i, curr_imss.info.ips[server_id], key_);
+
+		size_t size_sent_req = send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_);
+		if (size_sent_req == 0)
 		{
+			perror("HERCULES_ERR_UNLINK_DATASET_SEND_REQ");
+			slog_error("HERCULES_ERR_UNLINK_DATASET_SEND_REQ");
 			pthread_mutex_unlock(&lock_network);
-			perror("HERCULES_ERR_UNLINK_DATASET_SENDADDR");
-			return -1;
+
+			// check for malleability changes and retry.
+			if (get_malleability_changes((char *)dataset_uri) == 1)
+			{
+				return unlink_dataset(dataset_uri, dataset_id);
+			}
+			return -2;
 		}
 
-		size_t msg_length = 0;
-		msg_length = get_recv_data_length(ucp_worker_data, local_data_uid);
+		// prepare context for receiving the length.
+		client_ep_context_t *this_context = curr_imss.conns.ep_contexts[server_id];
+		if (this_context != NULL)
+		{
+			this_context->status = UCS_OK;
+		}
+
+		size_t msg_length = get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context);
+
+		if (msg_length == (size_t)-1) // Connection lost.
+		{
+			perror("ERR_HERCULES_UNLINK_CONNECTION_LOST");
+			slog_error("ERR_HERCULES_UNLINK_CONNECTION_LOST: The remote server disconnected.");
+			pthread_mutex_unlock(&lock_network);
+
+			if (get_malleability_changes((char *)dataset_uri) == 1)
+			{
+				return unlink_dataset(dataset_uri, dataset_id);
+			}
+			return -2;
+		}
+
 		if (msg_length == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -3286,32 +3318,49 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id)
 		}
 
 		void *result = (void *)malloc(msg_length);
-		msg_length = recv_data(ucp_worker_data, ep, result, msg_length, local_data_uid, 0);
-		if (msg_length == 0)
+		if (result == NULL)
+		{
+			pthread_mutex_unlock(&lock_network);
+			return -2;
+		}
+
+		size_t size_received_data = recv_data(ucp_worker_data, ep, result, msg_length, local_data_uid, 0);
+		if (size_received_data == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
 			perror("HERCULES_ERR_DELETE_DATASET_RECV_DATA");
-			slog_error("HERCULES_ERR_DELETE_DATASET_RECV_DATA");
 			free(result);
+			return -2;
+		}
+
+		if (!strncmp(MSG_MALLEABILITY_DATASERVERS, (const char *)result, strlen(MSG_MALLEABILITY_DATASERVERS)))
+		{
+			// remote server is decommissioning.
+			pthread_mutex_unlock(&lock_network);
+			int32_t changes_found = parse_malleability_message(result);
+			free(result);
+			if (changes_found > 0)
+			{
+				return unlink_dataset(dataset_uri, dataset_id);
+			}
 			return -1;
 		}
-		slog_debug("result=%s", result);
-		if (!strncmp((const char *)result, MSG_DELETE_OP, strlen(MSG_DELETE_OP)))
-		{ // the file has been deleted on the data server.
-			// to delete the file on the metadata server.
-			// TOFIX: modify the return value to work with replication.
-			// we just need to know if the original replica has been deleted.
+		else if (!strncmp((const char *)result, MSG_DELETE_OP, strlen(MSG_DELETE_OP)))
+		{
 			ret = (ret == -1) ? 0 : ret;
 		}
 		else if (!strncmp((const char *)result, MSG_NODELETE_OP, strlen(MSG_NODELETE_OP)))
-		{ // the file has not been deleted on the data server.
+		{
 			ret = (ret == -1) ? 1 : ret;
 		}
 		else
-		{ // an error has ocurred, e.g., the file does not exist.
+		{
+			slog_error("HERCULES_ERR_UNLINK_DATASET_SERVER_REJECTED: %s", (char *)result);
 			ret = -1;
+			free(result);
 			break;
 		}
+
 		free(result);
 	}
 
@@ -3898,7 +3947,7 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 	int num_storages = 0;
 	if (entry_value == -1)
 	{
-		slog_warn("Entry from intervals is NULL, setting num_storages=%d for data_id=%d", curr_imss.info.num_storages, data_id);
+		slog_warn("Entry from intervals is NULL, setting num_storages=%d (from curr_imss.info.num_storages) for data_id=%d", curr_imss.info.num_storages, data_id);
 		num_storages = curr_imss.info.num_storages;
 	}
 	else
@@ -4731,7 +4780,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	int entry_value = GetValueFromInterval(curr_dataset, data_id);
 	if (entry_value == -1)
 	{
-		slog_warn("Entry from intervals is NULL, setting curr_imss_storages=%d", curr_imss.info.num_storages);
+		slog_warn("Entry from intervals is NULL, setting curr_imss_storages=%d (from curr_imss.info.num_storages)", curr_imss.info.num_storages);
 		curr_imss_storages = curr_imss.info.num_storages;
 	}
 	else
@@ -4760,7 +4809,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		// Server storing the current data block.
 		// TODO: check if num_active_storages is still in use.
 		n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
-		slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset->n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset->n_servers, curr_imss_storages, curr_imss.info.num_active_storages);
+		slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset->n_servers=%d, curr_imss_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset->n_servers, curr_imss_storages, curr_imss.info.num_active_storages);
 
 		repl_servers[i] = n_server_;
 
