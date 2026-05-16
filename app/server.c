@@ -830,6 +830,7 @@ int32_t main(int32_t argc, char **argv)
 			size_t msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
 			void *response_buffer = (void *)malloc(msg_length * sizeof(char));
 			msg_length = recv_data(ucp_worker_meta, stat_eps[j], response_buffer, msg_length, local_meta_uid, SYNC);
+			free(response_buffer);
 		}
 
 		for (int32_t i = 0; i < num_servers; i++)

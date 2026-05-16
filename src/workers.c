@@ -31,6 +31,7 @@
 #include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 // void *map_server_eps = NULL;
@@ -588,7 +589,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && malleability_status.compare_exchange_strong(expected_status, MALLEABILITY_INPROGRESS, std::memory_order_acq_rel))
 	{
 		fprintf(stderr, "[INFO] Stopping server %d.\n", id_server_to_remove);
-		slog_debug("[INFO] Stopping %d server.", id_server_to_remove);
+		slog_debug("[INFO] Stopping server %d.", id_server_to_remove);
 		if (id_server_to_remove > number_active_storage_servers.load() - 1)
 		{
 			fprintf(stderr, "HERCULES_ERR_DECOMISSIONING_STAGE_INVALID_SERVVER_ID_TO_REMOVE");
@@ -874,11 +875,23 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		slog_debug("number_active_storage_servers=%d", number_active_storage_servers.load());
 
 		// pthread_mutex_unlock(&mutext_malleability);
-		char command_to_exec[PATH_MAX] = {0};
+		char command_to_exec[PATH_MAX * 2] = {0};
 		char *workdir = getenv("PWD");
+		// sprintf(command_to_exec,
+		// "( ssh %s 'cd %s && UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s %s/build/hercules_server d %d %d > %s/tmp/hercules_server_%d_log.txt 2>&1' ) &",
+		// 	node_to_use,
+		// 	workdir,
+		// 	arguments->args->configuration_file_path,
+		// 	arguments->args->hercules_path,
+		// 	id_server_to_modify,
+		// 	imss_info_struct->num_active_storages,
+		// 	arguments->args->hercules_path,
+		// 	id_server_to_modify);
+
 		sprintf(command_to_exec,
-			"( ssh %s 'cd %s && UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s %s/build/hercules_server d %d %d > %s/tmp/hercules_server_%d_log.txt 2>&1' ) &",
-			node_to_use,
+			"cd %s && LD_LIBRARY_PATH=\"/opt/ohpc/pub/compiler/gcc/12.2.0/lib64:/usr/lib64:/lib64:$LD_LIBRARY_PATH\" "
+			"UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s %s/build/hercules_server d %d %d "
+			"> %s/tmp/hercules_server_%d_log.txt 2>&1",
 			workdir,
 			arguments->args->configuration_file_path,
 			arguments->args->hercules_path,
@@ -887,7 +900,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			arguments->args->hercules_path,
 			id_server_to_modify);
 
-		char msg[PATH_MAX] = {'\0'};
+		char msg[PATH_MAX * 2] = {'\0'};
 		sprintf(msg, "Running command: %s, id server=%d\n", command_to_exec, id_server_to_modify);
 		fprintf(stderr, "%s", msg);
 		slog_debug(msg);
@@ -905,7 +918,8 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		}
 		else if (pid == 0)
 		{ // child
-			execlp("ssh", "ssh", node_to_use, command_to_exec, (char *)NULL);
+			// execlp("ssh", "ssh", node_to_use, command_to_exec, (char *)NULL);
+			execlp("ssh", "ssh", "-f", node_to_use, command_to_exec, (char *)NULL);
 			// the process is replaced by the ssh.
 			slog_error("HERCULES_ERR_COMISSIONING_STAGE_CHILD_EXECLP");
 			exit(-1);
@@ -916,10 +930,16 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			// waitpid is not here to avoid blocking the parent process.
 			// int status;
 
+			// Recover the child process immediately. Since ssh uses '-f',
+			// the child process terminates immediately after fork, preventing zombie states.
+			int status;
+			waitpid(pid, &status, 0);
+
 			slog_debug("Waiting for the signal from the main thread (SETSERVER).");
 
 			// block waiting for the "SETSERVER" message on the main thread.
 			pthread_mutex_lock(&server_ready_mutex);
+			slog_debug("Mutex has been locked.");
 
 			while (!is_new_server_ready)
 			{
@@ -1830,7 +1850,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		global_finish_dispatcher = FINISH_SERVER_STATUS;
 		id_server_to_modify = arguments->args->id;
 		uint32_t num_servers = 0;
-		int items_read = sscanf(req, "%s %" PRIu32, mode, &num_servers);
+		int items_read = sscanf(req, "%23s %" PRIu32, mode, &num_servers);
 		if (items_read == 2)
 		{
 			number_active_storage_servers.store(num_servers);
@@ -1841,6 +1861,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %s: expecting 2 fields but %d were receiving\n", req, items_read);
 			return -1;
 		}
+
+		slog_debug("[malleability] stopping this server.");
 
 		pthread_t thread;
 		p_argv *arguments_aux = new p_argv;
@@ -1882,7 +1904,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 		int32_t new_id = 0;
 		uint32_t num_servers = 0;
-		int items_read = sscanf(req, "%s %" PRIu32 " %" PRIu32 " %d", mode, &num_servers, &new_id, &id_server_to_modify);
+		int items_read = sscanf(req, "%23s %" PRIu32 " %" PRIu32 " %d", mode, &num_servers, &new_id, &id_server_to_modify);
 		if (items_read == 4)
 		{
 			number_active_storage_servers.store(num_servers);
@@ -1893,6 +1915,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_REORDERSERVER: Error reading the request %s: expecting 4 fields but %d were receiving.", req, items_read);
 			return -1;
 		}
+
+		slog_debug("[malleability] one server is being stop, moving blocks.");
 
 		slog_debug("mode=%s, number_active_storage_servers=%" PRIu32 ", new_id=%" PRIu32 "", mode, number_active_storage_servers.load(), new_id);
 		arguments->args->id = new_id;
@@ -1921,170 +1945,177 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		return 1;
 	}
 	else if (!strcmp(mode, "ADDSERVER"))
-    {
-        slog_debug("Connecting to data servers");
-        int32_t imss_found_in = -1;
-        char *imss_uri = arguments->args->imss_uri;
-        imss_found_in = find_imss(imss_uri, &curr_imss);
-        curr_global_imss_info = &curr_imss.info;
-        
-        if (imss_found_in == -1)
-        { // request the metadata.
-            slog_debug("imss structure not found, requesting to the metadata server");
-            int32_t open_ret = open_imss(imss_uri);
-            if (open_ret < 0)
-            {
-                slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-                pthread_exit(NULL);
-            }
-            number_active_storage_servers.store(open_ret);
-        }
-        else
-        { // update current struct.
-            slog_debug("imss structure found, updating.");
+	{
+		slog_debug("Connecting to data servers");
+		int32_t imss_found_in = -1;
+		char *imss_uri = arguments->args->imss_uri;
+		// imss_found_in = find_imss(imss_uri, &curr_imss);
+		imss *imss_;
+		imss_found_in = find_imss_pointer(imss_uri, &imss_);
+		// curr_global_imss_info = &curr_imss.info;
 
-            int32_t new_id = 0;
-            uint32_t num_servers = 0;
-            uint32_t id_server_to_modify = 0;
-            int oob_sock = -1;
-            size_t addr_len = 0;
-            int ret = 0;
-            char added_hostname[URI_] = {"\0"};
-            
-            // sprintf(request, "ADDSERVER %s %" PRId32 " %" PRId32 "", node_to_use, number_active_storage_servers.load(), id_server_to_modify);
-            int items_read = sscanf(req, "%s %s %" PRIu32 " %" PRIu32, mode, added_hostname, &num_servers, &id_server_to_modify);
-            if (items_read != 4)
-            // {
-            //     number_active_storage_servers.store(num_servers);
-            // }
-            // else
-            {
-                slog_error("HERCULES_ERR_SRV_WORKER_HELPER_ADDSERVER: Error reading the request '%s': expecting 4 fields but %d were receiving.", req, items_read);
-                fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_ADDSERVER: Error reading the request '%s': expecting 4 fields but %d were receiving.", req, items_read);
-                return -1;
-            }
+		slog_debug("[malleability] adding a server.");
 
-			slog_debug("mode=%s, added_hostname=%s, num_servers=%" PRIu32, ", id_server_to_modify=%" PRIu32, mode, added_hostname, num_servers, id_server_to_modify);
+		if (imss_found_in == -1)
+		{ // request the metadata.
+			slog_debug("imss structure not found, requesting to the metadata server");
+			int32_t open_ret = open_imss(imss_uri);
+			if (open_ret < 0)
+			{
+				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+				pthread_exit(NULL);
+			}
+			number_active_storage_servers.store(open_ret);
+		}
+		else
+		{ // update current struct.
+			slog_debug("imss structure found, updating.");
 
-            // Ensure capacity for the new server index within global tracking arrays
-            uint32_t required_capacity = id_server_to_modify + 1;
-			slog_debug("required_capacity=%" PRIu32, required_capacity)
-            if (required_capacity > curr_imss.info.num_storages)
-            {
-                // Safely allocate using temporary pointers to prevent memory leaks if realloc fails
-                ucp_address_t **tmp_peer = (ucp_address_t **)realloc(curr_imss.conns.peer_addr, required_capacity * sizeof(ucp_address_t *));
-                ucp_ep_h *tmp_eps = (ucp_ep_h *)realloc(curr_imss.conns.eps, required_capacity * sizeof(ucp_ep_h));
-                uint32_t *tmp_id = (uint32_t *)realloc(curr_imss.conns.id, required_capacity * sizeof(uint32_t));
-                client_ep_context_t **tmp_ep_contexts = (client_ep_context_t **)realloc(curr_imss.conns.ep_contexts, required_capacity * sizeof(client_ep_context_t *));
+			int32_t new_id = 0;
+			uint32_t num_servers = 0;
+			uint32_t id_server_to_modify = 0;
+			int oob_sock = -1;
+			size_t addr_len = 0;
+			int ret = 0;
+			char added_hostname[URI_] = {"\0"};
 
-                if (!tmp_peer || !tmp_eps || !tmp_id || !tmp_ep_contexts)
-                {
-                    slog_error("HERCULES_ERR_ADDSERVER_MEMORY_REALLOC: Memory reallocation failed.");
-                    return -1; 
-                }
+			// sprintf(request, "ADDSERVER %s %" PRId32 " %" PRId32 "", node_to_use, number_active_storage_servers.load(), id_server_to_modify);
+			int items_read = sscanf(req, "%23s %255s %" PRIu32 " %" PRIu32, mode, added_hostname, &num_servers, &id_server_to_modify);
+			if (items_read != 4)
+			// {
+			//     number_active_storage_servers.store(num_servers);
+			// }
+			// else
+			{
+				slog_error("HERCULES_ERR_SRV_WORKER_HELPER_ADDSERVER: Error reading the request '%s': expecting 4 fields but %d were receiving.", req, items_read);
+				fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_ADDSERVER: Error reading the request '%s': expecting 4 fields but %d were receiving.", req, items_read);
+				return -1;
+			}
 
-                // Commit the successful reallocations
-                curr_imss.conns.peer_addr = tmp_peer;
-                curr_imss.conns.eps = tmp_eps;
-                curr_imss.conns.id = tmp_id;
-                curr_imss.conns.ep_contexts = tmp_ep_contexts;
-                
-                // Zero-initialize the newly memory blocks to prevent undefined behavior
-                for (uint32_t i = curr_imss.info.num_storages; i < required_capacity; ++i)
-                {
-                    curr_imss.conns.peer_addr[i] = NULL;
-                    curr_imss.conns.eps[i] = NULL;
-                    curr_imss.conns.id[i] = 0;
-                    curr_imss.conns.ep_contexts[i] = NULL;
-                }
-            }
+			slog_debug("mode=%s, added_hostname=%s, num_servers=%" PRIu32 ", id_server_to_modify=%" PRIu32, mode, added_hostname, num_servers, id_server_to_modify);
 
-            slog_debug("connecting to %s:8500", added_hostname);
-            oob_sock = connect_common(added_hostname, 85000, AF_INET);
-            if (oob_sock < 0)
-            {
-                char err_msg[MAX_ERR_MSG_LEN] = {0};
-                char* target_ip = curr_imss.info.ips[id_server_to_modify] ? curr_imss.info.ips[id_server_to_modify] : added_hostname;
-                sprintf(err_msg, "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%" PRIu32 " - %s:%d", id_server_to_modify, target_ip, curr_imss.info.conn_port);
-                slog_error("%s", err_msg);
-                perror(err_msg);
-                return -1;
-            }
+			// Ensure capacity for the new server index within global tracking arrays
+			uint32_t required_capacity = id_server_to_modify + 1;
+			slog_debug("required_capacity=%" PRIu32, required_capacity) if (required_capacity > imss_->info.num_storages)
+			{
+				// Safely allocate using temporary pointers to prevent memory leaks if realloc fails
+				ucp_address_t **tmp_peer = (ucp_address_t **)realloc(imss_->conns.peer_addr, required_capacity * sizeof(ucp_address_t *));
+				if (tmp_peer)
+					imss_->conns.peer_addr = tmp_peer;
 
-            char request[REQUEST_SIZE] = {0};
-            sprintf(request, "%" PRIu32 " GET %s", arguments->args->id, "HELLO!JOIN");
+				ucp_ep_h *tmp_eps = (ucp_ep_h *)realloc(imss_->conns.eps, required_capacity * sizeof(ucp_ep_h));
+				if (tmp_eps)
+					imss_->conns.eps = tmp_eps;
+
+				uint32_t *tmp_id = (uint32_t *)realloc(imss_->conns.id, required_capacity * sizeof(uint32_t));
+				if (tmp_id)
+					imss_->conns.id = tmp_id;
+
+				client_ep_context_t **tmp_ep_contexts = (client_ep_context_t **)realloc(imss_->conns.ep_contexts, required_capacity * sizeof(client_ep_context_t *));
+				if (tmp_ep_contexts)
+					imss_->conns.ep_contexts = tmp_ep_contexts;
+
+				if (!tmp_peer || !tmp_eps || !tmp_id || !tmp_ep_contexts)
+				{
+					slog_error("HERCULES_ERR_ADDSERVER_MEMORY_REALLOC: Memory reallocation failed.");
+					return -1;
+				}
+
+				// Zero-initialize the newly memory blocks to prevent undefined behavior
+				for (uint32_t i = imss_->info.num_storages; i < required_capacity; ++i)
+				{
+					imss_->conns.peer_addr[i] = NULL;
+					imss_->conns.eps[i] = NULL;
+					imss_->conns.id[i] = 0;
+					imss_->conns.ep_contexts[i] = NULL;
+				}
+			}
+
+			slog_debug("connecting to %s:8500", added_hostname);
+			oob_sock = connect_common(added_hostname, 85000, AF_INET);
+			if (oob_sock < 0)
+			{
+				char err_msg[MAX_ERR_MSG_LEN] = {0};
+				sprintf(err_msg, "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%" PRIu32 " - %s:%d", id_server_to_modify, added_hostname, imss_->info.conn_port);
+				slog_error("%s", err_msg);
+				perror(err_msg);
+				return -1;
+			}
+
+			char request[REQUEST_SIZE] = {0};
+			sprintf(request, "%" PRIu32 " GET %s", arguments->args->id, "HELLO!JOIN");
 			slog_debug("request=%s", request);
-            // slog_live("ip_address=%s:%d", curr_imss.info.ips[i], curr_imss.info.conn_port);
+			// slog_live("ip_address=%s:%d", imss_->info.ips[i], imss_->info.conn_port);
 
-            if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
-            {
-                perror("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
-                slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
-                close(oob_sock);
-                return -1;
-            }
+			if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
+			{
+				perror("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
+				slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
+				close(oob_sock);
+				return -1;
+			}
 
-            ret = recv(oob_sock, &addr_len, sizeof(addr_len), MSG_WAITALL);
-            if (ret < 0)
-            {
-                perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
-                slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
-                close(oob_sock);
-                return -1;
-            }
+			ret = recv(oob_sock, &addr_len, sizeof(addr_len), MSG_WAITALL);
+			if (ret < 0)
+			{
+				perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
+				slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
+				close(oob_sock);
+				return -1;
+			}
 
-            // Store allocation persistently inside the global struct instead of a temporary block
-            curr_imss.conns.peer_addr[id_server_to_modify] = (ucp_address_t *)malloc(addr_len);
-            if (curr_imss.conns.peer_addr[id_server_to_modify] == NULL)
-            {
-                perror("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
-                slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
-                close(oob_sock);
-                exit(-1);
-            }
+			// Store allocation persistently inside the global struct instead of a temporary block
+			imss_->conns.peer_addr[id_server_to_modify] = (ucp_address_t *)malloc(addr_len);
+			if (imss_->conns.peer_addr[id_server_to_modify] == NULL)
+			{
+				perror("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
+				slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
+				close(oob_sock);
+				return -1;
+			}
 
-            ret = recv(oob_sock, curr_imss.conns.peer_addr[id_server_to_modify], addr_len, MSG_WAITALL);
-            if (ret < 0)
-            {
-                perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
-                slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
-                free(curr_imss.conns.peer_addr[id_server_to_modify]);
-                curr_imss.conns.peer_addr[id_server_to_modify] = NULL;
-                close(oob_sock);
-                return -1;
-            }
+			ret = recv(oob_sock, imss_->conns.peer_addr[id_server_to_modify], addr_len, MSG_WAITALL);
+			if (ret < 0)
+			{
+				perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
+				slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
+				free(imss_->conns.peer_addr[id_server_to_modify]);
+				imss_->conns.peer_addr[id_server_to_modify] = NULL;
+				close(oob_sock);
+				return -1;
+			}
 
-            if (close(oob_sock) < 0)
-            {
-                perror("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
-                slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
-            }
+			if (close(oob_sock) < 0)
+			{
+				perror("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
+				slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
+			}
 
-            curr_imss.conns.id[id_server_to_modify] = id_server_to_modify;
+			imss_->conns.id[id_server_to_modify] = id_server_to_modify;
 
-            client_create_ep_data(arguments->ucp_worker, &data_endpoints[id_server_to_modify], curr_imss.conns.peer_addr[id_server_to_modify], set_server_err_call_arg);
-            curr_imss.conns.eps[id_server_to_modify] = data_endpoints[id_server_to_modify];
+			client_create_ep_data(arguments->ucp_worker, &data_endpoints[id_server_to_modify], imss_->conns.peer_addr[id_server_to_modify], set_server_err_call_arg);
+			imss_->conns.eps[id_server_to_modify] = data_endpoints[id_server_to_modify];
 
-            global_malleability_t = clock() - global_malleability_t;
-            global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
-            // fprintf(stderr, "Server %" PRIu32 " connected in %.4f seconds\n", id_server_to_modify, global_malleability_time_taken);
-            slog_debug("Server %" PRIu32 " connected in %.4f seconds", id_server_to_modify, global_malleability_time_taken);
+			global_malleability_t = clock() - global_malleability_t;
+			global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
+			// fprintf(stderr, "Server %" PRIu32 " connected in %.4f seconds\n", id_server_to_modify, global_malleability_time_taken);
+			slog_debug("Server %" PRIu32 " connected in %.4f seconds", id_server_to_modify, global_malleability_time_taken);
 
-            
-            imss_info *imss_info_struct = curr_global_imss_info;
-            // num_storages is increased inside AddIPS.
-            fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
-            AddIPS(imss_info_struct, added_hostname, strlen(added_hostname));
-            slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
-            number_active_storage_servers.store(imss_info_struct->num_storages);
-            slog_debug("number_active_storage_servers=%d\n", number_active_storage_servers.load());
+			imss_info *imss_info_struct = &imss_->info;
+			// num_storages is increased inside AddIPS.
+			fprintf(stderr, "Adding %s on the data server %d.\n", added_hostname, arguments->thread_id);
+			AddIPS(imss_info_struct, added_hostname, strlen(added_hostname));
+			slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
+			number_active_storage_servers.store(imss_info_struct->num_storages);
+			curr_imss = *imss_;
+			slog_debug("number_active_storage_servers=%d, curr_imss.info.num_storages=%d\n", number_active_storage_servers.load(), curr_imss.info.num_storages);
 
-            // size_t num_elements_to_shift = update_ips_list(id_server_to_modify);
-            // Update_data_endpoint_list(id_server_to_modify, num_elements_to_shift);
-            // ReleaseSpecificDataServerNetworkResources(imss_uri, 1, id_server_to_modify, number_active_storage_servers.load());
-        }
+			// size_t num_elements_to_shift = update_ips_list(id_server_to_modify);
+			// Update_data_endpoint_list(id_server_to_modify, num_elements_to_shift);
+			// ReleaseSpecificDataServerNetworkResources(imss_uri, 1, id_server_to_modify, number_active_storage_servers.load());
+		}
 		return 1;
-    }
+	}
 	else
 	{
 		char err_msg[MAX_ERR_MSG_LEN] = {0};

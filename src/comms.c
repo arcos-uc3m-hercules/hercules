@@ -153,8 +153,8 @@ extern "C"
 		ucp_params.request_size = sizeof(struct ucx_context);
 		ucp_params.request_init = request_init;
 		ucp_params.name = "hercules";
-		// ucp_params.mt_workers_shared = UCS_THREAD_MODE_MULTI;
-		ucp_params.mt_workers_shared = 1; // UCS_THREAD_MODE_SERIALIZED;
+		ucp_params.mt_workers_shared = UCS_THREAD_MODE_MULTI;
+		// ucp_params.mt_workers_shared = 1; // UCS_THREAD_MODE_SERIALIZED;
 		// slog_info("Before ucp_init");
 		// status = ucp_init(&ucp_params, config, ucp_context);
 
@@ -243,15 +243,15 @@ extern "C"
 		// double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
 		// fprintf(stderr,"********** send data %lu time = %lf\n", msg_len, time_taken);
 		if (status != UCS_OK)
-        {
-            // slog_fatal("[COMM] Error sending to endpoint.");
-            char err_msg[MAX_ERR_MSG_LEN] = {0};
-            sprintf(err_msg, "HERCULES_ERR_SEND_DATA: %" PRIu64, from);
-            slog_fatal("%s", err_msg);
-            // fprintf(stderr, "HERCULES_ERR_SEND_DATA\n");
-            perror(err_msg);
-            return 0;
-        }
+		{
+			// slog_fatal("[COMM] Error sending to endpoint.");
+			char err_msg[MAX_ERR_MSG_LEN] = {0};
+			sprintf(err_msg, "HERCULES_ERR_SEND_DATA: %" PRIu64, from);
+			slog_fatal("%s", err_msg);
+			// fprintf(stderr, "HERCULES_ERR_SEND_DATA\n");
+			perror(err_msg);
+			return 0;
+		}
 
 		if (UCS_PTR_IS_ERR(request))
 		{
@@ -522,7 +522,7 @@ extern "C"
 
 	/**
 	 * @brief Get the recv data length with checking if the callback error catch something.
-	 * 
+	 *
 	 */
 	size_t get_recv_data_length_with_cb(ucp_worker_h ucp_worker, uint64_t dest, client_ep_context_t *ep_context)
 	{
@@ -915,7 +915,8 @@ extern "C"
 		{
 			slog_error("[err_cb_client][%s] failure handler called with status %d (%s)", arg_struct->msg, status, ucs_status_string(status));
 		}
-		if (arg_struct != NULL) {
+		if (arg_struct != NULL)
+		{
 			(*arg_struct).status = status;
 		}
 		// slog_error("[COMM] Client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
@@ -923,9 +924,9 @@ extern "C"
 		// fprintf(stderr, "[err_cb_client][%s] failure handler called with status %d (%s)\n", arg_struct->msg, status, ucs_status_string(status));
 		// if (status == UCS_ERR_ENDPOINT_TIMEOUT)
 		// {
-			// slog_error("[err_cb_client][%s] endpoint timeout error.", arg_struct->msg);
-			// fprintf(stderr, "[err_cb_client][%s] endpoint timeout error.\n", arg_struct->msg);
-			// ep_err_detected = 1;
+		// slog_error("[err_cb_client][%s] endpoint timeout error.", arg_struct->msg);
+		// fprintf(stderr, "[err_cb_client][%s] endpoint timeout error.\n", arg_struct->msg);
+		// ep_err_detected = 1;
 		// }
 		// *arg_status = status;
 		// arg_struct->status = status;
@@ -1031,6 +1032,8 @@ extern "C"
 		ucp_ep_params_t ep_params;
 		ucs_status_t status;
 		ucs_status_t ep_status = UCS_OK;
+
+		memset(&ep_params, 0, sizeof(ep_params));
 
 		client_ep_context_t *user_data_args = (client_ep_context_t *)malloc(sizeof(client_ep_context_t));
 		if (user_data_args == NULL)
@@ -1627,25 +1630,62 @@ extern "C"
 	}
 
 	// Function to flush and close the endpoint
-	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
-	{
-		// Flush the endpoint to ensure all outstanding operations are completed
-		// ucs_status_t status = ucp_ep_flush(ep);
-		// if (status != UCS_OK)
-		// {
-		// 	fprintf(stderr, "Failed to flush endpoint: %s\n", ucs_status_string(status));
-		// 	slog_error("Failed to flush endpoint: %s\n", ucs_status_string(status));
-		// }
-		// fprintf(stdout,"Closing ep %p\n", &ep);
-		ep_close(worker, ep, UCP_EP_CLOSE_MODE_FLUSH);
-		// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
+	// void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
+	// {
+	// 	// Flush the endpoint to ensure all outstanding operations are completed
+	// 	// ucs_status_t status = ucp_ep_flush(ep);
+	// 	// if (status != UCS_OK)
+	// 	// {
+	// 	// 	fprintf(stderr, "Failed to flush endpoint: %s\n", ucs_status_string(status));
+	// 	// 	slog_error("Failed to flush endpoint: %s\n", ucs_status_string(status));
+	// 	// }
+	// 	// fprintf(stdout,"Closing ep %p\n", &ep);
+	// 	ep_close(worker, ep, UCP_EP_CLOSE_MODE_FLUSH);
+	// 	// ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
 
-		// Destroy the endpoint
-		// ucp_ep_destroy(ep);
+	// 	// Destroy the endpoint
+	// 	// ucp_ep_destroy(ep);
 
-		// progress the worker
-		ucp_worker_progress(worker);
-	}
+	// 	// progress the worker
+	// 	ucp_worker_progress(worker);
+	// }
+
+void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
+{
+    if (ep == NULL) return;
+
+    fprintf(stderr, "[DEBUG] Starting ucp_ep_close_nb...\n");
+    void *request = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
+    
+    if (UCS_PTR_IS_ERR(request)) 
+    {
+        fprintf(stderr, "[DEBUG] Error en cierre: %s\n", ucs_status_string(UCS_PTR_STATUS(request)));
+        return;
+    }
+    else if (request == NULL) 
+    {
+        fprintf(stderr, "[DEBUG] Instant synchronized closing (OK).\n");
+        ucp_worker_progress(worker);
+        return;
+    }
+
+    fprintf(stderr, "[DEBUG] Asynchronous closure pending. Entering progress loop...\n");
+    ucs_status_t status;
+    unsigned long iterations = 0;
+    do {
+        ucp_worker_progress(worker);
+        status = ucp_request_check_status(request);
+        iterations++;
+        
+        // Alerta si lleva demasiados intentos esperando
+        if (iterations == 1000000) {
+            fprintf(stderr, "The endpoint has been stuck in the UCS_INPROGRESS state for 1 million iterations. Is the remote server still up?\n");
+        }
+    } while (status == UCS_INPROGRESS);
+
+    fprintf(stderr, "[DEBUG] Closure completed successfully. Releasing request.\n");
+    ucp_request_free(request);
+}
 
 	/**
 	 * Close UCP endpoint.

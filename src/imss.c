@@ -86,6 +86,7 @@ ucp_worker_h ucp_worker_meta = (ucp_worker_h)NULL;
 ucp_worker_h ucp_worker_data = (ucp_worker_h)NULL;
 ucp_address_t **stat_addr = NULL;
 ucp_ep_h *stat_eps;
+client_ep_context_t **ep_contexts;
 
 /* TCP variables. */
 char client_node[512] = {0}; // Node name where the client is running.
@@ -637,11 +638,43 @@ int32_t find_imss(const char *imss_uri, imss *imss_)
 	slog_live("imssd->len=%d", imssd->len);
 	for (int32_t i = 0; i < imssd->len; i++)
 	{
-		*imss_ = g_array_index(imssd, imss, i);
-		slog_live("imss_uri=%s, imss_->info.uri_=%s", imss_uri, imss_->info.uri_);
-		if (!strncmp(imss_uri, imss_->info.uri_, URI_))
+		// *imss_ = g_array_index(imssd, imss, i);
+		// slog_live("imss_uri=%s, imss_->info.uri_=%s", imss_uri, imss_->info.uri_);
+		// if (!strncmp(imss_uri, imss_->info.uri_, URI_))
+		// 	return i;
+		imss *current = &g_array_index(imssd, imss, i);
+
+		if (!strncmp(imss_uri, current->info.uri_, URI_))
+		{
+			if (imss_ != NULL)
+			{
+				*imss_ = *current;
+			}
 			return i;
+		}
 	}
+	return -1;
+}
+
+int32_t find_imss_pointer(const char *imss_uri, imss **out_ptr)
+{
+	slog_live("imssd->len=%d", imssd->len);
+
+	for (int32_t i = 0; i < imssd->len; i++)
+	{
+		imss *current_element = &g_array_index(imssd, imss, i);
+
+		if (!strncmp(imss_uri, current_element->info.uri_, URI_))
+		{
+			if (out_ptr != NULL)
+			{
+				*out_ptr = current_element;
+			}
+
+			return i;
+		}
+	}
+
 	return -1;
 }
 
@@ -886,6 +919,16 @@ int32_t stat_init(char *stat_hostfile,
 		exit(-1);
 	}
 
+	ep_contexts = (client_ep_context_t **)calloc(n_stat_servers, sizeof(client_ep_context_t *));
+	if (ep_contexts == NULL)
+	{
+		perror("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_EP_CONTEXTS");
+		slog_error("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_EP_CONTEXTS");
+		free(stat_ids);
+		free(stat_eps);
+		exit(-1);
+	}
+
 	char *stat_node = NULL;
 	// char *stat_node = (char *)malloc(LINE_LENGTH);
 	// if (stat_node == NULL)
@@ -1004,7 +1047,9 @@ int32_t stat_init(char *stat_hostfile,
 		}
 
 		// client_create_ep_metadata(ucp_worker_meta, &stat_eps[i], stat_addr[i]);
-		client_create_ep_data(ucp_worker_meta, &stat_eps[i], stat_addr[i], metadata_err_call_arg);
+		// client_create_ep_data(ucp_worker_meta, &stat_eps[i], stat_addr[i], metadata_err_call_arg);
+		client_create_ep_data_with_context(ucp_worker_meta, &stat_eps[i], stat_addr[i], metadata_err_call_arg, &ep_contexts[i]);
+		// client_create_ep_data_with_context(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], client_err_call_arg, &new_imss.conns.ep_contexts[i]);
 
 		slog_debug("created ep with %s:%ld", stat_node, port);
 	}
@@ -1584,43 +1629,54 @@ int32_t AddBackEndServer2Imss(char *imss_uri)
 {
 	ucp_address_t **temp_peer_addr = NULL;
 	ucp_ep_h *temp_eps = NULL;
-	uint32_t *temp_id = 0;
+	uint32_t *temp_id = NULL;
+	client_ep_context_t **temp_ep_contexts = NULL;
 
-	slog_debug("[IMSS]session_policy curr_imss.info.num_active_storages=%ld, num_storages=%ld", curr_imss.info.num_active_storages, curr_imss.info.num_storages);
+	slog_debug("[IMSS] session_policy curr_imss.info.num_active_storages=%ld, num_storages=%ld", curr_imss.info.num_active_storages, curr_imss.info.num_storages);
 
+	// Reallocate peer_addr
 	temp_peer_addr = (ucp_address_t **)realloc(curr_imss.conns.peer_addr, curr_imss.info.num_storages * sizeof(*curr_imss.conns.peer_addr));
 	if (temp_peer_addr == NULL)
 	{
-		fprintf(stderr, "Error: realloc failed!\n");
+		slog_error("HERCULES_ERR_REALLOC_FAILED: Failed to reallocate temp_peer_addr");
+		return -1;
 	}
-	else
-	{
-		curr_imss.conns.peer_addr = temp_peer_addr;
-	}
+	curr_imss.conns.peer_addr = temp_peer_addr;
 
+	// Reallocate endpoints (eps)
 	temp_eps = (ucp_ep_h *)realloc(curr_imss.conns.eps, curr_imss.info.num_storages * sizeof(ucp_ep_h));
 	if (temp_eps == NULL)
 	{
-		fprintf(stderr, "Error: realloc failed for temp_eps\n");
+		slog_error("HERCULES_ERR_REALLOC_FAILED: Failed to reallocate temp_eps");
+		return -1;
 	}
-	else
-	{
-		curr_imss.conns.eps = temp_eps;
-	}
+	curr_imss.conns.eps = temp_eps;
 
+	// Reallocate IDs
 	temp_id = (uint32_t *)realloc(curr_imss.conns.id, curr_imss.info.num_storages * sizeof(uint32_t));
-	if (temp_eps == NULL)
+	if (temp_id == NULL)
 	{
-		fprintf(stderr, "Error: realloc failed for temp_eps\n");
+		slog_error("HERCULES_ERR_REALLOC_FAILED: Failed to reallocate temp_id");
+		return -1;
 	}
-	else
-	{
-		curr_imss.conns.id = temp_id;
-	}
+	curr_imss.conns.id = temp_id;
 
+	// Reallocate Endpoint Contexts to match the new storage count
+	temp_ep_contexts = (client_ep_context_t **)realloc(curr_imss.conns.ep_contexts, curr_imss.info.num_storages * sizeof(client_ep_context_t *));
+	if (temp_ep_contexts == NULL)
+	{
+		slog_error("HERCULES_ERR_REALLOC_FAILED: Failed to reallocate temp_ep_contexts");
+		return -1;
+	}
+	curr_imss.conns.ep_contexts = temp_ep_contexts;
+
+	// Index of the newly added server
 	int i = curr_imss.info.num_storages - 1;
 
-	// skip current server.
+	// Initialize the new context pointer to NULL before creation
+	curr_imss.conns.ep_contexts[i] = NULL;
+
+	// Out-of-band connection to the new server
 	int oob_sock = -1;
 	size_t addr_len = 0;
 	int ret = 0;
@@ -1628,32 +1684,25 @@ int32_t AddBackEndServer2Imss(char *imss_uri)
 	oob_sock = connect_common(curr_imss.info.ips[i], curr_imss.info.conn_port, AF_INET);
 	if (oob_sock < 0)
 	{
-		char err_msg[MAX_ERR_MSG_LEN];
-		sprintf(err_msg, "HERCULES_ERR_OPEN_IMSS_CONNECT_COMMON - i=%d - %s:%d", i, curr_imss.info.ips[i], curr_imss.info.conn_port);
-		slog_error("%s", err_msg);
-		perror(err_msg);
+		slog_error("HERCULES_ERR_OPEN_IMSS_CONNECT_COMMON - i=%d - %s:%d", i, curr_imss.info.ips[i], curr_imss.info.conn_port);
 		return -1;
 	}
 
 	char request[REQUEST_SIZE] = {0};
 	sprintf(request, "%" PRIu32 " GET %s", process_rank, "HELLO!JOIN");
-	slog_live("ip_address=%s:%d", curr_imss.info.ips[i], curr_imss.info.conn_port);
-	// fprintf(stderr, "ip_address=%s:%d\n", curr_imss.info.ips[i], curr_imss.info.conn_port);
-
-	slog_live("Sending request %s", request);
 
 	if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
 	{
-		perror("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
-		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
+		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST: Failed to send JOIN request");
+		close(oob_sock);
 		return -1;
 	}
 
+	// Receive address length and the address itself
 	ret = recv(oob_sock, &addr_len, sizeof(addr_len), MSG_WAITALL);
 	if (ret < 0)
 	{
-		perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
-		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
+		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN: Failed to receive address length");
 		close(oob_sock);
 		return -1;
 	}
@@ -1661,45 +1710,40 @@ int32_t AddBackEndServer2Imss(char *imss_uri)
 	curr_imss.conns.peer_addr[i] = (ucp_address *)malloc(addr_len);
 	if (curr_imss.conns.peer_addr[i] == NULL)
 	{
-		perror("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
-		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
-		exit(-1);
+		slog_error("HERCULES_ERR_IMSS_MALLOC_FAILED: Failed to allocate peer_addr memory");
+		close(oob_sock);
+		return -1;
 	}
 
 	ret = recv(oob_sock, curr_imss.conns.peer_addr[i], addr_len, MSG_WAITALL);
 	if (ret < 0)
 	{
-		perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
-		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
+		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR: Failed to receive peer address");
 		close(oob_sock);
 		return -1;
 	}
-
-	if (close(oob_sock) < 0)
-	{
-		perror("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
-		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
-	}
+	close(oob_sock);
 
 	curr_imss.conns.id[i] = i;
-	// Save the current socket value when the IMSS ip matches the clients' one.
-	slog_debug("ips=%s, client_node=%s, client_ip=%s", (curr_imss.info.ips)[i], client_node, client_ip);
-	if (!strncmp((curr_imss.info.ips)[i], client_node, len_client_node) || !strncmp((curr_imss.info.ips)[i], client_ip, strlen(curr_imss.info.ips[i])))
+
+	// Check if the new server matches the local node/IP
+	if (!strncmp((curr_imss.info.ips)[i], client_node, len_client_node) ||
+	    !strncmp((curr_imss.info.ips)[i], client_ip, strlen(curr_imss.info.ips[i])))
 	{
-		slog_debug("This process is attached to the server %s:%d", curr_imss.info.ips[i], i);
-		curr_imss.conns.matching_server = i; // TOCHECK: this is used on other parts of the program that are not related to the LOCAL policy.
+		curr_imss.conns.matching_server = i;
 		matching_server_id = i;
-		// strcpy(att_deployment, imss_uri);
 	}
 
-	client_create_ep_data(ucp_worker_data, &curr_imss.conns.eps[i], curr_imss.conns.peer_addr[i], add_server_err_call_arg);
-	slog_debug("[IMSS] Created endpoint with %s, curr_imss.info.num_storages=%d", (curr_imss.info.ips)[i], curr_imss.info.num_storages);
-	fprintf(stderr, "[IMSS] Created endpoint with %s, curr_imss.info.num_storages=%d\n", (curr_imss.info.ips)[i], curr_imss.info.num_storages);
-	// fprintf(stderr, "[IMSS] Created endpoint with %s\n", (curr_imss.info.ips)[i]);
-	// }
+	// Create the UCX endpoint
+	client_create_ep_data_with_context(ucp_worker_data,
+					   &curr_imss.conns.eps[i],
+					   curr_imss.conns.peer_addr[i],
+					   add_server_err_call_arg,
+					   &curr_imss.conns.ep_contexts[i]);
 
-	// GInsert(&imssd_pos, &imssd_max_size, (char *)&curr_imss, imssd, free_imssd);
-	// Updates the structure on the GArray.
+	slog_debug("[IMSS] Created endpoint with %s, total storages=%d", (curr_imss.info.ips)[i], curr_imss.info.num_storages);
+
+	// Update the IMSS structure in the global registry
 	g_array_remove_index(imssd, curr_dataset->imss_d);
 	g_array_insert_val(imssd, curr_dataset->imss_d, curr_imss);
 
@@ -3267,10 +3311,13 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id)
 	{
 		int32_t server_id = repl_servers[i];
 		ucp_ep_h ep = curr_imss.conns.eps[server_id];
+		// char *node_hostname = curr_imss.info.ips[server_id];
+		char node_hostname[512];
+		strncpy(node_hostname, curr_imss.info.ips[server_id], 512);
 
 		// Format the unlink request.
 		sprintf(key_, "GET %d 0 %s$0 %d", UNLINK_OP, dataset_uri, curr_dataset->n_open);
-		slog_debug("Request to data %d (%s) - %s", i, curr_imss.info.ips[server_id], key_);
+		slog_debug("Request to data %d (%s) - %s", i, node_hostname, key_);
 
 		size_t size_sent_req = send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_);
 		if (size_sent_req == 0)
@@ -3280,7 +3327,25 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id)
 			pthread_mutex_unlock(&lock_network);
 
 			// check for malleability changes and retry.
-			if (get_malleability_changes((char *)dataset_uri) == 1)
+			int changes_found = get_malleability_changes((char *)dataset_uri);
+			if (changes_found == 0)
+			{
+				// try to connect again to the server.
+				int new_number_of_data_servers = curr_imss.info.num_storages - 1;
+				ReleaseSpecificDataServerNetworkResources("imss://", 1, server_id, new_number_of_data_servers);
+				PrintIntervals(curr_dataset);
+				SetInterval(curr_dataset, new_number_of_data_servers, 0, 0);
+				SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+				AddIPS(&curr_imss.info, node_hostname, strlen(node_hostname));
+				int backed_added = AddBackEndServer2Imss(IMSS_ROOT);
+				if (backed_added != -1)
+				{
+					// if the new conecction to the backed server was added we changes
+					// this to retry the function.
+					changes_found = 1;
+				}
+			}
+			if (changes_found == 1)
 			{
 				return unlink_dataset(dataset_uri, dataset_id);
 			}
@@ -3302,7 +3367,25 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id)
 			slog_error("ERR_HERCULES_UNLINK_CONNECTION_LOST: The remote server disconnected.");
 			pthread_mutex_unlock(&lock_network);
 
-			if (get_malleability_changes((char *)dataset_uri) == 1)
+			int changes_found = get_malleability_changes((char *)dataset_uri);
+			if (changes_found == 0)
+			{
+				// try to connect again to the server.+
+				int new_number_of_data_servers = curr_imss.info.num_storages - 1;
+				ReleaseSpecificDataServerNetworkResources("imss://", 1, server_id, new_number_of_data_servers);
+				PrintIntervals(curr_dataset);
+				SetInterval(curr_dataset, new_number_of_data_servers, 0, 0);
+				SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+				AddIPS(&curr_imss.info, node_hostname, strlen(node_hostname));
+				int backed_added = AddBackEndServer2Imss(IMSS_ROOT);
+				if (backed_added != -1)
+				{
+					// if the new conecction to the backed server was added we changes
+					// this to retry the function.
+					changes_found = 1;
+				}
+			}
+			if (changes_found == 1)
 			{
 				return unlink_dataset(dataset_uri, dataset_id);
 			}
@@ -4829,7 +4912,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	size_t msg_length = 0;
 	char mode[MODE_SIZE] = {0};
 	pthread_mutex_lock(&lock_network);
-	char *node_hostname = NULL;
+	// char *node_hostname = NULL;
 	key_t shm_key = -1;
 	int shm_id = -1;
 	int server_id = -1;
@@ -4869,7 +4952,9 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 
 		//  Key related to the requested data element.
 		ep = curr_imss.conns.eps[server_id];
-		node_hostname = curr_imss.info.ips[server_id];
+		// node_hostname = curr_imss.info.ips[server_id];
+		char node_hostname[512];
+		strncpy(node_hostname, curr_imss.info.ips[server_id], 512);
 
 		slog_debug("[IMSS] Request to data %d (%s) - '%s' to server %d (%s)", n_server_, node_hostname, key_, server_id, curr_imss.info.ips[server_id]);
 		size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
@@ -4884,10 +4969,32 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			// uint64_t ret_ds = 0;
 			// open_dataset(dataset_uri, 1);
 			pthread_mutex_unlock(&lock_network);
-			if (get_malleability_changes(dataset_uri) == 1)
+			// if (get_malleability_changes(dataset_uri) == 1)
+			// {
+			// 	// changes found, malleability was applied.
+			// 	// to try the same operation.
+			// 	return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request);
+			// }
+			int changes_found = get_malleability_changes((char *)dataset_uri);
+			if (changes_found == 0)
 			{
-				// changes found, malleability was applied.
-				// to try the same operation.
+				// try to connect again to the server.+
+				int new_number_of_data_servers = curr_imss.info.num_storages - 1;
+				ReleaseSpecificDataServerNetworkResources("imss://", 1, server_id, new_number_of_data_servers);
+				PrintIntervals(curr_dataset);
+				SetInterval(curr_dataset, new_number_of_data_servers, 0, 0);
+				SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+				AddIPS(&curr_imss.info, node_hostname, strlen(node_hostname));
+				int backed_added = AddBackEndServer2Imss(IMSS_ROOT);
+				if (backed_added != -1)
+				{
+					// if the new conecction to the backed server was added we changes
+					// this to retry the function.
+					changes_found = 1;
+				}
+			}
+			if (changes_found == 1)
+			{
 				return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request);
 			}
 			return -2;
@@ -4915,10 +5022,32 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			perror("ERR_HERCULES_GET_NDATA_CONNECTION_LOST");
 			slog_error("ERR_HERCULES_GET_NDATA_CONNECTION_LOST: The remote server has disconnected.");
 			pthread_mutex_unlock(&lock_network);
-			if (get_malleability_changes(dataset_uri) == 1)
+			// if (get_malleability_changes(dataset_uri) == 1)
+			// {
+			// 	// changes found, malleability was applied.
+			// 	// to try the same operation.
+			// 	return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request);
+			// }
+			int changes_found = get_malleability_changes((char *)dataset_uri);
+			if (changes_found == 0)
 			{
-				// changes found, malleability was applied.
-				// to try the same operation.
+				// try to connect again to the server.
+				int new_number_of_data_servers = curr_imss.info.num_storages - 1;
+				ReleaseSpecificDataServerNetworkResources("imss://", 1, server_id, new_number_of_data_servers);
+				PrintIntervals(curr_dataset);
+				SetInterval(curr_dataset, new_number_of_data_servers, 0, 0);
+				SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+				AddIPS(&curr_imss.info, node_hostname, strlen(node_hostname));
+				int backed_added = AddBackEndServer2Imss(IMSS_ROOT);
+				if (backed_added != -1)
+				{
+					// if the new conecction to the backed server was added we changes
+					// this to retry the function.
+					changes_found = 1;
+				}
+			}
+			if (changes_found == 1)
+			{
 				return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request);
 			}
 
@@ -5024,7 +5153,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			pthread_mutex_unlock(&lock_network);
 			int32_t changes_found = parse_malleability_message(response_buffer);
 			slog_debug("changes_found=%d", changes_found);
-			free(response_buffer);
+			// free(response_buffer);
+			// response_buffer = NULL;
 			if (changes_found > 0)
 			{
 				// to try the same operation.
@@ -5624,7 +5754,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		return -ECANCELED;
 	}
 
-	int32_t session_policy = curr_dataset->session_plcy; // get_policy();
+	int32_t session_policy = curr_dataset->session_plcy;
 
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE] = {0};
@@ -5644,16 +5774,18 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		curr_dataset->first_block_id = data_id;
 	}
 
-	char *node_hostname = NULL;
+	// char *node_hostname = NULL;
+	char node_hostname[512];
 	int use_local = 0;
 	int server_id = 0;
+
 	// Send the data block to every server implementing redundancy.
 	for (int32_t i = 0; i < curr_dataset->repl_factor; i++)
 	{
 		ucp_ep_h ep;
-		server_id = i;
 		// Server receiving the current data block.
 		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
+		server_id = n_server_;
 		use_local = ((session_policy == LOCAL_ || session_policy == ZCOPY_) && server_id == matching_server_id);
 
 		if (data_id == 0)
@@ -5661,196 +5793,203 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		else if (size == 0)
 			size = curr_dataset->data_entity_size;
 
+		ep = curr_imss.conns.eps[n_server_];
+		// node_hostname = curr_imss.info.ips[n_server_];
+		strncpy(node_hostname, curr_imss.info.ips[server_id], 512);
+		client_ep_context_t *this_context = curr_imss.conns.ep_contexts[n_server_];
+		if (this_context != NULL)
+		{
+			this_context->status = UCS_OK;
+		}
+
 		// when "LOCAL" or "ZCOPY_" is in use, we copy the data to shared memory.
 		if (use_local)
 		{
-			// Get the shared memory key and tries to create the shared memory region (pool).
 			key_t shm_key = getKeySMByBlock(dataset_uri, data_id);
-			// fprintf(stderr, "using key %d for file %s$%d and size %d\n", shm_key, dataset_uri, data_id, size);
 			int shm_id = getIdentifierSM(shm_key, size);
 			if (shm_id == -1)
 			{
-				fprintf(stderr, "Cannot generated a valid id for file %s$%d key %d with size %zu\n", dataset_uri, data_id, shm_key, size);
-				perror("HERCULES_ERR_SET_DATA_GET_IDENTIFIER_INVALID_SHM_ID");
-				slog_error("HERCULES_ERR_SET_DATA_GET_IDENTIFIER_INVALID_SHM_ID");
+				slog_error("HERCULES_ERR_SET_DATA_GET_IDENTIFIER_INVALID_SHM_ID: key %d size %zu", shm_key, size);
 				pthread_mutex_unlock(&lock_network);
-				// exit(-1);
 				return -ECANCELED;
 			}
-
-			slog_info("Generated id %d for key %d", shm_id, shm_key);
 
 			void *content = setContentSMByID(shm_id, size, buffer);
 
-			// Send the request to the server to copy from the shared memory to the private memory.
-			ep = curr_imss.conns.eps[n_server_];
-			node_hostname = curr_imss.info.ips[n_server_];
 			sprintf(key_, "LOCALSETBLOCK %lu %ld %d %s$%d", size, offset, shm_id, curr_dataset->uri_, data_id);
-			slog_info("BLOCK %d SENT TO DATA SERVER %d (%s) with Request: %s (%d)", data_id, n_server_, node_hostname, key_, size);
-			// fprintf(stderr, "BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%d)\n", data_id, n_server_, node_hostname, key_, size);
 
-			// send the request to the data server, indicating we will perform a local write operation (LOCALSETBLOCK).
-			if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
+			size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), "send_req", size_t, process_rank);
+			if (size_sent_req == 0)
 			{
-				perror("ERR_HERCULES_LOCAL_SET_REQ_SEND_LOCAL_REQ");
-				slog_error("ERR_HERCULES_LOCAL_SET_REQ_SEND_LOCAL_REQ");
+				slog_error("HERCULES_ERR_SET_DATA_SEND_REQ: Failed to send local request");
 				pthread_mutex_unlock(&lock_network);
-				return -ECANCELED;
-				// exit(-1);
-			}
 
-			// confirmation from the server to detach the memory.
-			// TOCHECK
-			clock_t t;
-			double time_taken = 0.0;
-			t = clock();
-			msg_length = TIMING(get_recv_data_length(ucp_worker_data, local_data_uid), "get_recv_data_length", size_t, process_rank);
-			t = clock() - t;
-			time_taken = ((double)t) / (CLOCKS_PER_SEC);
-			// ucp_tag_recv_info_t info_tag;
-			// ucp_tag_message_h msg_tag;
-			// msg_length = TIMING(get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t, process_rank);
-			slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
-			if (msg_length == 0)
-			{
-				perror("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
-				slog_error("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
-				pthread_mutex_unlock(&lock_network);
+				// Fault Tolerance Block
+				int changes_found = get_malleability_changes((char *)dataset_uri);
+				if (changes_found == 0)
+				{
+					int new_number_of_data_servers = curr_imss.info.num_storages - 1;
+					ReleaseSpecificDataServerNetworkResources("imss://", 1, server_id, new_number_of_data_servers);
+					PrintIntervals(curr_dataset);
+					SetInterval(curr_dataset, new_number_of_data_servers, 0, 0);
+					SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+					AddIPS(&curr_imss.info, node_hostname, strlen(node_hostname));
+					if (AddBackEndServer2Imss(IMSS_ROOT) != -1)
+						changes_found = 1;
+				}
+				if (changes_found == 1)
+					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async);
+
 				return -ECANCELED;
 			}
 
-			void *response_buffer = (void *)malloc(msg_length * sizeof(char));
-			if (response_buffer == NULL)
+			// Receive confirmation from the server to detach the memory.
+			msg_length = TIMING(get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context), "get_recv_data_length", size_t, process_rank);
+			if (msg_length == (size_t)-1)
 			{
-				perror("HERCULES_ERR_SET_NDATA_MEMORY_ALLOCATION");
-				slog_error("HERCULES_ERR_SET_NDATA_MEMORY_ALLOCATION");
+				slog_error("ERR_HERCULES_SET_DATA_CONNECTION_LOST: Remote server disconnected");
 				pthread_mutex_unlock(&lock_network);
+
+				// Fault Tolerance Block
+				int changes_found = get_malleability_changes((char *)dataset_uri);
+				if (changes_found == 0)
+				{
+					int new_number_of_data_servers = curr_imss.info.num_storages - 1;
+					ReleaseSpecificDataServerNetworkResources("imss://", 1, server_id, new_number_of_data_servers);
+					PrintIntervals(curr_dataset);
+					SetInterval(curr_dataset, new_number_of_data_servers, 0, 0);
+					SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+					AddIPS(&curr_imss.info, node_hostname, strlen(node_hostname));
+					if (AddBackEndServer2Imss(IMSS_ROOT) != -1)
+						changes_found = 1;
+				}
+				if (changes_found == 1)
+					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async);
+
 				return -ECANCELED;
 			}
-			size_t size_received_data = recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async);
 
-			free(response_buffer);
+			if (msg_length > 0)
+			{
+				void *response_buffer = malloc(msg_length);
+				recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async);
+				free(response_buffer);
+			}
 
-			// detach shared memory.
-			// unlinkSM(sh_memory_struct->content);
 			unlinkSM(content);
-			// free(sh_memory_struct);
-
-			slog_info("[IMSS] Block has been sent");
+			slog_info("[IMSS] Local block has been processed");
 		}
 		else
 		{ // non LOCAL policy.
 			sprintf(key_, "SET %lu %ld %s$%d %" PRIu32, size, offset, curr_dataset->uri_, data_id, curr_imss_storages);
-			// slog_info("[IMSS] BLOCK %d SENT TO SERVER %d  with Request: %s (%d)", data_id, n_server_, key_, size);
-			node_hostname = curr_imss.info.ips[n_server_];
-			slog_info("[IMSS] BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%d)", data_id, n_server_, node_hostname, key_, size);
 
-			ep = curr_imss.conns.eps[n_server_];
-
-			clock_t t;
-			double time_taken;
-			t = clock();
-			// send the request to the data server, indicating we will perform a write operation (SET) to certain data block (data_id) in a dataset (curr_dataset->uri).
+			clock_t t = clock();
 			size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), "send_req", size_t, process_rank);
 			if (size_sent_req == 0)
 			{
-				// fprintf(stderr, "********** current server status = %d\n", curr_imss.info.status[n_server_]);
-				perror("HERCULES_ERR_SET_REQ_SEND_REQ");
 				slog_error("HERCULES_ERR_SET_REQ_SEND_REQ");
 				pthread_mutex_unlock(&lock_network);
-				exit(-1);
+
+				// Fault Tolerance Block
+				int changes_found = get_malleability_changes((char *)dataset_uri);
+				if (changes_found == 0)
+				{
+					int new_number_of_data_servers = curr_imss.info.num_storages - 1;
+					ReleaseSpecificDataServerNetworkResources("imss://", 1, server_id, new_number_of_data_servers);
+					PrintIntervals(curr_dataset);
+					SetInterval(curr_dataset, new_number_of_data_servers, 0, 0);
+					SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+					AddIPS(&curr_imss.info, node_hostname, strlen(node_hostname));
+					if (AddBackEndServer2Imss(IMSS_ROOT) != -1)
+						changes_found = 1;
+				}
+				if (changes_found == 1)
+					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async);
+
+				return -ECANCELED;
 			}
+
 			size_t size_sent_data = 0;
 			if (async == ASYNC)
-			{ // async send.
+			{
 				async_data_worker_progress(curr_imss_storages);
-
 				ServerSendRequest *new_send = new ServerSendRequest();
-				void *ucx_req_handle = isend_data2(ucp_worker_data, ep, buffer, size, local_data_uid, new_send);
-				// if (UCS_PTR_IS_ERR(ucx_req_handle))
-				// {
-				// 	slog_error("Failed to initiate async send on server.");
-				// 	fprintf(stderr, "Error: Failed to initiate async send on server.\n");
-				// 	// The send function already cleaned up new_send.
-				// }
-				// else
-				// {
-				// 	size_sent_data = size;
-				// }
+				void *ucx_req_handle = isend_data2(ucp_worker_data, ep, (void *)buffer, size, local_data_uid, new_send);
 				if (UCS_PTR_IS_PTR(ucx_req_handle))
 				{
-					// The request is sending. The callback will handle cleanup.
 					size_sent_data = size;
 					outstanding_sends++;
 				}
-				else if (UCS_PTR_IS_ERR(ucx_req_handle))
+				else if (!UCS_PTR_IS_ERR(ucx_req_handle))
 				{
-					slog_error("Failed to initiate async send on server.");
-					fprintf(stderr, "Failed to initiate async send on server.");
-					// The send function already cleaned up new_send.
+					size_sent_data = size;
 				}
 				else
 				{
-					// It completed immediately. The send function also cleaned up.
-					size_sent_data = size;
+					slog_error("Failed to initiate async send");
 				}
 			}
 			else
 			{
-				char *response_buffer = NULL;
-				int32_t size_received_data = wait_ack_set_data(&response_buffer, ep, async);
-				if (size_received_data < 0)
+				// Receive ACK with fault tolerance checks
+				msg_length = TIMING(get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context), "get_recv_data_length", size_t, process_rank);
+				if (msg_length == (size_t)-1)
 				{
+					slog_error("ERR_HERCULES_SET_DATA_CONNECTION_LOST");
 					pthread_mutex_unlock(&lock_network);
+
+					// Fault Tolerance Block
+					int changes_found = get_malleability_changes((char *)dataset_uri);
+					if (changes_found == 0)
+					{
+						int new_number_of_data_servers = curr_imss.info.num_storages - 1;
+						ReleaseSpecificDataServerNetworkResources("imss://", 1, server_id, new_number_of_data_servers);
+						PrintIntervals(curr_dataset);
+						SetInterval(curr_dataset, new_number_of_data_servers, 0, 0);
+						SetInterval(curr_dataset, new_number_of_data_servers, curr_dataset->first_block_id, curr_dataset->last_block_id);
+						AddIPS(&curr_imss.info, node_hostname, strlen(node_hostname));
+						if (AddBackEndServer2Imss(IMSS_ROOT) != -1)
+							changes_found = 1;
+					}
+					if (changes_found == 1)
+						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async);
+
 					return -ECANCELED;
 				}
 
-				if (!strncmp(response_buffer, MSG_SPACE_OP, strlen(response_buffer)))
+				char *response_buffer = (char *)malloc(msg_length + 1);
+				recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async);
+				response_buffer[msg_length] = '\0';
+
+				if (!strncmp(response_buffer, MSG_SPACE_OP, strlen(MSG_SPACE_OP)))
 				{
-					slog_error("No space left");
+					slog_error("No space left on server");
 					free(response_buffer);
 					pthread_mutex_unlock(&lock_network);
 					return -EAGAIN;
 				}
 				else if (!strncmp(MSG_MALLEABILITY_DATASERVERS, (const char *)response_buffer, strlen(MSG_MALLEABILITY_DATASERVERS)))
-				{ // remote server is on a malleability stage.
-					slog_debug(" result=%s, msg_length=%d", response_buffer, msg_length);
-					int32_t changes_found = parse_malleability_message(response_buffer);
-					slog_debug("changes_found=%d", changes_found);
-
+				{
+					int32_t changes = parse_malleability_message(response_buffer);
 					free(response_buffer);
 					pthread_mutex_unlock(&lock_network);
-					if (changes_found > 0)
-					{
+					if (changes > 0)
 						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async);
-					}
-					else
-					{
-						return -ECANCELED;
-					}
-				}
-				else if (strncmp(response_buffer, MSG_OK_OP, 2) != 0)
-				{
-					slog_debug("Server response with a unkown expected message.");
-					pthread_mutex_unlock(&lock_network);
 					return -ECANCELED;
 				}
 
 				free(response_buffer);
-				slog_debug("Sending data of %s", dataset_uri);
-				// send the data to the data server of the current dataset.
+
+				// Perform actual data transfer
 				size_sent_data = TIMING(send_data(ucp_worker_data, ep, buffer, size, local_data_uid), "send_data", size_t, process_rank);
 				if (size_sent_data == 0)
 				{
-					perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
-					slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
+					slog_error("HERCULES_ERR_SEND_DATA_FAILED");
 					pthread_mutex_unlock(&lock_network);
 					return -ECANCELED;
 				}
 
-				t = clock() - t;
-				time_taken = ((double)t) / (CLOCKS_PER_SEC);
-				// performance metrics.
+				double time_taken = ((double)(clock() - t)) / (CLOCKS_PER_SEC);
 				std::string used_hostname_server = curr_imss.info.ips[n_server_];
 				backend_performance_metrics[used_hostname_server].write.total_data_size += (size_sent_req + size_sent_data);
 				backend_performance_metrics[used_hostname_server].write.total_data_time += time_taken;
