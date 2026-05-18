@@ -3146,7 +3146,7 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 
 	pthread_mutex_lock(&lock_network);
 
-	slog_debug("[IMSS] formated_uri='%s'", formated_uri);
+	slog_debug("[IMSS] Sending request to metadata server='%s'", formated_uri);
 	msg_length = send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri);
 	slog_debug("[IMSS] after send_req, ret=%lu", msg_length);
 	if (msg_length == 0)
@@ -3290,7 +3290,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 
 	pthread_mutex_lock(&lock_network);
 
-	slog_debug("[IMSS] formated_uri='%s'", formated_uri);
+	slog_debug("[IMSS] Sending request to metadata server='%s'", formated_uri);
 	// Send the request set the current dataset as closed on the metadata server.
 	msg_length = send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri);
 	slog_debug("[IMSS] after send_req, ret=%lu", msg_length);
@@ -4798,6 +4798,10 @@ IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval,
 {
 	if (curr_dataset->intervals == NULL)
 	{
+		if (curr_dataset->capacity <= 0)
+		{
+			curr_dataset->capacity = MAX_NUM_INTERVALS;
+		}
 		slog_debug("Alloc memory for %d intervals\n", curr_dataset->capacity);
 		curr_dataset->intervals = (IntervalEntry **)calloc(curr_dataset->capacity, sizeof(IntervalEntry *));
 	}
@@ -4821,15 +4825,16 @@ IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval,
 		// }
 		// TODO: mix with the previous if.
 		// expected interval is equals or is between the compared one.
-		if (left_interval >= curr_interval->left_interval && right_interval <= curr_interval->right_interval)
+		// if (left_interval >= curr_interval->left_interval && right_interval <= curr_interval->right_interval)
+		if (left_interval <= curr_interval->right_interval && right_interval >= curr_interval->left_interval)
 		{
 			slog_debug("Interval [%d,%d] found", curr_interval->left_interval, curr_interval->right_interval);
 			return curr_interval;
 		}
 
-		if (left_interval >= curr_interval->left_interval && right_interval <= curr_interval->right_interval)
-		{
-		}
+		// if (left_interval >= curr_interval->left_interval && right_interval <= curr_interval->right_interval)
+		// {
+		// }
 	}
 	slog_debug("Interval [%d,%d] NOT found", left_interval, right_interval);
 	return NULL;
@@ -4851,34 +4856,93 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 		return;
 	}
 
-	// Check if the current interval exists.
-	IntervalEntry *entry = GetIntervalPointer(curr_dataset, left_interval, right_interval);
-	if (entry == NULL)
+	if (curr_dataset->intervals == NULL)
 	{
-		// fprintf(stderr, "Making interval [%d, %d]=%d\n", left_interval, right_interval, value);
-		slog_debug("Making interval number %d of size %d, [%d, %d]=%d", curr_dataset->num_intervals, right_interval - left_interval + 1, left_interval, right_interval, value);
-		// Create a new IntervalEntry and populate it
-		IntervalEntry *new_entry = (IntervalEntry *)calloc(1, sizeof(IntervalEntry));
-		new_entry->value = value;
-		new_entry->left_interval = left_interval;
-		new_entry->right_interval = right_interval;
-
-		// Add the new entry to the end of the array
-		curr_dataset->intervals[curr_dataset->num_intervals] = new_entry;
-		curr_dataset->num_intervals++;
+		if (curr_dataset->capacity <= 0)
+		{
+			curr_dataset->capacity = MAX_NUM_INTERVALS;
+		}
+		slog_debug("Alloc memory for %d intervals\n", curr_dataset->capacity);
+		curr_dataset->intervals = (IntervalEntry **)calloc(curr_dataset->capacity, sizeof(IntervalEntry *));
 	}
-	else
+
+	// Resolve overlaps with existing intervals
+	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
 	{
-		// fprintf(stderr, "Updating interval [%d, %d]=%d-->[%d, %d]=%d\n", entry->left_interval, entry->right_interval, entry->value, left_interval, right_interval, value);
-		// if (left_interval == 0 && right_interval == 0)
-		// { // skip updating block zero.
-		// 	return;
-		// }
+		IntervalEntry *curr = curr_dataset->intervals[i];
 
-		slog_debug("Updating interval [%d, %d]=%d-->[%d, %d]=%d", entry->left_interval, entry->right_interval, entry->value, left_interval, right_interval, value);
-		entry->right_interval = right_interval;
-		entry->value = value;
+		// Check if an overlap exists
+		if (left_interval <= curr->right_interval && right_interval >= curr->left_interval)
+		{
+			// existing interval is completely encompassed by the new one
+			if (left_interval <= curr->left_interval && right_interval >= curr->right_interval)
+			{
+				slog_debug("Eclipsing interval [%d, %d]", curr->left_interval, curr->right_interval);
+				// Invalidate the interval for cleanup later
+				curr->right_interval = curr->left_interval - 1;
+			}
+
+			// incoming interval overlaps the right half of the existing interval
+			else if (left_interval > curr->left_interval && left_interval <= curr->right_interval)
+			{
+				slog_debug("Truncating right side of [%d, %d] to [%d, %d]",
+					   curr->left_interval, curr->right_interval,
+					   curr->left_interval, left_interval - 1);
+				curr->right_interval = left_interval - 1;
+			}
+			// incoming interval overlaps the left half of the existing interval
+			else if (right_interval < curr->right_interval && right_interval >= curr->left_interval)
+			{
+				slog_debug("Truncating left side of [%d, %d] to [%d, %d]",
+					   curr->left_interval, curr->right_interval,
+					   right_interval + 1, curr->right_interval);
+				curr->left_interval = right_interval + 1;
+			}
+		}
 	}
+
+	// remove invalidated intervals and compact the array
+	size_t valid_count = 0;
+	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
+	{
+		IntervalEntry *curr = curr_dataset->intervals[i];
+		if (curr->left_interval <= curr->right_interval)
+		{
+			curr_dataset->intervals[valid_count++] = curr;
+		}
+		else
+		{
+			free(curr);
+		}
+	}
+	curr_dataset->num_intervals = valid_count;
+	slog_debug("curr_dataset->num_intervals=%d, curr_dataset->capacity=%d", curr_dataset->num_intervals, curr_dataset->capacity);
+	// expand capacity safely if needed
+	if (curr_dataset->num_intervals >= curr_dataset->capacity)
+	{
+		curr_dataset->capacity = (curr_dataset->capacity == 0) ? MAX_NUM_INTERVALS : curr_dataset->capacity * 2;
+		IntervalEntry **temp = (IntervalEntry **)realloc(curr_dataset->intervals, curr_dataset->capacity * sizeof(IntervalEntry *));
+		if (!temp)
+		{
+			slog_error("HERCULES_ERR_SET_INTERVAL: Memory reallocation failed");
+			return;
+		}
+		curr_dataset->intervals = temp;
+	}
+
+	// Insert the new interval
+	IntervalEntry *new_entry = (IntervalEntry *)calloc(1, sizeof(IntervalEntry));
+	new_entry->value = value;
+	new_entry->left_interval = left_interval;
+	new_entry->right_interval = right_interval;
+
+	curr_dataset->intervals[curr_dataset->num_intervals] = new_entry;
+	curr_dataset->num_intervals++;
+
+	slog_debug("Added new interval [%d, %d]=%d", left_interval, right_interval, value);
+
+	// keep array sorted.
+	qsort(curr_dataset->intervals, curr_dataset->num_intervals, sizeof(IntervalEntry *), compare_intervals);
 }
 
 int compare_intervals(const void *a, const void *b)
