@@ -1650,42 +1650,45 @@ extern "C"
 	// 	ucp_worker_progress(worker);
 	// }
 
-void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
-{
-    if (ep == NULL) return;
+	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
+	{
+		if (ep == NULL)
+			return;
 
-    fprintf(stderr, "[DEBUG] Starting ucp_ep_close_nb...\n");
-    void *request = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
-    
-    if (UCS_PTR_IS_ERR(request)) 
-    {
-        fprintf(stderr, "[DEBUG] Error en cierre: %s\n", ucs_status_string(UCS_PTR_STATUS(request)));
-        return;
-    }
-    else if (request == NULL) 
-    {
-        fprintf(stderr, "[DEBUG] Instant synchronized closing (OK).\n");
-        ucp_worker_progress(worker);
-        return;
-    }
+		slog_debug("Starting ucp_ep_close_nb...");
+		void *request = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
 
-    fprintf(stderr, "[DEBUG] Asynchronous closure pending. Entering progress loop...\n");
-    ucs_status_t status;
-    unsigned long iterations = 0;
-    do {
-        ucp_worker_progress(worker);
-        status = ucp_request_check_status(request);
-        iterations++;
-        
-        // Alerta si lleva demasiados intentos esperando
-        if (iterations == 1000000) {
-            fprintf(stderr, "The endpoint has been stuck in the UCS_INPROGRESS state for 1 million iterations. Is the remote server still up?\n");
-        }
-    } while (status == UCS_INPROGRESS);
+		if (UCS_PTR_IS_ERR(request))
+		{
+			fprintf(stderr, "HERCULES_ERR_CLOSE_UCX_ENDPOINT: %s\n", ucs_status_string(UCS_PTR_STATUS(request)));
+			return;
+		}
+		else if (request == NULL)
+		{
+			slog_debug("Instant synchronized closing (OK).");
+			ucp_worker_progress(worker);
+			return;
+		}
 
-    fprintf(stderr, "[DEBUG] Closure completed successfully. Releasing request.\n");
-    ucp_request_free(request);
-}
+		slog_debug("Asynchronous closure pending. Entering progress loop...");
+		ucs_status_t status;
+		unsigned long iterations = 0;
+		do
+		{
+			ucp_worker_progress(worker);
+			status = ucp_request_check_status(request);
+			iterations++;
+
+			// Alerta si lleva demasiados intentos esperando
+			if (iterations == 1000000)
+			{
+				slog_warn("The endpoint has been stuck in the UCS_INPROGRESS state for 1 million iterations. Is the remote server still up?");
+			}
+		} while (status == UCS_INPROGRESS);
+
+		slog_debug("Closure completed successfully. Releasing request.");
+		ucp_request_free(request);
+	}
 
 	/**
 	 * Close UCP endpoint.

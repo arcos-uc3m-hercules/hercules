@@ -132,13 +132,16 @@ int data_ready = 0;
 #define GARBAGE_COLLECTOR_PERIOD 10
 #define CKECKPOINT_PERIOD 10
 
-int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
+int AddIPS(imss_info *my_imss, char *line, int32_t n_chars, int at_position)
 {
 	int count = my_imss->num_storages;
-#ifdef DPRINTF
-	fprintf(stderr, "[AddIPS] Adding %s (%d), count=%d\n", line, n_chars, count);
-#endif
-	slog_debug("Adding %s (%d), count=%d, my_imss->num_storages add=%p", line, n_chars, count, &(my_imss)->num_storages);
+	slog_debug("Adding %s (%d), count=%d, at_position=%d, my_imss->num_storages add=%p",
+		   line, n_chars, count, at_position, &(my_imss)->num_storages);
+
+	// -1 means append to the end
+	if (at_position < 0 || at_position >= count)
+		at_position = count;
+
 	char **new_ips = (char **)realloc(my_imss->ips, (count + 1) * sizeof(char *));
 	if (!new_ips)
 	{
@@ -148,30 +151,23 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars)
 	}
 	my_imss->ips = new_ips;
 
-	my_imss->ips[count] = (char *)calloc(LINE_LENGTH, sizeof(char));
-	if (!my_imss->ips[count])
+	// shift every entry from the end down to at_position one slot to the right
+	for (int i = count; i > at_position; i--)
+		my_imss->ips[i] = my_imss->ips[i - 1];
+
+	my_imss->ips[at_position] = (char *)calloc(LINE_LENGTH, sizeof(char));
+	if (!my_imss->ips[at_position])
 	{
 		perror("HERCULES_ERR_WORKER_ADD_IPS_CALLOC_ERR");
 		slog_fatal("HERCULES_ERR_WORKER_ADD_IPS_CALLOC_ERR");
 		return -1;
 	}
-	// Copy the line.
-	strncpy(my_imss->ips[count], line, n_chars);
+	strncpy(my_imss->ips[at_position], line, n_chars);
+	if (((my_imss->ips)[at_position])[n_chars - 1] == '\n')
+		((my_imss->ips)[at_position])[n_chars - 1] = '\0';
 
-	// Erase the new line character ('') from the string.
-	if (((my_imss->ips)[count])[n_chars - 1] == '\n')
-	{
-		((my_imss->ips)[count])[n_chars - 1] = '\0';
-	}
-	// Increase the num. of storages. This is the "master" value used on all code.
 	my_imss->num_storages++;
 	slog_debug("new num_storages=%d", my_imss->num_storages);
-
-	// print all ips.
-	// for (size_t j = 0; j < my_imss->num_storages; j++)
-	// {
-	// 	slog_debug("eps[%d] hostname=%s", j, my_imss->ips[j]);
-	// }
 	return 0;
 }
 
@@ -199,7 +195,7 @@ int ReadHostfile(char *deployfile, imss_info *my_imss)
 	while ((n_chars = getline(&line, &l_size, svr_nodes)) != -1)
 	{
 		// Allocate resources in the metadata structure so as to store the current HERCULES's IP.
-		ret = AddIPS(my_imss, line, n_chars);
+		ret = AddIPS(my_imss, line, n_chars, -1);
 		if (ret == -1)
 		{
 			fprintf(stderr, "HERCULES_ERR_WORKER_READ_HOSTFILE_ADD_IPS");
@@ -371,8 +367,10 @@ void *move_blocks_2_server(void *th_argv)
 
 	slog_debug("Connecting to data servers");
 	int32_t imss_found_in = -1;
-	imss_found_in = find_imss(imss_uri, &curr_imss);
-	curr_global_imss_info = &curr_imss.info;
+	imss *local_imss_;
+	imss_found_in = find_imss_pointer("imss://", &local_imss_);
+
+	// imss_found_in = find_imss(imss_uri, &curr_imss);
 	if (imss_found_in == -1)
 	{ // request the metadata.
 		slog_debug("imss structure not found, requesting to the metadata server");
@@ -383,14 +381,21 @@ void *move_blocks_2_server(void *th_argv)
 			pthread_exit(NULL);
 		}
 		number_active_storage_servers.store(open_ret);
+		imss_found_in = find_imss_pointer("imss://", &local_imss_);
+		if (imss_found_in == -1)
+		{
+			fprintf(stderr, "HERCULES_ERR_MOVE_BLOCKS_2_SERVER: Failed opening imss\n");
+			pthread_exit(NULL);
+		}
 	}
 	else
 	{ // update current struct.
 		slog_debug("imss structure found, updating.");
 		// size_t num_elements_to_shift = update_ips_list(id_server_to_modify);
 		// Update_data_endpoint_list(id_server_to_modify, num_elements_to_shift);
-		ReleaseSpecificDataServerNetworkResources(imss_uri, 1, id_server_to_modify, number_active_storage_servers.load());
+		ReleaseSpecificDataServerNetworkResources(local_imss_, 1, id_server_to_modify, number_active_storage_servers.load());
 	}
+	curr_global_imss_info = &local_imss_->info;
 
 	// Here data server should to move the datablocks.
 	// print all key/value elements.
@@ -553,21 +558,19 @@ size_t update_ips_list(int id_server_to_remove)
 
 void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift)
 {
-	if (num_elements_to_shift <= 0)
-	{
-		slog_warn("HERCULES_ERR_UPDATE_DATA_ENDPOINTS_LIST: Invalid num elements to shift");
-		return;
-	}
-
 	if (id_server_to_remove < 0 || id_server_to_remove > number_active_storage_servers.load())
 	{
 		slog_warn("HERCULES_ERR_UPDATE_DATA_ENDPOINTS_LIST: Invalid id server to remove");
 		return;
 	}
 
-	memmove(&data_endpoints[id_server_to_remove],
-		&data_endpoints[id_server_to_remove + 1],
-		num_elements_to_shift * sizeof(char *));
+	// Only attempt to shift memory if there are elements coming after the removed server
+	if (num_elements_to_shift > 0)
+	{
+		memmove(&data_endpoints[id_server_to_remove],
+			&data_endpoints[id_server_to_remove + 1],
+			num_elements_to_shift * sizeof(ucp_ep_h));
+	}
 
 	data_endpoints[number_active_storage_servers.load()] = NULL;
 	return;
@@ -590,14 +593,17 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 	{
 		fprintf(stderr, "[INFO] Stopping server %d.\n", id_server_to_remove);
 		slog_debug("[INFO] Stopping server %d.", id_server_to_remove);
-		if (id_server_to_remove > number_active_storage_servers.load() - 1)
+		int old_num_servers = number_active_storage_servers.load();
+		int32_t new_number_of_servers = (int32_t)(old_num_servers - 1);
+
+		if (id_server_to_remove > old_num_servers - 1)
 		{
 			fprintf(stderr, "HERCULES_ERR_DECOMISSIONING_STAGE_INVALID_SERVVER_ID_TO_REMOVE");
 			slog_error("HERCULES_ERR_DECOMISSIONING_STAGE_INVALID_SERVVER_ID_TO_REMOVE");
 			return 0;
 		}
 		// Avoid reducing the number of servers to less than 1.
-		if (number_active_storage_servers.load() - 1 <= 0)
+		if (new_number_of_servers <= 0)
 		{
 			fprintf(stdout, "[INFO] The number of servers cannot be less than 1. Canceling decomissioning stage.\n");
 			slog_debug("[INFO] The number of servers cannot be less than 1. Canceling decomissioning stage.");
@@ -605,28 +611,24 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		}
 
 		is_new_server_ready = false;
-		int index = 0;
-		// removes the server from the ips list.
-		size_t num_elements_to_shift = update_ips_list(id_server_to_remove);
-		arguments->args->num_data_servers = number_active_storage_servers.load();
-
 		char request[REQUEST_SIZE] = {0};
 		int ret = 0;
 		int32_t new_id = 0;
 		// fprintf(stderr, "Sending %s to server ID %d\n", request, id_server_to_remove);
-		for (size_t i = 0; i < number_active_storage_servers.load() + 1; i++)
+		for (size_t i = 0; i < old_num_servers; i++)
 		{
+
 			// Send the request to all servers.
 			if (i == id_server_to_remove)
 			{
-				sprintf(request, "STOPSERVER %" PRId32 "", number_active_storage_servers.load());
+				sprintf(request, "STOPSERVER %" PRId32 "", new_number_of_servers);
 			}
 			else
 			{
-				sprintf(request, "REORDERSERVER %" PRId32 " %" PRId32 " %d", number_active_storage_servers.load(), new_id, id_server_to_remove);
+				sprintf(request, "REORDERSERVER %" PRId32 " %" PRId32 " %d", new_number_of_servers, new_id, id_server_to_remove);
 				new_id++;
 			}
-			slog_debug("Sending %s to server ID %d (%s), number of active storage servers=%d", request, i, curr_global_imss_info->ips[i], number_active_storage_servers.load());
+			slog_debug("Sending %s to server ID %d (%s), number of old active storage servers=%d", request, i, curr_global_imss_info->ips[i], old_num_servers);
 			slog_debug("Thread id %d", arguments->thread_id);
 			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
 			if (ret == 0)
@@ -641,6 +643,11 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		// Close the endpoint connection.
 		close_ucx_endpoint(arguments->ucp_worker, data_endpoints[id_server_to_remove]);
 
+		// removes the server from the ips list.
+		size_t num_elements_to_shift = update_ips_list(id_server_to_remove);
+		arguments->args->num_data_servers = number_active_storage_servers.load();
+
+		// removes the server fron the data_endpoints array.
 		Update_data_endpoint_list(id_server_to_remove, num_elements_to_shift);
 
 		// se me ocurre cambiar todos los dataset que utilicen el número de servidores actual
@@ -681,21 +688,26 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 void *run_malleability(void *th_argv)
 {
 	MalleabilityArgs *arguments = (MalleabilityArgs *)th_argv;
-#ifdef DPRINTF
 	slog_debug("Waiting for the mutex to be free");
 	pthread_mutex_lock(&mutext_malleability);
-
+#ifdef DPRINTF
 	fprintf(stderr, "arguments->args->malleability=%" PRId32 ", comissioning_on=%d, consecutive_scale_up_signals=%d\n", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire), consecutive_scale_up_signals);
 #endif
 	slog_debug("arguments->args->malleability:%d comissioning_on.load:%d", arguments->args->malleability, comissioning_on.load(std::memory_order_acquire));
-	const ElasticityMetric *slowest_server = NULL;
+	ElasticityMetric slowest_server;
+	slowest_server.server_id = -1;
+	std::map<std::string, std::vector<ElasticityMetric>> history_snapshot;
+
+	pthread_mutex_lock(&mutext_performance_metrics);
+	history_snapshot = elasticity_records_history;
+	pthread_mutex_unlock(&mutext_performance_metrics);
 	// if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
 	// {
 	// Set comissioning ON to avoid doing twice at same time.
 	comissioning_on = true;
 	// Always check the performance trend.
 	// int slowest_server_id;
-	scaling_action action = make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
+	scaling_action action = make_scaling_decision(history_snapshot, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
 
 	// Only trigger the actual scaling operation if the threshold is met.
 	if (consecutive_scale_up_signals >= arguments->args->malleability_tolerance)
@@ -704,16 +716,16 @@ void *run_malleability(void *th_argv)
 	}
 	else
 	{
-		fprintf(stdout, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
-		slog_debug("SCALE_UP: Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_up_signals + 1 % arguments->args->malleability_tolerance);
+		fprintf(stdout, "Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", (consecutive_scale_up_signals + 1) % arguments->args->malleability_tolerance);
+		slog_debug("SCALE_UP: Waiting for more consecutive strakes. consecutive_scale_up_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", (consecutive_scale_up_signals + 1) % arguments->args->malleability_tolerance);
 	}
 
 	if (consecutive_scale_down_signals >= arguments->args->malleability_tolerance)
 	{
-		if (slowest_server != NULL)
+		if (slowest_server.server_id != -1)
 		{
-			std::string key_to_remove = slowest_server->server_hostname;
-			int target_id = slowest_server->server_id;
+			std::string key_to_remove = slowest_server.server_hostname;
+			int target_id = slowest_server.server_id;
 			int ret = decomissioning_stage(arguments, target_id);
 			if (ret)
 			{
@@ -730,7 +742,6 @@ void *run_malleability(void *th_argv)
 					slog_error("Server %s has NOT been deleted from the elasticity records history.", key_to_remove.c_str());
 				}
 			}
-			slowest_server = NULL;
 		}
 		else
 		{
@@ -741,7 +752,7 @@ void *run_malleability(void *th_argv)
 	else
 	{
 		// fprintf(stderr, "Waiting for more consecutive strakes. consecutive_scale_down_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d\n", consecutive_scale_down_signals + 1 % CONSECUTIVE_SIGNALS_THRESHOLD);
-		slog_debug("SCALE_DOWN: Waiting for more consecutive strakes. consecutive_scale_down_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", consecutive_scale_down_signals + 1 % arguments->args->malleability_tolerance);
+		slog_debug("SCALE_DOWN: Waiting for more consecutive strakes. consecutive_scale_down_signals+1 mod CONSECUTIVE_SIGNALS_THRESHOLD=%d", (consecutive_scale_down_signals + 1) % arguments->args->malleability_tolerance);
 	}
 	comissioning_on = false;
 
@@ -797,6 +808,7 @@ void *run_malleability(void *th_argv)
 	// slog_debug("Reponse sent to client=%lu\n", temp_p_argv_for_calls.worker_uid);
 	// free(arguments);
 	// arguments = NULL;
+	free(arguments);
 	pthread_exit(NULL);
 }
 
@@ -1011,9 +1023,20 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls)
 
 	if (curr_global_imss_info == NULL)
 	{
-		fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_INVALID_HERCULES");
-		slog_error("HERCULES_ERR_COMISSIONING_STAGE_INVALID_HERCULES");
-		return -1;
+		int32_t imss_found_in = find_imss(temp_p_argv_for_calls.my_uri, &curr_imss);
+		if (imss_found_in == -1)
+		{ // request the metadata.
+			slog_debug("imss structure not found, requesting to the metadata server");
+			int32_t open_ret = open_imss((char *)temp_p_argv_for_calls.my_uri);
+			if (open_ret < 0)
+			{
+				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+				pthread_exit(NULL);
+			}
+			number_active_storage_servers.store(open_ret);
+		}
+
+		curr_global_imss_info = &curr_imss.info;
 	}
 
 	for (size_t i = 0; i < curr_global_imss_info->num_storages; i++)
@@ -1042,29 +1065,29 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls)
 }
 
 /**
- * @brief Analyzes the metrics history to decide if scaling is needed.
- * @param history The map containing the metrics history for all servers.
+ * @brief Analyzes the metrics elasticity_records_history to decide if scaling is needed.
+ * @param elasticity_records_history The map containing the metrics history for all servers.
  */
 double moving_average_test = 0;
-scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double performance_threshold, const ElasticityMetric *&slowest_server)
+scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &elasticity_records_history, int32_t analysis_window_size, double performance_threshold, ElasticityMetric &slowest_server)
 {
-	// pthread_mutex_lock(&mutext_malleability); // history is a shared resource.
+	// pthread_mutex_lock(&mutext_malleability); // elasticity_records_history is a shared resource.
 	if (analysis_window_size <= 0)
 	{
 		analysis_window_size = DEFAULT_ANALYSIS_WINDOW_SIZE;
 		slog_warn("Invalid windows size, using the default one: %" PRId32, analysis_window_size)
 	}
 #ifdef DPRINTF
-	fprintf(stderr, "analysis_window_size=%" PRId32 ", performance_threshold=%f, history.empty()=%d\n", analysis_window_size, performance_threshold, history.empty());
+	fprintf(stderr, "analysis_window_size=%" PRId32 ", performance_threshold=%f, elasticity_records_history.empty()=%d\n", analysis_window_size, performance_threshold, elasticity_records_history.empty());
 #endif
-	slog_debug("analysis_window_size=%" PRId32 ", performance_threshold=%f, history.empty()=%d", analysis_window_size, performance_threshold, history.empty());
-	if (history.empty())
+	slog_debug("analysis_window_size=%" PRId32 ", performance_threshold=%f, elasticity_records_history.empty()=%d", analysis_window_size, performance_threshold, elasticity_records_history.empty());
+	if (elasticity_records_history.empty())
 	{
 		// pthread_mutex_unlock(&mutext_malleability);
 		return scaling_action::HOLD;
 	}
 
-	size_t num_records = history.begin()->second.size();
+	size_t num_records = elasticity_records_history.begin()->second.size();
 
 	if (num_records < analysis_window_size)
 	{
@@ -1078,7 +1101,8 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 
 	// Calculate the aggregate system performance for the analysis window.
 	// const ElasticityMetric *slowest_server = NULL;
-	slowest_server = NULL;
+	// slowest_server = NULL;
+	const ElasticityMetric *slowest_server_ptr = NULL;
 	double slowest_performance = 0.0;
 	std::vector<double> aggregate_performance_history;
 	for (size_t i = num_records - analysis_window_size; i < num_records; ++i)
@@ -1086,7 +1110,7 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 		double total_performance_at_point_i = 0.0;
 		int active_servers_count = 0;
 
-		for (const auto &pair : history)
+		for (const auto &pair : elasticity_records_history)
 		{
 			slog_debug("i=%d, pair.second.size())=%ld", i, pair.second.size());
 			if (i < pair.second.size())
@@ -1113,13 +1137,13 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 					   pair.second[i].read_performance,
 					   pair.second[i].read_performance / MB);
 
-				if (!slowest_server)
+				if (!slowest_server_ptr)
 				{
-					slowest_server = &(pair.second[i]);
+					slowest_server_ptr = &(pair.second[i]);
 				}
-				else if (pair.second[i].overall_performance < slowest_server->overall_performance)
+				else if (pair.second[i].overall_performance < slowest_server_ptr->overall_performance)
 				{
-					slowest_server = &(pair.second[i]);
+					slowest_server_ptr = &(pair.second[i]);
 				}
 
 				total_performance_at_point_i += pair.second[i].overall_performance;
@@ -1211,6 +1235,11 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 		// 	*slowest_server_id = slowest_server->server_id;
 		// else
 		// 	slowest_server_id = NULL;
+
+		if (slowest_server_ptr != NULL)
+		{
+			slowest_server = *slowest_server_ptr;
+		}
 
 		return scaling_action::SCALE_DOWN;
 	}
@@ -1437,9 +1466,15 @@ void *get_performance_metrics(void *th_argv)
 		if (arguments->args->malleability == MALLEABILITY_CONF_PERF)
 		{
 			// int slowest_server_id;
-			const ElasticityMetric *slowest_server = NULL;
+			std::map<std::string, std::vector<ElasticityMetric>> history_snapshot;
+			ElasticityMetric slowest_server;
+
+			pthread_mutex_lock(&mutext_performance_metrics);
+			history_snapshot = elasticity_records_history;
+			pthread_mutex_unlock(&mutext_performance_metrics);
+
 			pthread_mutex_lock(&mutext_malleability);
-			make_scaling_decision(elasticity_records_history, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
+			make_scaling_decision(history_snapshot, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
 			pthread_mutex_unlock(&mutext_malleability);
 		}
 		// else
@@ -2031,7 +2066,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				}
 			}
 
-			slog_debug("connecting to %s:8500", added_hostname);
+			slog_debug("connecting to %s:%" PRIu16, added_hostname, imss_->info.conn_port);
 			oob_sock = connect_common(added_hostname, 85000, AF_INET);
 			if (oob_sock < 0)
 			{
@@ -2104,7 +2139,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			imss_info *imss_info_struct = &imss_->info;
 			// num_storages is increased inside AddIPS.
 			fprintf(stderr, "Adding %s on the data server %d.\n", added_hostname, arguments->thread_id);
-			AddIPS(imss_info_struct, added_hostname, strlen(added_hostname));
+			AddIPS(imss_info_struct, added_hostname, strlen(added_hostname), -1);
 			slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
 			number_active_storage_servers.store(imss_info_struct->num_storages);
 			curr_imss = *imss_;
@@ -2155,10 +2190,10 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		{
 		case READ_OP:
 		{
+			// Check if there was an associated block to the key.
 			int32_t ret = TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id);
 			// fprintf(stderr, "%s returned %d\n", key.c_str(), ret);
 
-			// Check if there was an associated block to the key.
 			if (ret == 0)
 			{ // block does not exist.
 				// pthread_mutex_lock(&lock_network);
@@ -2171,6 +2206,15 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
 					return -1;
 				}
+				// Instead of sending that the block does not exist,
+				// we send the list of current nodes just to tell the
+				// front-end to retry the call.
+				// p_argv temp_p_argv_for_calls;
+				// temp_p_argv_for_calls.ucp_worker = arguments->ucp_worker;
+				// temp_p_argv_for_calls.server_ep = arguments->server_ep;
+				// temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
+				// strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
+				// send_node_list_2_frontend(temp_p_argv_for_calls); // Update the server list in the frontend.
 			}
 			else
 			{
@@ -2872,9 +2916,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		{
 			// check if the frondend used the correct number of storage servers.
 			// if not, we need to tell it the new configuration.
-			if (server_n_used_in_frontend != number_active_storage_servers.load())
+			if (!(server_n_used_in_frontend == number_active_storage_servers.load() || server_n_used_in_frontend == MALLEABILITY_SET_BYPASS))
 			{
-				slog_warn("HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers.");
+				slog_warn("HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers, number_active_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32, number_active_storage_servers.load(), server_n_used_in_frontend);
 				// TODO: client does not know at this moment that the block does not corresponding to this server.
 				// We will receive the data but we will not store it, just to progress and then we will tell the
 				// client the new configuration if this deployment.
@@ -3700,7 +3744,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		imss_info *imss_info_struct = curr_global_imss_info;
 		// num_storages is increased inside AddIPS.
 		fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
-		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname));
+		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname), -1);
 		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
 		number_active_storage_servers.store(imss_info_struct->num_storages);
 		slog_debug("number_active_storage_servers=%d\n", number_active_storage_servers.load());

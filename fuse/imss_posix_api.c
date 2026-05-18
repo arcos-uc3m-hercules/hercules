@@ -263,7 +263,7 @@ extern "C"
 		}
 
 		// get block 0 from data server.
-		ret = TIMING(get_ndata(imss_path, ds, 0, aux, 0, 0, SYNC, NULL), "get_ndata0,imss_refresh", int32_t, 0);
+		ret = TIMING(get_ndata(imss_path, ds, 0, aux, 0, 0, SYNC, NULL, INITIAL_RECURSION), "get_ndata0,imss_refresh", int32_t, 0);
 		if (ret < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN];
@@ -373,7 +373,7 @@ extern "C"
 
 				//  "data" is filled in "get data".
 				// get block 0.
-				ret = get_ndata((char *)imss_path, ds, 0, data, 0, 0, SYNC, NULL);
+				ret = get_ndata((char *)imss_path, ds, 0, data, 0, 0, SYNC, NULL, INITIAL_RECURSION);
 				if (ret < 0)
 				{
 					slog_error("Error getting data: %s", imss_path);
@@ -399,7 +399,7 @@ extern "C"
 					return -ENOMEM;
 				}
 				//  data is filled in "get data".
-				ret = get_ndata((char *)imss_path, ds, 0, data, 0, 0, SYNC, NULL);
+				ret = get_ndata((char *)imss_path, ds, 0, data, 0, 0, SYNC, NULL, INITIAL_RECURSION);
 				if (ret < 0)
 				{
 					slog_error("Error getting data: %s", imss_path);
@@ -531,7 +531,7 @@ extern "C"
 			}
 
 			void *data = (void *)malloc(sizeof(struct stat) * sizeof(char) + 1);
-			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0, SYNC, NULL), "imss_open,get_ndata", int, 0);
+			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0, SYNC, NULL, INITIAL_RECURSION), "imss_open,get_ndata", int, 0);
 			if (ret < 0)
 			{
 				free(data);
@@ -868,7 +868,7 @@ extern "C"
 			}
 
 			// get data from the data server.
-			been_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset, SYNC, NULL), "get_ndata", ssize_t, -1);
+			been_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset, SYNC, NULL, INITIAL_RECURSION), "get_ndata", ssize_t, -1);
 			// Error handling when get_ndata does not found the request data.
 
 			if (been_read < 0)
@@ -1010,7 +1010,7 @@ extern "C"
 						// The final destination for this data is at the end of what's already been scheduled.
 						requests[i].final_offset_in_buf = total_bytes_scheduled;
 
-						ssize_t ret = TIMING(get_ndata((char *)path, ds, current_block_id, requests[i].temp_buffer, bytes_to_read_in_block, offset_in_block, ASYNC, &requests[i].ucx_handle), "get_ndata", ssize_t, -1);
+						ssize_t ret = TIMING(get_ndata((char *)path, ds, current_block_id, requests[i].temp_buffer, bytes_to_read_in_block, offset_in_block, ASYNC, &requests[i].ucx_handle, INITIAL_RECURSION), "get_ndata", ssize_t, -1);
 
 						if (ret >= 0)
 						{
@@ -1793,7 +1793,7 @@ extern "C"
 			slog_debug("writting %" PRIu64 " kilobytes (%" PRIu64 " bytes) with an offset of %" PRIu64 " kilobytes (%" PRIu64 " bytes)", bytes_to_copy / 1024, bytes_to_copy, block_offset / 1024, block_offset);
 
 			// Send data to data server.
-			int32_t ret_set_data = TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO), "set_data", int32_t, -1);
+			int32_t ret_set_data = TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO, INITIAL_RECURSION), "set_data", int32_t, -1);
 			if (ret_set_data < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
@@ -2299,7 +2299,7 @@ extern "C"
 		// memcpy(head, &stats, sizeof(struct stat));
 
 		// Updates the size of the file in the block 0.
-		int32_t ret_set_data = set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC, INITIAL_RECURSION);
 		if (ret_set_data < 0)
 		{
 			perror("HERCULES_ERR_WRITTING_BLOCK");
@@ -2404,7 +2404,7 @@ extern "C"
 		pthread_mutex_lock(&lock); // lock.
 		// stores block 0.
 		// fprintf(stdout, "size of stat=%lu bytes\n", sizeof(struct stat));
-		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0, SYNC);
+		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0, SYNC, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock); // unlock.
 		if (ret < 0)
 		{
@@ -2573,7 +2573,7 @@ extern "C"
 		if (ret == 0)
 		{ // dataset has been delete on the metadata backend.
 			// to erase data in the backend.
-			ret = unlink_dataset(imss_path, file_desc);
+			ret = unlink_dataset(imss_path, file_desc, INITIAL_RECURSION);
 		}
 
 		slog_debug("delete_dataset %s, ret=%d", imss_path, ret);
@@ -2587,7 +2587,6 @@ extern "C"
 		}
 		case 0: // dataset was delete.
 		{
-			// ******************************* TO CHECK!
 			// pthread_mutex_lock(&lock_file);
 			HierarchicalMapErase(hierarchical_map, imss_path);
 			// pthread_mutex_unlock(&lock_file);
@@ -2596,7 +2595,6 @@ extern "C"
 			// map_release_prefetch(map_prefetch, imss_path);
 			// slog_debug("Finish map_release_prefetch %s", path);
 			// *******************************
-			// ret = release_dataset(file_desc);
 			ret = release_dataset(imss_path);
 			slog_debug("relese_dataset ret=%d", ret);
 			if (ret < 0)
@@ -2647,7 +2645,7 @@ extern "C"
 		}
 
 		pthread_mutex_lock(&lock);
-		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
+		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock);
 
 		memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2658,7 +2656,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock);
 
 		return ret_set_data;
@@ -2712,7 +2710,7 @@ extern "C"
 					return -1;
 				}
 				aux = (char *)malloc(sizeof(struct stat) + 1);
-				ret = get_ndata(new_path_1, file_desc, 0, aux, 0, 0, SYNC, NULL);
+				ret = get_ndata(new_path_1, file_desc, 0, aux, 0, 0, SYNC, NULL, INITIAL_RECURSION);
 				memcpy(&stats, aux, sizeof(struct stat));
 				pthread_mutex_lock(&lock_file);
 				// map_put(map, new_path_1, file_desc, stats, aux);
@@ -2801,7 +2799,7 @@ extern "C"
 		memcpy(buff, &stats, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock);
 		if (ret_set_data < 0)
 		{
@@ -2847,7 +2845,7 @@ extern "C"
 		}
 
 		pthread_mutex_lock(&lock);
-		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
+		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock);
 
 		memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2862,7 +2860,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		int32_t ret_set_data = set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock);
 
 		free(rpath);
@@ -2895,7 +2893,7 @@ extern "C"
 		}
 
 		pthread_mutex_lock(&lock);
-		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL);
+		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock);
 
 		memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2910,7 +2908,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock);
 		// free(rpath);
 		return ret_set_data;

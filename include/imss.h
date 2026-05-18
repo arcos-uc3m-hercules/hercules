@@ -24,6 +24,8 @@
 #define SYNC 0	// all replicas are written synchronously
 #define ASYNC 1 // first replica is written synchronously, the rest asynchronously
 
+#define INITIAL_RECURSION 0
+
 // Type of IMSS instance to be deployed.
 #define DETACHED 0
 #define ATTACHED 1
@@ -290,7 +292,7 @@ RETURNS:	 0 - Initialization procedure was successfully performed.
 	// int32_t init_imss(char *imss_uri, char *hostfile, char *meta_hostfile, int32_t n_servers, uint16_t conn_port, uint64_t buff_size, uint32_t deployment, const char *binary_path, uint16_t meta_port);
 
 	int32_t open_imss(char *imss_uri);
-	int32_t AddBackEndServer2Imss(char *imss_uri);
+	int32_t AddBackEndServer2Imss(imss* local_imss_, int at_position);
 
 	/* Method releasing client-side and/or server-side resources related to a certain IMSS instance.
 
@@ -392,7 +394,7 @@ RETURNS:	> 0 - Number identifying the retrieved dataset among the client's sessi
 
 RETURNS:	 0 - Release operation took place successfully.
 -1 - In case of error.*/
-	int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id);
+	int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id, int deep);
 	int32_t delete_dataset(const char *dataset_uri, int32_t dataset_id, int is_dir);
 
 	int32_t close_dataset(const char *dataset_uri, int fd);
@@ -496,7 +498,7 @@ RETURNS:	 0 - Release operation took place successfully.
 	 * requested block was not find in the remote server, or -2 in case of
 	 * error.
 	 */
-	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request);
+	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request, int deep);
 	ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_id, void **buffer_prefetch, size_t total_read_size, size_t num_blocks_to_read);
 
 	ssize_t start_block_request(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
@@ -537,7 +539,7 @@ offset     - Offset within the block.
 RETURNS:	 0 - The requested block was successfully stored.
 -1 - In case of error.
 	 */
-	int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int async);
+	int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int async, int deep);
 
 	int32_t set_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
 
@@ -642,7 +644,7 @@ RETURNS:	0 - Resources were released successfully.
 
 	int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root);
 	int32_t release_network_resources(const char *imss_uri, int is_parent, int process_rank);
-	int32_t ReleaseSpecificDataServerNetworkResources(const char *imss_uri, int is_parent, int server_id_to_remove, int current_number_of_servers);
+	int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, int server_id_to_remove, int new_number_of_servers);
 
 	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
 	int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir);

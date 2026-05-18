@@ -32,6 +32,7 @@
 #define UINT64_MAX_STR_LEN (sizeof(uint64_t) * 3 + 1)
 
 // #define CLOSE_EP 9999999
+#define MALLEABILITY_SET_BYPASS 9999
 
 #define SHM_SIZE 50L * 1024L * 1024L * 1024L
 
