@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <errno.h>
 #include <ifaddrs.h>
@@ -3397,22 +3398,20 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id, int deep)
 		size_t size_sent_req = send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_);
 		if (size_sent_req == 0)
 		{
-			perror("HERCULES_ERR_UNLINK_DATASET_SEND_REQ");
 			slog_error("HERCULES_ERR_UNLINK_DATASET_SEND_REQ");
 			pthread_mutex_unlock(&lock_network);
-
 			if (deep > MAX_RETRIES)
 			{
 				slog_error("max retries (%d) reached for '%s', giving up.", MAX_RETRIES, key_);
 				return -2;
 			}
-
 			// check for malleability changes and retry.
 			int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 			if (changes_found == 1)
 			{
 				return unlink_dataset(dataset_uri, dataset_id, deep + 1);
 			}
+			fprintf(stderr, "HERCULES_ERR_UNLINK_DATASET_SEND_REQ\n");
 			return -2;
 		}
 
@@ -3427,22 +3426,19 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id, int deep)
 
 		if (msg_length == (size_t)-1) // Connection lost.
 		{
-			perror("ERR_HERCULES_UNLINK_CONNECTION_LOST");
-			slog_error("ERR_HERCULES_UNLINK_CONNECTION_LOST: The remote server disconnected.");
+			slog_error("HERCULES_ERR_UNLINK_CONNECTION_LOST: The remote server disconnected.");
 			pthread_mutex_unlock(&lock_network);
-
 			if (deep > MAX_RETRIES)
 			{
 				slog_error("max retries (%d) reached for '%s', giving up.", MAX_RETRIES, key_);
 				return -2;
 			}
-
 			int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
-
 			if (changes_found == 1)
 			{
 				return unlink_dataset(dataset_uri, dataset_id, deep + 1);
 			}
+			fprintf(stderr, "HERCULES_ERR_UNLINK_CONNECTION_LOST: The remote server disconnected.\n");
 			return -2;
 		}
 
@@ -3473,6 +3469,7 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id, int deep)
 		if (!strncmp(MSG_MALLEABILITY_DATASERVERS, (const char *)result, strlen(MSG_MALLEABILITY_DATASERVERS)))
 		{
 			// remote server is decommissioning.
+			slog_error("Remove server is decomissioning");
 			pthread_mutex_unlock(&lock_network);
 			if (deep > MAX_RETRIES + 1)
 			{
@@ -5081,7 +5078,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
 		if (size_sent_req == 0)
 		{
-			perror("HERCULES_ERR_GET_NDATA_SEND_REQ");
 			slog_error("HERCULES_ERR_GET_NDATA_SEND_REQ");
 			pthread_mutex_unlock(&lock_network);
 			if (deep > MAX_RETRIES)
@@ -5094,6 +5090,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			{
 				return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
 			}
+			fprintf(stderr, "HERCULES_ERR_GET_NDATA_SEND_REQ\n");
 			return -2;
 		}
 
@@ -5116,21 +5113,19 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
 		if (msg_length == (size_t)-1)
 		{
-			// perror("ERR_HERCULES_GET_NDATA_CONNECTION_LOST");
-			slog_error("ERR_HERCULES_GET_NDATA_CONNECTION_LOST: The remote server has disconnected.");
+			slog_error("HERCULES_ERR_GET_NDATA_CONNECTION_LOST: The remote server has disconnected.");
 			pthread_mutex_unlock(&lock_network);
 			if (deep > MAX_RETRIES)
 			{
 				slog_error("max retries (%d) reached for '%s', giving up.", MAX_RETRIES, key_);
 				return -2;
 			}
-
 			int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 			if (changes_found == 1)
 			{
 				return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
 			}
-
+			fprintf(stderr, "HERCULES_ERR_GET_NDATA_CONNECTION_LOST: The remote server has disconnected.\n");
 			return -2;
 		}
 
@@ -5249,16 +5244,12 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			}
 			int32_t changes_found = parse_malleability_message(response_buffer, node_hostname);
 			slog_debug("changes_found=%d", changes_found);
-			// response_buffer = NULL;
 			if (changes_found == 1)
 			{
 				// to try the same operation.
 				return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
 			}
-			else
-			{
-				return -1;
-			}
+			return -1;
 		}
 		else
 		{
@@ -5918,7 +5909,6 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			{
 				slog_error("HERCULES_ERR_SET_DATA_SEND_REQ: Failed to send local request");
 				pthread_mutex_unlock(&lock_network);
-
 				if (deep > MAX_RETRIES)
 				{
 					slog_error("max retries (%d) reached for '%s', giving up.", MAX_RETRIES, key_);
@@ -5927,7 +5917,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 				if (changes_found == 1)
 					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1);
-
+				fprintf(stderr, "HERCULES_ERR_SET_DATA_SEND_REQ: Failed to send local request\n");
 				return -ECANCELED;
 			}
 
@@ -5935,7 +5925,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			msg_length = TIMING(get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context), "get_recv_data_length", size_t, process_rank);
 			if (msg_length == (size_t)-1)
 			{
-				slog_error("ERR_HERCULES_SET_DATA_CONNECTION_LOST: Remote server disconnected");
+				slog_error("HERCULES_ERR_SET_DATA_CONNECTION_LOST: Remote server disconnected");
 				pthread_mutex_unlock(&lock_network);
 
 				if (deep > MAX_RETRIES)
@@ -5944,10 +5934,9 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 					return -ECANCELED;
 				}
 				int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
-
 				if (changes_found == 1)
 					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1);
-
+				fprintf(stderr, "HERCULES_ERR_SET_DATA_CONNECTION_LOST: Remote server disconnected\n");
 				return -ECANCELED;
 			}
 
@@ -5980,7 +5969,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 				if (changes_found == 1)
 					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1);
-
+				fprintf(stderr, "HERCULES_ERR_SET_REQ_SEND_REQ\n");
 				return -ECANCELED;
 			}
 
@@ -6010,7 +5999,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				msg_length = TIMING(get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context), "get_recv_data_length", size_t, process_rank);
 				if (msg_length == (size_t)-1)
 				{
-					slog_error("ERR_HERCULES_SET_DATA_CONNECTION_LOST");
+					slog_error("HERCULES_ERR_SET_DATA_CONNECTION_LOST");
 					pthread_mutex_unlock(&lock_network);
 					if (deep > MAX_RETRIES)
 					{
@@ -6020,7 +6009,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 					int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 					if (changes_found == 1)
 						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1);
-
+					fprintf(stderr, "HERCULES_ERR_SET_DATA_CONNECTION_LOST\n");
 					return -ECANCELED;
 				}
 
@@ -6037,6 +6026,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				}
 				else if (!strncmp(MSG_MALLEABILITY_DATASERVERS, (const char *)response_buffer, strlen(MSG_MALLEABILITY_DATASERVERS)))
 				{
+					slog_debug(" result=%s, msg_length=%d", response_buffer, msg_length);
 					pthread_mutex_unlock(&lock_network);
 					if (deep > MAX_RETRIES + 1)
 					{

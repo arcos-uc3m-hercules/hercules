@@ -273,7 +273,6 @@ extern "C"
 		}
 		stats = (struct stat *)aux;
 
-		// HERE STATS->ST_NLINK RETURNS 0, IT MUST BE 1.
 		slog_debug("ret=%d, ds=%d, st_size=%ld, stats->st_nlink=%lu, old_stats.st_nlink=%lu", ret, ds, stats->st_size, stats->st_nlink, old_stats.st_nlink);
 		HierarchicalMapUpdate(hierarchical_map, imss_path, ds, *stats);
 
@@ -2334,7 +2333,7 @@ extern "C"
 		{ // if the file was not deleted by the close we update the stat.
 			// imss_refresh is too slow.
 			// When we remove it pass from 3.45 sec to 0.008505 sec.
-			// TO CHECK: imss_refresh do same actions as like_release
+			// TO CHECK: imss_refresh do same actions as imss_release
 			// but it adds HierarchicalMapUpdate. Maybe imss_refresh
 			// could be removed if imss_release has HierarchicalMapUpdate.
 			imss_refresh(path);
