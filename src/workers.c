@@ -419,8 +419,6 @@ void *move_blocks_2_server(void *th_argv)
 	// for (const auto &pair : *hiermap)
 	for (const std::string &key : block_keys)
 	{
-		// const std::string &key = pair.first;
-		// const std::shared_ptr<map_records> &value = pair.second;
 		// Get the "shared_ptr" of this "key".
 		std::shared_ptr<map_records> value = hierarchical_map->HierarchicalMapGetDir(key.c_str());
 		// fprintf(stderr, "Key: %s\n", key.c_str());
@@ -456,13 +454,13 @@ void *move_blocks_2_server(void *th_argv)
 					slog_error("Invalid block '%s' extracted from '%s'", block.c_str(), inner_key.c_str());
 					continue;
 				}
-				next_server = find_server(number_active_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy); // TODO: check for the current data policy in the dataset, not in the imss configuration.
+				// TODO: check for the current data policy in the dataset, not in the imss configuration.
+				next_server = find_server(number_active_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy); 
 
 				// TODO: check replication factor.
 
 				slog_live("key='%s',\turi='%s',\tblock='%s',\tnext server=%d", inner_key.c_str(), data_uri.c_str(), block.c_str(), next_server);
 
-				// if (id_server_to_modify == -1 && next_server == server_id)
 				if (next_server == server_id && arguments->status == true)
 				{
 					// fprintf(stderr, "[SKIP] BLOCK %ld TO %d SERVER\n", block_number, next_server);
@@ -1490,14 +1488,6 @@ void *get_performance_metrics(void *th_argv)
 		// #endif
 	}
 
-	// TO FIX: making a parallel thread is throwing an IOR WARNING on write operations.
-	// int *ret_thread = NULL;
-	// if (pthread_join(comissioning_stage_thread, (void **)&ret_thread) != 0)
-	// {
-	// 	perror("HERCULES_ERR_MALLEABILITY_PTHREAD_JOIN_COMISSIONING_STAGE");
-	// 	slog_error("HERCULES_ERR_MALLEABILITY_PTHREAD_JOIN_COMISSIONING_STAGE");
-	// 	return (void *)-1;
-	// }
 
 	return NULL;
 }
@@ -3022,6 +3012,11 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
 					slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
 					SendConfirmationMessage(arguments, MSG_ERROR_OP);
+					if (reused_memory == 0) 
+                    {
+                        free(buffer);
+						buffer=NULL;
+                    }
 					return -1;
 				}
 			}
@@ -3154,6 +3149,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				memcpy((char *)address_ + block_offset, (char *)buffer + block_offset, msg_length);
 				pthread_mutex_unlock(&memory_protect);
 				free(buffer);
+				buffer = NULL;
 			}
 		}
 		// if the block was already stored:
@@ -4286,13 +4282,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		{
 		case PERFORMANCE_OP:
 		{
-			// TODO: this function can be called on a thread.
-			// This avoid blocking future operations.
-			// fprintf(stderr, "Receiving performance, client=%lu\n", arguments->worker_uid);
-			// NUMBER_OF_LAUNCHED_THREADS++;
 			get_performance_metrics((void *)arguments);
-			// NUMBER_OF_LAUNCHED_THREADS--;
-			// fprintf(stderr, "Performance received, client=%lu\n", arguments->worker_uid);
 		}
 		break;
 		default:
@@ -4300,7 +4290,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			slog_debug("[SET_OP] Creating dataset %s", key.c_str());
 			std::unique_lock<std::mutex> lck(operation_lock);
 			pthread_mutex_lock(&memory_protect);
-			// if (!TIMING(HierarchicalMapGet(hierarchical_map, key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id))
 			if (!TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "HierarchicalMapGet", int32_t, arguments->thread_id))
 			{ // If the record was not already stored, add the block.
 				// fprintf(stderr, "%s not found", key.c_str());
@@ -4349,22 +4338,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					pthread_mutex_lock(&memory_protect);
 					return -1;
 				}
-				// INSERT THE ELEMENT IN THE MAP.
 				int32_t insert_successful = -1;
-				// Insert the received uri into the directory tree.
-				// slog_debug("Inserting %s into directory tree", key.c_str());
-				// GNode *new_node = NULL;
-				// insert_successful = TIMING(GTree_insert((char *)key_for_tree.c_str(), &new_node), "*GTree_insert", int32_t, arguments->thread_id);
-				// slog_debug("insert_successful=%d, new node add=%p", insert_successful, new_node);
-				// if (insert_successful == -1)
-				// {
-				// 	slog_error("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
-				// 	perror("HERCULES_ERR_METADATA_WORKER_GTREEINSERT_SET_OP");
-				// 	free(buffer);
-				// 	pthread_mutex_unlock(&memory_protect);
-				// 	return -1;
-				// }
-
 				if (operation == IMSS_INFO)
 				{ // Hercules instance case.
 					ret = TIMING(recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, IMSS_INFO, arguments->worker_uid, length), "recv_dynamic_stream IMSS_INFO", int32_t, arguments->thread_id);
@@ -4379,7 +4353,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// dataset_info *struct_ = (dataset_info *)buffer;
 					slog_debug("END Recv dynamic, n_server_when_created=%d", ((dataset_info *)buffer)->n_servers_when_created);
 				}
-
+				
+				// Insert the element in the map.
 				insert_successful = TIMING(hierarchical_map->HierarchicalMapPut(key, buffer, length, reused_memory, NULL, 1), "HierarchicalMapPut", int, arguments->thread_id);
 				slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);
 
@@ -4426,79 +4401,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				pthread_mutex_unlock(&memory_protect);
 
-				// Follow a certain behavior if the received block was already stored.
 				slog_debug("LOCAL DATASET_UPDATE %ld", block_size_recv);
-				// switch (1) // TO CKECK!
-				// {
-				// // Update where the blocks of a LOCAL dataset have been stored.
-				// case LOCAL_DATASET_UPDATE:
-				// {
-				// 	// pthread_mutex_lock(&lock_network);
-				// 	msg_length = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
-				// 	if (msg_length == 0)
-				// 	{
-				// 		perror("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
-				// 		slog_error("HERCULES_ERR_METADATA_WORKER_GET_RECV_DATA_LENGTH_SET_OP");
-				// 		// pthread_mutex_unlock(&lock_network);
-				// 		return -1;
-				// 	}
-				// 	data_ref = malloc(msg_length);
-				// 	if (data_ref == NULL)
-				// 	{
-				// 		perror("HERCULES_ERR_STAT_LOCAL_DATASET_UPDATE");
-				// 		slog_error("HERCULES_ERR_STAT_LOCAL_DATASET_UPDATE");
-				// 		// pthread_mutex_unlock(&lock_network);
-				// 		return -1;
-				// 	}
-				// 	msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, data_ref, msg_length, arguments->worker_uid, 0);
-				// 	if (msg_length == 0)
-				// 	{
-				// 		perror("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP");
-				// 		slog_error("HERCULES_ERR_METADATA_WORKER_RECV_DATA_SET_OP");
-				// 		free(data_ref);
-				// 		// pthread_mutex_unlock(&lock_network);
-				// 		return -1;
-				// 	}
-
-				// 	uint32_t data_size = RESPONSE_SIZE; // MIRAR
-
-				// 	// Value to be written in certain positions of the vector.
-				// 	uint16_t *update_value = (uint16_t *)(data_size + (char *)data_ref - 8);
-				// 	// Positions to be updated.
-				// 	uint32_t *update_positions = (uint32_t *)data_ref;
-
-				// 	// pthread_mutex_lock(&memory_protect);
-				// 	// Set of positions that are going to be updated (those are just under the concerned dataset but not pointed by it).
-				// 	uint16_t *data_locations = (uint16_t *)((char *)address_ + sizeof(dataset_info));
-
-				// 	// Number of positions to be updated.
-				// 	int32_t num_pos_toupdate = (data_size / sizeof(uint32_t)) - 2;
-
-				// 	// Perform the update operation.
-				// 	for (int32_t i = 0; i < num_pos_toupdate; i++)
-				// 		data_locations[update_positions[i]] = *update_value;
-
-				// 	// Answer the client with the update.
-				// 	slog_debug("[STAT_WORKER] Updating existing dataset %s.", key.c_str());
-				// 	// char answer[] = "UPDATED!\0";
-				// 	response_msg = MSG_UPDATED_OP;
-				// 	ret = SendConfirmationMessage(arguments, response_msg);
-				// 	if (ret == 0)
-				// 	{
-				// 		slog_error("HERCULES_ERR_METADATA_WORKER_SEND_DATA_SET_OP");
-				// 		perror("HERCULES_ERR_METADATA_WORKER_SEND_DATA_SET_OP");
-				// 		free(data_ref);
-				// 		// pthread_mutex_unlock(&lock_network);
-				// 		return -1;
-				// 	}
-				// 	free(data_ref);
-
-				// 	// pthread_mutex_unlock(&lock_network);
-				// 	break;
-				// }
-
-				// default:
-				// { // always executed.
 				slog_debug("num_input_read=%d, operation=%d", num_input_read, operation);
 				int new_server_status = 0;
 				int flag = 0;
@@ -4542,29 +4445,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// skip imss_info and num_storages.
 					address_aux += sizeof(imss_info);
 					address_aux += imss_info_->num_storages * LINE_LENGTH;
-					// reserve memory to store the status list.
-					// imss_info_->status = (int *)malloc(imss_info_->num_storages * sizeof(int));
-					// copy the status list.
-					// memcpy(imss_info_->status, address_aux, imss_info_->num_storages * sizeof(int));
-
-					// int current_num_storages = imss_info_->num_storages;
-					// slog_debug("[STAT_WORKER] prev. num data servers=%d", imss_info_->num_storages);
-					// slog_debug("[STAT_WORKER] changing data server %d with status=%d to a new status=%d", delete_dataserver_indx, imss_info_->status[delete_dataserver_indx], new_server_status);
-					// free(imss_info_->ips[delete_dataserver_indx]);
-					// imss_info_->status[delete_dataserver_indx] = new_server_status;
-					// slog_debug("[STAT_WORKER] new num data servers=%d, new status=%d", imss_info_->num_active_storages, imss_info_->status[delete_dataserver_indx]);
-					// address_ += sizeof(imss_info);
-					// address_ += imss_info_->num_storages * LINE_LENGTH;
-					// memcpy(address_aux, imss_info_->status, imss_info_->num_storages * sizeof(int));
-					// move the pointer to the arr_num_active_storages position.
-					// address_aux += (imss_info_->num_storages * sizeof(int));
-
-					// copy the arr_num_active_storages list.
-					// imss_info_->arr_num_active_storages = (int *)malloc(imss_info_->num_storages * sizeof(int));
-					// memcpy(imss_info_->arr_num_active_storages, address_aux, imss_info_->num_storages * sizeof(int));
-					// set the value.
-					// imss_info_->arr_num_active_storages[delete_dataserver_indx] = imss_info_->num_active_storages;
-					// memcpy(address_aux, imss_info_->arr_num_active_storages, imss_info_->num_storages * sizeof(int));
+					
 					free(imss_info_);
 					pthread_mutex_unlock(&memory_protect);
 				}

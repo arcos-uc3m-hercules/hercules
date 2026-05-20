@@ -3253,7 +3253,10 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 
 	wait_ack(ucp_worker_meta, local_meta_uid, ep, SYNC);
 
-	wait_malleability_changes(ucp_worker_meta, local_meta_uid, ep, NULL);
+	// MALLEABILITY_CONF_PERF configuration does not apply malleability changes. 
+	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED) {
+		wait_malleability_changes(ucp_worker_meta, local_meta_uid, ep, NULL);
+	}
 
 	end_send_performance_t = clock() - init_malleability_t;
 	send_performance_time_taken = ((double)end_send_performance_t) / CLOCKS_PER_SEC; // in seconds
@@ -3344,7 +3347,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 
 	// MALLEABILITY_CONF_PERF is used to measure the performance when malleability is not enabled.
 	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED || CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_PERF) // TODO: add a new condition to check the Malleability type (e.g., memory usage, performance, ...)
-	{														 // To send performance metrics.
+	{	// To send performance metrics.
 		int status = send_performance_metrics(ep, dataset_uri, m_srv);
 	}
 

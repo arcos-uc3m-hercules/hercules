@@ -227,7 +227,7 @@ int32_t main(int32_t argc, char **argv)
 		bind_port = args.stat_port;
 
 		imss_copy.num_storages = 0;
-		if (strlen(args.alloc_data_hostfile) != 0 && args.malleability > 0)
+		if (strlen(args.alloc_data_hostfile) != 0 && args.malleability == MALLEABILITY_CONF_ENABLED)
 		{
 			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
 			fprintf(stderr, "Number of hosts in %s are %d\n", args.alloc_data_hostfile, number_of_hosts);

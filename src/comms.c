@@ -1928,7 +1928,7 @@ extern "C"
 		}
 		if (status != UCS_OK)
 		{
-			fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str, ucs_status_string(status));
+			// fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str, ucs_status_string(status));
 			slog_warn("unable to %s %s (%s)\n", op_str, data_str, ucs_status_string(status));
 		}
 		// ep_err_detected = 0;
