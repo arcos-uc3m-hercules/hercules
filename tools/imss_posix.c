@@ -968,72 +968,59 @@ pid_t fork(void)
 
 pid_t vfork(void)
 {
-	if (!real_vfork)
-		real_vfork = (pid_t (*)())dlsym(RTLD_NEXT, "vfork");
+    static pid_t (*real_vfork)(void) = nullptr;
 
-	if (!init)
-	{
-		return real_vfork();
-	}
-	WarnOperationNotSupported(__func__, "GENERIC");
-	// pid_t pid = real_vfork();
-	// slog_live("[POSIX] Ending real '%s', pid=%d", __func__, pid);
-	return real_vfork();
+    if (!real_vfork)
+    {
+        real_vfork = reinterpret_cast<pid_t (*)(void)>(dlsym(RTLD_NEXT, __func__));
+    }
+
+    if (!init)
+    {
+        return real_vfork();
+    }
+
+    errno = 0;
+    slog_live("[POSIX] Calling vfork");
+
+    // Do NOT lock mutexes here. vfork suspends the parent process.
+    slog_debug("[POSIX] Init real_vfork");
+    
+    pid_t pid = real_vfork();
+
+    if (pid == -1)
+    {
+        perror("vfork error");
+        slog_error("[POSIX] Error 'real vfork', errno=%d:%s", errno, strerror(errno));
+        return pid;
+    }
+
+    switch (pid)
+    {
+        case -1:
+        {
+            slog_live("[POSIX] vfork failed");
+        }
+        break;
+        
+        case 0: // child process.
+        {
+            // Memory is shared with the parent. 
+            // Do NOT reinitialize mutexes, nullify pointers, or initialize network resources.
+            slog_live("[POSIX] Child process (vfork)");
+        }
+        break;
+        
+        default: // parent process.
+        {
+            // Parent resumes execution only after the child calls exec() or _exit()
+            slog_live("[POSIX] Parent process, vfork child pid=%d", pid);
+        }
+        break;
+    }
+
+    return pid;
 }
-
-// pid_t vfork(void)
-// {
-// 	if (!real_vfork)
-// 		real_vfork = dlsym(RTLD_NEXT, "vfork");
-
-// 	if (!init)
-// 	{
-// 		return real_vfork();
-// 	}
-// 	// pid_t pid = real_vfork();
-// 	// slog_live("[POSIX] Ending real '%s', pid=%d", __func__, pid);
-
-// 	errno = 0;
-// 	slog_live("[POSIX] Calling vfork");
-// 	// pid_t pid = real_vfork();
-// 	int status = -1;
-// 	pid_t pid = real_vfork(); // vfork(); // real_fork();
-
-// 	if (pid == -1)
-// 	{
-
-// 		slog_error("[POSIX] Error 'real %s', errno=%d:%s", __func__, errno, strerror(errno));
-// 		perror("Vfork error");
-// 		return pid;
-// 	}
-
-// 	if (pid == 0) // child process.
-// 	{
-// 		// release is set to 0 to prevent clossing the communication twice (only the parent process must do it).
-// 		release = 0;
-// 		// slog_live("[POSIX] Child process");
-// 	}
-// 	// else
-// 	// {
-// 		// release = 0;
-// 		// errno = 0;
-// 		//// slog_live("[POSIX] Parent process, pid=%d", pid);
-// 		// while (wait(&status) != pid)
-// 		// 	;
-// 		// if (status == 0)
-// 		// {
-// 		// 	slog_live("[POSIX] Child process has ended, pid=%d", pid);
-// 		// }
-// 		// else
-// 		// {
-// 		// 	slog_error("[POSIX] Child process has failed, pid=%d", pid);
-// 		// }
-
-// 		// slog_live("[POSIX] Ending '%s'", __func__);
-// 	// }
-
-// 	return pid;
-// }
 
 int lstat64(const char *__restrict__ pathname, struct stat64 *__restrict__ buf)
 {
