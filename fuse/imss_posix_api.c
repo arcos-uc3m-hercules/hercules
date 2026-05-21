@@ -228,9 +228,49 @@ extern "C"
 	/*
 	   -----------	FUSE IMSS implementation -----------
 	 */
-
-	int imss_truncate(const char *path, off_t offset)
+	int imss_truncate(const char *path, off_t length)
 	{
+		clock_t t = clock();
+		int ds = 0;
+		int fd = -1;
+		struct stat stats;
+		char *aux = nullptr;
+
+		fd_lookup(const_cast<char *>(path), &fd, &stats, &aux);
+		if (fd >= 0)
+		{
+			ds = fd;
+		}
+		else if (fd == -1)
+		{
+			return -ENOENT;
+		}
+
+		slog_debug("[imss_truncate] path=%s, requested length=%ld, current size=%ld", path, length, stats.st_size);
+
+		if (stats.st_size == length)
+		{
+			return 0; 
+		}
+
+		int64_t new_blocks = (length == 0) ? 0 : ((length + IMSS_DATA_BSIZE - 1) / IMSS_DATA_BSIZE);
+
+		// TODO: if the file is reduced, we have to tell the servers to delete the blocks from
+		// 'new_blocks' to 'stats.st_blocks'.
+
+		stats.st_size = length;
+		stats.st_blocks = new_blocks;
+
+		slog_debug("[imss_truncate] Updating stat, st_size=%ld, st_blocks=%ld", stats.st_size, stats.st_blocks);
+		
+		// Updated the metadata hierarchical map
+		HierarchicalMapUpdate(hierarchical_map, path, ds, stats);
+
+		t = clock() - t;
+		double time_taken = (static_cast<double>(t)) / CLOCKS_PER_SEC;
+
+		slog_debug(">>>>>>> [API] imss_truncate time total %f s, length = %ld <<<<<<<<<", time_taken, length);
+
 		return 0;
 	}
 
