@@ -1,5 +1,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#include "slog.h"
+#include <unistd.h>
 #endif
 
 #include "imss_posix.h"
@@ -1619,28 +1621,101 @@ int flock(int fd, int operation)
 		real_flock = (int (*)(int, int))dlsym(RTLD_NEXT, __func__);
 
 	if (!init)
-	{
 		return real_flock(fd, operation);
-	}
 
 	errno = 0;
 	int ret = 0;
+
 	std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
 	if (!pathname_ob.empty())
 	{
 		const char *pathname = pathname_ob.c_str();
 
-		// TODO
-		slog_warn("[POSIX][TODO] Calling Hercules 'flock', pathname=%s\n", pathname);
-		// fprintf(stderr, "[POSIX]. Calling Hercules 'flock', pathname=%s\n", pathname);
-		// fprintf(stderr,"[POSIX]. Ending Hercules 'flock', pathname=%s\n", pathname);
-	}
-	else
-	{
-		slog_full("[POSIX] Calling real 'flock', fd=%d\n", fd);
-		ret = real_flock(fd, operation);
-	}
-	return ret;
+
+		const int lock_type = operation & ~LOCK_NB;   // turn off the no-lock indicator 
+		const bool non_blocking = (operation & LOCK_NB) != 0;
+
+		slog_live("[POSIX]. Calling Hercules 'flock', pathname=%s, fd=%d, "
+		          "operation=0x%x (%s%s)",
+                  pathname, fd, operation,
+                  lock_type == LOCK_SH ? "LOCK_SH" :
+                  lock_type == LOCK_EX ? "LOCK_EX" :
+                  lock_type == LOCK_UN ? "LOCK_UN" : "UNKNOWN",
+                  non_blocking        ? "|LOCK_NB" : "");
+
+        switch (lock_type)
+        {
+            // Shared lock
+            case LOCK_SH:
+            {
+                slog_live("[POSIX][flock] pathname=%s, fd=%d, LOCK_SH%s",
+                          pathname, fd, non_blocking ? "|LOCK_NB" : "");
+
+                if (non_blocking)
+                {
+					// Grant immediately.
+					// TODO: implement a backend blocking implementation.
+                    ret = 0;
+                }
+                else
+                {
+                    // Blocking shared lock.
+					ret = real_flock(fd, operation);
+                }
+                break;
+            }
+
+            // Exclusive lock
+            case LOCK_EX:
+            {
+                slog_live("[POSIX][flock] pathname=%s, fd=%d, LOCK_EX%s",
+                          pathname, fd, non_blocking ? "|LOCK_NB" : "");
+
+                if (non_blocking)
+                {
+					// Grant immediately.
+					// TODO: implement a backend blocking implementation.
+					ret = 0;
+                }
+                else
+                {
+                    // Blocking exclusive lock.
+					ret = real_flock(fd, operation);
+                }
+                break;
+            }
+
+            // Unlock
+            case LOCK_UN:
+			{
+				slog_live("[POSIX][flock] pathname=%s, fd=%d, LOCK_UN", pathname, fd);
+				ret = real_flock(fd, LOCK_UN);
+				break;
+			}
+
+            // Invalid operation.
+            default:
+            {
+                slog_warn("[POSIX][flock] pathname=%s, fd=%d, invalid operation=0x%x",
+                          pathname, fd, operation);
+                ret   = -1;
+                errno = EINVAL;
+                break;
+            }
+        }
+
+        slog_live("[POSIX]. Ending Hercules 'flock', pathname=%s, fd=%d, "
+                  "operation=0x%x, ret=%d, errno=%d",
+                  pathname, fd, operation, ret, ret == -1 ? errno : 0);
+    }
+    else
+    {
+        slog_live("[POSIX] Calling real 'flock', fd=%d, operation=0x%x", fd, operation);
+        ret = real_flock(fd, operation);
+        slog_live("[POSIX] Ending real 'flock', fd=%d, ret=%d", fd, ret);
+    }
+
+    return ret;
 }
 
 int fclose(FILE *fp)
@@ -3045,45 +3120,101 @@ int truncate(const char *path, off_t length)
 	if (!real_truncate)
 		real_truncate = (int (*)(const char *, off_t))dlsym(RTLD_NEXT, __func__);
 
-	if (init)
-	{
-		// TODO.
-		// fprintf(stderr, "[POSIX][TODO]. Calling truncate, path=%s, length=%ld", path, length);
-		slog_warn("[POSIX][TODO]. Calling truncate, path=%s, length=%ld", path, length);
-	}
+	 if (!init)
+    {
+        return real_truncate(path, length);
+    }
 
-	return real_truncate(path, length);
+    errno = 0;
+    int ret = -1;
+    char *new_path = checkHerculesPath(path);
+	if (new_path != NULL)
+	{
+        const char *pathname = new_path;
+        slog_live("[POSIX]. Calling Hercules 'truncate', pathname=%s, length=%ld", pathname, length);
+
+        ret = TIMING(generalFtruncate(pathname, length), "generalFtruncate", int, rank);
+
+        slog_live("[POSIX]. Ending Hercules 'ftruncate', pathname=%s, length=%ld, ret=%d\n", pathname, length, ret);
+    }
+    else
+    {
+        slog_full("[POSIX]. Calling real 'ftruncate', length=%ld", length);
+        // fprintf(stderr, "[POSIX]. Calling real 'ftruncate', fd=%d, length=%ld\n", fd, length);
+        ret = real_truncate(path, length);
+        slog_full("[POSIX]. Ending real 'ftruncate', ret=%d", ret);
+    }
+
+	return ret;
 }
 
 int ftruncate(int fd, off_t length)
 {
-	if (!real_ftruncate)
-		real_ftruncate = (int (*)(int, off_t))dlsym(RTLD_NEXT, __func__);
+    static int (*real_ftruncate)(int, off_t) = nullptr;
 
-	if (!init)
-	{
-		return real_ftruncate(fd, length);
-	}
+    if (!real_ftruncate)
+    {
+        real_ftruncate = reinterpret_cast<int (*)(int, off_t)>(dlsym(RTLD_NEXT, __func__));
+    }
 
-	errno = 0;
-	int ret;
-	std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
-	if (!pathname_ob.empty())
-	{
-		const char *pathname = pathname_ob.c_str();
-		// TODO.
-		slog_live("[POSIX][TODO]. Calling Hercules 'ftruncate', fd=%d, length=%ld, errno=%d:%s\n", fd, length, errno, strerror(errno));
-		ret = 1;
-		slog_live("[POSIX][TODO]. Ending Hercules 'ftruncate', ret=%d, fd=%d, length=%ld, errno=%d:%s\n", ret, fd, length, errno, strerror(errno));
-	}
-	else
-	{
-		slog_full("[POSIX] Calling real 'ftruncate', fd=%d", fd);
-		ret = real_ftruncate(fd, length);
-	}
+    if (!init)
+    {
+        return real_ftruncate(fd, length);
+    }
 
-	return ret;
+    errno = 0;
+    int ret = -1;
+    std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
+    if (!pathname_ob.empty())
+    {
+        const char *pathname = pathname_ob.c_str();
+        slog_live("[POSIX]. Calling Hercules 'ftruncate', pathname=%s, length=%ld, fd=%d", pathname, length, fd);
+
+        ret = TIMING(generalFtruncate(pathname, length), "generalFtruncate", int, rank);
+
+        slog_live("[POSIX]. Ending Hercules 'ftruncate', pathname=%s, length=%ld, ret=%d, fd=%d\n", pathname, length, ret, fd);
+    }
+    else
+    {
+        slog_full("[POSIX]. Calling real 'ftruncate', fd=%d, length=%ld", fd, length);
+        ret = real_ftruncate(fd, length);
+        slog_full("[POSIX]. Ending real 'ftruncate', fd=%d, ret=%d", fd, ret);
+    }
+
+    return ret;
 }
+
+int generalFtruncate(const char *pathname, off_t length)
+{
+    int ret = 0;
+    struct stat ds_stat_n;
+    char *aux = nullptr;
+    int fd_lkup = -1;
+
+    fd_lookup(const_cast<char *>(pathname), &fd_lkup, &ds_stat_n, &aux);
+
+    if (fd_lkup == -1)
+    {
+        errno = ENOENT;
+        ret = -1;
+        slog_error("[POSIX] Error Hercules 'ftruncate'  : %d:%s", errno, strerror(errno));
+        return ret;
+    }
+
+    slog_live("[POSIX]. pathname=%s, length to truncate=%ld", pathname, length);
+
+    ret = TIMING(imss_truncate(pathname, length), "imss_truncate", int, rank);
+    if (ret < 0)
+    {
+        SetErrno(ret);
+        ret = -1;
+    }
+
+    // ftruncate alters the file size but does not modify the file offset for any open file descriptors.    
+
+    return ret;
+}
+
 
 ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset)
 {
@@ -3299,6 +3430,38 @@ ssize_t pread(int fd, void *buf, size_t count, off_t offset)
 		slog_live("[POSIX]. Calling real 'pread', size=%ld, fd=%d.", count, fd);
 		ret = real_pread(fd, buf, count, offset);
 		slog_live("[POSIX]. Ending real 'pread', size=%ld, fd=%d, ret=%d", count, fd, ret);
+	}
+	return ret;
+}
+
+ssize_t pread64(int fd, void *buf, size_t count, off_t offset)
+{
+	if (!real_pread64)
+		real_pread64 = (ssize_t (*)(int, void *, size_t, off_t))dlsym(RTLD_NEXT, __func__);
+
+	if (!init)
+	{
+		return real_pread64(fd, buf, count, offset);
+	}
+
+	errno = 0;
+	ssize_t ret = -1;
+	std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
+	if (!pathname_ob.empty())
+	{
+		const char *pathname = pathname_ob.c_str();
+		slog_live("[POSIX]. Calling Hercules 'pread64', pathname=%s, size=%ld, offset=%ld, fd=%ld.", pathname, count, offset, fd);
+
+		ret = imss_sread(pathname, buf, count, offset);
+		// The file offset is not changed.
+
+		slog_live("[POSIX]. End Hercules 'pread64', pathname=%s, ret=%ld, size=%ld, offset=%d, fd=%d", pathname, ret, count, offset, fd);
+	}
+	else
+	{
+		slog_live("[POSIX]. Calling real 'pread64', size=%ld, fd=%d.", count, fd);
+		ret = real_pread64(fd, buf, count, offset);
+		slog_live("[POSIX]. Ending real 'pread64', size=%ld, fd=%d, ret=%d", count, fd, ret);
 	}
 	return ret;
 }
@@ -5442,15 +5605,17 @@ int fsync(int fd)
 	{
 		const char *pathname = pathname_ob.c_str();
 		slog_info("[POSIX] Calling Hercules fsync, fd=%d", fd);
-		// TO CHECK! This function is used by IOR to I/O verification.
+		// TODO: TO CHECK! This function is used by IOR to I/O verification.
 		// Upon successful completion, fsync() shall return 0. Otherwise,
 		// -1 shall be returned and errno set to indicate the error.
 		// If the fsync() function fails, outstanding I/O operations
 		// are not guaranteed to have been completed.
+
 		return 0;
 	}
 	else
 	{
+		slog_full("Calling Real 'fsync'")
 		return real_fsync(fd);
 	}
 }
@@ -5889,176 +6054,35 @@ int fchdir(int fd)
 // 	real_exit(status);
 // }
 
-int fcntl(int fd, int cmd, ... /* arg */)
-{
-	if (!real_fcntl)
-		real_fcntl = (int (*)(int, int, ...))dlsym(RTLD_NEXT, "fcntl");
-	// FIX ME!
+// Used by hdf5 iotest but does not require a Hercules implementation.
+// int fcntl(int fd, int cmd, ...) ...
+// int fcntl64(int fd, int cmd, ...)
+// {
+// 	if (!real_fcntl64)
+// 		real_fcntl64 = (int (*)(int, int, ...))dlsym(RTLD_NEXT, __func__);
 
-	va_list ap;
-	void *arg;
-	va_start(ap, cmd);
-	arg = va_arg(ap, void *);
-	va_end(ap);
+// 	va_list ap;
+// 	void *arg;
+// 	va_start(ap, cmd);
+// 	arg = va_arg(ap, void *);
+// 	va_end(ap);
 
-	if (!init)
-	{
-		if (!arg)
-			return real_fcntl(fd, cmd);
-		else
-			return real_fcntl(fd, cmd, arg);
-	}
+// 	if (!init)
+// 	{
+// 		if (!arg)
+// 			return real_fcntl64(fd, cmd);
+// 		else
+// 			return real_fcntl64(fd, cmd, arg);
+// 	}
 
-	errno = 0;
-	int ret = 0;
-	std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
-	// if (pathname = map_fd_search_by_val(map_fd, fd))
-	if (!pathname_ob.empty())
-	{
-		const char *pathname = pathname_ob.c_str();
-		slog_live("[POSIX]. Calling Hercules 'fcntl', pathname=%s, fd=%d, cmd=%d", pathname, fd, cmd);
-		// cmd = FCNTL_ADJUST_CMD(cmd);
-		switch (cmd)
-		{
-		// case F_SETLKW:
-		case F_SETLKW64: // release the existence of record locks.
-			// return SYSCALL_CANCEL(fcntl64, fd, cmd, arg);
-			slog_live("[POSIX][fcntl] pathname=%s, fd=%d, F_SETLKW", pathname, fd);
-			// ret = 0;//real_fcntl(fd, cmd, arg);
-			ret = -1;
-			errno = EDEADLK;
-			break;
-		case F_OFD_SETLKW:
-		{
-			struct flock *flk = (struct flock *)arg;
-			slog_live("[POSIX][fcntl] pathname=%s, fd=%d, F_OFD_SETLKW", pathname, fd);
-			// struct flock64 flk64 =
-			// 	{
-			// 		.l_type = flk->l_type,
-			// 		.l_whence = flk->l_whence,
-			// 		.l_start = flk->l_start,
-			// 		.l_len = flk->l_len,
-			// 		.l_pid = flk->l_pid
-			// 	};
-			// return SYSCALL_CANCEL(fcntl64, fd, cmd, &flk64);
-			ret = 0; // real_fcntl(fd, cmd, &flk);
-			break;
-		}
-		case F_OFD_GETLK:
-		case F_OFD_SETLK:
-		{
-			slog_live("[POSIX][fcntl], pathname=%s, fd=%d, F_OFD_SETLK", pathname, fd);
-			struct flock *flk = (struct flock *)arg;
-			// struct flock64 flk64 =
-			// 	{
-			// 		.l_type = flk->l_type,
-			// 		.l_whence = flk->l_whence,
-			// 		.l_start = flk->l_start,
-			// 		.l_len = flk->l_len,
-			// 		.l_pid = flk->l_pid
-			// 	};
-			int ret = real_fcntl(fd, cmd, &flk); // INLINE_SYSCALL_CALL(fcntl64, fd, cmd, &flk64);
-			if (ret == -1)
-				return -1;
-			if ((off_t)flk->l_start != flk->l_start || (off_t)flk->l_len != flk->l_len)
-			{
-				//__set_errno(EOVERFLOW);
-				errno = EOVERFLOW;
-				return -1;
-			}
-			// flk->l_type = flk64.l_type;
-			// flk->l_whence = flk64.l_whence;
-			// flk->l_start = flk64.l_start;
-			// flk->l_len = flk64.l_len;
-			// flk->l_pid = flk64.l_pid;
-			// return ret;
-			break;
-		}
-		case F_DUPFD_CLOEXEC:
-		{
-			slog_live("[POSIX][fcntl], pathname=%s, fd=%d, F_DUPFD_CLOEXEC", pathname, fd);
-			// ret = real_fcntl(fd, cmd, arg);
-			ret = dup(fd);
-			break;
-		}
-		/* Since only F_SETLKW{64}/F_OLD_SETLK are cancellation entrypoints and
-	   only OFD locks require LFS handling, all others flags are handled
-	   unmodified by calling __NR_fcntl64.  */
-		default:
-			slog_live("[POSIX][fcntl], pathname=%s, fd=%d, default", pathname, fd);
-			// ret = real_fcntl(fd, cmd, arg);
-			if (!arg)
-				ret = real_fcntl(fd, cmd);
-			else
-				ret = real_fcntl(fd, cmd, arg);
-			break;
-			// return __fcntl64_nocancel_adjusted(fd, cmd, arg);
-		}
-		slog_live("[POSIX]. Ending Hercules 'fcntl', pathname=%s, fd=%d, ret=%d\n", pathname, fd, ret);
-	}
-	else
-	{
-		slog_full("[POSIX]. Calling real 'fcntl', fd=%d", fd);
-		// cmd = FCNTL_ADJUST_CMD(cmd);
-		// switch (cmd)
-		// {
-		// // case F_SETLKW:
-		// case F_SETLKW64: // release the existence of record locks.
-		// 	slog_live("[POSIX][fcntl] fd=%d, F_SETLKW", fd);
-		// 	break;
-		// case F_OFD_SETLKW:
-		// {
-		// 	struct flock *flk = (struct flock *)arg;
-		// 	slog_live("[POSIX][fcntl] fd=%d, F_OFD_SETLKW", fd);
-		// 	break;
-		// }
-		// case F_OFD_GETLK:
-		// case F_OFD_SETLK:
-		// {
-		// 	slog_live("[POSIX][fcntl] fd=%d, F_OFD_SETLK", fd);
-		// 	break;
-		// }
-		// default:
-		// 	slog_live("[POSIX][fcntl] fd=%d, default", fd);
-		// 	break;
-		// }
-		if (!arg)
-			ret = real_fcntl(fd, cmd);
-		else
-			ret = real_fcntl(fd, cmd, arg);
-		slog_full("[POSIX]. Ending Real 'fcntl', fd=%d, ret=%d", fd, ret);
-	}
+// 	int ret = 0;
+// 	if (!arg)
+// 		ret = real_fcntl64(fd, cmd);
+// 	else
+// 		ret = real_fcntl64(fd, cmd, arg);
 
-	return ret;
-}
-
-int fcntl64(int fd, int cmd, ...)
-{
-	if (!real_fcntl64)
-		real_fcntl64 = (int (*)(int, int, ...))dlsym(RTLD_NEXT, __func__);
-
-	va_list ap;
-	void *arg;
-	va_start(ap, cmd);
-	arg = va_arg(ap, void *);
-	va_end(ap);
-
-	if (!init)
-	{
-		if (!arg)
-			return real_fcntl64(fd, cmd);
-		else
-			return real_fcntl64(fd, cmd, arg);
-	}
-
-	int ret = 0;
-	if (!arg)
-		ret = real_fcntl64(fd, cmd);
-	else
-		ret = real_fcntl64(fd, cmd, arg);
-
-	return ret;
-}
+// 	return ret;
+// }
 
 void *prefetch_function(void *th_argv)
 {

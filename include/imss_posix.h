@@ -52,6 +52,7 @@ extern "C"
     char *convert_path(const char *name);
     int generalOpen(const char *new_path, int flags, mode_t mode, int createFd);
     ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, size_t offset);
+    int generalFtruncate(const char *pathname, off_t length);
     int GeneralFAccessAt(int dirfd, const char *pathname, int mode, int flags, char *pathname_dir);
     void SetErrno(int value);
     int IsAbsolutePath(const char *pathname);
@@ -165,7 +166,9 @@ extern "C"
     static pid_t (*real_waitpid)(pid_t pid, int *wstatus, int options) = NULL;
     static int (*real___fwprintf_chk)(FILE *stream, int flag, const wchar_t *format) = NULL;
     static ssize_t (*real_pread)(int fd, void *buf, size_t count, off_t offset) = NULL;
+    static ssize_t (*real_pread64)(int fd, void *buf, size_t count, off64_t offset) = NULL;
     static ssize_t (*real_pwrite)(int fd, const void *buf, size_t count, off_t offset) = NULL;
+    // static ssize_t (*real_pwrite64)(int fd, const void *buf, size_t count, off64_t offset) = NULL;
     static int (*real_truncate)(const char *path, off_t length) = NULL;
     static int (*real_ftruncate)(int fd, off_t length) = NULL;
     static int (*real_flock)(int fd, int operation) = NULL;
