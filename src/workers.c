@@ -374,13 +374,14 @@ void *move_blocks_2_server(void *th_argv)
 	if (imss_found_in == -1)
 	{ // request the metadata.
 		slog_debug("imss structure not found, requesting to the metadata server");
-		int32_t open_ret = open_imss((char *)arguments->args->imss_uri);
-		if (open_ret < 0)
+		uint32_t num_servers = 0;
+		int32_t ret_open_imss = open_imss((char *)arguments->args->imss_uri, &num_servers);
+		if (ret_open_imss < 0 && ret_open_imss != -2)
 		{
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
 			pthread_exit(NULL);
 		}
-		number_active_storage_servers.store(open_ret);
+		number_active_storage_servers.store(num_servers);
 		imss_found_in = find_imss_pointer("imss://", &local_imss_);
 		if (imss_found_in == -1)
 		{
@@ -455,7 +456,7 @@ void *move_blocks_2_server(void *th_argv)
 					continue;
 				}
 				// TODO: check for the current data policy in the dataset, not in the imss configuration.
-				next_server = find_server(number_active_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy); 
+				next_server = find_server(number_active_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy);
 
 				// TODO: check replication factor.
 
@@ -1025,13 +1026,14 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls)
 		if (imss_found_in == -1)
 		{ // request the metadata.
 			slog_debug("imss structure not found, requesting to the metadata server");
-			int32_t open_ret = open_imss((char *)temp_p_argv_for_calls.my_uri);
-			if (open_ret < 0)
+			uint32_t num_servers = 0;
+			int32_t ret_open_imss = open_imss((char *)temp_p_argv_for_calls.my_uri, &num_servers);
+			if (ret_open_imss < 0 && ret_open_imss != -2)
 			{
 				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
 				pthread_exit(NULL);
 			}
-			number_active_storage_servers.store(open_ret);
+			number_active_storage_servers.store(num_servers);
 		}
 
 		curr_global_imss_info = &curr_imss.info;
@@ -1487,7 +1489,6 @@ void *get_performance_metrics(void *th_argv)
 		// 		fprintf(stderr, "Testing block\n");
 		// #endif
 	}
-
 
 	return NULL;
 }
@@ -1984,13 +1985,14 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		if (imss_found_in == -1)
 		{ // request the metadata.
 			slog_debug("imss structure not found, requesting to the metadata server");
-			int32_t open_ret = open_imss(imss_uri);
-			if (open_ret < 0)
+			uint32_t num_servers = 0;
+			int32_t ret_open_imss = open_imss(imss_uri, &num_servers);
+			if (ret_open_imss < 0 && ret_open_imss != -2)
 			{
 				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
 				pthread_exit(NULL);
 			}
-			number_active_storage_servers.store(open_ret);
+			number_active_storage_servers.store(num_servers);
 		}
 		else
 		{ // update current struct.
@@ -3012,11 +3014,11 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
 					slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
 					SendConfirmationMessage(arguments, MSG_ERROR_OP);
-					if (reused_memory == 0) 
-                    {
-                        free(buffer);
-						buffer=NULL;
-                    }
+					if (reused_memory == 0)
+					{
+						free(buffer);
+						buffer = NULL;
+					}
 					return -1;
 				}
 			}
@@ -4353,7 +4355,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// dataset_info *struct_ = (dataset_info *)buffer;
 					slog_debug("END Recv dynamic, n_server_when_created=%d", ((dataset_info *)buffer)->n_servers_when_created);
 				}
-				
+
 				// Insert the element in the map.
 				insert_successful = TIMING(hierarchical_map->HierarchicalMapPut(key, buffer, length, reused_memory, NULL, 1), "HierarchicalMapPut", int, arguments->thread_id);
 				slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);
@@ -4445,7 +4447,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// skip imss_info and num_storages.
 					address_aux += sizeof(imss_info);
 					address_aux += imss_info_->num_storages * LINE_LENGTH;
-					
+
 					free(imss_info_);
 					pthread_mutex_unlock(&memory_protect);
 				}

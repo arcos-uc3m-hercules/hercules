@@ -230,9 +230,49 @@ extern "C"
 	/*
 	   -----------	FUSE IMSS implementation -----------
 	 */
-
-	int imss_truncate(const char *path, off_t offset)
+	int imss_truncate(const char *path, off_t length)
 	{
+		clock_t t = clock();
+		int ds = 0;
+		int fd = -1;
+		struct stat stats;
+		char *aux = nullptr;
+
+		fd_lookup(const_cast<char *>(path), &fd, &stats, &aux);
+		if (fd >= 0)
+		{
+			ds = fd;
+		}
+		else if (fd == -1)
+		{
+			return -ENOENT;
+		}
+
+		slog_debug("[imss_truncate] path=%s, requested length=%ld, current size=%ld", path, length, stats.st_size);
+
+		if (stats.st_size == length)
+		{
+			return 0; 
+		}
+
+		int64_t new_blocks = (length == 0) ? 0 : ((length + IMSS_DATA_BSIZE - 1) / IMSS_DATA_BSIZE);
+
+		// TODO: if the file is reduced, we have to tell the servers to delete the blocks from
+		// 'new_blocks' to 'stats.st_blocks'.
+
+		stats.st_size = length;
+		stats.st_blocks = new_blocks;
+
+		slog_debug("[imss_truncate] Updating stat, st_size=%ld, st_blocks=%ld", stats.st_size, stats.st_blocks);
+		
+		// Updated the metadata hierarchical map
+		HierarchicalMapUpdate(hierarchical_map, path, ds, stats);
+
+		t = clock() - t;
+		double time_taken = (static_cast<double>(t)) / CLOCKS_PER_SEC;
+
+		slog_debug(">>>>>>> [API] imss_truncate time total %f s, length = %ld <<<<<<<<<", time_taken, length);
+
 		return 0;
 	}
 
@@ -340,6 +380,7 @@ extern "C"
 		char *aux = NULL;
 		if (!strcmp(imss_path, IMSS_ROOT))
 		{
+			slog_debug("root case, imss_path=%s", imss_path);
 			stbuf->st_size = 4;
 			slog_debug("is root, setting st_nlink to 1");
 			stbuf->st_nlink = 1;
@@ -2301,8 +2342,8 @@ extern "C"
 		int32_t ret_set_data = set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC, INITIAL_RECURSION);
 		if (ret_set_data < 0)
 		{
-			perror("HERCULES_ERR_WRITTING_BLOCK");
-			slog_error("HERCULES_ERR_WRITTING_BLOCK");
+			perror("HERCULES_ERR_IMSS_RELEASE_SET_DATA");
+			slog_error("HERCULES_ERR_IMSS_RELEASE_SET_DATA");
 			return ret_set_data;
 		}
 
@@ -2861,6 +2902,11 @@ extern "C"
 		pthread_mutex_lock(&lock);
 		int32_t ret_set_data = set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock);
+
+		if (ret_set_data == 1) {
+			// chmod: On success, zero is returned.  On error, -1 is returned, and errno is set to indicate the error.
+			ret_set_data = 0;
+		}
 
 		free(rpath);
 		return ret_set_data;

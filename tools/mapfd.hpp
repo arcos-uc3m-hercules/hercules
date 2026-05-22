@@ -7,10 +7,10 @@
 extern "C" {
 #endif
 
-// #include <sys/stat.h>
 void *map_fd_create();
 void map_fd_destroy(void *map);
 int map_fd_put(void *map, const char *pathname, const int fd, unsigned long offset);
+int map_fd_dup(void *map, const int old_fd, const int new_fd);
 void map_fd_update_value(void *map, const char *pathname, const int fd, unsigned long offset);
 void map_fd_update_fd(void *map, const char *pathname, const int fd, const int new_fd, unsigned long offset);
 void map_fd_erase(void *map, const int fd);

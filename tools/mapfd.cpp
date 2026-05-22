@@ -1,202 +1,184 @@
 #include <map>
 #include <iostream>
 #include <vector>
+#include <memory>
 #include <cstddef>
 #include <cstring>
+#include <climits>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <mutex>
 
-// to manage logs.
+#include "mapfd.hpp"
 #include "slog.h"
 
 using std::string;
-typedef std::map<int, std::pair<std::string, long>> Map;
+
+// Structure representing the open file description state
+struct FileDescription {
+    std::string pathname;
+    unsigned long offset;
+
+    FileDescription(std::string path, unsigned long off)
+        : pathname(std::move(path)), offset(off) {}
+};
+
+// Map file descriptors to a shared pointer of the file description
+typedef std::map<int, std::shared_ptr<FileDescription>> Map;
 
 std::mutex fdlock;
 
 extern "C"
 {
-
 	void *map_fd_create()
 	{
-		return reinterpret_cast<void *>(new Map);
+		std::unique_lock<std::mutex> lck(fdlock);
+		return reinterpret_cast<void *>(new Map());
 	}
 
 	void map_fd_destroy(void *map)
 	{
 		if (map)
 		{
+			std::unique_lock<std::mutex> lck(fdlock);
 			Map *m = reinterpret_cast<Map *>(map);
-			// for (auto &it : *m)
-			// {
-			// 	free(it.second.first.c_str());
-			// }
-
 			m->clear();
-
 			delete m;
 		}
 	}
 
-	int map_fd_put(void *map, const char *pathname, const int fd, long offset)
+	int map_fd_put(void *map, const char *pathname, const int fd, unsigned long offset)
 	{
-		// std::unique_lock<std::mutex> lck(fdlock);
+		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
-		std::pair<std::string, long> value(pathname, offset);
-		std::pair<std::map<int, std::pair<std::string, long>>::iterator, bool> ret;
-		ret = m->insert({fd, value});
-		if (ret.second == false)
+		
+		auto value = std::make_shared<FileDescription>(pathname, offset);
+		auto ret = m->insert({fd, value});
+		
+		return ret.second ? 1 : -1;
+	}
+
+	int map_fd_dup(void *map, const int old_fd, const int new_fd)
+	{
+		std::unique_lock<std::mutex> lck(fdlock);
+		Map *m = reinterpret_cast<Map *>(map);
+		
+		auto search = m->find(old_fd);
+		if (search == m->end())
 		{
 			return -1;
 		}
-		else
-		{
-			return 1;
-		}
+		
+		// Map the new_fd to point to the exact same tracking instance
+		(*m)[new_fd] = search->second;
+		return 1;
 	}
 
 	void map_fd_update_value(void *map, const char *pathname, const int fd, unsigned long offset)
 	{
-		// std::unique_lock<std::mutex> lck(fdlock);
+		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
 		auto search = m->find(fd);
 
 		if (search != m->end())
 		{
-			search->second.first = pathname;
-			search->second.second = offset;
+			search->second->pathname = pathname;
+			search->second->offset = offset;
 		}
-		// else
-		// {
-		// 	fprintf(stderr, "Map not updated, fd=%d", fd);
-		// }
 	}
 
 	void map_fd_update_fd(void *map, const char *pathname, const int fd, const int new_fd, unsigned long offset)
 	{
-
-		// std::unique_lock<std::mutex> lck(fdlock);
+		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
 		auto node = m->extract(fd);
-		node.key() = new_fd;
-		m->insert(std::move(node));
+		
+		if (!node.empty())
+		{
+			node.key() = new_fd;
+			node.mapped()->pathname = pathname;
+			node.mapped()->offset = offset;
+			m->insert(std::move(node));
+		}
 	}
 
 	void map_fd_erase(void *map, const int fd)
-	// void map_fd_erase(void *map, char *k)
 	{
-		// std::unique_lock<std::mutex> lck(fdlock);
+		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
 		m->erase(fd);
-		// m->erase(std::string(k));
 	}
 
 	int map_fd_erase_by_pathname(void *map, const char *pathname)
 	{
 		slog_debug("Erasing %s from the map", pathname);
-		// std::unique_lock<std::mutex> lck(fdlock);
+		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
 		char aux_path[PATH_MAX] = {0};
 
 		size_t len = strlen(pathname);
 		if (len > 0 && pathname[len - 1] != '/')
 		{
-			strcat(aux_path, pathname);
+			strncpy(aux_path, pathname, PATH_MAX - 2);
 			strcat(aux_path, "/");
 		}
 
-		for (auto &it : *m)
+		for (auto it = m->begin(); it != m->end(); )
 		{
-			const char *val = it.second.first.c_str();
-			// if (!strncmp(val, pathname, strlen(val)))
+			const char *val = it->second->pathname.c_str();
 			slog_debug("pathname=%s, aux_path=%s", pathname, aux_path);
-			if (!strcmp(val, pathname) || !strcmp(val, aux_path))
+			if (strcmp(val, pathname) == 0 || (aux_path[0] != '\0' && strcmp(val, aux_path) == 0))
 			{
-				int fd = it.first;
-				m->erase(fd);
+				it = m->erase(it);
 				return 1;
 			}
+			else
+			{
+				++it;
+			}
 		}
-		// if (last[0] != '/')
-		// {
-		// 	char aux_path[PATH_MAX] = {0};
-		// 	strcat(aux_path, pathname);
-		// 	strcat(aux_path, "/");
-		// 	int ret = map_fd_erase_by_pathname(map, aux_path);
-		// 	if (ret)
-		// 	{
-		// 		return ret;
-		// 	}
-		// }
+		
 		return -1;
 	}
 
 	int map_fd_search(void *map, const char *pathname, const int fd, unsigned long *offset)
 	{
-		// lock this function.
-		// std::unique_lock<std::mutex> lck(fdlock);
+		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
-		// looking for the value with key "fd".
 		auto search = m->find(fd);
-		// if the key exists:
+		
 		if (search != m->end())
 		{
-			*offset = search->second.second;
+			if (offset) *offset = search->second->offset;
 			return 1;
 		}
-		else
-		{
-			// nothing to do.
-			return -1;
-		}
+		return -1;
 	}
 
-	/*
-	Note: this function should also return a pointer to the offset
-	to avoid to use "map_fd_search", which add extra overhead.
-	*/
 	std::string map_fd_search_by_val(void *map, const int fd)
 	{
-		// std::unique_lock<std::mutex> lck(fdlock);
-		if (!map)
-		{
-			return "";
-		}
+		std::unique_lock<std::mutex> lck(fdlock);
+		if (!map) return "";
+		
 		Map *m = reinterpret_cast<Map *>(map);
-
 		auto search = m->find(fd);
 
 		if (search != m->end())
 		{
-			// when "fd" exists, return the pathname.
-			return search->second.first;
+			return search->second->pathname;
 		}
-		else
-		{
-			// slog_debug("fd %d does not exist in the local map", fd);
-			return "";
-		}
+		return "";
 	}
 
 	int map_fd_search_by_val_close(void *map, int fd)
 	{
-		// std::unique_lock<std::mutex> lck(fdlock);
+		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
-		// Traverse the map
-		int remove = -1;
+		auto search = m->find(fd);
 
-		for (auto &it : *m)
+		if (search != m->end())
 		{
-			if (it.first == fd)
-			{
-				remove = it.first;
-			}
-		}
-
-		if (remove != -1)
-		{
-			m->erase(remove);
+			m->erase(search);
 			return 0;
 		}
 		return 1;
@@ -204,17 +186,15 @@ extern "C"
 
 	int map_fd_search_by_pathname(void *map, const char *pathname, int *fd, long *offset)
 	{
-		// std::unique_lock<std::mutex> lck(fdlock);
+		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
 		// Traverse the map
 		for (auto &it : *m)
 		{
-			const char *val = it.second.first.c_str();
-			// if (!strncmp(val, pathname, strlen(val)))
-			if (!strcmp(val, pathname))
+			if (strcmp(it.second->pathname.c_str(), pathname) == 0)
 			{
-				*fd = it.first;
-				*offset = it.second.second;
+				if (fd) *fd = it.first;
+				if (offset) *offset = static_cast<long>(it.second->offset);
 				return 1;
 			}
 		}
