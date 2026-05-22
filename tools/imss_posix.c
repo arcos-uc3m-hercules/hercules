@@ -137,7 +137,8 @@ int __fxstat(int ver, int fd, struct stat *buf);
 void WarnOperationNotSupported(const char *call_name, const char *pathname)
 {
 	slog_warn("[POSIX] '%s' not currently supported, using real '%s' for pathname=%s\n", call_name, call_name, pathname);
-	fprintf(stderr, "[POSIX][WARNING] '%s' not currently supported, using real '%s' for pathname=%s\n", call_name, call_name, pathname);
+	fprintf(stdout, "[POSIX][WARNING] '%s' not currently supported, using real '%s' for pathname=%s\n", call_name, call_name, pathname);
+	fflush(stdout);
 }
 
 void checkOpenFlags(const char *pathname, int flags)
@@ -701,7 +702,7 @@ int close(int fd)
 	{
 		slog_full("[POSIX]. Calling Real 'close', fd=%d", fd);
 		ret = real_close(fd);
-		slog_full("[POSIX]. Ending Real 'close', ret=%d", ret);
+		slog_full("[POSIX]. Ending Real 'close', fd=%d, ret=%d", fd, ret);
 	}
 	return ret;
 }
@@ -907,22 +908,24 @@ pid_t fork(void)
 	// fprintf(stdout, "[POSIX] Calling fork\n");
 	slog_live("[POSIX] Calling 'fork'");
 
-	// pthread_mutex_lock(&lock_network);
-	pthread_mutex_destroy(&lock_network);
-
-	// release_network_resources(IMSS_ROOT, 1, rank);
-	// imss_comm_cleanup();
-
+	// pthread_mutex_destroy(&lock_network);
+	
+	release_network_resources(IMSS_ROOT, 1, rank);
+	imss_comm_cleanup();
+	
+	pthread_mutex_lock(&lock_network);
 	slog_debug("[POSIX] Init real_fork");
 	pid_t pid = real_fork();
 
 	if (pid == -1)
 	{
-		// pthread_mutex_unlock(&lock_network);
+		pthread_mutex_unlock(&lock_network);
 		perror("Fork error");
 		slog_error("[POSIX] Error 'real fork', errno=%d:%s", errno, strerror(errno));
 		return pid;
 	}
+
+	slog_debug("Locking network, add=%p", &lock_network);
 
 	switch (pid)
 	{
@@ -933,14 +936,17 @@ pid_t fork(void)
 	break;
 	case 0: // child process.
 	{
-		pthread_mutex_init(&lock_network, NULL);
-		// ucp_context_client = NULL;
-		// ucp_worker_meta = NULL;
-		// ucp_worker_data = NULL;
-		// local_addr_meta = NULL;
-		// local_addr_data = NULL;
-		// stat_eps = NULL;
-		// stat_addr = NULL;
+		// pthread_mutex_init(&lock_network, NULL);
+		slog_debug("The child is unlocking the mutex");
+		pthread_mutex_unlock(&lock_network);
+		slog_live("[POSIX] Child process");
+		ucp_context_client = NULL;
+		ucp_worker_meta = NULL;
+		ucp_worker_data = NULL;
+		local_addr_meta = NULL;
+		local_addr_data = NULL;
+		stat_eps = NULL;
+		stat_addr = NULL;
 
 		// slog_debug("ucp_worker_meta=%p", &ucp_worker_meta);
 		// slog_debug("ucp_worker_meta=%p", &ucp_worker_data);s
@@ -953,18 +959,27 @@ pid_t fork(void)
 		// struct tm tm = *localtime(&t);
 		// sprintf(log_path, "client-thread-%ld.%02d-%02d.%d", pthread_self(), tm.tm_hour, tm.tm_min, getpid());
 		// slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
-		slog_live("[POSIX] Child process");
-		// init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
+		init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
 		slog_live("[POSIX] Child process: network resources has been initialized.");
 	}
 	break;
 	default: // parent process.
 	{
-		// pthread_mutex_unlock(&lock_network);
-		pthread_mutex_init(&lock_network, NULL);
+		slog_debug("The parent is unlocking the mutex");
+		pthread_mutex_unlock(&lock_network);
+		// pthread_mutex_init(&lock_network, NULL);
 		slog_live("[POSIX] Parent process, child pid=%d", pid);
+		
+		ucp_context_client = NULL;
+		ucp_worker_meta = NULL;
+		ucp_worker_data = NULL;
+		local_addr_meta = NULL;
+		local_addr_data = NULL;
+		stat_eps = NULL;
+		stat_addr = NULL;
+		
 		print_worker_pointer(ucp_worker_meta);
-		// init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
+		init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
 	}
 	break;
 	}
@@ -1801,10 +1816,10 @@ size_t fwrite(const void *buf, size_t size, size_t count, FILE *fp)
 	}
 	else
 	{
-		slog_full("[POSIX]. Calling real 'fwrite', fd=%d", fd);
-		// fprintf(stderr, "Calling real fwrite, fd=%d\n", fd);
+		// slog_full("[POSIX]. Calling real 'fwrite', fd=%d", fd);
+		//fprintf(stdout, "Calling real fwrite, fd=%d\n", fd);
 		ret = real_fwrite(buf, size, count, fp);
-		slog_full("[POSIX]. Ending real 'fwrite', fd=%d, ret=%d\n", fd, ret);
+		// slog_full("[POSIX]. Ending real 'fwrite', fd=%d, ret=%d\n", fd, ret);
 	}
 
 	return ret;
@@ -2331,7 +2346,11 @@ FILE *fopen(const char *pathname, const char *mode)
 	}
 	else /* Do not try to use slog_ here! This function uses 'fopen' internally. */
 	{
+		// slog_live("[POSIX]. Calling Real 'fopen', pathname=%s", pathname);
+		//fprintf(stdout, "[POSIX]. Calling Real 'fopen', pathname=%s\n", pathname);
+		//fflush(stdout);
 		file = real_fopen(pathname, mode);
+		// slog_live("[POSIX]. Closing Real 'fopen', pathname=%s", pathname);
 	}
 
 	return file;
@@ -2939,7 +2958,7 @@ off_t lseek(int fd, off_t offset, int whence)
 		slog_full("[POSIX]. Calling Real 'lseek', fd=%d, whence=%d, offset=%ld", fd, whence, offset);
 		// fprintf(stderr,"[POSIX]. Calling real 'lseek', fd=%d, whence=%d, offset=%ld, errno=%d:%s\n", fd, whence, offset, errno, strerror(errno));
 		ret = real_lseek(fd, offset, whence);
-		slog_full("[POSIX]. Ending Real 'lseek', fd=%d, whence=%d, offset=%ld", fd, whence, offset);
+		slog_full("[POSIX]. Ending Real 'lseek', fd=%d, whence=%d, offset=%ld, ret=%d", fd, whence, offset, ret);
 		// fprintf(stderr,"[POSIX]. Ending real 'lseek', fd=%d, whence=%d, offset=%ld, errno=%d:%s\n", fd, whence, offset, errno, strerror(errno));
 	}
 	return ret;
@@ -3562,7 +3581,8 @@ size_t fread(void *buf, size_t size, size_t count, FILE *fp)
 	}
 	else
 	{
-		slog_full("[POSIX] Calling real 'fread', fd=%d", fd);
+		// slog_full("[POSIX] Calling real 'fread', fd=%d", fd);
+//		fprintf(stdout, "[POSIX] Calling real 'fread', fd=%d\n", fd);
 		ret = real_fread(buf, size, count, fp);
 	}
 

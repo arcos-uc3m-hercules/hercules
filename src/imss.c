@@ -641,10 +641,10 @@ int32_t find_imss(const char *imss_uri, imss *imss_)
 	for (int32_t i = 0; i < imssd->len; i++)
 	{
 		// *imss_ = g_array_index(imssd, imss, i);
-		// slog_live("imss_uri=%s, imss_->info.uri_=%s", imss_uri, imss_->info.uri_);
 		// if (!strncmp(imss_uri, imss_->info.uri_, URI_))
 		// 	return i;
 		imss *current = &g_array_index(imssd, imss, i);
+		slog_live("imss_uri=%s, current->info.uri_=%s", imss_uri, current->info.uri_);
 
 		if (!strncmp(imss_uri, current->info.uri_, URI_))
 		{
@@ -652,6 +652,7 @@ int32_t find_imss(const char *imss_uri, imss *imss_)
 			{
 				*imss_ = *current;
 			}
+			slog_debug("instance find at %d", i);
 			return i;
 		}
 	}
@@ -681,8 +682,7 @@ int32_t find_imss_pointer(const char *imss_uri, imss **out_ptr)
 }
 
 // Method deleting a certains IMSS in the vector
-int32_t delete_imss(char *imss_uri,
-		    imss *imss_)
+int32_t delete_imss(char *imss_uri, imss *imss_)
 {
 	int32_t pos = find_imss(imss_uri, imss_);
 	if (pos != -1)
@@ -1161,7 +1161,7 @@ int32_t stat_release()
 	for (uint32_t i = 0; i < n_stat_servers; i++)
 	{
 		ep = stat_eps[i];
-		slog_debug("Closing endpoing %" PRIu32 "/%" PRIu32, i / n_stat_servers);
+		slog_debug("Closing endpoing %" PRIu32 "/%" PRIu32, i, n_stat_servers);
 		close_ucx_endpoint(ucp_worker_meta, ep);
 		free(stat_addr[i]);
 	}
@@ -1449,6 +1449,7 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 		if (check_imss.conns.matching_server != -2)
 		{
 			// instance has been already created.
+			slog_debug("Instance has been already creted.");
 			return -2;
 		}
 		slog_debug("freeing ips");
@@ -1799,6 +1800,8 @@ int32_t AddBackEndServer2Imss(imss *local_imss_, int at_position)
 
 int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root)
 {
+	imss aux;
+	delete_imss(imss_root, &aux);
 	// fprintf(stderr, "Creating network resources, stat_hostfile=%s, stat_port=%d, num_stat_servers=%d\n", stat_hostfile, stat_port, num_stat_servers);
 	if (stat_init(stat_hostfile, stat_port, num_stat_servers, rank) == -1)
 	{
@@ -2097,6 +2100,7 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 	ucp_ep_h ep;
 	for (int32_t i = 0; i < imss_.info.num_storages; i++)
 	{
+		slog_debug("release imss, i=%d, imss_.info.num_storages=%d", i, imss_.info.num_storages);
 		ep = imss_.conns.eps[i];
 		flush_ep(ucp_worker_data, ep);
 		slog_live("release_msg=%s to server %d", release_msg_data, i);
