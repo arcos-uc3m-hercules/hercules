@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <netdb.h>
 #include <errno.h>
 #include <unistd.h>
@@ -18,6 +19,7 @@
 #include "crc.h"
 #include "imss.h"
 #include "map_ep.hpp"
+#include "slog.h"
 #include "workers.h"
 #include "policies.h"
 #include "shared_memory.h"
@@ -44,8 +46,8 @@ uint32_t *stat_ids = NULL;
 // uint32_t NUM_DATA_SERVERS;
 int32_t N_SERVERS = -1; // Default
 
-GArray *imssd;			// Set of IMSS metadata and connection structures currently used.
-GArray *free_imssd;		// Set of free entries within the 'imssd' vector.
+GArray *imssd = NULL;			// Set of IMSS metadata and connection structures currently used.
+GArray *free_imssd = NULL;		// Set of free entries within the 'imssd' vector.
 int32_t imssd_pos;		// Next position within the vextor were a new IMSS will be inserted.
 int32_t imssd_max_size; // Maximum number of elements that could be introduced into the imss array.
 
@@ -721,36 +723,50 @@ int32_t stat_init(char *stat_hostfile,
 	// memset(&att_deployment, 0, URI_);
 
 	// Initialize the set of GArrays dealing with the underlying set of structures.
-	if ((imssd = g_array_sized_new(FALSE, FALSE, sizeof(imss), ELEMENTS)) == NULL)
+	if(!imssd)
 	{
-		perror("HERCULES_ERR_STATINIT_GARRAYIMSS");
-		free(stat_addr);
-		return -1;
+		slog_debug("Init imssd");
+		if ((imssd = g_array_sized_new(FALSE, FALSE, sizeof(imss), ELEMENTS)) == NULL)
+		{
+			perror("HERCULES_ERR_STATINIT_GARRAYIMSS");
+			free(stat_addr);
+			return -1;
+		}
 	}
 
-	if ((free_imssd = g_array_sized_new(FALSE, FALSE, sizeof(int32_t), ELEMENTS)) == NULL)
+	if(!free_imssd)
 	{
-		perror("HERCULES_ERR_STATINIT_GARRAYIMSSREG");
-		free(stat_addr);
-		return -1;
+		slog_debug("Init free_imssd");
+		if ((free_imssd = g_array_sized_new(FALSE, FALSE, sizeof(int32_t), ELEMENTS)) == NULL)
+		{
+			perror("HERCULES_ERR_STATINIT_GARRAYIMSSREG");
+			free(stat_addr);
+			return -1;
+		}
 	}
 
 	// datasetd = g_array_sized_new(FALSE, FALSE, sizeof(dataset_info), ELEMENTS)
 	if (!datasetd)
+	{
+		slog_debug("Init datasetd");
 		if ((datasetd = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_dataset_data)) == NULL)
 		{
 			perror("HERCULES_ERR_STATINIT_GARRAYDATASET");
 			free(stat_addr);
 			return -1;
 		}
+	}
 
 	if (!pool_hash_tables_datasetd)
+	{
+		slog_debug("Init pool_hash_tables_datasetd");
 		if ((pool_hash_tables_datasetd = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_hash_table_destroy)) == NULL)
 		{
 			perror("HERCULES_ERR_STATINIT_GARRAYDATASETPOOL");
 			free(stat_addr);
 			return -1;
 		}
+	}
 
 	// if ((free_datasetd = g_array_sized_new(FALSE, FALSE, sizeof(int32_t), ELEMENTS)) == NULL)
 	// {
@@ -1339,18 +1355,24 @@ uint32_t get_dir(std::string requested_uri_obj, char ***items)
  *  If the HERCULES instance has been already opened or created -2 is returned.
  *  On error, -1 is returned.
  */
-int32_t open_imss(char *imss_uri)
+int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 {
+
+	if (num_active_storages == NULL) {
+		slog_error("HERCULES_ERR_INVALID_ADDRESS_STORAGES");
+		fprintf(stderr, "HERCULES_ERR_INVALID_ADDRESS_STORAGES");
+		return -1;
+	}
 
 	// New IMSS structure storing the entity to be created.
 	imss new_imss;
 	ucs_status_t status;
 	int32_t not_initialized = 0;
 
-	slog_live("[IMSS] session_policy starting function, imss_uri=%s", imss_uri);
+	slog_live("[IMSS] starting function, imss_uri=%s", imss_uri);
 	// Retrieve the actual information from the metadata server.
 	int32_t imss_existance = stat_imss(imss_uri, &new_imss.info);
-	slog_live("[IMSS] session_policy imss_uri=%s, imss_existance=%d", imss_uri, imss_existance);
+	slog_live("[IMSS] imss_uri=%s, imss_existance=%d", imss_uri, imss_existance);
 	// Check if the requested IMSS did not exist or was already stored in the local vector.
 	switch (imss_existance)
 	{
@@ -1382,7 +1404,7 @@ int32_t open_imss(char *imss_uri)
 	}
 	}
 
-	slog_debug("[IMSS]session_policy new_imss.info.num_active_storages=%ld, num_storages=%ld", new_imss.info.num_active_storages, new_imss.info.num_storages);
+	slog_debug("[IMSS] new_imss.info.num_active_storages=%ld, num_storages=%ld", new_imss.info.num_active_storages, new_imss.info.num_storages);
 
 	new_imss.conns.peer_addr = (ucp_address_t **)malloc(new_imss.info.num_storages * sizeof(ucp_address_t *));
 	new_imss.conns.id = (uint32_t *)calloc(new_imss.info.num_storages, sizeof(uint32_t));
@@ -1486,25 +1508,27 @@ int32_t open_imss(char *imss_uri)
 	// new_imss.info.num_storages -= num_down_storages;
 	// NUM_DATA_SERVERS = new_imss.info.num_storages;
 	N_SERVERS = new_imss.info.num_storages;
+	*num_active_storages = new_imss.info.num_storages;
 	// NUM_DATA_SERVERS = new_imss.info.num_active_storages;
 
 	// char str_NUM_DATA_SERVERS[10] = {0};
 	// sprintf(str_NUM_DATA_SERVERS, "%d", new_imss.info.num_active_storages);
 	// // TO CHECK: do we already need this?
 	// setenv("HERCULES_CURR_ACTIVE_DATA_NODES", str_NUM_DATA_SERVERS, 1);
-
+	new_imss.info.session_plcy = get_policy_number(POLICY);
+	curr_imss = new_imss;
+	
 	// If the struct was found within the vector but uninitialized, once updated, store it in the same position.
 	if (not_initialized)
 	{
+		slog_debug("Reinserting instace at same position");
 		g_array_remove_index(imssd, found_in);
 		g_array_insert_val(imssd, found_in, new_imss);
 
 		return 0;
 	}
 
-	new_imss.info.session_plcy = get_policy_number(POLICY);
 
-	curr_imss = new_imss;
 
 	// for (size_t k = 0; k < curr_imss.info.num_storages; k++)
 	// {
@@ -1533,6 +1557,7 @@ int32_t open_imss(char *imss_uri)
 	GHashTable *root_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, IMSS_ROOT);
 	if (!root_subdir_children_table)
 	{ // root not found.
+		slog_debug("root not found in the pool_hash_tables_datasetd")
 		// GHashTable *root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
 		root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
 		if (!root_subdir_children_table)
@@ -1558,7 +1583,6 @@ int32_t open_imss(char *imss_uri)
 		// root_directory_info->type = TYPE_HERCULES_INSTANCE;
 	}
 
-	// return 0;
 	return new_imss.info.num_storages;
 }
 
@@ -1700,8 +1724,9 @@ int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t 
 	}
 
 	// remove_dataset_entry(datasetd, imss_root);
-	int32_t num_active_storages = open_imss(imss_root);
-	if (num_active_storages < 0)
+	uint32_t num_active_storages = 0;
+	int32_t ret = open_imss(imss_root, &num_active_storages);
+	if (ret < 0 && ret != -2) // -2 special case
 	{
 		slog_fatal("Error creating HERCULES's resources, the process cannot be started");
 		printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
@@ -1987,7 +2012,7 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 	{
 		slog_live("[IMSS] imss_found_in=%d, imss_info_->num_storages=%d, searched_imss.info.num_storages=%d", imss_found_in, imss_info_->num_storages, searched_imss.info.num_storages);
 		memcpy(imss_info_, &searched_imss.info, sizeof(imss_info));
-		imss_info_->ips = (char **)malloc((imss_info_->num_storages) * sizeof(char *));
+		imss_info_->ips = (char **)malloc((searched_imss.info.num_storages) * sizeof(char *));
 		for (int32_t i = 0; i < searched_imss.info.num_storages; i++)
 		{
 			imss_info_->ips[i] = (char *)malloc(LINE_LENGTH * sizeof(char));
@@ -2288,7 +2313,7 @@ int32_t create_dataset(char *dataset_uri,
 		for (int i = 0; i < max_retries; ++i)
 		{
 			ret = stat_dataset(parent_dir, &parent_dataset, 0);
-			if (ret == 0 || ret == -3)
+			if (ret == 1 || ret == -3)
 			{
 				// Found it! Break the loop
 				break;
@@ -3660,6 +3685,7 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 {
 	// If the current dataset policy was not established yet.
 	slog_debug("dataset_id=%d, id_current_dataset=%d", dataset_id, id_current_dataset);
+	slog_debug("dataset_uri=%s", dataset_uri);
 
 	int ret = 0;
 	// fprintf(stderr,"id_current_dataset=%d, dataset_id=%d\n", id_current_dataset, dataset_id);

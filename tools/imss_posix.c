@@ -1,6 +1,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #include "slog.h"
+#include <pthread.h>
 #include <unistd.h>
 #endif
 
@@ -528,7 +529,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 		exit(1);
 	}
 
-	int num_active_storages = 0;
+	uint32_t num_active_storages = 0;
 	// Hercules init -- Attached deploy
 	// default is 2.
 	// if (DEPLOYMENT == 1)
@@ -543,8 +544,8 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// if (DEPLOYMENT == 2)
 	// {
 	// Make the connection to all data servers.
-	num_active_storages = TIMING(open_imss(IMSS_ROOT), "open imss", int32_t, rank);
-	if (num_active_storages < 0)
+	int ret_open_imss = TIMING(open_imss(IMSS_ROOT, &num_active_storages), "open imss", int32_t, rank);
+	if (ret_open_imss < 0)
 	{
 		slog_fatal("Error creating HERCULES's resources, the process cannot be started.");
 		printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
@@ -904,9 +905,10 @@ pid_t fork(void)
 
 	errno = 0;
 	// fprintf(stdout, "[POSIX] Calling fork\n");
-	slog_live("[POSIX] Calling fork");
+	slog_live("[POSIX] Calling 'fork'");
 
-	pthread_mutex_lock(&lock_network);
+	// pthread_mutex_lock(&lock_network);
+	pthread_mutex_destroy(&lock_network);
 
 	// release_network_resources(IMSS_ROOT, 1, rank);
 	// imss_comm_cleanup();
@@ -916,7 +918,7 @@ pid_t fork(void)
 
 	if (pid == -1)
 	{
-		pthread_mutex_unlock(&lock_network);
+		// pthread_mutex_unlock(&lock_network);
 		perror("Fork error");
 		slog_error("[POSIX] Error 'real fork', errno=%d:%s", errno, strerror(errno));
 		return pid;
@@ -932,13 +934,13 @@ pid_t fork(void)
 	case 0: // child process.
 	{
 		pthread_mutex_init(&lock_network, NULL);
-		ucp_context_client = NULL;
-		ucp_worker_meta = NULL;
-		ucp_worker_data = NULL;
-		local_addr_meta = NULL;
-		local_addr_data = NULL;
-		stat_eps = NULL;
-		stat_addr = NULL;
+		// ucp_context_client = NULL;
+		// ucp_worker_meta = NULL;
+		// ucp_worker_data = NULL;
+		// local_addr_meta = NULL;
+		// local_addr_data = NULL;
+		// stat_eps = NULL;
+		// stat_addr = NULL;
 
 		// slog_debug("ucp_worker_meta=%p", &ucp_worker_meta);
 		// slog_debug("ucp_worker_meta=%p", &ucp_worker_data);s
@@ -952,12 +954,14 @@ pid_t fork(void)
 		// sprintf(log_path, "client-thread-%ld.%02d-%02d.%d", pthread_self(), tm.tm_hour, tm.tm_min, getpid());
 		// slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
 		slog_live("[POSIX] Child process");
-		init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
+		// init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
+		slog_live("[POSIX] Child process: network resources has been initialized.");
 	}
 	break;
 	default: // parent process.
 	{
-		pthread_mutex_unlock(&lock_network);
+		// pthread_mutex_unlock(&lock_network);
+		pthread_mutex_init(&lock_network, NULL);
 		slog_live("[POSIX] Parent process, child pid=%d", pid);
 		print_worker_pointer(ucp_worker_meta);
 		// init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
@@ -3872,7 +3876,9 @@ int chmod(const char *pathname, mode_t mode)
 	}
 	else
 	{
+		slog_live("[POSIX]. Calling real 'chmod', pathname=%s", pathname);
 		ret = real_chmod(pathname, mode);
+		slog_live("[POSIX]. Calling real 'chmod', pathname=%s, ret=%d", pathname, ret);
 	}
 	return ret;
 }
@@ -4010,10 +4016,14 @@ int dup2(int oldfd, int newfd)
 		}
 		else
 		{
-			ret = map_fd_put(map_fd, pathname, newfd, 0);
+			// Close the target fd if it's already open
+			close(newfd);
+
+			ret = map_fd_dup(map_fd, oldfd, newfd);
+
 			if (ret == -1)
 			{
-				slog_error("[POSIX] Error Hercules in 'dup2', newfd=%d already exist.", newfd); // -1 when error, and errno is set.
+				slog_error("[POSIX] Error Hercules in 'dup2', oldfd=%d tracking does not exist.", oldfd);
 			}
 			else
 			{
@@ -5727,37 +5737,80 @@ int fsync(int fd)
 
 char *getcwd(char *buf, size_t size)
 {
-	if (!real_getcwd)
-		real_getcwd = (char *(*)(char *, size_t))dlsym(RTLD_NEXT, "getcwd");
+    static char *(*real_getcwd)(char *, size_t) = nullptr;
 
-	if (!init)
-	{
-		return real_getcwd(buf, size);
-	}
+    if (!real_getcwd)
+    {
+        real_getcwd = reinterpret_cast<char *(*)(char *, size_t)>(dlsym(RTLD_NEXT, "getcwd"));
+    }
 
-	char *curr_dir = getenv("PWD");
-	if (curr_dir != NULL && !strncmp(curr_dir, MOUNT_POINT, strlen(MOUNT_POINT)))
-	{
-		slog_live("[POSIX] Calling Hercules 'getcwd'");
-		size_t buf_length = strlen(buf);
-		strncpy(buf, curr_dir, buf_length);
-		slog_live("[POSIX] Ending Hercules 'getcwd', buf=%s", buf);
-	}
-	else
-	{
-		// TODO: check "segmentation fault" when HERCULES_DEBUG_LEVEL=SLOG_FULL is set.
-		// slog_full("[POSIX] Calling real 'getcwd'");
-		buf = real_getcwd(buf, size);
-		// if (buf == NULL)
-		// {
-		// 	slog_full("[POSIX] Ending real 'getcwd', buf=NULL");
-		// }
-		// else
-		// {
-		// 	slog_full("[POSIX] Ending real 'getcwd', buf=%s", buf);
-		// }
-	}
-	return buf;
+    if (!init)
+    {
+        return real_getcwd(buf, size);
+    }
+
+    char *curr_dir = getenv("PWD"); 
+    if (curr_dir != nullptr && !strncmp(curr_dir, MOUNT_POINT, strlen(MOUNT_POINT)))
+    {
+        slog_live("[POSIX] Calling Hercules 'getcwd'");
+
+        size_t required_size = strlen(curr_dir) + 1;
+        char *result_buf = buf;
+
+        if (result_buf == nullptr)
+        {
+			slog_debug("result_buf is null");
+            // If size is 0, allocate exactly what is needed, otherwise use the requested size
+            size_t alloc_size = (size == 0) ? required_size : size;
+            
+            if (alloc_size < required_size)
+            {
+                errno = ERANGE;
+				slog_debug("Ending Hercules 'getcwd', alloc size < required size");
+                return nullptr;
+            }
+
+            result_buf = reinterpret_cast<char *>(malloc(alloc_size));
+            if (result_buf == nullptr)
+            {
+                errno = ENOMEM;
+				slog_debug("Ending Hercules 'getcwd', error during malloc");
+                return nullptr;
+            }
+        }
+        else
+        {
+			slog_debug("result_buf is NOT null");
+            if (size == 0 || size < required_size)
+            {
+                errno = ERANGE;
+				slog_debug("Ending Hercules 'getcwd', size is 0 or size < required_size");
+                return nullptr;
+            }
+        }
+
+        memcpy(result_buf, curr_dir, required_size);
+
+        slog_live("[POSIX] Ending Hercules 'getcwd', buf=%s", result_buf);
+        return result_buf;
+    }
+    else
+    {
+        slog_full("[POSIX] Calling real 'getcwd'");
+        char *real_buf = real_getcwd(buf, size);
+        
+        // avoids passing NULL to %s
+        if (real_buf == nullptr)
+        {
+            slog_full("[POSIX] Ending real 'getcwd', failed (errno=%d)", errno);
+        }
+        else
+        {
+            slog_full("[POSIX] Ending real 'getcwd', buf=%s", real_buf);
+        }
+        
+        return real_buf;
+    }
 }
 
 int chdir(const char *pathname)
@@ -5772,12 +5825,17 @@ int chdir(const char *pathname)
 
 	errno = 0;
 	int ret = 0;
-	// if (!strncmp(path, MOUNT_POINT, strlen(MOUNT_POINT)))
 	char *new_path = checkHerculesPath(pathname);
 	if (new_path != NULL)
 	{
 		slog_live("Calling Hercules 'chdir', pathname=%s", pathname);
-		setenv("PWD", pathname, 1);
+		// setenv("PWD", pathname, 1);
+		if (setenv("PWD", pathname, 1) == -1)
+        {
+            slog_debug("[chdir] setenv(PWD, %s) failed -> errno=%d (%s)",
+                       pathname, errno, strerror(errno));
+            ret = -1;;
+        }
 		slog_live("End Hercules 'chdir', pathname=%s, ret=%d", pathname, ret);
 		free(new_path);
 	}

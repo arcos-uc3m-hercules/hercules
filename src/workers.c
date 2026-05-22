@@ -352,8 +352,8 @@ void *move_blocks_2_server(void *th_argv)
 	// Creates endpoints to all data servers. It is use in case of
 	// malleability to move blocks between data servers.
 	slog_debug("Connecting to data servers\n");
-	open_imss((char *)imss_uri);
-	if (number_active_storage_servers < 0)
+	int ret_open_imss = open_imss((char *)imss_uri, &number_active_storage_servers);
+	if (ret_open_imss < 0 && ret_open_imss != -2) // -2 special case
 	{
 		slog_fatal("Error creating HERCULES's resources, the process cannot be started");
 		return NULL;

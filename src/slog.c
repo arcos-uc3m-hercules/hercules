@@ -93,10 +93,13 @@ char *strclr(const char *clr, char *str, ...)
 // TODO: check this for multithreading.
 // int opened = 0;
 
+// Getting current directory.
+char cwd[512] = {0};
 /*
  * Append log info to log file.
  */
 void slog_to_file(char *out, const char *fname, SlogDate *sdate)
+
 {
     if (!init_slog)
     {
@@ -105,14 +108,6 @@ void slog_to_file(char *out, const char *fname, SlogDate *sdate)
     
 
     char filename[PATH_MAX] = {0};
-
-    // Getting current directory.
-    char cwd[512] = {0};
-    if (getcwd(cwd, sizeof(cwd)) == NULL)
-    {
-        perror("[SLOG] Error getting the current working directory.");
-        return;
-    }
 
     if (slg.filestamp)
     { /* Create log filename with date. (eg example-2017-01-21.log) */
@@ -469,6 +464,13 @@ void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int 
     slg.fname = fname;
     slg.exclusive = 1; /* If 1 will exclude other levels different to the chose one */
     slg.rank = rank;   /* Identifier used when multiple process are writing over the same file */
+
+    if (getcwd(cwd, sizeof(cwd)) == NULL)
+    {
+        perror("[SLOG] Error getting the current working directory.");
+        return;
+    }
+
 
     /* Init mutex sync. */
     if (t_safe)
