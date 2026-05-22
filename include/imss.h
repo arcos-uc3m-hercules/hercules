@@ -284,7 +284,7 @@ RETURNS:	 0 - Initialization procedure was successfully performed.
 	 */
 	// int32_t init_imss(char *imss_uri, char *hostfile, char *meta_hostfile, int32_t n_servers, uint16_t conn_port, uint64_t buff_size, uint32_t deployment, const char *binary_path, uint16_t meta_port);
 
-	int32_t open_imss(char *imss_uri);
+	int32_t open_imss(char *imss_uri, uint32_t *num_active_storages);
 	int32_t AddBackEndServer2Imss(char *imss_uri);
 
 	/* Method releasing client-side and/or server-side resources related to a certain IMSS instance.

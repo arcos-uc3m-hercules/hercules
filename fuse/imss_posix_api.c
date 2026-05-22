@@ -2,6 +2,7 @@
 #include "hierarchical_map.hpp"
 #include "mapprefetch.hpp"
 #include "hercules.hpp"
+#include "slog.h"
 #include "imss_posix_api.h"
 #include <pthread.h>
 #include <stdio.h>
@@ -384,6 +385,7 @@ extern "C"
 		// 	slog_debug("n_ent=%d", n_ent);
 		if (!strcmp(imss_path, IMSS_ROOT))
 		{
+			slog_debug("root case, imss_path=%s", imss_path);
 			stbuf->st_size = 4;
 			slog_debug("is root, setting st_nlink to 1");
 			stbuf->st_nlink = 1;
@@ -2348,8 +2350,8 @@ extern "C"
 		int32_t ret_set_data = set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC);
 		if (ret_set_data < 0)
 		{
-			perror("HERCULES_ERR_WRITTING_BLOCK");
-			slog_error("HERCULES_ERR_WRITTING_BLOCK");
+			perror("HERCULES_ERR_IMSS_RELEASE_SET_DATA");
+			slog_error("HERCULES_ERR_IMSS_RELEASE_SET_DATA");
 			return ret_set_data;
 		}
 
@@ -2912,6 +2914,11 @@ extern "C"
 		pthread_mutex_lock(&lock);
 		int32_t ret_set_data = set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC);
 		pthread_mutex_unlock(&lock);
+
+		if (ret_set_data == 1) {
+			// chmod: On success, zero is returned.  On error, -1 is returned, and errno is set to indicate the error.
+			ret_set_data = 0;
+		}
 
 		free(rpath);
 		return ret_set_data;
