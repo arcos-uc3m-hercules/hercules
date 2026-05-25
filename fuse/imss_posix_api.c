@@ -3675,7 +3675,7 @@ extern "C"
 		return ret;
 	}
 
-	int imss_serializate_structs(char *shm_name)
+	int imss_serializate_hash_table(char *shm_name)
 	{
 		int shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0600);
 		if (shm_fd >= 0)
@@ -3686,7 +3686,7 @@ extern "C"
 		}
 		return shm_fd;
 	}
-
+	
 #ifdef __cplusplus
 }
 #endif

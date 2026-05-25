@@ -77,7 +77,7 @@ extern "C"
 
 	int imss_close(const char *path, int fd);
 
-	int imss_serializate_structs(char *);
+	int imss_serializate_hash_table(char *);
 
 
 #ifdef __cplusplus

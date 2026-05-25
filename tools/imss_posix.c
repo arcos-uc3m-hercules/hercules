@@ -486,7 +486,6 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// 	fprintf(stderr, "LOG PATH= %s\n", log_path); // this line raise an exception running a python app with threads.
 	// }
 	slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
-	// slog_ready = 1;
 	slog_time("Info,,Rank,Function,Time(msec),Comment");
 
 	map_fd = map_fd_create();
@@ -1166,6 +1165,9 @@ int stat(const char *pathname, struct stat *buf)
 {
 	if (!real_stat)
 		real_stat = (int (*)(const char *, struct stat *))dlsym(RTLD_NEXT, "stat");
+
+	if (!real_stat)
+		real_stat = (int (*)(const char *, struct stat *))dlsym(RTLD_NEXT, "__xstat");
 
 	if (!init)
 	{
@@ -4797,25 +4799,13 @@ int fstat(int fd, struct stat *buf)
 
 	if (!real_fstat)
 	{
-		// if (slog_ready)
-		// {
-		// 	slog_debug("real_fstat is NULL, init __fxstat");
-		// }
-		// real__fxstat = (int (*)(int, int, struct stat *))dlsym(RTLD_NEXT, "__fxstat");
 		return __fxstat(_STAT_VER, fd, buf);
 	}
 
 	if (!init)
 	{
-		if (slog_ready)
-		{
-			slog_debug("Calling real fstat");
-		}
+		
 		int ret = real_fstat(fd, buf);
-		if (slog_ready)
-		{
-			slog_live("[POSIX] End Real 'fstat', fd=%d, errno=%d:%s, ret=%d, st_size=%ld, st_blocks=%ld, st_blksize=%ld", fd, errno, strerror(errno), ret, buf->st_size, buf->st_blocks, buf->st_blksize);
-		}
 		return ret;
 	}
 
