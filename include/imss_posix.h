@@ -9,6 +9,7 @@
 #include "flags.h"
 #include "resolvepath.h"
 #include "tempname.h"
+#include "hash_table.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -155,7 +156,7 @@ extern "C"
     static int (*real_chmod)(const char *pathname, mode_t mode) = NULL;
     static int (*real_fchmod)(int fd, mode_t mode) = NULL;
     static int (*real_execve)(const char *pathname, char *const argv[], char *const envp[]) = NULL;
-    // static int (*real_execv)(const char *pathname, char *const argv[]) = NULL;
+    static int (*real_execv)(const char *pathname, char *const argv[]) = NULL;
     static char *(*real_getcwd)(char *buf, size_t size) = NULL;
     static int (*real_change_to_directory)(char *, int, int) = NULL;
     static int (*real_bindpwd)(int) = NULL;

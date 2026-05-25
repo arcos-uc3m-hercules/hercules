@@ -1,6 +1,7 @@
 // #define FUSE_USE_VERSION 26
 #include "imss_posix_api.h"
 #include "comms.h"
+#include "hash_table.h"
 #include "hercules.hpp"
 #include "hierarchical_map.hpp"
 #include "mapprefetch.hpp"
@@ -252,7 +253,7 @@ extern "C"
 
 		if (stats.st_size == length)
 		{
-			return 0; 
+			return 0;
 		}
 
 		int64_t new_blocks = (length == 0) ? 0 : ((length + IMSS_DATA_BSIZE - 1) / IMSS_DATA_BSIZE);
@@ -264,7 +265,7 @@ extern "C"
 		stats.st_blocks = new_blocks;
 
 		slog_debug("[imss_truncate] Updating stat, st_size=%ld, st_blocks=%ld", stats.st_size, stats.st_blocks);
-		
+
 		// Updated the metadata hierarchical map
 		HierarchicalMapUpdate(hierarchical_map, path, ds, stats);
 
@@ -2903,7 +2904,8 @@ extern "C"
 		int32_t ret_set_data = set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock);
 
-		if (ret_set_data == 1) {
+		if (ret_set_data == 1)
+		{
 			// chmod: On success, zero is returned.  On error, -1 is returned, and errno is set to indicate the error.
 			ret_set_data = 0;
 		}
@@ -3671,8 +3673,18 @@ extern "C"
 		}
 		// TODO: checks for errors.
 		return ret;
+	}
 
-		
+	int imss_serializate_structs(char *shm_name)
+	{
+		int shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0600);
+		if (shm_fd >= 0)
+		{
+			hercules_serialize_pool(shm_fd);
+
+			close(shm_fd);
+		}
+		return shm_fd;
 	}
 
 #ifdef __cplusplus

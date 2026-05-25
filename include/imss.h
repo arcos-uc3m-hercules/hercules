@@ -389,6 +389,7 @@ RETURNS:	> 0 - Number identifying the retrieved dataset among the client's sessi
 	int32_t open_dataset(char *dataset_uri, int opened);
 
 	int32_t imss_check(char *dataset_uri);
+	int32_t delete_imss(char *imss_uri, imss *imss_);
 
 	/*Method deleting a dataset.
 

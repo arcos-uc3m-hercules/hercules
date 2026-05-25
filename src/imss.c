@@ -1,6 +1,7 @@
 #include "imss.h"
 #include "comms.h"
 #include "crc.h"
+#include "hash_table.h"
 #include "map_ep.hpp"
 #include "policies.h"
 #include "shared_memory.h"
@@ -52,10 +53,10 @@ int32_t N_SERVERS = -1; // Default
 const int32_t MAX_SERVERS = 100;
 const int MAX_RETRIES = 1;
 
-GArray *imssd = NULL;			// Set of IMSS metadata and connection structures currently used.
-GArray *free_imssd = NULL;		// Set of free entries within the 'imssd' vector.
-int32_t imssd_pos;		// Next position within the vextor were a new IMSS will be inserted.
-int32_t imssd_max_size; // Maximum number of elements that could be introduced into the imss array.
+GArray *imssd = NULL;	   // Set of IMSS metadata and connection structures currently used.
+GArray *free_imssd = NULL; // Set of free entries within the 'imssd' vector.
+int32_t imssd_pos;	   // Next position within the vextor were a new IMSS will be inserted.
+int32_t imssd_max_size;	   // Maximum number of elements that could be introduced into the imss array.
 
 // GArray
 GHashTable *datasetd = NULL;		      // Set of dataset metadata structures.
@@ -216,10 +217,6 @@ int find_dataset_by_uri_hash_pool(const char *dataset_uri, dataset_info **datase
 
 void add_dataset_entry(GHashTable **map, const char *uri, dataset_info *info)
 {
-	// if (*map == NULL)
-	// {
-	// 	*map = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, free_ghashtable_dataset_data);
-	// }
 	g_hash_table_insert(*map, g_strdup(uri), info);
 	slog_debug("[%d] Added element %s to the Hash Map", g_hash_table_size(*map), info->uri_);
 }
@@ -259,6 +256,13 @@ GHashTable *CreatePoolHashMapElement(char *dataset_uri)
 GHashTable *AddDirectoryToPool(const gchar *dataset_uri)
 {
 	// TODO: change "g_hash_table_new" for "g_hash_table_new_full".
+	// Check if this directory already has a table allocated.
+	GHashTable *existing_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, dataset_uri);
+    if (existing_table != NULL)
+    {
+        slog_debug("Children table for directory '%s' already exists. Reusing it.", dataset_uri);
+        return existing_table;
+    }
 	slog_debug("Add directory %s to pool", dataset_uri);
 	// GHashTable *new_directory_children_table = g_hash_table_new(g_str_hash, g_str_equal);
 	GHashTable *new_directory_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
@@ -286,22 +290,10 @@ int add_dataset_entry_in_pool(const gchar *dataset_uri, dataset_info *info)
 		slog_warn("Parent directory %s of %s has not been added to the pool of hash tables. Creating the new hash table.", parent_dir, dataset_uri);
 		// create the parent hash table to add this entry.
 		parent_subdir_children_table = AddDirectoryToPool(parent_dir);
-		// parent_subdir_children_table = g_hash_table_new(g_str_hash, g_str_equal);
-		// if (!parent_subdir_children_table)
-		// {
-		// 	perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
-		// 	slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
-		// 	exit(-1);
-		// }
-		// // Insert the new directory's children hash table into 'pool_hash_tables_datasetd'.
-		// // The key is a copy of the new directory's dataset_uri.
-		// g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(parent_dir), parent_subdir_children_table);
-		// parent_subdir_children_table = CreatePoolHashMapElement(parent_dir);
-		// return 1;
 	}
 
 	// Add the dataset in the parent directory hash table.
-	// slog_debug("Inserting dataset of %s into %s", parent_subdir_children_table->);
+	slog_debug("Inserting dataset %s", info->uri_);
 	g_hash_table_insert(parent_subdir_children_table, g_strdup(dataset_uri), info);
 
 	// If the dataset corresponds to a directory, we create a new GHashtable to store its children.
@@ -331,6 +323,157 @@ int add_dataset_entry_in_pool(const gchar *dataset_uri, dataset_info *info)
 		AddDirectoryToPool(dataset_uri);
 	}
 	return 0;
+}
+
+void hercules_serialize_pool(int shm_fd)
+{
+	if (!pool_hash_tables_datasetd)
+	{
+		slog_warn("Pool hash table dataset is null. Nothing to serialize.");
+		return;
+	}
+
+	slog_debug("[Serialization] Starting GHashTable pool dump...");
+
+	// collect and write all dataset_info records
+	GList *info_list = NULL;
+	GHashTableIter outer_iter;
+	gpointer dir_key, dir_value;
+
+	// Initialize the outer iterator to traverse all directory tables
+	g_hash_table_iter_init(&outer_iter, pool_hash_tables_datasetd);
+	while (g_hash_table_iter_next(&outer_iter, &dir_key, &dir_value))
+	{
+		GHashTable *child_table = (GHashTable *)dir_value;
+		GHashTableIter inner_iter;
+		gpointer item_key, item_value;
+
+		// Traverse the files inside this directory table
+		g_hash_table_iter_init(&inner_iter, child_table);
+		while (g_hash_table_iter_next(&inner_iter, &item_key, &item_value))
+		{
+			dataset_info *info = (dataset_info *)item_value;
+			slog_debug("Adding to the list: %s", info->uri_);
+			info_list = g_list_append(info_list, info);
+		}
+	}
+
+	// Write total item count followed by the actual structures
+	uint32_t info_count = g_list_length(info_list);
+	write(shm_fd, &info_count, sizeof(info_count));
+
+	for (GList *l = info_list; l != NULL; l = l->next)
+	{
+		dataset_info *info = (dataset_info *)l->data;
+
+		write(shm_fd, info, sizeof(dataset_info));
+
+		// deep-copy the dynamic 'intervals' array if it exists
+		if (info->num_intervals > 0 && info->intervals != NULL)
+		{
+			for (int i = 0; i < info->num_intervals; i++)
+			{
+				write(shm_fd, info->intervals[i], sizeof(IntervalEntry));
+			}
+		}
+	}
+	g_list_free(info_list);
+
+	// save directory keys 
+	uint32_t dir_count = g_hash_table_size(pool_hash_tables_datasetd);
+	write(shm_fd, &dir_count, sizeof(dir_count));
+
+	g_hash_table_iter_init(&outer_iter, pool_hash_tables_datasetd);
+	while (g_hash_table_iter_next(&outer_iter, &dir_key, &dir_value))
+	{
+		const char *dir_uri = (const char *)dir_key;
+		uint32_t len = strlen(dir_uri);
+
+		write(shm_fd, &len, sizeof(len));
+		write(shm_fd, dir_uri, len);
+	}
+
+	slog_debug("[Serialization] Successfully dumped %u records and %u directory structures.", info_count, dir_count);
+}
+
+void hercules_deserialize_pool(int shm_fd)
+{
+	slog_debug("[Deserialization] Rebuilding GHashTable pool from shared memory...");
+
+	pool_hash_tables_datasetd = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_hash_table_destroy);
+
+	// read and restore dataset_info elements
+	uint32_t info_count = 0;
+	if (read(shm_fd, &info_count, sizeof(info_count)) != sizeof(info_count))
+	{
+		slog_error("Failed to read info count during deserialization.");
+		return;
+	}
+
+	for (uint32_t i = 0; i < info_count; i++)
+	{
+		dataset_info *info = g_new(dataset_info, 1);
+		if (read(shm_fd, info, sizeof(dataset_info)) == sizeof(dataset_info))
+		{
+			// Reconstruct the dynamic intervals array
+			if (info->num_intervals > 0)
+			{
+				// Allocate the array of pointers
+				info->intervals = g_new(IntervalEntry *, info->capacity > 0 ? info->capacity : info->num_intervals);
+
+				for (int j = 0; j < info->num_intervals; j++)
+				{
+					// Allocate the actual interval entry
+					info->intervals[j] = g_new(IntervalEntry, 1);
+
+					// Read the interval data from shared memory into the new heap allocation
+					if (read(shm_fd, info->intervals[j], sizeof(IntervalEntry)) != sizeof(IntervalEntry))
+					{
+						slog_error("Truncated read while parsing IntervalEntry.");
+						// TODO: handle errors
+					}
+				}
+			}
+			else
+			{
+				info->intervals = NULL;
+				info->capacity = 0;
+			}
+
+			// insert into the rebuilt hash table
+			add_dataset_entry_in_pool(info->uri_, info);
+		}
+		else
+		{
+			slog_error("Truncated read while parsing dataset_info element %u", i);
+			g_free(info);
+			break;
+		}
+	}
+
+	// read and restore directory keys
+	uint32_t dir_count = 0;
+	if (read(shm_fd, &dir_count, sizeof(dir_count)) != sizeof(dir_count))
+		return;
+
+	for (uint32_t i = 0; i < dir_count; i++)
+	{
+		uint32_t len = 0;
+		if (read(shm_fd, &len, sizeof(len)) != sizeof(len))
+			break;
+
+		char *dir_uri = g_new0(char, len + 1);
+		if (read(shm_fd, dir_uri, len) == len)
+		{
+			if (!g_hash_table_lookup(pool_hash_tables_datasetd, dir_uri))
+			{
+				slog_debug("[Deserialization] Restoring empty tracked directory: %s", dir_uri);
+				AddDirectoryToPool(dir_uri);
+			}
+		}
+		g_free(dir_uri);
+	}
+	slog_debug("[Deserialization] Hierarchy fully restored.");
 }
 
 int remove_dataset_entry(GHashTable *map, const char *uri)
@@ -762,7 +905,7 @@ int32_t stat_init(char *stat_hostfile,
 	// memset(&att_deployment, 0, URI_);
 
 	// Initialize the set of GArrays dealing with the underlying set of structures.
-	if(!imssd)
+	if (!imssd)
 	{
 		slog_debug("Init imssd");
 		if ((imssd = g_array_sized_new(FALSE, FALSE, sizeof(imss), ELEMENTS)) == NULL)
@@ -773,7 +916,7 @@ int32_t stat_init(char *stat_hostfile,
 		}
 	}
 
-	if(!free_imssd)
+	if (!free_imssd)
 	{
 		slog_debug("Init free_imssd");
 		if ((free_imssd = g_array_sized_new(FALSE, FALSE, sizeof(int32_t), ELEMENTS)) == NULL)
@@ -799,11 +942,34 @@ int32_t stat_init(char *stat_hostfile,
 	if (!pool_hash_tables_datasetd)
 	{
 		slog_debug("Init pool_hash_tables_datasetd");
-		if ((pool_hash_tables_datasetd = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_hash_table_destroy)) == NULL)
+		char shm_name[256];
+		snprintf(shm_name, sizeof(shm_name), "/hercules_state_%d", getpid());
+		// char *shm_env = getenv("HERCULES_SHM_STATE");
+		// if (shm_env != NULL)
 		{
-			perror("HERCULES_ERR_STATINIT_GARRAYDATASETPOOL");
-			free(stat_addr);
-			return -1;
+			slog_debug("[POSIX] Inheriting Hercules state from: %s", shm_name);
+			// open the shared memory file
+			int shm_fd = shm_open(shm_name, O_RDONLY, 0600);
+			if (shm_fd >= 0)
+			{
+				slog_debug("Shared memory exists");
+				// reads the serialized data and rebuild pool_hash_tables_datasetd
+				hercules_deserialize_pool(shm_fd);
+
+				close(shm_fd);
+			}
+			else
+			{
+				slog_debug("Shared memory does not exist.");
+				slog_debug("Creating a fresh empty pool.");
+				pool_hash_tables_datasetd = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_hash_table_destroy);
+				if (pool_hash_tables_datasetd == NULL)
+				{
+					perror("HERCULES_ERR_STATINIT_GARRAYDATASETPOOL");
+					free(stat_addr);
+					return -1;
+				}
+			}
 		}
 	}
 
@@ -865,13 +1031,12 @@ int32_t stat_init(char *stat_hostfile,
 
 			// ignore 127.0.0.1 (Loopback) and idrac.
 			// if (!strcmp(host, "127.0.0.1") != 0 || !strcmp(ifa->ifa_name, "idrac") != 0)
-			if (!strcmp(ifa->ifa_name, "lo") != 0 || !strcmp(ifa->ifa_name, "idrac") != 0)
+			if (strcmp(ifa->ifa_name, "lo") == 0 || strcmp(ifa->ifa_name, "idrac") == 0) {
 			{
 				continue;
 			}
 			// ignore idrac
 			strncpy(client_ip, host, sizeof(client_ip) - 1);
-			client_ip[sizeof(client_ip) - 1] = '\0'; // Ensure null termination
 			found_ip = 1;
 			break; // Found a valid non-restricted IP, stop looking.
 		}
@@ -1419,7 +1584,8 @@ uint32_t get_dir(std::string requested_uri_obj, char ***items)
 int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 {
 
-	if (num_active_storages == NULL) {
+	if (num_active_storages == NULL)
+	{
 		slog_error("HERCULES_ERR_INVALID_ADDRESS_STORAGES");
 		fprintf(stderr, "HERCULES_ERR_INVALID_ADDRESS_STORAGES");
 		return -1;
@@ -1584,7 +1750,7 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 	// setenv("HERCULES_CURR_ACTIVE_DATA_NODES", str_NUM_DATA_SERVERS, 1);
 	new_imss.info.session_plcy = get_policy_number(POLICY);
 	curr_imss = new_imss;
-	
+
 	// If the struct was found within the vector but uninitialized, once updated, store it in the same position.
 	if (not_initialized)
 	{
@@ -1596,7 +1762,7 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 	}
 
 
-
+	
 	// for (size_t k = 0; k < curr_imss.info.num_storages; k++)
 	// {
 	// 	slog_debug("curr_imss.info.ips[%d]=%s", k, curr_imss.info.ips[k]);
@@ -1625,8 +1791,8 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 	if (!root_subdir_children_table)
 	{ // root not found.
 		slog_debug("root not found in the pool_hash_tables_datasetd")
-		// GHashTable *root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
-		root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
+		    // GHashTable *root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
+		    root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
 		if (!root_subdir_children_table)
 		{
 			perror("HERCULES_ERR_OPEN_IMSS_INIT_ROOT_SUBDIR_CHILDREN_TABLE");
@@ -1801,8 +1967,10 @@ int32_t AddBackEndServer2Imss(imss *local_imss_, int at_position)
 int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root)
 {
 	imss aux;
+	slog_debug("Calling delete_imss");
 	delete_imss(imss_root, &aux);
 	// fprintf(stderr, "Creating network resources, stat_hostfile=%s, stat_port=%d, num_stat_servers=%d\n", stat_hostfile, stat_port, num_stat_servers);
+	slog_debug("Calling stat_init");
 	if (stat_init(stat_hostfile, stat_port, num_stat_servers, rank) == -1)
 	{
 		// In case of error notify and exit
@@ -1813,15 +1981,17 @@ int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t 
 	}
 
 	// remove_dataset_entry(datasetd, imss_root);
+	slog_debug("Calling open_imss");
 	uint32_t num_active_storages = 0;
 	int32_t ret = open_imss(imss_root, &num_active_storages);
+	slog_debug("ret from open_imss=%" PRId32, ret);
 	if (ret < 0 && ret != -2) // -2 special case
 	{
 		slog_fatal("Error creating HERCULES's resources, the process cannot be started");
 		printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
 		exit(1);
 	}
-
+	slog_debug("Ending init_network_resources");
 	return 0;
 }
 
@@ -3282,8 +3452,9 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 
 	wait_ack(ucp_worker_meta, local_meta_uid, ep, SYNC);
 
-	// MALLEABILITY_CONF_PERF configuration does not apply malleability changes. 
-	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED) {
+	// MALLEABILITY_CONF_PERF configuration does not apply malleability changes.
+	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
+	{
 		wait_malleability_changes(ucp_worker_meta, local_meta_uid, ep, NULL);
 	}
 
@@ -3376,7 +3547,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 
 	// MALLEABILITY_CONF_PERF is used to measure the performance when malleability is not enabled.
 	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED || CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_PERF) // TODO: add a new condition to check the Malleability type (e.g., memory usage, performance, ...)
-	{	// To send performance metrics.
+	{														 // To send performance metrics.
 		int status = send_performance_metrics(ep, dataset_uri, m_srv);
 	}
 
@@ -5311,7 +5482,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			pthread_mutex_unlock(&lock_network);
 			return (ssize_t)size_received_data;
 		}
-		// other cases. Ensure shared memory is deleted.
 		if (use_local)
 		{
 			// detach shared memory.

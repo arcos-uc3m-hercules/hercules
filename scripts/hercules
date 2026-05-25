@@ -485,13 +485,21 @@ if [[ "${VERBOSE}" -eq "1" ]]; then
     echo "Hercules path - $HERCULES_PATH"
 fi
 
-if [[ "$SLURM" -eq "1" && ( "${STATUS}" = "start" || "${STATUS}" = "add" ) ]]; then
+if [[ "$SLURM" -eq "1" ]]; then
     echo "[+] Slurm is active."
-    ## If slurm is enabled, we concat the job id to the configuration file to create a new one.
-    CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
-    # Copy if the file does not exist.
-    if [[ ! -f "${CURR_HERCULES_CONF_FILE}" ]]; then
-        cp "${FILE}" "${CURR_HERCULES_CONF_FILE}"
+    # Check if SLURM_JOB_ID is defined.
+    if [[ ! -n "${SLURM_JOB_ID}" ]]; then
+        echo "[-] Slurm is active but is not defined. Please, run export SLURM_JOB_ID=<jod id>"
+        exit 1
+    fi
+    if [[ ( "${STATUS}" = "start" || "${STATUS}" = "add" ) ]]; then
+
+        ## If slurm is enabled, we concat the job id to the configuration file to create a new one.
+        CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
+        # Copy if the file does not exist.
+        if [[ ! -f "${CURR_HERCULES_CONF_FILE}" ]]; then
+            cp "${FILE}" "${CURR_HERCULES_CONF_FILE}"
+        fi
     fi
 else 
     echo "[+] Slurm is not active."

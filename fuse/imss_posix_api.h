@@ -29,15 +29,6 @@
 
 #include <dirent.h>
 
-// struct dirent64
-// {
-// 	__ino64_t d_ino;
-// 	__off64_t d_off;
-// 	unsigned short int d_reclen;
-// 	unsigned char d_type;
-// 	char d_name[256]; /* We must not include limits.h! */
-// };
-
 #ifdef __cplusplus
 extern "C"
 {
@@ -85,6 +76,8 @@ extern "C"
 	int HerculesMove(const char *given_old_path, const char *given_new_pathname, const char *hercules_path);
 
 	int imss_close(const char *path, int fd);
+
+	int imss_serializate_structs(char *);
 
 
 #ifdef __cplusplus
