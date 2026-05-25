@@ -258,11 +258,11 @@ GHashTable *AddDirectoryToPool(const gchar *dataset_uri)
 	// TODO: change "g_hash_table_new" for "g_hash_table_new_full".
 	// Check if this directory already has a table allocated.
 	GHashTable *existing_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, dataset_uri);
-    if (existing_table != NULL)
-    {
-        slog_debug("Children table for directory '%s' already exists. Reusing it.", dataset_uri);
-        return existing_table;
-    }
+	if (existing_table != NULL)
+	{
+		slog_debug("Children table for directory '%s' already exists. Reusing it.", dataset_uri);
+		return existing_table;
+	}
 	slog_debug("Add directory %s to pool", dataset_uri);
 	// GHashTable *new_directory_children_table = g_hash_table_new(g_str_hash, g_str_equal);
 	GHashTable *new_directory_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
@@ -379,7 +379,7 @@ void hercules_serialize_pool(int shm_fd)
 	}
 	g_list_free(info_list);
 
-	// save directory keys 
+	// save directory keys
 	uint32_t dir_count = g_hash_table_size(pool_hash_tables_datasetd);
 	write(shm_fd, &dir_count, sizeof(dir_count));
 
@@ -943,7 +943,8 @@ int32_t stat_init(char *stat_hostfile,
 	{
 		slog_debug("Init pool_hash_tables_datasetd");
 		char shm_name[256];
-		snprintf(shm_name, sizeof(shm_name), "/hercules_state_%d", getpid());
+		snprintf(shm_name, sizeof(shm_name), "/hercules_state_hashmap_%d", getpid());
+		slog_debug("shm_name=%s", shm_name);
 		// char *shm_env = getenv("HERCULES_SHM_STATE");
 		// if (shm_env != NULL)
 		{
@@ -1031,7 +1032,7 @@ int32_t stat_init(char *stat_hostfile,
 
 			// ignore 127.0.0.1 (Loopback) and idrac.
 			// if (!strcmp(host, "127.0.0.1") != 0 || !strcmp(ifa->ifa_name, "idrac") != 0)
-			if (strcmp(ifa->ifa_name, "lo") == 0 || strcmp(ifa->ifa_name, "idrac") == 0) {
+			if (strcmp(ifa->ifa_name, "lo") == 0 || strcmp(ifa->ifa_name, "idrac") == 0)
 			{
 				continue;
 			}
@@ -1761,8 +1762,6 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 		return 0;
 	}
 
-
-	
 	// for (size_t k = 0; k < curr_imss.info.num_storages; k++)
 	// {
 	// 	slog_debug("curr_imss.info.ips[%d]=%s", k, curr_imss.info.ips[k]);

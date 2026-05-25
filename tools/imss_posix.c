@@ -447,10 +447,6 @@ __attribute__((constructor)) void imss_posix_init(void)
 	int ret = 0;
 	gettimeofday(&start, NULL);
 
-	slog_time("Info,,Rank,Function,Time(msec),Comment");
-
-	map_fd = map_fd_create();
-
 	rank = GetRank();
 
 	// fill global variables with the enviroment variables value.
@@ -490,6 +486,58 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// 	fprintf(stderr, "LOG PATH= %s\n", log_path); // this line raise an exception running a python app with threads.
 	// }
 	slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
+	slog_ready = 1;
+	slog_time("Info,,Rank,Function,Time(msec),Comment");
+
+	map_fd = map_fd_create();
+
+	char shm_name_map_fd[256];
+	snprintf(shm_name_map_fd, sizeof(shm_name_map_fd), "/hercules_state_mapfd_%d", getpid());
+	slog_debug("shm_name_map_fd=%s", shm_name_map_fd);
+	int shm_fd_map_fd = shm_open(shm_name_map_fd, O_RDONLY, 0600);
+	if (shm_fd_map_fd >= 0)
+	{
+		struct stat st;
+		slog_debug("running fstat for shm_name_map_fd");
+		if (fstat(shm_fd_map_fd, &st) != -1)
+		{
+			slog_debug("st.st_size=%ld", st.st_size);
+			if (st.st_size > 0)
+			// if (stat(shm_name_map_fd, &st) == 0 && st.st_size > 0)
+			{
+				size_t shm_size = st.st_size;
+				slog_debug("Ok, the size of the shared memory block is %ld", shm_size);
+				void *shm_ptr = mmap(NULL, shm_size, PROT_READ, MAP_SHARED, shm_fd_map_fd, 0);
+
+				if (shm_ptr != MAP_FAILED)
+				{
+					// 3. Populate our freshly allocated global map with the inherited records
+					slog_debug("Discovered inherited state from parent PID %d. Deserializing...", getppid());
+					map_fd_deserialize(map_fd, shm_ptr, shm_size);
+
+					munmap(shm_ptr, shm_size);
+				}
+			}
+			else
+			{
+				slog_debug("shm_name_map_fd, Invalid size");
+			}
+		}
+		else
+		{
+			slog_debug("Stat error of shm_name_map_fd, fd=%d", shm_fd_map_fd);
+			exit(-1);
+		}
+		close(shm_fd_map_fd);
+
+		// Unlink immediately so the file clears out of RAM
+		// and doesn't get accidentally processed by deeper grandchildren
+		shm_unlink(shm_name_map_fd);
+	}
+	else
+	{
+		slog_debug("No inherited state found. Running with a fresh tracking map.");
+	}
 
 	// if (args.logging.hercules_debug_file > 0)
 	// {
@@ -612,7 +660,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 
 	slog_live("Client %d ready in %f sec.\n", rank, elapsed);
 	// fprintf(stdout, "[%s] Client %d/%d ready in %f sec.\n", args.data_hostname, rank, getpid(), elapsed);
-	// slog_debug("init before assigment=%d\n", init);
+	slog_debug("init before assigment=%d\n", init);
 	init = 1;
 	// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 }
@@ -3189,7 +3237,7 @@ int truncate(const char *path, off_t length)
 
 int ftruncate(int fd, off_t length)
 {
-	static int (*real_ftruncate)(int, off_t) = nullptr;
+	// static int (*real_ftruncate)(int, off_t) = nullptr;
 
 	if (!real_ftruncate)
 	{
@@ -3945,18 +3993,48 @@ int execv(const char *pathname, char *const argv[])
 
 	slog_debug("[POSIX] Running execv, pathname=%s\n", pathname);
 	// generate unique SHM filename
-	char shm_name[256];
-	snprintf(shm_name, sizeof(shm_name), "/hercules_state_%d", getpid());
+	char shm_name_hash_table[256];
+	snprintf(shm_name_hash_table, sizeof(shm_name_hash_table), "/hercules_state_hashmap_%d", getpid());
+	slog_debug("shm_name_hash_table=%s", shm_name_hash_table);
 
 	// serialize the datasets to shared memory
-	int shm_fd = imss_serializate_structs(shm_name);
+	int shm_fd_hash_table = imss_serializate_hash_table(shm_name_hash_table);
+
+	// serialize the map_fd to shared memory.
+	char shm_name_map_fd[256];
+	snprintf(shm_name_map_fd, sizeof(shm_name_map_fd), "/hercules_state_mapfd_%d", getpid());
+	slog_debug("shm_name_map_fd=%s", shm_name_map_fd);
+	int shm_fd_map_fd = shm_open(shm_name_map_fd, O_CREAT | O_RDWR, 0600);
+	if (shm_fd_map_fd >= 0)
+	{
+		void *serializate_data = NULL;
+		size_t out_size = 0;
+		if (map_fd_serialize(map_fd, &serializate_data, &out_size) == 0 && serializate_data)
+		{
+			slog_debug("Map map_fd has been serializated, out_size=%ld", out_size);
+			// ftruncate(shm_fd_map_fd, out_size);
+			write(shm_fd_map_fd, serializate_data, out_size);
+			// if (serializate_data)
+			// {
+			free(serializate_data);
+			serializate_data = NULL;
+			// }
+		}
+		close(shm_fd_map_fd);
+	}
 
 	int ret = real_execv(pathname, argv);
 
 	// only reached if real_execve fails
-	if (shm_fd >= 0)
+	if (shm_fd_hash_table >= 0)
 	{
-		shm_unlink(shm_name);
+		slog_debug("Unlinking shm_name_hash_table");
+		shm_unlink(shm_name_hash_table);
+	}
+	if (shm_fd_map_fd >= 0)
+	{
+		slog_debug("Unlinking shm_name_map_fd")
+		    shm_unlink(shm_name_map_fd);
 	}
 
 	return ret;
@@ -3984,7 +4062,52 @@ int execve(const char *pathname, char *const argv[], char *const envp[])
 
 	slog_debug("[POSIX] Running execve, pathname=%s\n", pathname);
 
-	return real_execve(pathname, argv, envp);
+	// generate unique SHM filename
+	char shm_name_hash_table[256];
+	snprintf(shm_name_hash_table, sizeof(shm_name_hash_table), "/hercules_state_hashmap_%d", getpid());
+	slog_debug("shm_name_hash_table=%s", shm_name_hash_table);
+
+	// serialize the datasets to shared memory
+	int shm_fd_hash_table = imss_serializate_hash_table(shm_name_hash_table);
+
+	// serialize the map_fd to shared memory.
+	char shm_name_map_fd[256];
+	snprintf(shm_name_map_fd, sizeof(shm_name_map_fd), "/hercules_state_mapfd_%d", getpid());
+	slog_debug("shm_name_map_fd=%s", shm_name_map_fd);
+	int shm_fd_map_fd = shm_open(shm_name_map_fd, O_CREAT | O_RDWR, 0600);
+	if (shm_fd_map_fd >= 0)
+	{
+		void *serializate_data = NULL;
+		size_t out_size = 0;
+		if (map_fd_serialize(map_fd, &serializate_data, &out_size) == 0 && serializate_data)
+		{
+			slog_debug("Map map_fd has been serializated, out_size=%ld", out_size);
+			// ftruncate(shm_fd_map_fd, out_size);
+			write(shm_fd_map_fd, serializate_data, out_size);
+			if (serializate_data)
+			{
+				free(serializate_data);
+				serializate_data = NULL;
+			}
+		}
+		close(shm_fd_map_fd);
+	}
+
+	int ret = real_execve(pathname, argv, envp);
+
+	// only reached if real_execve fails
+	if (shm_fd_hash_table >= 0)
+	{
+		slog_debug("Unlinking shm_name_hash_table");
+		shm_unlink(shm_name_hash_table);
+	}
+	if (shm_fd_map_fd >= 0)
+	{
+		slog_debug("Unlinking shm_name_map_fd")
+		    shm_unlink(shm_name_map_fd);
+	}
+
+	return ret;
 }
 
 int dup(int oldfd)
@@ -4629,6 +4752,9 @@ int fstat64(int fd, struct stat64 *buf)
 	if (!real_fstat64)
 		real_fstat64 = (int (*)(int, struct stat64 *))dlsym(RTLD_NEXT, __func__);
 
+	if (!real_fstat64)
+		real_fstat64 = (int (*)(int, struct stat64 *))dlsym(RTLD_NEXT, "__fxstat64");
+
 	if (!init)
 	{
 		return real_fstat64(fd, buf);
@@ -4665,11 +4791,32 @@ int fstat64(int fd, struct stat64 *buf)
 int fstat(int fd, struct stat *buf)
 {
 	if (!real_fstat)
-		real_fstat = (int (*)(int, struct stat *))dlsym(RTLD_NEXT, __func__);
+	{
+		real_fstat = (int (*)(int, struct stat *))dlsym(RTLD_NEXT, "fstat");
+	}
+
+	if (!real_fstat)
+	{
+		if (slog_ready)
+		{
+			slog_debug("real_fstat is NULL, init __fxstat");
+		}
+		// real__fxstat = (int (*)(int, int, struct stat *))dlsym(RTLD_NEXT, "__fxstat");
+		return __fxstat(_STAT_VER, fd, buf);
+	}
 
 	if (!init)
 	{
-		return real_fstat(fd, buf);
+		if (slog_ready)
+		{
+			slog_debug("Calling real fstat");
+		}
+		int ret = real_fstat(fd, buf);
+		if (slog_ready)
+		{
+			slog_live("[POSIX] End Real 'fstat', fd=%d, errno=%d:%s, ret=%d, st_size=%ld, st_blocks=%ld, st_blksize=%ld", fd, errno, strerror(errno), ret, buf->st_size, buf->st_blocks, buf->st_blksize);
+		}
+		return ret;
 	}
 
 	errno = 0;
@@ -5677,8 +5824,7 @@ int fsync(int fd)
 	}
 	else
 	{
-		slog_full("Calling Real 'fsync'")
-		return real_fsync(fd);
+		slog_full("Calling Real 'fsync'") return real_fsync(fd);
 	}
 }
 

@@ -19,6 +19,8 @@ int map_fd_search_by_pathname(void *map, const char *pathname, int *fd, long *of
 int map_fd_erase_by_pathname(void *map, const char *pathname);
 int map_fd_search_by_val_close(void *map, int fd);
 std::string map_fd_search_by_val(void *map, const int fd);
+int map_fd_serialize(void *map, void **out_buf, size_t *out_size);
+int map_fd_deserialize(void *map, const void *buf, size_t size);
 
 #ifdef __cplusplus
 }
