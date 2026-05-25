@@ -486,7 +486,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// 	fprintf(stderr, "LOG PATH= %s\n", log_path); // this line raise an exception running a python app with threads.
 	// }
 	slog_init(log_path, args.logging.hercules_debug_level, args.logging.hercules_debug_file, args.logging.hercules_debug_screen, 1, 1, 1, rank);
-	slog_ready = 1;
+	// slog_ready = 1;
 	slog_time("Info,,Rank,Function,Time(msec),Comment");
 
 	map_fd = map_fd_create();
@@ -4797,10 +4797,10 @@ int fstat(int fd, struct stat *buf)
 
 	if (!real_fstat)
 	{
-		if (slog_ready)
-		{
-			slog_debug("real_fstat is NULL, init __fxstat");
-		}
+		// if (slog_ready)
+		// {
+		// 	slog_debug("real_fstat is NULL, init __fxstat");
+		// }
 		// real__fxstat = (int (*)(int, int, struct stat *))dlsym(RTLD_NEXT, "__fxstat");
 		return __fxstat(_STAT_VER, fd, buf);
 	}
