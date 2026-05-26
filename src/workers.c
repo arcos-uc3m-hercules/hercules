@@ -132,6 +132,32 @@ int data_ready = 0;
 #define GARBAGE_COLLECTOR_PERIOD 10
 #define CKECKPOINT_PERIOD 10
 
+void fill_temp_p_argv(const p_argv *src, p_argv *dest)
+{
+
+	if (!src)
+	{
+		slog_warn("Invalid src pointer."); 
+		return;
+	}
+
+	if (!dest)
+	{
+		slog_warn("Invalid dest pointer."); 
+		return;
+	}
+
+	dest->ucp_worker = src->ucp_worker;
+	dest->server_ep = src->server_ep;
+	dest->worker_uid = src->worker_uid;
+
+	strncpy(dest->curr_req, src->curr_req, PATH_MAX - 1);
+	dest->curr_req[PATH_MAX - 1] = '\0';
+
+	strncpy(dest->my_uri, src->my_uri, URI_ - 1);
+	dest->my_uri[URI_ - 1] = '\0';
+}
+
 int AddIPS(imss_info *my_imss, char *line, int32_t n_chars, int at_position)
 {
 	int count = my_imss->num_storages;
@@ -455,7 +481,7 @@ void *move_blocks_2_server(void *th_argv)
 					continue;
 				}
 				// TODO: check for the current data policy in the dataset, not in the imss configuration.
-				next_server = find_server(number_active_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy); 
+				next_server = find_server(number_active_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_imss.info.session_plcy);
 
 				// TODO: check replication factor.
 
@@ -911,7 +937,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			id_server_to_modify);
 
 		char msg[PATH_MAX * 2] = {'\0'};
-		sprintf(msg, "Running command: %s, id server=%d\n", command_to_exec, id_server_to_modify);
+		sprintf(msg, "Running command: %s, id server=%d, in node_to_use=%s\n", command_to_exec, id_server_to_modify, node_to_use);
 		fprintf(stderr, "%s", msg);
 		slog_debug(msg);
 		// Deploy the new hercules instance on the avaiable node.
@@ -1487,7 +1513,6 @@ void *get_performance_metrics(void *th_argv)
 		// 		fprintf(stderr, "Testing block\n");
 		// #endif
 	}
-
 
 	return NULL;
 }
@@ -2914,10 +2939,11 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				// client the new configuration if this deployment.
 
 				p_argv temp_p_argv_for_calls;
-				temp_p_argv_for_calls.ucp_worker = arguments->ucp_worker;
-				temp_p_argv_for_calls.server_ep = arguments->server_ep;
-				temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
-				strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
+				// temp_p_argv_for_calls.ucp_worker = arguments->ucp_worker;
+				// temp_p_argv_for_calls.server_ep = arguments->server_ep;
+				// temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
+				// strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
+				fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
 				send_node_list_2_frontend(temp_p_argv_for_calls); // Update the server list in the frontend.
 				return -1;
 			}
@@ -3012,11 +3038,11 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
 					slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
 					SendConfirmationMessage(arguments, MSG_ERROR_OP);
-					if (reused_memory == 0) 
-                    {
-                        free(buffer);
-						buffer=NULL;
-                    }
+					if (reused_memory == 0)
+					{
+						free(buffer);
+						buffer = NULL;
+					}
 					return -1;
 				}
 			}
@@ -3637,10 +3663,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	else if (!strcmp(mode, "GETMALLEABILITY")) // changes this later.
 	{
 		p_argv temp_p_argv_for_calls;
-		temp_p_argv_for_calls.ucp_worker = arguments->ucp_worker;
-		temp_p_argv_for_calls.server_ep = arguments->server_ep;
-		temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
-		strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
+		// temp_p_argv_for_calls.ucp_worker = arguments->ucp_worker;
+		// temp_p_argv_for_calls.server_ep = arguments->server_ep;
+		// temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
+		// strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
+		fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
 		send_node_list_2_frontend(temp_p_argv_for_calls);
 		return 1;
 	}
@@ -4353,7 +4380,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// dataset_info *struct_ = (dataset_info *)buffer;
 					slog_debug("END Recv dynamic, n_server_when_created=%d", ((dataset_info *)buffer)->n_servers_when_created);
 				}
-				
+
 				// Insert the element in the map.
 				insert_successful = TIMING(hierarchical_map->HierarchicalMapPut(key, buffer, length, reused_memory, NULL, 1), "HierarchicalMapPut", int, arguments->thread_id);
 				slog_debug("map->put (key %s) err %d", key.c_str(), insert_successful);
@@ -4445,7 +4472,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					// skip imss_info and num_storages.
 					address_aux += sizeof(imss_info);
 					address_aux += imss_info_->num_storages * LINE_LENGTH;
-					
+
 					free(imss_info_);
 					pthread_mutex_unlock(&memory_protect);
 				}

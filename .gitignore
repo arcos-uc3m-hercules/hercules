@@ -17,6 +17,7 @@ tst/2_4_6_SERVERS_RESULTS.csv
 .aux
 kill_stat.sh
 build
+build-sanitazer
 install
 bash
 TODO
@@ -46,4 +47,5 @@ stuff/dummy/*
 .cache/
 *_TEMP
 *.txt
+
 

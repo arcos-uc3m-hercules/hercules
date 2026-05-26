@@ -2977,8 +2977,11 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 			int remaining = (int)local_imss_->info.num_storages - 1;
 			ReleaseSpecificDataServerNetworkResources(local_imss_, 1, i, remaining);
 			PrintIntervals(curr_dataset);
-			SetInterval(curr_dataset, remaining, 0, 0);
-			SetInterval(curr_dataset, remaining, curr_dataset->first_block_id, curr_dataset->last_block_id);
+			if (remaining > 0)
+			{
+				SetInterval(curr_dataset, remaining, 0, 0);
+				SetInterval(curr_dataset, remaining, curr_dataset->first_block_id, curr_dataset->last_block_id);
+			}
 			changes_found = 1;
 		}
 	}
@@ -3011,8 +3014,11 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 			ReleaseSpecificDataServerNetworkResources(local_imss_, 1, slot, remaining);
 			slog_debug("New number of storage servers %d", local_imss_->info.num_storages);
 			PrintIntervals(curr_dataset);
-			SetInterval(curr_dataset, remaining, 0, 0);
-			SetInterval(curr_dataset, remaining, curr_dataset->first_block_id, curr_dataset->last_block_id);
+			if (remaining > 0)
+			{
+				SetInterval(curr_dataset, remaining, 0, 0);
+				SetInterval(curr_dataset, remaining, curr_dataset->first_block_id, curr_dataset->last_block_id);
+			}
 
 			AddIPS(&local_imss_->info, expected_server_list[slot], strlen(expected_server_list[slot]), slot);
 			AddBackEndServer2Imss(local_imss_, slot);
@@ -3253,8 +3259,9 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 
 	wait_ack(ucp_worker_meta, local_meta_uid, ep, SYNC);
 
-	// MALLEABILITY_CONF_PERF configuration does not apply malleability changes. 
-	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED) {
+	// MALLEABILITY_CONF_PERF configuration does not apply malleability changes.
+	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
+	{
 		wait_malleability_changes(ucp_worker_meta, local_meta_uid, ep, NULL);
 	}
 
@@ -3347,7 +3354,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 
 	// MALLEABILITY_CONF_PERF is used to measure the performance when malleability is not enabled.
 	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED || CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_PERF) // TODO: add a new condition to check the Malleability type (e.g., memory usage, performance, ...)
-	{	// To send performance metrics.
+	{														 // To send performance metrics.
 		int status = send_performance_metrics(ep, dataset_uri, m_srv);
 	}
 
@@ -5956,7 +5963,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		else
 		{ // non LOCAL policy.
 			sprintf(key_, "SET %lu %ld %s$%d %" PRIu32, size, offset, curr_dataset->uri_, data_id, curr_imss_storages);
-			slog_debug("Sending request %s to server %d (%s)", key_, server_id, node_hostname);
+			slog_debug("Sending request '%s' to server %d (%s)", key_, server_id, node_hostname);
 
 			clock_t t = clock();
 			size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), "send_req", size_t, process_rank);
