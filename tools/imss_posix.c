@@ -741,10 +741,10 @@ int close(int fd)
 		// map_fd_update_value(map_fd, pathname, fd, 0);
 		map_fd_erase(map_fd, fd);
 		// TODO: check this.
-		// if (real_close(fd) == -1)
+		if (real_close(fd) == -1)
 		// {
 		// 	slog_error("Cannot close aux fd used by HERCULES %d", fd);
-		// 	errno = 0;
+			errno = 0;
 		// }
 		slog_live("[POSIX]. Ending Hercules 'close', pathname=%s, ret=%d\n", pathname, ret);
 		// free(pathname);
@@ -1856,7 +1856,7 @@ size_t fwrite(const void *buf, size_t size, size_t count, FILE *fp)
 
 	errno = 0;
 	size_t ret = -1;
-	int fd = fp->_fileno;
+	int fd = fileno(fp); // fp->_fileno;
 	std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
 	if (!pathname_ob.empty())
 	{
@@ -1864,18 +1864,32 @@ size_t fwrite(const void *buf, size_t size, size_t count, FILE *fp)
 		size_t to_write = size * count;
 
 		unsigned long offset = -1;
-		slog_live("[POSIX]. Calling Hercules 'fwrite', pathname=%s, to_write=%ld, size=%ld, count=%ld, fd=%d", pathname, to_write, size, count, fd);
+		slog_live("[POSIX]. Calling Hercules 'fwrite', pathname=%s, to_write=%zu, size=%zu, count=%zu, fd=%d", pathname, to_write, size, count, fd);
 
-		ret = generalWrite(pathname, fd, buf, to_write, offset);
+		// return 0 immediately if either size or count is zero
+		if (size == 0 || count == 0)
+		{
+			return 0;
+		}
 
-		slog_live("[POSIX]. Ending Hercules 'fwrite', pathname=%s, ret=%ld, fd=%d\n", pathname, ret, fd);
+		long bytes_written = generalWrite(pathname, fd, buf, to_write, offset);
+
+		if (bytes_written < 0)
+		{
+			ret = 0;
 	}
 	else
 	{
-		// slog_full("[POSIX]. Calling real 'fwrite', fd=%d", fd);
-		// fprintf(stdout, "Calling real fwrite, fd=%d\n", fd);
+			ret = (size_t)bytes_written / size;
+		}
+
+		slog_live("[POSIX]. Ending Hercules 'fwrite', pathname=%s, fd=%d, elements_written=%zu\n", pathname, fd, ret);
+	}
+	else
+	{
+		slog_full("[POSIX]. Calling real 'fwrite', to_write=%zu, size=%zu, count=%zu, fd=%d", size * count, size, count, fd);
 		ret = real_fwrite(buf, size, count, fp);
-		// slog_full("[POSIX]. Ending real 'fwrite', fd=%d, ret=%d\n", fd, ret);
+		slog_full("[POSIX]. Ending real 'fwrite', fd=%d, ret=%zu\n", fd, ret);
 	}
 
 	return ret;
@@ -2491,6 +2505,53 @@ FILE *fdopen(int fildes, const char *mode)
 	}
 
 	return file;
+}
+
+int fdclose(FILE *stream, int *fdp)
+{
+	if (!real_fdclose)
+		real_fdclose = (int (*)(FILE *, int *))dlsym(RTLD_NEXT, __func__);
+
+	if (!init)
+		return real_fdclose(stream, fdp);
+
+	errno = 0;
+	int ret = 0;
+	int fd = stream->_fileno;
+	std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
+	if (!pathname_ob.empty())
+	{
+		const char *pathname = pathname_ob.c_str();
+
+		slog_live("[POSIX]. Calling Hercules 'fdclose', pathname=%s, fd=%d", pathname, fd);
+		ret = imss_close(pathname, fd);
+		// Upon successful completion, fclose() shall return 0;
+		// otherwise, it shall return EOF and set errno to indicate the error.
+		if (ret > 0)
+		{
+			ret = 0;
+		}
+		if (ret < 0)
+		{
+			ret = EOF;
+		}
+
+		slog_live("[POSIX]. Ending Hercules 'fdclose' pathname=%s, fd=%d\n", pathname, fd);
+		// Set offset to 0.
+		map_fd_update_value(map_fd, pathname, fd, 0);
+		map_fd_erase(map_fd, fd);
+		// TODO: TO CHECK!
+		// real_fclose(fp);
+		// free(pathname);
+	}
+	else
+	{
+		slog_live("[POSIX]. Calling real 'fdclose', fd=%d", fd);
+		ret = real_fdclose(stream, fdp);
+		slog_live("[POSIX]. Ending real 'fdclose', fd=%d, ret=%d", fd, ret);
+	}
+
+	return ret;
 }
 
 ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, size_t offset)

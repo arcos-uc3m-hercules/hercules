@@ -105,6 +105,8 @@ extern "C"
     static int (*real_creat)(const char *pathname, mode_t mode) = NULL;
     static FILE *(*real_fopen)(const char *pathname, const char *mode) = NULL;
     static FILE *(*real_fdopen)(int fildes, const char *mode) = NULL;
+    static int (*real_fdclose)(FILE *stream, int *fdp) = NULL;
+    static int (*real_fcloseall)(void) = NULL;
     // static FILE *(*real_fopen64)(const char * pathname, const char * mode) = NULL;
     static int (*real_access)(const char *pathname, int mode) = NULL;
     static int (*real_mkdir)(const char *path, mode_t mode) = NULL;
