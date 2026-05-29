@@ -82,3 +82,33 @@ int is_valid_long(const char *str, long *out_val)
     *out_val = val;
     return 1;
 }
+
+int is_valid_double(const char *str, double *out_val)
+{
+    if (str == NULL || *str == '\0') {
+        return 0;
+    }
+
+    char *endptr = NULL;
+    errno = 0;
+    
+    double val = strtod(str, &endptr);
+
+    // Check for overflow or underflow as reported by errno
+    if (errno == ERANGE) {
+        return 0;
+    }
+
+    // Verify that at least one valid character was processed
+    if (endptr == str) {
+        return 0;
+    }
+
+    // Ensure the string ends correctly
+    if (*endptr != '\0' && *endptr != '\n') {
+        return 0;
+    }
+
+    *out_val = val;
+    return 1;
+}

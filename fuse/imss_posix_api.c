@@ -1796,7 +1796,7 @@ extern "C"
 			if (ret_set_data < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
-				fprintf(stderr, "[imss_write] Error writing to Hercules: %s\n", strerror(ret_set_data));
+				fprintf(stderr, "[imss_write] Error writing to Hercules: %s\n", strerror(-ret_set_data));
 				error_print = ret_set_data;
 				return ret_set_data;
 			}

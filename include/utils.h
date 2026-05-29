@@ -47,4 +47,14 @@ int is_valid_integer(const char *str, int *out_val);
  */
 int is_valid_long(const char *str, long *out_val);
 
+/**
+ * @brief Checks if a string is a valid double integer number.
+ * 
+ * @param str Input string to be checked.
+ * @param out_val double pointer where the value will be stored if the "str" is valid.
+ * @return int 1 if the string is a valid integer number, 0 on other case.
+ */
+int is_valid_double(const char *str, double *out_val);
+
+
 #endif

@@ -673,10 +673,10 @@ int getConfiguration(struct arguments *args)
 			break;
 	}
 
-	if (args->malleability)
-	{
+	// if (args->malleability)
+	// {
 		
-	}
+	// }
 
 	// @deprecated
 	// if (getenv("HERCULES_MALLEABILITY_TYPE") != NULL)
@@ -912,9 +912,14 @@ void fillMalleabilityParams(struct arguments *args, struct cfg_struct *cfg)
 	double default_threshold = 5000.0;
 	if (getenv("HERCULES_MALLEABILITY_THRESHOLD") != NULL)
 		args->malleability_performance_threshold = atoi(getenv("HERCULES_MALLEABILITY_THRESHOLD"));
-	else if (cfg_get(cfg, "MALLEABILITY_THRESHOLD"))
-		args->malleability_performance_threshold = atoi(cfg_get(cfg, "MALLEABILITY_THRESHOLD"));
-	else
+	else if (cfg_get(cfg, "MALLEABILITY_THRESHOLD")) {
+		const char *aux_var = cfg_get(cfg, "MALLEABILITY_THRESHOLD");
+		if(is_valid_double(aux_var, &args->malleability_performance_threshold) == 0)
+		{
+			fprintf(stderr, "WARNING: Invalid performance threshold %s, setting to %f MB\n", aux_var, default_threshold);
+			args->malleability_performance_threshold = default_threshold;
+		}
+	} else
 		// default value.
 		args->malleability_performance_threshold = default_threshold;
 

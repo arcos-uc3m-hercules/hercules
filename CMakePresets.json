@@ -4,19 +4,23 @@
     {
       "name": "default",
       "displayName": "Default Configuration",
+      "description": "Optimized release build without debug symbols",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/install",
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "USE_ASAN": "OFF"
       }
     },
     {
       "name": "debug",
       "displayName": "Debug Configuration",
-      "binaryDir": "${sourceDir}/build",
+      "description": "Debug build with AddressSanitizer enabled",
+      "binaryDir": "${sourceDir}/build-debug",
       "cacheVariables": {
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/install",
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "USE_ASAN": "ON"
       }
     }
   ],

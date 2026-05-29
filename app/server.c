@@ -887,6 +887,7 @@ int32_t main(int32_t argc, char **argv)
 
 	ret = ready(tmp_file_path, "OK");
 	fprintf(stdout, ANSI_COLOR_GREEN "[%s] %c-server %d is ready, status code=%d" ANSI_COLOR_RESET "\n", args.data_hostname, args.type, args.id, ret);
+	fflush(stdout);
 	slog_debug("[%s] %c-server %d is ready, status code=%d", args.data_hostname, args.type, args.id, ret);
 	// Wait for threads to finish.
 	for (int32_t i = 0; i < total_threads; i++)

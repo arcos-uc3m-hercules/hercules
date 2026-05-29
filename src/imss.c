@@ -115,6 +115,8 @@ extern char POLICY[MAX_POLICY_LEN];
 SharedMemory *shared_memory;
 key_t shared_memory_key;
 
+std::mutex mutex_hercules_struct;
+
 struct arguments args;
 
 void print_worker_pointer(ucp_worker_h ucp_worker)
@@ -1800,14 +1802,159 @@ int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t 
 void print_ips(imss *imss_)
 {
 	int number_of_servers = imss_->info.num_storages;
+	slog_debug("number_of_servers=%d", number_of_servers);
 	for (size_t j = 0; j < number_of_servers; j++)
 	{
 		slog_debug("eps[%d]=%s, endpoint address=%p", j, imss_->info.ips[j], imss_->conns.eps[j]);
+		// fprintf(stderr, "eps[%d]=%s, endpoint address=%p\n", j, imss_->info.ips[j], imss_->conns.eps[j]);
 	}
+	slog_debug("Ending print_ips");
 }
+
+// int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, int server_id_to_remove, int new_number_of_servers)
+// {
+// 	std::lock_guard<std::mutex> lock(mutex_hercules_struct);
+// 	/* Validate bounds to prevent underflow in memmove calculation */
+// 	if (server_id_to_remove < 0 || (uint32_t)server_id_to_remove >= imss_->info.num_storages)
+// 	{
+// 		slog_error("Invalid server_id_to_remove: %d", server_id_to_remove);
+// 		return -1;
+// 	}
+
+// 	// fprintf(stderr, "Removing server with ID %d, new number of servers is %d, previous number was %d\n", server_id_to_remove, new_number_of_servers, imss_->info.num_active_storages);
+// 	slog_debug("Removing server with ID %d (%s), new number of servers is %d, previous number was %d", server_id_to_remove, imss_->info.ips[server_id_to_remove], new_number_of_servers, imss_->info.num_storages);
+// 	// fprintf(stderr, "Removing server with ID %d (%s), new number of servers is %d, previous number was %d\n", server_id_to_remove, imss_->info.ips[server_id_to_remove], new_number_of_servers, imss_->info.num_storages);
+
+// 	slog_debug("printing current ips list");
+// 	// print_ips(imss_);
+
+// 	// Release the set of connections to the corresponding IMSS.
+// 	slog_live("num_storages=%d", imss_->info.num_storages);
+// 	// ucp_ep_h ep;
+// 	// for (int32_t i = 0; i < imss_.info.num_storages; i++)
+// 	// int id = server_id_to_remove;
+// 	// ep = imss_->conns.eps[id];
+// 	// if (is_parent)
+// 	// {
+// 	// 	flush_ep(ucp_worker_data, ep);
+// 	// 	slog_live("release_msg=%s to server %d", release_msg_data, id);
+// 	// 	// close the endpoint in the server side.
+// 	// 	if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, release_msg_data) == 0)
+// 	// 	{
+// 	// 		perror("HERCULES_ERR_RELEASE_SPECIFIC_NETWORK_RESOURCES_SEND_REQ");
+// 	// 		slog_error("HERCULES_ERR_RELEASE_SPECIFIC_NETWORK_RESOURCES_SEND_REQ");
+// 	// 		// return -1;
+// 	// 	}
+// 	// }
+// 	// close_ucx_endpoint(ucp_worker_data, ep);
+// 	// TODO: data servers does not have to call this function, only the metadata server and clients.
+// 	int ret = PerformanceRecordsRemoveKey(imss_->info.ips[server_id_to_remove]);
+// 	// if (ret == -1)
+// 	// {
+// 	// 	slog_error("Failed to remove performance records for server %d", server_id_to_remove);
+// 	// 	return ret;
+// 	// }
+
+// 	// Release UCX endpoint resources
+// 	// if (imss_->conns.eps[server_id_to_remove] != NULL)
+// 	// {
+// 	// 	imss_->conns.eps[server_id_to_remove] = NULL;
+// 	// }
+// 	ucp_ep_h ep = imss_->conns.eps[server_id_to_remove];
+// 	if (ep != NULL)
+// 	{
+// 		void *close_req = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
+// 		if (UCS_PTR_IS_PTR(close_req))
+// 		{
+// 			ucs_status_t status;
+// 			do
+// 			{
+// 				ucp_worker_progress(ucp_worker_data);
+// 				status = ucp_request_check_status(close_req);
+// 			} while (status == UCS_INPROGRESS);
+// 			ucp_request_free(close_req);
+// 		}
+// 		else if (UCS_PTR_STATUS(close_req) != UCS_OK)
+// 		{
+// 			slog_error("Failed to close endpoint cleanly");
+// 		}
+
+// 		imss_->conns.eps[server_id_to_remove] = NULL;
+// 	}
+
+// 	free(imss_->info.ips[server_id_to_remove]);
+// 	imss_->info.ips[server_id_to_remove] = NULL;
+// 	slog_debug("ips[%d] freed.", server_id_to_remove);
+
+// 	free(imss_->conns.peer_addr[server_id_to_remove]);
+// 	imss_->conns.peer_addr[server_id_to_remove] = NULL;
+// 	slog_debug("peer_addr[%d] freed.", server_id_to_remove);
+
+// 	free(imss_->conns.ep_contexts[server_id_to_remove]);
+// 	imss_->conns.ep_contexts[server_id_to_remove] = NULL;
+
+// 	size_t num_elements_to_shift = imss_->info.num_storages - server_id_to_remove - 1;
+// 	slog_debug("num_elements_to_shift=%d", num_elements_to_shift);
+// 	if (num_elements_to_shift > 0)
+// 	{
+// 		slog_debug("Sorting arrays");
+// 		// sort the ips array.
+// 		memmove(&imss_->info.ips[server_id_to_remove],
+// 			&imss_->info.ips[server_id_to_remove + 1],
+// 			num_elements_to_shift * sizeof(char *));
+
+// 		// sort the peer addresses array.
+// 		memmove(&imss_->conns.peer_addr[server_id_to_remove],
+// 			&imss_->conns.peer_addr[server_id_to_remove + 1],
+// 			num_elements_to_shift * sizeof(ucp_address_t *));
+
+// 		// sort the endpoints array.
+// 		memmove(&imss_->conns.eps[server_id_to_remove],
+// 			&imss_->conns.eps[server_id_to_remove + 1],
+// 			num_elements_to_shift * sizeof(ucp_ep_h));
+
+// 		// sort the contexts array.
+// 		memmove(&imss_->conns.ep_contexts[server_id_to_remove],
+// 			&imss_->conns.ep_contexts[server_id_to_remove + 1],
+// 			num_elements_to_shift * sizeof(client_ep_context_t *));
+
+// 		// sort the ids array.
+// 		memmove(&imss_->conns.id[server_id_to_remove],
+// 			&imss_->conns.id[server_id_to_remove + 1],
+// 			num_elements_to_shift * sizeof(uint32_t));
+// 	}
+
+// 	// re-sequence IDs from the removed slot
+// 	for (uint32_t k = server_id_to_remove; k < imss_->info.num_storages - 1; k++)
+// 		imss_->conns.id[k] = k;
+
+// 	// Null the last slot in the array.
+// 	uint32_t last_idx = imss_->info.num_storages - 1;
+// 	imss_->info.ips[last_idx] = NULL;
+// 	imss_->conns.peer_addr[last_idx] = NULL;
+// 	imss_->conns.eps[last_idx] = NULL;
+// 	imss_->conns.ep_contexts[last_idx] = NULL;
+// 	imss_->conns.id[last_idx] = 0;
+
+// 	// slog_debug("imss_ add=%p", &imss_->info.num_active_storages);
+// 	slog_debug("imss_->info.num_storages=%d", imss_->info.num_storages);
+// 	// fprintf(stderr, "imss_->info.num_storages=%d\n", imss_->info.num_storages);
+// 	imss_->info.num_storages = new_number_of_servers; // imss_->info.num_storages - 1;
+// 	imss_->info.num_active_storages = imss_->info.num_storages;
+// 	// imss_->info.num_active_storages = imss_->info.num_active_storages - 1;
+// 	curr_imss = *imss_;
+
+// 	slog_debug("printing ips in release");
+// 	print_ips(imss_);
+// 	// PerformanceRecordsRemoveKey(server_id_to_remove);
+
+// 	slog_debug("imss_->info.num_active_storages=%d, imss_->info.num_storages=%d", imss_->info.num_active_storages, imss_->info.num_storages);
+// 	return 0;
+// }
 
 int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, int server_id_to_remove, int new_number_of_servers)
 {
+	std::lock_guard<std::mutex> lock(mutex_hercules_struct);
 	/* Validate bounds to prevent underflow in memmove calculation */
 	if (server_id_to_remove < 0 || (uint32_t)server_id_to_remove >= imss_->info.num_storages)
 	{
@@ -1817,6 +1964,18 @@ int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, in
 
 	// fprintf(stderr, "Removing server with ID %d, new number of servers is %d, previous number was %d\n", server_id_to_remove, new_number_of_servers, imss_->info.num_active_storages);
 	slog_debug("Removing server with ID %d (%s), new number of servers is %d, previous number was %d", server_id_to_remove, imss_->info.ips[server_id_to_remove], new_number_of_servers, imss_->info.num_storages);
+	// fprintf(stderr, "Removing server with ID %d (%s), new number of servers is %d, previous number was %d\n", server_id_to_remove, imss_->info.ips[server_id_to_remove], new_number_of_servers, imss_->info.num_storages);
+
+	if (imss_->info.num_storages == new_number_of_servers) {
+		// fprintf(stderr, "The list is already updated.\n");
+		slog_debug("The list is already updated.\n");
+		// TODO: ask the server the last list just to be sure is updated.
+		// imss_->info.num_storages can be update because a previous 
+		// call to the send_node_list_2_frontend function that updated the
+		// list of nodes.
+		// Add the same for ReleaseSpecificDataServerNetworkResources?
+		return 0;
+	}
 
 	slog_debug("printing current ips list");
 	print_ips(imss_);
@@ -1931,6 +2090,7 @@ int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, in
 
 	// slog_debug("imss_ add=%p", &imss_->info.num_active_storages);
 	slog_debug("imss_->info.num_storages=%d", imss_->info.num_storages);
+	// fprintf(stderr, "imss_->info.num_storages=%d\n", imss_->info.num_storages);
 	imss_->info.num_storages = new_number_of_servers; // imss_->info.num_storages - 1;
 	imss_->info.num_active_storages = imss_->info.num_storages;
 	// imss_->info.num_active_storages = imss_->info.num_active_storages - 1;
@@ -4733,10 +4893,11 @@ int32_t imss_flush_data()
 	// }
 
 	// Release the set of connections to the corresponding IMSS.
+	// fprintf(stderr, "imss_flush_data, curr_imss.info.num_storages=%" PRId32 "\n", curr_imss.info.num_storages);
 	for (int32_t i = 0; i < curr_imss.info.num_storages; i++)
 	{
 		ucp_ep_h ep;
-
+		// fprintf(stderr, "i=%d\n", i);
 		ep = curr_imss.conns.eps[i];
 
 		flush_ep(ucp_worker_data, ep);
@@ -4996,7 +5157,13 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	}
 	else
 	{
-		curr_imss_storages = entry_value; // entry->value;
+		curr_imss_storages = entry_value;
+		if (curr_imss_storages > curr_imss.info.num_storages) {
+			// Old datasets could have an invalid number of data storages nodes.
+			// During decommissiong all data is moved to the new number of storages nodes (curr_imss.info.num_storages).
+			slog_debug("Entry value is bigger than curr_imss.info.num_storages (%" PRId32 " > %" PRId32 "), using curr_imss.info.num_storages=%" PRId32 ".", curr_imss_storages, curr_imss.info.num_storages, curr_imss.info.num_storages);
+			curr_imss_storages = curr_imss.info.num_storages;
+		}
 	}
 	slog_debug("curr_imss_storages=%d", curr_imss_storages);
 
@@ -5077,7 +5244,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			sprintf(mode, "GET");
 			sprintf(key_, "%s %lu %ld %s$%d %ld", mode, 0l, offset, curr_dataset->uri_, data_id, to_read);
 		}
-
+		slog_debug("server id = %d", server_id);
+		print_ips(&curr_imss);
 		//  Key related to the requested data element.
 		ep = curr_imss.conns.eps[server_id];
 		// node_hostname = curr_imss.info.ips[server_id];
