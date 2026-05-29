@@ -10,8 +10,36 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/CMake)
 
 PROJECT (${PROJECT_NAME_STR} C CXX)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build." FORCE)
+endif()
+
+# set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# ===================
+#  SANITIZERS CONFIGURATION
+option(USE_ASAN "Enable AddressSanitizer (Memory errors/SegFault)" OFF)
+option(USE_TSAN "Enable ThreadSanitizer (Data races)" OFF)
+
+if(USE_ASAN AND USE_TSAN)
+    message(FATAL_ERROR "You cannot enable ASan and TSan at the same time. Choose one.")
+endif()
+
+if(USE_ASAN)
+    message(STATUS "Enabling AddressSanitizer (ASan)...")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+elseif(USE_TSAN)
+    message(STATUS "Enabling ThreadSanitizer (TSAN)...")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=thread")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
+endif()
+# ===================
 
 find_package(PCRE)
 
@@ -42,16 +70,10 @@ SET(CMAKE_SUPPRESS_REGENERATION TRUE)
 
 SET(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 
-SET(CMAKE_CXX_FLAGS  " ${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_RELEASE}")
-SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
 
-set(IS_DEBUG_BUILD CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-
-# Indication to the code that this is a debug build
-if (${IS_DEBUG_BUILD})
+if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     add_compile_definitions(__DEBUG__)
 endif ()
-
 
 # find_package(FUSE)
 
