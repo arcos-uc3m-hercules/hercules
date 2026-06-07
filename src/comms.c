@@ -1130,10 +1130,12 @@ extern "C"
 		{
 			fprintf(stderr, "failed to create an endpoint on the data server: (%s)\n", ucs_status_string(status));
 			slog_error("failed to create an endpoint on the data server: (%s)", ucs_status_string(status));
-			free(user_data_args_aux);
+			// free(user_data_args_aux);
+		} else
+		{
+			slog_debug("[COMM] Created client endpoint");
 		}
 
-		slog_debug("[COMM] Created client endpoint");
 		return status;
 	}
 
@@ -1847,10 +1849,13 @@ extern "C"
 			close(sockfd);
 			sockfd = -1;
 		}
-
+		{
+			char msg[PATH_MAX] = {0};
+			sprintf(msg, "open client socket %s:%" PRIu64 "", server, server_port);
 		CHKERR_ACTION(sockfd < 0,
-			      (server) ? "open client socket" : "open server socket",
+				      (server) ? msg : "open server socket",
 			      (void)sockfd /* no action */);
+		}
 
 	out_free_res:
 		freeaddrinfo(res);

@@ -65,7 +65,8 @@ struct arguments
     int64_t num_data_servers;       /* number of data servers arg to '-n' */
     int64_t num_metadata_servers;   /* number of metada servers */
     int32_t malleability;
-    int32_t malleability_tolerance; /* tolerance for performing a malleability operation. */
+    int32_t malleability_tolerance_commissioning; /* tolerance for performing a malleability commissioning operation. */
+    int32_t malleability_tolerance_decommissioning; /* tolerance for performing a malleability decommissioning operation. */
     int32_t malleability_windows_size; /* how many records are used to check the performance status. */
     double malleability_performance_threshold; /* performance threshold in MB/s */
     // int32_t malleability_type;

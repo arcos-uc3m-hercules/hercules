@@ -877,21 +877,37 @@ int getConfiguration(struct arguments *args)
 
 void fillMalleabilityParams(struct arguments *args, struct cfg_struct *cfg) 
 {
-	// tolerance for performing a malleability operation.
-	int32_t default_tolerance = 100;
-	if (getenv("HERCULES_MALLEABILITY_TOLERANCE") != NULL)
-		args->malleability_tolerance = atoi(getenv("HERCULES_MALLEABILITY_TOLERANCE"));
-	else if (cfg_get(cfg, "MALLEABILITY_TOLERANCE"))
-		args->malleability_tolerance = atoi(cfg_get(cfg, "MALLEABILITY_TOLERANCE"));
+	
+	// tolerance for performing a malleability commissioning operation.
+	if (getenv("HERCULES_MALLEABILITY_COMMISSIONING_TOLERANCE") != NULL)
+		args->malleability_tolerance_commissioning = atoi(getenv("HERCULES_MALLEABILITY_COMMISSIONING_TOLERANCE"));
+	else if (cfg_get(cfg, "MALLEABILITY_COMMISSIONING_TOLERANCE"))
+		args->malleability_tolerance_commissioning = atoi(cfg_get(cfg, "MALLEABILITY_COMMISSIONING_TOLERANCE"));
 	else
 		// default value.
-		args->malleability_tolerance = default_tolerance;
+		args->malleability_tolerance_commissioning = DEFAULT_TOLERANCE_COMMISIONING;
 
-	if (args->malleability_tolerance < 0)
+	if (args->malleability_tolerance_commissioning < 0)
 	{
-		fprintf(stderr, "WARNING: Invalid performance windows size of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_tolerance, default_tolerance);
-		args->malleability_tolerance = default_tolerance;
+		fprintf(stderr, "WARNING: Invalid malleability commissioning tolerance of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_tolerance_commissioning, DEFAULT_TOLERANCE_COMMISIONING);
+		args->malleability_tolerance_commissioning = DEFAULT_TOLERANCE_COMMISIONING;
 	}
+
+	// tolerance for performing a malleability decommissioning operation.
+	if (getenv("HERCULES_MALLEABILITY_DECOMMISSIONING_TOLERANCE") != NULL)
+		args->malleability_tolerance_decommissioning = atoi(getenv("HERCULES_MALLEABILITY_DECOMMISSIONING_TOLERANCE"));
+	else if (cfg_get(cfg, "MALLEABILITY_DECOMMISSIONING_TOLERANCE"))
+		args->malleability_tolerance_decommissioning = atoi(cfg_get(cfg, "MALLEABILITY_DECOMMISSIONING_TOLERANCE"));
+	else
+		// default value.
+		args->malleability_tolerance_decommissioning = DEFAULT_TOLERANCE_DECOMMISIONING;
+
+	if (args->malleability_tolerance_decommissioning < 0)
+	{
+		fprintf(stderr, "WARNING: Invalid malleability decommissioning tolerance of %" PRId32 ", setting to %" PRId32 "\n", args->malleability_tolerance_decommissioning, DEFAULT_TOLERANCE_DECOMMISIONING);
+		args->malleability_tolerance_decommissioning = DEFAULT_TOLERANCE_DECOMMISIONING;
+	}
+
 
 	// windows size or how many records are used to check the performance status.
 	if (getenv("HERCULES_MALLEABILITY_WSIZE") != NULL)
@@ -930,8 +946,9 @@ void fillMalleabilityParams(struct arguments *args, struct cfg_struct *cfg)
 	}
 	// Convert from MB to bytes.
 	args->malleability_performance_threshold *= MB;
-	fprintf(stdout, "Malleability is enabled.\n HERCULES_MALLEABILITY_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f\n",
-			args->malleability_tolerance,
+	fprintf(stdout, "Malleability is enabled.\n HERCULES_MALLEABILITY_DECOMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_COMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f\n",
+			args->malleability_tolerance_decommissioning,
+			args->malleability_tolerance_commissioning,
 			args->malleability_windows_size,
 			args->malleability_performance_threshold);
 }
