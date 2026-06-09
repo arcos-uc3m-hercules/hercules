@@ -56,9 +56,15 @@ extern "C"
     /**
      * @brief Get the Mallebaility's configuration.
      */
-    void fillMalleabilityParams(struct arguments *args, struct cfg_struct *cfg);
+    void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg);
+    
+    /**
+     * @brief Get Snapshot configuration.
+     */
+    void fill_snapshot_params(struct arguments *args, struct cfg_struct *cfg);
 
     void getBlockInformation(std::string key, int *block_number, std::string *data_uri, std::string *file_name);
+
 
 #ifdef __cplusplus
 }

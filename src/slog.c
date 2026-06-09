@@ -257,12 +257,18 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
     // saves the current "errno" value to be returned by hercules after slog finished.
     int prev_errno = errno;
 
-    if (flag > slg.level || (slg.level >= SLOG_READ && flag != SLOG_READ))
+    // if (flag > slg.level || (slg.level >= SLOG_READ && flag != SLOG_READ))
+    if (flag > slg.level)
     {
         return;
     }
 
     if (flag != SLOG_TIME && slg.level == SLOG_TIME)
+    {
+        return;
+    }
+
+    if (flag != SLOG_MALLEABILITY && slg.level == SLOG_MALLEABILITY)
     {
         return;
     }
@@ -534,6 +540,8 @@ int getLevel(char *str)
         ret = SLOG_FULL;
     if (!strcmp(str, "SLOG_READ"))
         ret = SLOG_READ;
+    if (!strcmp(str, "SLOG_MALLEABILITY"))
+        ret = SLOG_MALLEABILITY;
 
     if (ret == -1)
     {

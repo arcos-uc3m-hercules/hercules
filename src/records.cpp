@@ -1556,6 +1556,10 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 	return continue_exe;
 }
 
+/**
+ * @brief Copy all data stored in Hercules WITHOUT following a Posix format file.
+ * It makes a backup of the Hercules blocks.
+ */
 int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id, char *data_hostname, struct arguments args)
 {
 	clock_t t;

@@ -50,6 +50,7 @@ struct arguments
     char mount_point[PATH_MAX];
     char hercules_checkpoint_path[PATH_MAX];
     char hercules_snapshot_path[PATH_MAX];
+    char hercules_malleability_checkpoint_path[PATH_MAX];
     char snapshot_paths_list[PATH_MAX];
     char ignore_paths_list[PATH_MAX];
     char data_hostname[HOST_NAME_MAX];
@@ -68,6 +69,7 @@ struct arguments
     int32_t malleability_tolerance_commissioning; /* tolerance for performing a malleability commissioning operation. */
     int32_t malleability_tolerance_decommissioning; /* tolerance for performing a malleability decommissioning operation. */
     int32_t malleability_windows_size; /* how many records are used to check the performance status. */
+    CommunicationMode malleability_reorder_mode; /* how blocks will be moved between servers, 0: network (network), 1: disk (checkpoint) */
     double malleability_performance_threshold; /* performance threshold in MB/s */
     // int32_t malleability_type;
     int32_t upper_bound_servers;

@@ -72,6 +72,26 @@ extern char client_ip[16];	// IP number of the node where the client is taking e
 
 extern std::mutex mutex_hercules_struct;
 
+enum CommunicationMode
+{
+	MODE_NETWORK,
+	MODE_DISK,
+	MODE_SHM
+};
+
+struct ServerBuffer
+{
+	std::vector<uint8_t> data; // serialised records
+	uint32_t block_count = 0;
+};
+
+struct DiskBlock
+{
+    std::string data_uri;
+    int32_t     block_id;
+    std::vector<uint8_t> data;
+};
+
 // /* Hercules objects */
 // extern imss curr_imss;
 
@@ -545,7 +565,30 @@ RETURNS:	 0 - The requested block was successfully stored.
 
 	int32_t set_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
 
+	/**
+	 * @brief Send data to a server by network.
+	 */
 	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server, uint32_t num_of_servers);
+
+	/**
+	 * @brief Send data to a server by copying the blocks to disk.
+	 */
+	// int32_t set_data_server_disk(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server, uint32_t num_of_servers);
+
+	/**
+	 * @brief Serialise one block into a ServerBuffer struct. Used for Snapshoting the data to other server when blocks are being moved.
+	 */
+	void append_block_to_buffer(ServerBuffer &srv_buf, const char *data_uri, int32_t data_id, const void *block_data, uint64_t block_size);
+
+	/**
+	 * @brief Deserialise a list of blocks from a file stored in disk.
+	 */
+	std::vector<DiskBlock> deserialise_server_buffer(const char *file_path);
+
+	/**
+	 * @brief flush one server's buffer: write to disk and notify the remote server that the data is ready.
+	 */
+	int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *malleability_checkpoint_path, const char *data_hostname, int number_of_servers);
 
 	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char *key);
 

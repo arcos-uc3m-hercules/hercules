@@ -51,6 +51,52 @@ int is_valid_integer(const char *str, int *out_val)
     return 1;
 }
 
+int is_valid_uint32(const char *str, uint32_t *out_val)
+{
+    char *endptr = NULL;
+    errno = 0;
+
+    // Skip leading whitespace to accurately inspect the first non-space character
+    const char *p = str;
+    while (isspace((unsigned char)*p)) {
+        p++;
+    }
+
+    // strtoul allows negative signs and wraps around via modulo arithmetic.
+    // If the string represents a negative number, it is inherently invalid for uint32_t.
+    if (*p == '-') {
+        return 0;
+    }
+
+    // convert the string to an unsigned long integer using base 10.
+    // endptr will point the address of the first invalid character if it exists.
+    unsigned long val = strtoul(str, &endptr, 10);
+
+    // checks for limits set by the strtoul conversion.
+    if ((errno == ERANGE && val == ULONG_MAX) || (errno != 0 && val == 0)) {
+        return 0;
+    }
+
+    // Explicitly check if the parsed value exceeds the bounds of a 32-bit unsigned integer.
+    // This is mandatory on 64-bit architectures where ULONG_MAX > UINT32_MAX.
+    if (val > UINT32_MAX) {
+        return 0;
+    }
+
+    // If there were no digits at all, strtoul() stores the original value of str in *endptr (and returns 0).
+    if (endptr == str) {
+        return 0;
+    }
+
+    // check for a valid end of line.
+    if (*endptr != '\0' && *endptr != '\n') {
+        return 0;
+    }
+
+    // the string is a valid uint32_t number, cast it to uint32_t.
+    *out_val = (uint32_t)val;
+    return 1;
+}
 
 int is_valid_long(const char *str, long *out_val)
 {

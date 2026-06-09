@@ -1,17 +1,17 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <pthread.h>
-#include <sys/signal.h>
-#include "metadata_stat.h"
-#include "imss.h"
-#include "workers.h"
 #include "hercules.hpp"
-#include "directory.h"
-#include "records.hpp"
 #include "comms.h"
+#include "directory.h"
+#include "imss.h"
+#include "metadata_stat.h"
+#include "records.hpp"
 #include "utils.h"
+#include "workers.h"
 #include <cinttypes>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/signal.h>
+#include <unistd.h>
 
 /***************************************************************************
 *******************************  STRUCTURES  *******************************
@@ -85,7 +85,6 @@ uint16_t connection_port; // FIXME
 
 // Metadata deployment flag.
 uint32_t metadata_server_deployed;
-
 
 /***************************************************************************
 *******************************  FUNCTIONS  ********************************
@@ -363,7 +362,7 @@ uint32_t metadata_server_deployed;
 // Method initializing an instance of the HERCULES in-memory storage system.
 /**
  * @deprecated
- * 
+ *
  */
 // int32_t hercules_init(uint32_t rank,
 // 			  uint64_t backend_strg_size,
@@ -467,7 +466,7 @@ uint32_t metadata_server_deployed;
 // Method releasing an instance of the HERCULES in-memory storage system.
 /**
  * @deprecated
- * 
+ *
  */
 // int32_t hercules_release()
 // {
@@ -551,9 +550,9 @@ int getConfiguration(struct arguments *args)
 	if (ret)
 	{
 		char default_paths[3][PATH_MAX] = {
-			"/etc/hercules.conf",
-			"./hercules.conf",
-			"hercules.conf"};
+		    "/etc/hercules.conf",
+		    "./hercules.conf",
+		    "hercules.conf"};
 
 		for (size_t i = 0; i < 3; i++)
 		{
@@ -653,30 +652,26 @@ int getConfiguration(struct arguments *args)
 	else
 		args->malleability = 0;
 
-	switch (args->malleability) {
-		case MALLEABILITY_CONF_DISABLED:
+	switch (args->malleability)
+	{
+	case MALLEABILITY_CONF_DISABLED:
 		break;
-		case MALLEABILITY_CONF_ENABLED:
-		{
-			CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_ENABLED;
-			fillMalleabilityParams(args, cfg);
-		}
-		break;
-		case MALLEABILITY_CONF_PERF:
-		{
-			CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_PERF;
-			fillMalleabilityParams(args, cfg);
-		}
-		break;	
-		default:
-			fprintf(stdout, "Invalid malleability option %d\n", args->malleability);
-			break;
+	case MALLEABILITY_CONF_ENABLED:
+	{
+		CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_ENABLED;
+		fill_malleability_params(args, cfg);
 	}
-
-	// if (args->malleability)
-	// {
-		
-	// }
+	break;
+	case MALLEABILITY_CONF_PERF:
+	{
+		CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_PERF;
+		fill_malleability_params(args, cfg);
+	}
+	break;
+	default:
+		fprintf(stdout, "Invalid malleability option %d\n", args->malleability);
+		break;
+	}
 
 	// @deprecated
 	// if (getenv("HERCULES_MALLEABILITY_TYPE") != NULL)
@@ -727,9 +722,9 @@ int getConfiguration(struct arguments *args)
 	}
 	if (args->async_io == ASYNC)
 	{
-		fprintf(stderr,"Asynchronous IO: %" PRIu32 "\n", args->async_io);
+		fprintf(stderr, "Asynchronous IO: %" PRIu32 "\n", args->async_io);
 	}
-	
+
 	ASYNC_IO = args->async_io;
 	// fprintf(stderr, "ASYNC IO %d\n", ASYNC_IO);
 	// End of Sync or Async I/O.
@@ -839,45 +834,19 @@ int getConfiguration(struct arguments *args)
 	else
 		args->hercules_checkpoint_path[0] = '\0';
 
-	if (getenv("HERCULES_SNAPSHOT_PATH") != NULL)
-		strcpy(args->hercules_snapshot_path, getenv("HERCULES_SNAPSHOT_PATH"));
-	else if (cfg_get(cfg, "HERCULES_SNAPSHOT_PATH"))
-		strcpy(args->hercules_snapshot_path, cfg_get(cfg, "HERCULES_SNAPSHOT_PATH"));
-	else
-		args->hercules_snapshot_path[0] = '\0';
-
-	if (getenv("HERCULES_SNAPSHOT_PATHS_LIST") != NULL)
-		strcpy(args->snapshot_paths_list, getenv("HERCULES_SNAPSHOT_PATHS_LIST"));
-	else if (cfg_get(cfg, "SNAPSHOT_PATHS_LIST"))
-		strcpy(args->snapshot_paths_list, cfg_get(cfg, "SNAPSHOT_PATHS_LIST"));
-	else
-		args->snapshot_paths_list[0] = '\0';
-
-	if (getenv("IGNORE_PATHS_LIST") != NULL)
-		strcpy(args->ignore_paths_list, getenv("IGNORE_PATHS_LIST"));
-	else if (cfg_get(cfg, "IGNORE_PATHS_LIST"))
-		strcpy(args->ignore_paths_list, cfg_get(cfg, "IGNORE_PATHS_LIST"));
-	else
-		args->ignore_paths_list[0] = '\0';
+	// Snapshot.
+	fill_snapshot_params(args, cfg);
 
 	cfg_free(cfg);
 
-	// ret = gethostname(&args->data_hostname[0], HOST_NAME_MAX);
-	// if (ret == -1)
-	// {
-	// 	perror("HERCULES_ERR_GETHOSTNAME");
-	// 	args->data_hostname[0] = '\0';
-	// } else {
-	// 	args->data_hostname[HOST_NAME_MAX-1] = '\0';
-	// }
 	get_hostname(args->data_hostname, HOST_NAME_MAX);
 
 	return 1;
 }
 
-void fillMalleabilityParams(struct arguments *args, struct cfg_struct *cfg) 
+void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 {
-	
+
 	// tolerance for performing a malleability commissioning operation.
 	if (getenv("HERCULES_MALLEABILITY_COMMISSIONING_TOLERANCE") != NULL)
 		args->malleability_tolerance_commissioning = atoi(getenv("HERCULES_MALLEABILITY_COMMISSIONING_TOLERANCE"));
@@ -908,7 +877,6 @@ void fillMalleabilityParams(struct arguments *args, struct cfg_struct *cfg)
 		args->malleability_tolerance_decommissioning = DEFAULT_TOLERANCE_DECOMMISIONING;
 	}
 
-
 	// windows size or how many records are used to check the performance status.
 	if (getenv("HERCULES_MALLEABILITY_WSIZE") != NULL)
 		args->malleability_windows_size = atoi(getenv("HERCULES_MALLEABILITY_WSIZE"));
@@ -928,14 +896,16 @@ void fillMalleabilityParams(struct arguments *args, struct cfg_struct *cfg)
 	double default_threshold = 5000.0;
 	if (getenv("HERCULES_MALLEABILITY_THRESHOLD") != NULL)
 		args->malleability_performance_threshold = atoi(getenv("HERCULES_MALLEABILITY_THRESHOLD"));
-	else if (cfg_get(cfg, "MALLEABILITY_THRESHOLD")) {
+	else if (cfg_get(cfg, "MALLEABILITY_THRESHOLD"))
+	{
 		const char *aux_var = cfg_get(cfg, "MALLEABILITY_THRESHOLD");
-		if(is_valid_double(aux_var, &args->malleability_performance_threshold) == 0)
+		if (is_valid_double(aux_var, &args->malleability_performance_threshold) == 0)
 		{
 			fprintf(stderr, "WARNING: Invalid performance threshold %s, setting to %f MB\n", aux_var, default_threshold);
 			args->malleability_performance_threshold = default_threshold;
 		}
-	} else
+	}
+	else
 		// default value.
 		args->malleability_performance_threshold = default_threshold;
 
@@ -946,11 +916,118 @@ void fillMalleabilityParams(struct arguments *args, struct cfg_struct *cfg)
 	}
 	// Convert from MB to bytes.
 	args->malleability_performance_threshold *= MB;
-	fprintf(stdout, "Malleability is enabled.\n HERCULES_MALLEABILITY_DECOMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_COMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f\n",
-			args->malleability_tolerance_decommissioning,
-			args->malleability_tolerance_commissioning,
-			args->malleability_windows_size,
-			args->malleability_performance_threshold);
+
+	// mode
+	const char *env_val = NULL;
+	const char *cfg_val = NULL;
+
+	enum CommunicationMode default_reorder_mode = MODE_NETWORK;
+	// check if the enviroment variable was defined
+	const char *raw_mode_str = getenv("HERCULES_MALLEABILITY_REORDER_MODE");
+	if (raw_mode_str == NULL)
+	{
+		// check if the value was define in the configuration file
+		raw_mode_str = cfg_get(cfg, "MALLEABILITY_REORDER_MODE");
+	}
+
+	if (raw_mode_str != NULL)
+	{
+		uint32_t temp_val = 0;
+
+		// Parse to a temporary integer, then verify if it matches a valid enum value
+		if (is_valid_uint32(raw_mode_str, &temp_val) != 0 && (temp_val == MODE_NETWORK || temp_val == MODE_DISK || temp_val == MODE_SHM))
+		{
+			args->malleability_reorder_mode = (enum CommunicationMode)temp_val;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid malleability reorder mode: %s, setting to %d\n", raw_mode_str, (int)default_reorder_mode);
+			args->malleability_reorder_mode = default_reorder_mode;
+		}
+	}
+	else
+	{
+		args->malleability_reorder_mode = default_reorder_mode;
+	}
+
+	// malleability checkpoint path.
+	env_val = getenv("HERCULES_MALLEABILITY_CHECKPOINT_PATH");
+	if (env_val != NULL)
+	{
+		snprintf(args->hercules_malleability_checkpoint_path, sizeof(args->hercules_malleability_checkpoint_path), "%s", env_val);
+	}
+	else if ((cfg_val = cfg_get(cfg, "MALLEABILITY_CHECKPOINT_PATH")) != NULL)
+	{
+		snprintf(args->hercules_malleability_checkpoint_path, sizeof(args->hercules_malleability_checkpoint_path), "%s", cfg_val);
+	}
+	else
+	{
+		args->hercules_malleability_checkpoint_path[0] = '\0';
+	}
+
+	if (args->malleability_reorder_mode == CommunicationMode::MODE_DISK && strlen(args->hercules_malleability_checkpoint_path) <= 0)
+	{
+		fprintf(stderr, "Invalid malleability checkpoint path, required when malleability reorder mode is by Disk.\n Changing reorder mode to Network: %d", (int)default_reorder_mode);
+		args->malleability_reorder_mode = default_reorder_mode;
+	}
+
+	fprintf(stdout, "Malleability is enabled.\n HERCULES_MALLEABILITY_DECOMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_COMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f, HERCULES_MALLEABILITY_REORDER_MODE=%d\n",
+		args->malleability_tolerance_decommissioning,
+		args->malleability_tolerance_commissioning,
+		args->malleability_windows_size,
+		args->malleability_performance_threshold,
+		(int)args->malleability_reorder_mode);
+}
+
+void fill_snapshot_params(struct arguments *args, struct cfg_struct *cfg)
+{
+	const char *env_val = NULL;
+	const char *cfg_val = NULL;
+
+	// Process HERCULES_SNAPSHOT_PATH.
+	env_val = getenv("HERCULES_SNAPSHOT_PATH");
+	if (env_val != NULL)
+	{
+		snprintf(args->hercules_snapshot_path, sizeof(args->hercules_snapshot_path), "%s", env_val);
+	}
+	else if ((cfg_val = cfg_get(cfg, "SNAPSHOT_PATH")) != NULL)
+	{
+		snprintf(args->hercules_snapshot_path, sizeof(args->hercules_snapshot_path), "%s", cfg_val);
+	}
+	else
+	{
+		args->hercules_snapshot_path[0] = '\0';
+	}
+
+	// Process HERCULES_SNAPSHOT_PATHS_LIST
+	env_val = getenv("HERCULES_SNAPSHOT_PATHS_LIST");
+	if (env_val != NULL)
+	{
+		snprintf(args->snapshot_paths_list, sizeof(args->snapshot_paths_list), "%s", env_val);
+	}
+	else if ((cfg_val = cfg_get(cfg, "SNAPSHOT_PATHS_LIST")) != NULL)
+	{
+		snprintf(args->snapshot_paths_list, sizeof(args->snapshot_paths_list), "%s", cfg_val);
+	}
+	else
+	{
+		args->snapshot_paths_list[0] = '\0';
+	}
+
+	// Process IGNORE_PATHS_LIST
+	env_val = getenv("HERCULES_IGNORE_PATHS_LIST");
+	if (env_val != NULL)
+	{
+		snprintf(args->ignore_paths_list, sizeof(args->ignore_paths_list), "%s", env_val);
+	}
+	else if ((cfg_val = cfg_get(cfg, "IGNORE_PATHS_LIST")) != NULL)
+	{
+		snprintf(args->ignore_paths_list, sizeof(args->ignore_paths_list), "%s", cfg_val);
+	}
+	else
+	{
+		args->ignore_paths_list[0] = '\0';
+	}
 }
 
 void getBlockInformation(std::string key, int *block_number, std::string *data_uri, std::string *file_name)
@@ -974,7 +1051,7 @@ void getBlockInformation(std::string key, int *block_number, std::string *data_u
 		return;
 	}
 	*block_number = std::stoi(block, 0, 10); //  string to number.
-	pos -= 1;								 // -1 to skip '$' on the data uri.
+	pos -= 1;				 // -1 to skip '$' on the data uri.
 	// data_uri = (char *)key.substr(0, pos).c_str(); // substract the data uri from the key.
 	*data_uri = key.substr(0, pos);
 	// strcpy(data_uri, key.substr(0, pos).c_str());

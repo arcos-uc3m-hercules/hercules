@@ -7,6 +7,7 @@
 #include "slog.h"
 #include "ucs/type/status.h"
 #include "workers.h"
+#include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <chrono>
@@ -3190,7 +3191,7 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 			int ret = AddBackEndServer2Imss(local_imss_, slot);
 			if (ret == -1)
 			{
-				// Connection failed — the server is not reachable yet (e.g. still being stopped or not yet started). 
+				// Connection failed — the server is not reachable yet (e.g. still being stopped or not yet started).
 				// Undo the AddIPS by removing the slot we just inserted so the local state stays consistent with what is actually reachable.
 				// We pass (num_storages - 1) as the new count because we are back to the same number we had after ReleaseSpecific above.
 				slog_warn("AddBackEndServer2Imss failed for '%s' at slot %d, rolling back.", expected_server_list[slot], slot);
@@ -6886,8 +6887,16 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 
 	ucp_ep_h ep;
 
-	// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
-	sprintf(key_, "SET %lu %ld %s$%d %" PRIu32, size, offset, data_uri, data_id, MALLEABILITY_SET_BYPASS);
+	int chars_written = snprintf(key_, REQUEST_SIZE, "SETNETWORK %zu %ld %s$%d %" PRIu32, size, (long)offset, data_uri, data_id, MALLEABILITY_SET_BYPASS);
+
+	if (chars_written < 0 || chars_written >= REQUEST_SIZE)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_REQ_FORMATTING_ERROR");
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_SERVER_REQ_FORMATTING_ERROR\n");
+		return -1;
+	}
+
 	slog_live("[IMSS] BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%lu)", data_id, n_server_, curr_imss.info.ips[n_server_], key_, size);
 	// fprintf(stderr, "[IMSS] BLOCK %d SENT TO %d SERVER with Request: %s (%lu)\n", data_id, n_server_, key_, size);
 	ep = curr_imss.conns.eps[n_server_];
@@ -6896,18 +6905,17 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 	if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
-		perror("HERCULES_ERR_SET_REQ_SEND_REQ");
-		slog_error("HERCULES_ERR_SET_REQ_SEND_REQ");
-		// return -1;
-		exit(-1);
+		perror("HERCULES_ERR_SET_DATA_SERVER_REQ_SEND_REQ");
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_REQ_SEND_REQ");
+		return -1;
 	}
 
 	// send the data to the data server of the current dataset.
 	if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
-		perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
-		slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
+		perror("HERCULES_ERR_SET_DATA_SERVER_SEND_DATA");
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_SEND_DATA");
 		return -1;
 	}
 	slog_live("[IMSS][completed] BLOCK %d SENT TO SERVER %d with Request: %s (%d)", data_id, n_server_, key_, size);
@@ -6916,6 +6924,199 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 
 	pthread_mutex_unlock(&lock_network);
 	return 1;
+}
+
+/**
+ * @brief Concatenates the given uri length, uri, block id, block size and block data into a serialized buffer.
+ This function does not copy the data to persistent storage or send it by network. See "flush_server_buffer".
+ */
+void append_block_to_buffer(ServerBuffer &srv_buf,
+			    const char *data_uri,
+			    int32_t data_id,
+			    const void *block_data,
+			    uint64_t block_size)
+{
+	const uint32_t uri_len = static_cast<uint32_t>(strlen(data_uri));
+
+	// Pre-extend so we do at most one allocation per record.
+	const size_t record_size = sizeof(uri_len) + uri_len + sizeof(data_id) + sizeof(block_size) + block_size;
+
+	const size_t old_size = srv_buf.data.size();
+	srv_buf.data.resize(old_size + record_size);
+	uint8_t *p = srv_buf.data.data() + old_size;
+
+	// copy the length of the data_uri
+	memcpy(p, &uri_len, sizeof(uri_len));
+	p += sizeof(uri_len);
+	// copy the data_uri
+	memcpy(p, data_uri, uri_len);
+	p += uri_len;
+	// copye the block_id
+	memcpy(p, &data_id, sizeof(data_id));
+	p += sizeof(data_id);
+	// copy the block size
+	memcpy(p, &block_size, sizeof(block_size));
+	p += sizeof(block_size);
+	// copy the block data
+	memcpy(p, block_data, block_size);
+
+	srv_buf.block_count++;
+}
+
+/**
+ * @brief Writes the "srv_buf" to persistent storage and notify the server "server_id" that the data is ready to be read.
+ */
+int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *malleability_checkpoint_path, const char *data_hostname, int number_of_servers)
+{
+	if (srv_buf.data.empty())
+		return 1; // nothing to do
+
+	// makes the directory.
+	if (mkdir(malleability_checkpoint_path, 0755) != 0 && errno != EEXIST)
+	{
+		perror("HERCULES_ERR_FLUSH_SERVER_BUFFER_MKDIR");
+		slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER_MKDIR: cannot create '%s'", malleability_checkpoint_path);
+		return -1;
+	}
+
+	// unique path for this server.
+	std::string file_path = std::string(malleability_checkpoint_path) + "/server_" + std::to_string(server_id) + "_" + data_hostname + ".bin";
+
+	// writes to disk
+	int fd = open(file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd < 0)
+	{
+		slog_error("flush_server_buffer: cannot open '%s': %s", file_path.c_str(), strerror(errno));
+		return -1;
+	}
+
+	const uint8_t *ptr = srv_buf.data.data();
+	size_t to_write = srv_buf.data.size();
+	while (to_write > 0)
+	{
+		ssize_t n = write(fd, ptr, to_write);
+		if (n < 0)
+		{
+			if (errno == EINTR)
+				continue;
+			perror("HERCULES_ERR_FLUSH_SERVER_BUFFER_WRITE");
+			slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER_WRITE: write error on '%s'", file_path.c_str());
+			close(fd);
+			return -1;
+		}
+		ptr += n;
+		to_write -= n;
+	}
+
+	if (fsync(fd) != 0)
+		slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER_FSYNC: fsync warning on '%s'", file_path.c_str());
+
+	close(fd);
+
+	slog_live("[DISK] server %d to '%s'  blocks=%u  total_bytes=%zu", server_id, file_path.c_str(), srv_buf.block_count, srv_buf.data.size());
+
+	// notify the remote serverd
+	pthread_mutex_lock(&lock_network);
+
+	char key_[REQUEST_SIZE] = {0};
+	int chars_written = snprintf(key_, REQUEST_SIZE,
+				     "SETDISK %u %s %d",
+				     srv_buf.block_count,
+				     file_path.c_str(),
+				     number_of_servers);
+
+	if (chars_written < 0 || chars_written >= REQUEST_SIZE)
+	{
+		pthread_mutex_unlock(&lock_network);
+		perror("HERCULES_ERR_FLUSH_SERVER_BUFFER_FORMATING");
+		slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER_FORMATING: request formatting error for server %d", server_id);
+		return -1;
+	}
+
+	ucp_ep_h ep = curr_imss.conns.eps[server_id];
+
+	slog_debug("Sending request %s", data_hostname, key_);
+	if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER_SEND_REQ: send_req failed for server %d", server_id);
+		perror("HERCULES_ERR_FLUSH_SERVER_BUFFER_SEND_REQ");
+		return -1;
+	}
+
+	wait_ack(ucp_worker_data, local_data_uid, ep, SYNC);
+
+	pthread_mutex_unlock(&lock_network);
+	return 1;
+}
+
+/**
+ * @brief Deserializes the list of blocks read from a file, or return an empty vector on error.
+ */
+std::vector<DiskBlock> deserialise_server_buffer(const char *file_path)
+{
+	std::vector<DiskBlock> blocks;
+
+	int fd = open(file_path, O_RDONLY);
+	if (fd < 0)
+	{
+		slog_error("deserialise_server_buffer: cannot open '%s': %s",
+			   file_path, strerror(errno));
+		return blocks;
+	}
+
+	// lamda to read exactly n bytes, returns false on EOF or error.
+	auto read_exact = [&](void *buf, size_t n) -> bool
+	{
+		size_t done = 0;
+		while (done < n)
+		{
+			ssize_t r = read(fd, (char *)buf + done, n - done);
+			if (r <= 0)
+			{
+				if (r < 0 && errno == EINTR)
+					continue;
+				return false;
+			}
+			done += r;
+		}
+		return true;
+	};
+
+	while (true)
+	{
+		DiskBlock blk;
+
+		// reads the uri length
+		uint32_t uri_len = 0;
+		if (!read_exact(&uri_len, sizeof(uri_len)))
+			break;
+
+		// reads the data_uri
+		blk.data_uri.resize(uri_len);
+		if (!read_exact(blk.data_uri.data(), uri_len))
+			break;
+
+		// reads the block id
+		if (!read_exact(&blk.block_id, sizeof(blk.block_id)))
+			break;
+
+		// reads the block size
+		uint64_t data_size = 0;
+		if (!read_exact(&data_size, sizeof(data_size)))
+			break;
+
+		// reads the block data
+		blk.data.resize(data_size);
+		if (!read_exact(blk.data.data(), data_size))
+			break;
+
+		// puts the entry into the vector of DiskBlocks.
+		blocks.push_back(std::move(blk));
+	}
+
+	close(fd);
+	return blocks;
 }
 
 int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char *key)

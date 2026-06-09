@@ -21,10 +21,11 @@
 #define RENAME_DIR_DIR_OP 6
 #define CLOSE_OP 7
 #define OPEN_OP 8
-#define READV2_OP 11
-#define UNLINK_OP 12
 #define INSTANCE_OP 9
 #define PERFORMANCE_OP 10
+#define READV2_OP 11
+#define UNLINK_OP 12
+#define DISK_OP 13
 #define DECOMISSIONING_OP 20
 
 #define WRITE_OP 1
@@ -43,7 +44,7 @@
 
 #define LOCAL_DATASET_UPDATE 0
 
-extern HierarchicalRecords *hierarchical_map;
+extern HierarchicalRecords *global_hierarchical_map;
 extern HierarchicalRecords *garbage_collector_map;
 
 // Set of arguments passed to each server thread.
