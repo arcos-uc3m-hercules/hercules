@@ -3692,9 +3692,7 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id, int deep)
 			int32_t changes_found = parse_malleability_message(result, NULL);
 			free(result);
 			result = NULL;
-			// if (changes_found == 1)
 			return unlink_dataset(dataset_uri, dataset_id, deep);
-			// return -1;
 		}
 		else if (!strncmp((const char *)result, MSG_DELETE_OP, strlen(MSG_DELETE_OP)))
 		{
@@ -4565,15 +4563,18 @@ int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, i
 	char key_[REQUEST_SIZE] = {0};
 
 	// Request the concerned block to the involved servers.
-	for (int32_t i = 0; i < curr_dataset->repl_factor; i++)
+	// TOCHECK: we update this to send the request to all data servers 
+	// to delete all the blocks related to this dataset_uri.
+	for (int32_t i = 0; i < curr_imss.info.num_storages; i++)
+	// for (int32_t i = 0; i < curr_dataset->repl_factor; i++)
 	{
-		ucp_ep_h ep = curr_imss.conns.eps[repl_servers[i]];
+		ucp_ep_h ep = curr_imss.conns.eps[i];// curr_imss.conns.eps[repl_servers[i]];
 
 		// Key related to the requested data element.
 		sprintf(key_, "GET 4 0 %s", dataset_uri);
 		// fprintf(stderr, "Request - %s\n", key_);
 		// printf("BLOCK %d ASKED TO %d SERVER with key: %s (%d)", data_id, repl_servers[i], key, key_length);
-		slog_debug("Request to data %d - %s", i, key_);
+		slog_debug("Request to data %d (%s) - %s", i, curr_imss.info.ips[i], key_);
 		if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -4591,11 +4592,8 @@ int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, i
 			return -1;
 		}
 
-		// // char result[msg_length];
-		// char *result = (char *)malloc(msg_length * sizeof(char));
 		void *result = (void *)malloc(msg_length);
 		msg_length = recv_data(ucp_worker_data, ep, result, msg_length, local_data_uid, 0);
-		// msg_length = recv_data_opt(ucp_worker_data, ep, &result, msg_length, local_data_uid, 0);
 		if (msg_length == 0)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -4607,7 +4605,7 @@ int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, i
 		slog_debug("result=%s", result);
 		if (!strncmp((const char *)result, MSG_ERROR_OP, strlen(MSG_ERROR_OP)))
 		{ // error case.
-			perror("HERCULES_ERR_DELETE_DATASET_RESULT");
+			// perror("HERCULES_ERR_DELETE_DATASET_RESULT");
 			slog_error("HERCULES_ERR_DELETE_DATASET_RESULT");
 		}
 		free(result);
