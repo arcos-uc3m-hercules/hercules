@@ -1058,3 +1058,12 @@ void getBlockInformation(std::string key, int *block_number, std::string *data_u
 	*file_name = data_uri->substr(strlen("imss://"));
 	// strcpy(file_name, data_uri.substr(strlen("imss://").c_str()));
 }
+
+
+std::string GetBaseUri(const std::string &key)
+{
+    const auto pos = key.rfind('$');
+    if (pos != std::string::npos)
+        return key.substr(0, pos);
+    return key;
+}

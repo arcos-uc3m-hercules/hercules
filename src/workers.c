@@ -384,6 +384,7 @@ int Shutdown_server()
 
 uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool server_status, CommunicationMode mode, char *malleability_checkpoint_path)
 {
+	global_hierarchical_map->HierarchicalMapCleanGarbageCollector();
 	// Get all the keys of this server.
 	std::vector<std::string> block_keys = global_hierarchical_map->HierarchicalMapGetAllDirectories();
 
@@ -493,6 +494,8 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 			}
 		}
 	}
+
+	global_hierarchical_map->HierarchicalMapCleanGarbageCollector();
 
 	auto end_time_req = std::chrono::steady_clock::now();
 	std::chrono::duration<double> time_taken_req = end_time_req - start_time_req;
@@ -3206,7 +3209,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// if this is the last link, we put the file in the garbage collector.
 			if (header->st_nlink == 0 && num_opened == 0)
 			{
-				hierarchical_map->HierarchicalMapPutInGarbageCollector(key);
+				hierarchical_map->HierarchicalMapPutInGarbageCollector(GetBaseUri(key));
+				hierarchical_map->HierarchicalMapCleanGarbageCollector();
 				response_msg = MSG_DELETE_OP;
 			}
 			else
@@ -3231,7 +3235,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			const char *response_msg = NULL;
 			// for data server we need to look up for all the blocks.
 			// map->put_garbage_collector(key);
-			hierarchical_map->HierarchicalMapPutInGarbageCollector(key);
+			hierarchical_map->HierarchicalMapPutInGarbageCollector(GetBaseUri(key));
+			hierarchical_map->HierarchicalMapCleanGarbageCollector();
 
 			response_msg = MSG_OK_OP;
 
