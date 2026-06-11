@@ -4563,12 +4563,12 @@ int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, i
 	char key_[REQUEST_SIZE] = {0};
 
 	// Request the concerned block to the involved servers.
-	// TOCHECK: we update this to send the request to all data servers 
+	// TOCHECK: we update this to send the request to all data servers
 	// to delete all the blocks related to this dataset_uri.
 	for (int32_t i = 0; i < curr_imss.info.num_storages; i++)
 	// for (int32_t i = 0; i < curr_dataset->repl_factor; i++)
 	{
-		ucp_ep_h ep = curr_imss.conns.eps[i];// curr_imss.conns.eps[repl_servers[i]];
+		ucp_ep_h ep = curr_imss.conns.eps[i]; // curr_imss.conns.eps[repl_servers[i]];
 
 		// Key related to the requested data element.
 		sprintf(key_, "GET 4 0 %s", dataset_uri);
@@ -6924,41 +6924,105 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 	return 1;
 }
 
+int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const char *data_hostname, int number_of_servers)
+{
+
+	if (srv_buf.data.empty())
+		return 1; // nothing to do
+
+	const unsigned char *buffer = srv_buf.data.data();
+	size_t size_to_send = srv_buf.offset;
+
+	pthread_mutex_lock(&lock_network);
+	char key_[REQUEST_SIZE] = {0};
+	// Server receiving the current data buffer.
+	uint32_t n_server_ = server_id;
+
+	ucp_ep_h ep;
+
+	int chars_written = snprintf(key_, REQUEST_SIZE,
+				     "SETNETWORK %u %d",
+				     srv_buf.block_count,
+				     number_of_servers);
+
+	if (chars_written < 0 || chars_written >= REQUEST_SIZE)
+	{
+		pthread_mutex_unlock(&lock_network);
+		perror("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_FORMATING");
+		slog_error("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_FORMATING: request formatting error for server %d", server_id);
+		return -1;
+	}
+
+	slog_live("[IMSS] SENT TO SERVER %d (%s) with Request: %s", n_server_, curr_imss.info.ips[n_server_], key_);
+	ep = curr_imss.conns.eps[n_server_];
+	if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		perror("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_SEND_REQ");
+		slog_error("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_SEND_REQ");
+		return -1;
+	}
+
+	// send the data
+	if (send_data(ucp_worker_data, ep, buffer, size_to_send, local_data_uid) == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		perror("HERCULES_ERR_SET_DATA_SERVER_SEND_DATA");
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_SEND_DATA");
+		return -1;
+	}
+	slog_live("[IMSS][completed] SENT TO SERVER %d with Request: %s (%zu)", n_server_, key_, size_to_send);
+
+	wait_ack(ucp_worker_data, local_data_uid, ep, SYNC);
+
+	pthread_mutex_unlock(&lock_network);
+	return 1;
+}
+
 /**
  * @brief Concatenates the given uri length, uri, block id, block size and block data into a serialized buffer.
  This function does not copy the data to persistent storage or send it by network. See "flush_server_buffer".
+ * @return Returns true if the buffer is full and must be flushed before appending.
  */
-void append_block_to_buffer(ServerBuffer &srv_buf,
-			    const char *data_uri,
-			    int32_t data_id,
-			    const void *block_data,
-			    uint64_t block_size)
+bool append_block_to_buffer(ServerBuffer &srv_buf, const char *data_uri, int32_t data_id, const void *block_data, uint64_t block_size)
 {
 	const uint32_t uri_len = static_cast<uint32_t>(strlen(data_uri));
-
-	// Pre-extend so we do at most one allocation per record.
 	const size_t record_size = sizeof(uri_len) + uri_len + sizeof(data_id) + sizeof(block_size) + block_size;
 
-	const size_t old_size = srv_buf.data.size();
-	srv_buf.data.resize(old_size + record_size);
-	uint8_t *p = srv_buf.data.data() + old_size;
+	// Signal to the caller that the buffer must be flushed first.
+	if (srv_buf.offset + record_size > srv_buf.max_size && srv_buf.offset > 0)
+		return true;
 
-	// copy the length of the data_uri
+	// Write directly at the offset position.
+	uint8_t *p = srv_buf.data.data() + srv_buf.offset;
+
 	memcpy(p, &uri_len, sizeof(uri_len));
 	p += sizeof(uri_len);
-	// copy the data_uri
 	memcpy(p, data_uri, uri_len);
 	p += uri_len;
-	// copye the block_id
 	memcpy(p, &data_id, sizeof(data_id));
 	p += sizeof(data_id);
-	// copy the block size
 	memcpy(p, &block_size, sizeof(block_size));
 	p += sizeof(block_size);
-	// copy the block data
 	memcpy(p, block_data, block_size);
 
+	srv_buf.offset += record_size;
 	srv_buf.block_count++;
+	return false; // no flush needed
+}
+
+void init_server_buffer(ServerBuffer &srv_buf)
+{
+	srv_buf.data.resize(srv_buf.max_size);
+	srv_buf.block_count = 0;
+	srv_buf.offset = 0;
+}
+
+void reset_server_buffer(ServerBuffer &srv_buf)
+{
+	// srv_buf.data.clear();
+	srv_buf.block_count = 0;
+	srv_buf.offset = 0;
 }
 
 /**
@@ -6966,7 +7030,7 @@ void append_block_to_buffer(ServerBuffer &srv_buf,
  */
 int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *malleability_checkpoint_path, const char *data_hostname, int number_of_servers)
 {
-	if (srv_buf.data.empty())
+	if (srv_buf.offset == 0)
 		return 1; // nothing to do
 
 	// makes the directory.
@@ -6989,7 +7053,7 @@ int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *ma
 	}
 
 	const uint8_t *ptr = srv_buf.data.data();
-	size_t to_write = srv_buf.data.size();
+	size_t to_write = srv_buf.offset;
 	while (to_write > 0)
 	{
 		ssize_t n = write(fd, ptr, to_write);
@@ -7046,6 +7110,102 @@ int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *ma
 
 	pthread_mutex_unlock(&lock_network);
 	return 1;
+}
+
+std::vector<DiskBlock> deserialise_network_buffer(ucp_worker_h ucp_worker, uint64_t worker_uid, ucp_ep_h server_ep, uint32_t expected_block_count)
+{
+	std::vector<DiskBlock> blocks;
+
+	// get the size of the incoming buffer
+	size_t msg_length = get_recv_data_length(ucp_worker, worker_uid);
+	if (msg_length == 0)
+	{
+		perror("HERCULES_ERR_DESERIALISE_NETWORK_BUFFER_INVALID_MSG_LENGTH");
+		slog_error("HERCULES_ERR_DESERIALISE_NETWORK_BUFFER_INVALID_MSG_LENGTH");
+		return blocks;
+	}
+
+	// allocate and receive the raw buffer
+	void *raw_buffer = malloc(msg_length * sizeof(char));
+	if (raw_buffer == NULL)
+	{
+		perror("HERCULES_ERR_DESERIALISE_NETWORK_BUFFER_MALLOC");
+		slog_error("HERCULES_ERR_DESERIALISE_NETWORK_BUFFER_MALLOC");
+		return blocks;
+	}
+
+	size_t received = recv_data(ucp_worker, server_ep, raw_buffer, msg_length, worker_uid, 1);
+	if (received == 0)
+	{
+		perror("HERCULES_ERR_DESERIALISE_NETWORK_BUFFER_RECV_DATA");
+		slog_error("HERCULES_ERR_DESERIALISE_NETWORK_BUFFER_RECV_DATA");
+		free(raw_buffer);
+		return blocks;
+	}
+
+	slog_live("[NETWORK] received buffer of %zu bytes, expected %u blocks",
+		  msg_length, expected_block_count);
+
+	// deserialise
+	const uint8_t *p = (const uint8_t *)raw_buffer;
+	const uint8_t *end = p + msg_length;
+
+	// lambda to read exactly n bytes from the buffer, returns false if out of bounds.
+	auto read_exact = [&](void *dst, size_t n) -> bool
+	{
+		if (p + n > end)
+		{
+			slog_error("deserialise_network_buffer: unexpected end of buffer "
+				   "(need %zu, have %zu)",
+				   n, (size_t)(end - p));
+			return false;
+		}
+		memcpy(dst, p, n);
+		p += n;
+		return true;
+	};
+
+	while (p < end)
+	{
+		DiskBlock blk;
+
+		// uri_len
+		uint32_t uri_len = 0;
+		if (!read_exact(&uri_len, sizeof(uri_len)))
+			break;
+
+		// data_uri
+		blk.data_uri.resize(uri_len);
+		if (!read_exact(blk.data_uri.data(), uri_len))
+			break;
+
+		// block_id
+		if (!read_exact(&blk.block_id, sizeof(blk.block_id)))
+			break;
+
+		// size
+		uint64_t data_size = 0;
+		if (!read_exact(&data_size, sizeof(data_size)))
+			break;
+
+		// data 
+		blk.data.resize(data_size);
+		if (!read_exact(blk.data.data(), data_size))
+			break;
+
+		blocks.push_back(std::move(blk));
+	}
+
+	free(raw_buffer);
+
+	if (blocks.size() != expected_block_count)
+	{
+		slog_error("deserialise_network_buffer: expected %u blocks but deserialised %zu",
+			   expected_block_count, blocks.size());
+	}
+
+	slog_live("[NETWORK] deserialised %zu blocks", blocks.size());
+	return blocks;
 }
 
 /**

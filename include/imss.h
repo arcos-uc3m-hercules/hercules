@@ -76,20 +76,27 @@ enum CommunicationMode
 {
 	MODE_NETWORK,
 	MODE_DISK,
-	MODE_SHM
+	MODE_SHM,
+	MODE_UNDEFINED
 };
+
+#define SERVER_BUFFER_MAX_SIZE (5ULL * 1024ULL * 1024ULL * 1024ULL) // GB
+// #define SERVER_BUFFER_MAX_SIZE (64ULL * 1024ULL * 1024ULL) // MB
+// #define SERVER_BUFFER_MAX_SIZE (1024ULL * 1024ULL) // KB
 
 struct ServerBuffer
 {
 	std::vector<uint8_t> data; // serialised records
 	uint32_t block_count = 0;
+	size_t max_size = SERVER_BUFFER_MAX_SIZE;
+	size_t offset = 0; // current write position
 };
 
 struct DiskBlock
 {
-    std::string data_uri;
-    int32_t     block_id;
-    std::vector<uint8_t> data;
+	std::string data_uri;
+	int32_t block_id;
+	std::vector<uint8_t> data;
 };
 
 // /* Hercules objects */
@@ -569,6 +576,7 @@ RETURNS:	 0 - The requested block was successfully stored.
 	 * @brief Send data to a server by network.
 	 */
 	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server, uint32_t num_of_servers);
+	int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const char *data_hostname, int number_of_servers);
 
 	/**
 	 * @brief Send data to a server by copying the blocks to disk.
@@ -576,14 +584,20 @@ RETURNS:	 0 - The requested block was successfully stored.
 	// int32_t set_data_server_disk(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server, uint32_t num_of_servers);
 
 	/**
-	 * @brief Serialise one block into a ServerBuffer struct. Used for Snapshoting the data to other server when blocks are being moved.
-	 */
-	void append_block_to_buffer(ServerBuffer &srv_buf, const char *data_uri, int32_t data_id, const void *block_data, uint64_t block_size);
+	* @brief Concatenates the given uri length, uri, block id, block size and block data into a serialized buffer.
+	This function does not copy the data to persistent storage or send it by network. See "flush_server_buffer".
+	Serialise one block into a ServerBuffer struct. Used for Snapshoting the data to other server when blocks are being moved.
+	* @return Returns true if the buffer is full and must be flushed before appending.
+	*/
+	bool append_block_to_buffer(ServerBuffer &srv_buf, const char *data_uri, int32_t data_id, const void *block_data, uint64_t block_size);
+	void init_server_buffer(ServerBuffer &srv_buf);
+	void reset_server_buffer(ServerBuffer &srv_buf);
 
 	/**
 	 * @brief Deserialise a list of blocks from a file stored in disk.
 	 */
 	std::vector<DiskBlock> deserialise_server_buffer(const char *file_path);
+	std::vector<DiskBlock> deserialise_network_buffer(ucp_worker_h ucp_worker, uint64_t worker_uid, ucp_ep_h server_ep, uint32_t expected_block_count);
 
 	/**
 	 * @brief flush one server's buffer: write to disk and notify the remote server that the data is ready.

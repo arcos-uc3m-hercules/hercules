@@ -165,6 +165,4 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls);
  */
 void *move_blocks_2_server(void *th_argv);
 
-
-
 #endif

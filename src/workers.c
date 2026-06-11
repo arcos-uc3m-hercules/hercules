@@ -394,7 +394,6 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 	int number_of_blocks_sent = 0;
 	uint64_t total_data_moved = 0;
 
-	auto start_time_req = std::chrono::steady_clock::now();
 	// One buffer per server, allocated lazily.
 	std::unordered_map<int, ServerBuffer> server_buffers;
 
@@ -448,35 +447,66 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 					continue;
 				}
 
-				// check if the data will be moved by using the persistent storage or by network.
-				if (mode == CommunicationMode::MODE_DISK)
+				ServerBuffer &srv_buf = server_buffers[next_server];
+				if (srv_buf.data.capacity() == 0)
+    				init_server_buffer(srv_buf);  // reserve max_size on first use
+
+				// Flush the buffer first if the next block would exceed max_size.
+				if (append_block_to_buffer(srv_buf, data_uri.c_str(), (int32_t)block_number, inner_value.data, (uint64_t)inner_value.size))
 				{
-					// Adds the data into the buffer corresponding to a specific server.
-					append_block_to_buffer(server_buffers[next_server],
-						data_uri.c_str(),
-						(int32_t)block_number,
-						inner_value.data,
-						(uint64_t)inner_value.size);
-				}
-				else
-				{
-					// 	here we can send key.c_str() directly to reduce the number of operations.
-					if (set_data_server(data_uri.c_str(),
-							    (int32_t)block_number,
-							    inner_value.data,
-							    inner_value.size,
-							    0,
-							    next_server,
-							    number_active_storage_servers.load()) < 0)
+					slog_debug("Buffer full for server %d (%zu bytes), flushing before appending.", next_server, srv_buf.data.size());
+
+					// Flush the full buffer.
+					int rc = 0;
+					if (mode == CommunicationMode::MODE_DISK)
 					{
-						slog_error("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_SET_DATA");
-						perror("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_SET_DATA");
+						rc = flush_server_buffer(next_server, srv_buf, malleability_checkpoint_path, data_hostname, number_active_storage_servers.load());
+					}
+					else
+					{
+						rc = flush_data_to_network(next_server, srv_buf, data_hostname, number_active_storage_servers.load());
+					}
+
+					if (rc < 0)
+					{
+						slog_error("HERCULES_ERR_FLUSH_MID_LOOP, server=%d", next_server);
 						return -1;
 					}
+
+					reset_server_buffer(srv_buf);
+
+					// Now append the block that triggered the flush.
+					append_block_to_buffer(srv_buf, data_uri.c_str(), (int32_t)block_number, inner_value.data, (uint64_t)inner_value.size);
 				}
 
-				total_data_moved += inner_value.size;
+				// check if the data will be moved by using the persistent storage or by network.
+				// if (mode == CommunicationMode::MODE_DISK)
+				// {
+				// Adds the data into the buffer corresponding to a specific server.
+				// append_block_to_buffer(server_buffers[next_server],
+				// 		       data_uri.c_str(),
+				// 		       (int32_t)block_number,
+				// 		       inner_value.data,
+				// 		       (uint64_t)inner_value.size);
+				// }
+				// else
+				// {
+				// 	// 	here we can send key.c_str() directly to reduce the number of operations.
+				// 	if (set_data_server(data_uri.c_str(),
+				// 			    (int32_t)block_number,
+				// 			    inner_value.data,
+				// 			    inner_value.size,
+				// 			    0,
+				// 			    next_server,
+				// 			    number_active_storage_servers.load()) < 0)
+				// 	{
+				// 		slog_error("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_SET_DATA");
+				// 		perror("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_SET_DATA");
+				// 		return -1;
+				// 	}
+				// }
 
+				total_data_moved += inner_value.size;
 				global_hierarchical_map->HierarchicalMapPutInGarbageCollector(inner_key.c_str());
 			}
 		}
@@ -494,13 +524,21 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 			}
 		}
 	}
+	else
+	{
+		for (auto &[srv_id, srv_buf] : server_buffers)
+		{
+
+			if (flush_data_to_network(srv_id, srv_buf, data_hostname, number_active_storage_servers.load()) < 0)
+			{
+				slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER server=%d", srv_id);
+				return -1;
+			}
+		}
+	}
 
 	global_hierarchical_map->HierarchicalMapCleanGarbageCollector();
 
-	auto end_time_req = std::chrono::steady_clock::now();
-	std::chrono::duration<double> time_taken_req = end_time_req - start_time_req;
-
-	slog_malleability("Time,%f,DataMoved(bytes),%" PRIu64, time_taken_req.count(), total_data_moved);
 
 	// fprintf(stderr, "++ number_of_blocks_sent=%d\n", number_of_blocks_sent);
 	slog_debug("++ number_of_blocks_sent=%d", number_of_blocks_sent);
@@ -1911,7 +1949,7 @@ int CheckForMalleability(const p_argv *arguments, const char *req)
 	return 0;
 }
 
-int store_block(p_argv *arguments, std::string key, const void *data_from_disk, uint64_t block_size_recv, uint32_t block_offset, int32_t server_n_used_in_frontend, int snapshot_op, CommunicationMode transfer_mode, key_t shm_key)
+int store_block(p_argv *arguments, std::string key, const void *data_from_disk, uint64_t block_size_recv, uint32_t block_offset, int32_t server_n_used_in_frontend, int snapshot_op, CommunicationMode transfer_mode, key_t shm_key, bool expect_ack)
 {
 	slog_debug("[WRITE_OP] WRITE NORMAL CASE. Size %ld, offset=%ld", block_size_recv, block_offset);
 	int ret = 0;
@@ -2501,7 +2539,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	char uri_[URI_] = {0};
 	size_t to_read = 0;
 	int sender = 0;
-	CommunicationMode mode_type = CommunicationMode::MODE_NETWORK;
+	CommunicationMode mode_type = CommunicationMode::MODE_UNDEFINED;
 
 	// Get the GET, SET, ..., operation (mode).
 	TIMING_NO_RETURN(sscanf(req, "%s", mode), "sscanf mode", arguments->thread_id);
@@ -2542,7 +2580,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	{
 		more = SET_OP;
 		mode_type = CommunicationMode::MODE_NETWORK;
-		to_read_args = 1;
+		to_read_args = 0;
 	}
 	else if (!strcmp(mode, "SETDISK"))
 	{
@@ -3621,10 +3659,39 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			{
 				key = blk.data_uri + "$" + std::to_string(blk.block_id);
 				slog_debug("Writting %s, size=%d ", key.c_str(), blk.data.size());
-				if (store_block(arguments, key, blk.data.data(), blk.data.size(), block_offset, server_n_used_in_frontend, snapshot_op, CommunicationMode::MODE_DISK, shm_key) < 0)
+				if (store_block(arguments, key, blk.data.data(), blk.data.size(), block_offset, server_n_used_in_frontend, snapshot_op, CommunicationMode::MODE_DISK, shm_key, 0) < 0)
 				{
-					slog_error("store_block failed for uri='%s' block=%d",
-						   blk.data_uri.c_str(), blk.block_id);
+					slog_error("store_block failed for uri='%s' block=%d", blk.data_uri.c_str(), blk.block_id);
+					// TODO: decide whether to abort or continue with remaining blocks
+				}
+			}
+			// Send ACK once.
+			SendConfirmationMessage(arguments, MSG_OK_OP);
+		}
+		else if (mode_type == CommunicationMode::MODE_NETWORK)
+		{
+			ServerBuffer srv_buf;
+			char file_path[PATH_MAX] = {0};
+			int server_n_used_in_frontend = 0;
+			int expected_recv_args = 3;
+			slog_debug("Request: %s", req);
+			int recv_args = sscanf(req, "%" XSTR(MODE_SIZE) "s %u %d", mode, &srv_buf.block_count, &server_n_used_in_frontend);
+			if (recv_args != expected_recv_args)
+			{
+				fprintf(stderr, "Invalid request, expected %d but %d were read.", expected_recv_args, recv_args);
+				slog_error("Invalid request, expected %d but %d were read.", expected_recv_args, recv_args);
+				return -1;
+			}
+
+			std::vector<DiskBlock> list_of_blocks = deserialise_network_buffer(arguments->ucp_worker, arguments->worker_uid, arguments->server_ep, srv_buf.block_count); // deserialise_server_buffer(file_path);
+
+			for (const DiskBlock &blk : list_of_blocks)
+			{
+				key = blk.data_uri + "$" + std::to_string(blk.block_id);
+				slog_debug("Writting %s, size=%d ", key.c_str(), blk.data.size());
+				if (store_block(arguments, key, blk.data.data(), blk.data.size(), block_offset, server_n_used_in_frontend, snapshot_op, CommunicationMode::MODE_DISK, shm_key, 0) < 0)
+				{
+					slog_error("store_block failed for uri='%s' block=%d", blk.data_uri.c_str(), blk.block_id);
 					// TODO: decide whether to abort or continue with remaining blocks
 				}
 			}
@@ -3638,7 +3705,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			{
 				transfer_mode = CommunicationMode::MODE_SHM;
 			}
-			ret = store_block(arguments, key, NULL, block_size_recv, block_offset, to_read, snapshot_op, transfer_mode, shm_key);
+			ret = store_block(arguments, key, NULL, block_size_recv, block_offset, to_read, snapshot_op, transfer_mode, shm_key, 1);
 			if (ret < 0)
 			{
 				// fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_STORE_BLOCK: %d\n", ret);
