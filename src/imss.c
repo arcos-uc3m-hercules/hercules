@@ -655,6 +655,7 @@ gboolean replace_uri_base_path_regular_file(GHashTable *hash_table, const char *
 
 int32_t imss_comm_cleanup()
 {
+	slog_debug("Starting imss_comm_cleanup");
 	// ep_close(ucp_worker_meta, stat_eps[0], 0);
 	ucp_worker_flush(ucp_worker_meta);
 	ucp_worker_flush(ucp_worker_data);
@@ -674,6 +675,7 @@ int32_t imss_comm_cleanup()
 	ucp_worker_destroy(ucp_worker_data);
 	// context.
 	ucp_cleanup(ucp_context_client);
+	slog_debug("Ending imss_comm_cleanup");
 
 	return 0;
 }

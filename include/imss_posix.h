@@ -98,7 +98,6 @@ extern "C"
     static int (*real___fxstatat64)(int __ver, int __fildes, const char *__filename, struct stat64 *__stat_buf, int __flag) = NULL;
 
     static int (*real_close)(int fd) = NULL;
-    static int (*real_puts)(const char *str) = NULL;
     static int (*real__open_2)(const char *pathname, int flags, ...) = NULL;
     static int (*real_open64)(const char *pathname, int flags, ...) = NULL;
     static int (*real_open)(const char *pathname, int flags, ...) = NULL;
@@ -145,6 +144,10 @@ extern "C"
     static int (*real_ferror)(FILE *fp) = NULL;
     static int (*real_feof)(FILE *fp) = NULL;
     static long int (*real_ftell)(FILE *fp) = NULL;
+    static int (*real_fputs)(const char *, FILE *) = NULL;
+	static int (*real_fputc)(int, FILE *) = NULL;
+	static int (*real_puts)(const char *) = NULL;
+
     static void (*real_rewind)(FILE *stream) = NULL;
     // static void *(*real_mmap)(void *addr, size_t length, int prot, int flags, int fd, off_t offset) = NULL;
     static int (*real_symlink)(const char *name1, const char *name2) = NULL;
@@ -207,10 +210,15 @@ extern "C"
     static void (*real_exit)(int status) __attribute__((noreturn)) = NULL;
     // static int (*real_fprintf)(FILE * stream, const char * format, ...);
     static int (*real_fprintf)(FILE *stream, const char *format, va_list) = NULL; // not fully supported.
+    static int (*real_vfprintf)(FILE *, const char *, va_list) = NULL;
 
     static ssize_t (*real_readlink)(const char *pathname, char *buf, size_t bufsiz) = NULL;
     static ssize_t (*real_readlinkat)(int dirfd, const char *pathname, char *buf, size_t bufsiz) = NULL;
     static int (*real_utimensat)(int dirfd, const char *pathname, const struct timespec times[_Nullable 2], int flags) = NULL;
+
+    static int (*real_ioctl)(int, unsigned long, ...) = NULL;
+	
+    
 
     // static int (*real_syscall)(SYS_faccessat2, int dirfd, const char *path, int mode, int flags) = NULL;
 

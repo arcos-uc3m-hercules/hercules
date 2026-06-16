@@ -309,6 +309,7 @@ extern "C"
 	void HierarchicalMapFree(void *hierarchical_map)
 	{
 		std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+		slog_debug("Calling HierarchicalMapFree");
 
 		HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
@@ -317,6 +318,7 @@ extern "C"
 		{
 			map_free(it->second);
 		}
+		slog_debug("Ending HierarchicalMapFree");
 	}
 
 } // extern "C"
