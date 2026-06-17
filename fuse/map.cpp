@@ -71,12 +71,12 @@ extern "C"
 	{
 		std::unique_lock<std::mutex> lck(map_lock);
 		Map *m = reinterpret_cast<Map *>(map);
-		// int ret = 0;
 		auto search = m->find(std::string(k));
 
 		if (search != m->end())
 		{
 			free(search->second.aux);
+			search->second.aux = NULL;
 			slog_debug("erasing element with key %s", k);
 		}
 		else
@@ -122,6 +122,30 @@ extern "C"
 		m->insert(std::move(node));
 		// TODO: add error handling.
 		return 1;
+	}
+
+	/**
+	 * @brief Move an existing element to a new key on the local map, preserving its fd, stat and aux data.
+	 * @param map Pointer to the map containing the element.
+	 * @param old_key Current key of the element to rename.
+	 * @param new_key New key under which the element will be stored.
+	 */
+	void map_rename_key(void *map, const char *old_key, const char *new_key)
+	{
+		std::unique_lock<std::mutex> lck(map_lock);
+		Map *m = reinterpret_cast<Map *>(map);
+
+		auto it = m->find(std::string(old_key));
+		if (it == m->end())
+		{
+			slog_debug("element with key %s was not found for rename", old_key);
+			return;
+		}
+
+		struct elements e = it->second;
+		m->erase(it); // removes the node WITHOUT freeing the "elements"
+		(*m)[std::string(new_key)] = e;
+		slog_debug("renamed key %s to %s", old_key, new_key);
 	}
 
 	/**
@@ -205,18 +229,29 @@ extern "C"
 		return 1;
 	}
 
+	/**
+	 * @brief Free all elements of a map, releasing each element's aux buffer, then delete the map itself.
+	 * @param map Pointer to the map to be freed.
+	 */
 	void map_free(void *map)
 	{
 		std::unique_lock<std::mutex> lck(map_lock);
 		Map *m = reinterpret_cast<Map *>(map);
 		// auto search = m->find(std::string(k));
 
-		for (auto it = m->cbegin(); it != m->cend(); ++it)
+		for (auto it = m->begin(); it != m->end(); ++it)
 		{
-			free(it->second.aux);
+			if (it->second.aux)
+			{
+				slog_debug("Freeing %s", it->first.c_str());
+				free(it->second.aux);
+				it->second.aux = NULL;
+			}
 		}
 
-		m->clear();
+		// m->clear();
+
+		delete m;
 
 		// if (search != m->end())
 		// {

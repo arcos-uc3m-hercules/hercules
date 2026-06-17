@@ -5671,9 +5671,9 @@ int statx(int dirfd, const char *pathname, int flags, unsigned int mask, struct 
 	}
 	else
 	{
-		slog_live("[POSIX]. Calling Real 'statx', pathname=%s.", pathname);
+		slog_full("[POSIX]. Calling Real 'statx', pathname=%s.", pathname);
 		ret = real_statx(dirfd, pathname, flags, mask, statxbuf);
-		slog_live("[POSIX]. Ending Real 'statx', pathname=%s.", pathname);
+		slog_full("[POSIX]. Ending Real 'statx', pathname=%s.", pathname);
 	}
 
 	return ret;

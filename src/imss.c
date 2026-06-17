@@ -3289,6 +3289,10 @@ int32_t wait_malleability_changes(ucp_worker_h ucp_worker, uint64_t local_data_u
 
 int32_t get_malleability_changes(const char *dataset_uri, const char *failed_hostname)
 {
+	if (CONF_MALLEABILITY_STATUS != MALLEABILITY_CONF_ENABLED){
+		return -1;
+	}
+
 	char formated_uri[REQUEST_SIZE] = {0};
 	int32_t ret = -1;
 	size_t msg_length = 0;
