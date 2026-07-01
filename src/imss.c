@@ -12,11 +12,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <errno.h>
 #include <ifaddrs.h>
 #include <inttypes.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +27,7 @@
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <threads.h>
 #include <time.h>
 #include <ucp/api/ucp.h>
 #include <unistd.h>
@@ -37,8 +40,8 @@ size_t IMSS_ROOT_LEN = 0;
 
 // __thread
 /* Hercules objects. */
-int32_t id_current_dataset;	   // Dataset whose policy has been set last.
-dataset_info *curr_dataset = NULL; // Currently managed dataset.
+int32_t id_current_dataset;			// Dataset whose policy has been set last.
+thread_local dataset_info *curr_dataset = NULL; // Currently managed dataset.
 
 imss curr_imss;
 
@@ -58,9 +61,12 @@ GArray *free_imssd = NULL; // Set of free entries within the 'imssd' vector.
 int32_t imssd_pos;	   // Next position within the vextor were a new IMSS will be inserted.
 int32_t imssd_max_size;	   // Maximum number of elements that could be introduced into the imss array.
 
-// GArray
+// GHash, pool of dataset
 GHashTable *datasetd = NULL;		      // Set of dataset metadata structures.
 GHashTable *pool_hash_tables_datasetd = NULL; // Set of Hash tables.
+pthread_mutex_t pool_mutex;
+pthread_mutexattr_t attr;
+
 // GArray *free_datasetd;				   // Set of free entries within the 'datasetd' vector.
 // GHashTable *dataset_uri_map = NULL;
 int32_t datasetd_pos;	   // Next position within the vextor were a new dataset will be inserted.
@@ -85,8 +91,8 @@ int32_t IMSS_WRITE_ASYNC = 1;
 
 /* UCP objects */
 ucp_context_h ucp_context_client; // = (ucp_context_h)NULL;
-ucp_worker_h ucp_worker_meta = (ucp_worker_h)NULL;
-ucp_worker_h ucp_worker_data = (ucp_worker_h)NULL;
+ucp_worker_h ucp_worker_meta;	  // = (ucp_worker_h)NULL;
+ucp_worker_h ucp_worker_data;	  // = (ucp_worker_h)NULL;
 ucp_address_t **stat_addr = NULL;
 ucp_ep_h *stat_eps;
 client_ep_context_t **ep_contexts;
@@ -97,7 +103,6 @@ int32_t len_client_node;     // Length of the previous node name.
 char client_ip[16] = {0};    // IP number of the node where the client is taking execution.
 int matching_server_id = -1;
 
-// static ucp_address_t *local_addr_meta;
 ucp_address_t *local_addr_meta;
 size_t local_addr_len_meta;
 
@@ -181,14 +186,18 @@ void key_destroy_func(gpointer data)
 
 GHashTable *FindCorrespondingHashTable(const char *dataset_uri)
 {
+	pthread_mutex_lock(&pool_mutex);
 	char parent_dir[PATH_MAX] = {0};
 	find_last_parent_dir(dataset_uri, parent_dir);
 	GHashTable *parent_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, parent_dir);
 	if (!parent_subdir_children_table)
 	{
 		slog_warn("HERCULES_ERR_FIND_CORRESPONDING_HASH_TABLE_NOT_FOUND");
+		pthread_mutex_unlock(&pool_mutex);
+
 		return NULL;
 	}
+	pthread_mutex_unlock(&pool_mutex);
 
 	return parent_subdir_children_table;
 }
@@ -200,9 +209,10 @@ int find_dataset_by_uri_hash(GHashTable *map, const char *dataset_uri, dataset_i
 		perror("HERCULES_ERR_INVALID_HASH_MAP");
 		exit(-1);
 	}
-
+	pthread_mutex_lock(&pool_mutex);
 	slog_debug("Searching for %s on the Hash Map", dataset_uri);
 	*dataset_info_ = (dataset_info *)g_hash_table_lookup(map, dataset_uri);
+	pthread_mutex_unlock(&pool_mutex);
 	if (*dataset_info_ != NULL)
 	{
 		// Found the element
@@ -217,6 +227,7 @@ int find_dataset_by_uri_hash(GHashTable *map, const char *dataset_uri, dataset_i
 
 int find_dataset_by_uri_hash_pool(const char *dataset_uri, dataset_info **dataset_info_)
 {
+	pthread_mutex_lock(&pool_mutex);
 	slog_debug("Searching for %s on the Hash Map", dataset_uri);
 
 	// Get the parent directory.
@@ -229,12 +240,14 @@ int find_dataset_by_uri_hash_pool(const char *dataset_uri, dataset_info **datase
 	if (!parent_subdir_children_table)
 	{
 		slog_debug("Directory '%s' not found in file system structure.", parent_dir);
+		pthread_mutex_unlock(&pool_mutex);
 		return -1;
 	}
 
 	// Look up the element by its uri within the parent's children hash table.
 	*dataset_info_ = (dataset_info *)g_hash_table_lookup(parent_subdir_children_table, dataset_uri);
 
+	pthread_mutex_unlock(&pool_mutex);
 	if (*dataset_info_ != NULL)
 	{
 		slog_debug("Found element '%s' in directory '%s'.", (*dataset_info_)->uri_, parent_dir);
@@ -249,12 +262,15 @@ int find_dataset_by_uri_hash_pool(const char *dataset_uri, dataset_info **datase
 
 void add_dataset_entry(GHashTable **map, const char *uri, dataset_info *info)
 {
+	pthread_mutex_lock(&pool_mutex);
 	g_hash_table_insert(*map, g_strdup(uri), info);
 	slog_debug("[%d] Added element %s to the Hash Map", g_hash_table_size(*map), info->uri_);
+	pthread_mutex_unlock(&pool_mutex);
 }
 
 GHashTable *CreatePoolHashMapElement(char *dataset_uri)
 {
+	pthread_mutex_lock(&pool_mutex);
 	char parent_dir[PATH_MAX] = {0};
 	find_last_parent_dir(dataset_uri, parent_dir);
 	// Retrieve the hash table for the parent directory's children from 'main_filesystem_table'.
@@ -270,29 +286,34 @@ GHashTable *CreatePoolHashMapElement(char *dataset_uri)
 		{
 			perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
 			slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+			pthread_mutex_unlock(&pool_mutex);
 			exit(-1);
 		}
 		// Insert the new directory's children hash table into 'pool_hash_tables_datasetd'.
 		// The key is a copy of the new directory's dataset_uri.
 		slog_debug("Inserting hash table %s in %s", new_parent_subdir_children_table, parent_dir);
 		g_hash_table_insert(returning_parent_subdir_children_table, g_strdup(parent_dir), new_parent_subdir_children_table);
+		pthread_mutex_unlock(&pool_mutex);
 		return new_parent_subdir_children_table;
 	}
 	else
 	{ // Element exists on the pool.
 		slog_debug("Parent directory %s of %s is on the pool of hash tables.", parent_dir, dataset_uri);
+		pthread_mutex_unlock(&pool_mutex);
 		return parent_subdir_children_table;
 	}
 }
 
 GHashTable *AddDirectoryToPool(const gchar *dataset_uri)
 {
+	pthread_mutex_lock(&pool_mutex);
 	// TODO: change "g_hash_table_new" for "g_hash_table_new_full".
 	// Check if this directory already has a table allocated.
 	GHashTable *existing_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, dataset_uri);
 	if (existing_table != NULL)
 	{
 		slog_debug("Children table for directory '%s' already exists. Reusing it.", dataset_uri);
+		pthread_mutex_unlock(&pool_mutex);
 		return existing_table;
 	}
 	slog_debug("Add directory %s to pool", dataset_uri);
@@ -302,16 +323,19 @@ GHashTable *AddDirectoryToPool(const gchar *dataset_uri)
 	{
 		perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
 		slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
+		pthread_mutex_unlock(&pool_mutex);
 		exit(-1);
 	}
 	// Insert the new directory's children hash table into 'pool_hash_tables_datasetd'.
 	// The key is a copy of the new directory's dataset_uri.
 	g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(dataset_uri), new_directory_children_table);
+	pthread_mutex_unlock(&pool_mutex);
 	return new_directory_children_table;
 }
 
 int add_dataset_entry_in_pool(const gchar *dataset_uri, dataset_info *info)
 {
+	pthread_mutex_lock(&pool_mutex);
 	char parent_dir[PATH_MAX] = {0};
 	find_last_parent_dir(dataset_uri, parent_dir);
 	slog_debug("parent dir=%s of dataset_uri=%s", parent_dir, dataset_uri);
@@ -326,42 +350,34 @@ int add_dataset_entry_in_pool(const gchar *dataset_uri, dataset_info *info)
 
 	// Add the dataset in the parent directory hash table.
 	slog_debug("Inserting dataset %s", info->uri_);
-	g_hash_table_insert(parent_subdir_children_table, g_strdup(dataset_uri), info);
+	// g_hash_table_insert(parent_subdir_children_table, g_strdup(dataset_uri), info);
+	gboolean is_new_insertion = g_hash_table_insert(parent_subdir_children_table, g_strdup(dataset_uri), info);
+	if (is_new_insertion)
+	{
+		slog_debug("Successfully inserted new dataset entry: %s", dataset_uri);
+	}
+	else
+	{
+		slog_debug("Overwrote existing dataset entry for: %s", dataset_uri);
+	}
 
 	// If the dataset corresponds to a directory, we create a new GHashtable to store its children.
 	if (info->type == TYPE_DIRECTORY)
 	{
-		// Only create the children table if it doesn't already exist from recursive creation.
-		// if (g_hash_table_lookup(pool_hash_tables_datasetd, dataset_uri) == NULL)
-		// {
-		// 	GHashTable *new_directory_children_table = g_hash_table_new(g_str_hash, g_str_equal);
-		// 	if (!new_directory_children_table)
-		// 	{
-		// 		perror("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
-		// 		slog_fatal("HERCULES_ERR_MALLOC_NEW_DIR_CHILDREN_TABLE");
-		// 		exit(-1);
-		// 	}
-		// 	// Insert the new directory's children hash table into 'main_filesystem_table'.
-		// 	// The key is a copy of the new directory's full path.
-		// 	g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(dataset_uri), new_directory_children_table);
-		// 	slog_debug("Created children table for new directory: '%s'", dataset_uri);
-		// }
-		// else
-		// {
-		// 	slog_debug("Children table for directory '%s' already exists", dataset_uri);
-		// }
-
 		slog_debug("%s is a directory, creating the new hash table.", info->uri_);
 		AddDirectoryToPool(dataset_uri);
 	}
+	pthread_mutex_unlock(&pool_mutex);
 	return 0;
 }
 
 void hercules_serialize_pool(int shm_fd)
 {
+	pthread_mutex_lock(&pool_mutex);
 	if (!pool_hash_tables_datasetd)
 	{
 		slog_warn("Pool hash table dataset is null. Nothing to serialize.");
+		pthread_mutex_unlock(&pool_mutex);
 		return;
 	}
 
@@ -426,11 +442,13 @@ void hercules_serialize_pool(int shm_fd)
 	}
 
 	slog_debug("[Serialization] Successfully dumped %u records and %u directory structures.", info_count, dir_count);
+	pthread_mutex_unlock(&pool_mutex);
 }
 
 void hercules_deserialize_pool(int shm_fd)
 {
-	slog_debug("[Deserialization] Rebuilding GHashTable pool from shared memory...");
+	pthread_mutex_lock(&pool_mutex);
+	slog_debug("Rebuilding GHashTable pool from shared memory...");
 
 	pool_hash_tables_datasetd = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_hash_table_destroy);
 
@@ -439,6 +457,7 @@ void hercules_deserialize_pool(int shm_fd)
 	if (read(shm_fd, &info_count, sizeof(info_count)) != sizeof(info_count))
 	{
 		slog_error("Failed to read info count during deserialization.");
+		pthread_mutex_unlock(&pool_mutex);
 		return;
 	}
 
@@ -486,7 +505,10 @@ void hercules_deserialize_pool(int shm_fd)
 	// read and restore directory keys
 	uint32_t dir_count = 0;
 	if (read(shm_fd, &dir_count, sizeof(dir_count)) != sizeof(dir_count))
+	{
+		pthread_mutex_unlock(&pool_mutex);
 		return;
+	}
 
 	for (uint32_t i = 0; i < dir_count; i++)
 	{
@@ -505,12 +527,38 @@ void hercules_deserialize_pool(int shm_fd)
 		}
 		g_free(dir_uri);
 	}
+	pthread_mutex_unlock(&pool_mutex);
 	slog_debug("[Deserialization] Hierarchy fully restored.");
+}
+
+void print_ghashtable()
+{
+	GHashTableIter outer_iter;
+	gpointer dir_key, dir_value;
+
+	// Initialize the outer iterator to traverse all directory tables
+	g_hash_table_iter_init(&outer_iter, pool_hash_tables_datasetd);
+	while (g_hash_table_iter_next(&outer_iter, &dir_key, &dir_value))
+	{
+		GHashTable *child_table = (GHashTable *)dir_value;
+		GHashTableIter inner_iter;
+		gpointer item_key, item_value;
+
+		// Traverse the files inside this directory table
+		g_hash_table_iter_init(&inner_iter, child_table);
+		while (g_hash_table_iter_next(&inner_iter, &item_key, &item_value))
+		{
+			dataset_info *info = (dataset_info *)item_value;
+			slog_debug("Dataset found: %s", info->uri_);
+		}
+	}
 }
 
 int remove_dataset_entry(GHashTable *map, const char *uri)
 {
+	pthread_mutex_lock(&pool_mutex);
 	gboolean removed = g_hash_table_remove(map, uri);
+	pthread_mutex_unlock(&pool_mutex);
 	if (removed)
 	{
 		slog_debug("%s successfully removed.", uri);
@@ -575,6 +623,8 @@ gboolean replace_uri_base_path_dir(GHashTable *hash_table, const char *old_base_
 	GHashTableIter iter;
 	gpointer current_key = NULL;
 	gpointer current_value = NULL;
+
+	pthread_mutex_lock(&pool_mutex);
 
 	// Initialize the iterator to start from the beginning of the hash table.
 	g_hash_table_iter_init(&iter, hash_table);
@@ -650,6 +700,7 @@ gboolean replace_uri_base_path_dir(GHashTable *hash_table, const char *old_base_
 	}
 
 	// g_hash_table_foreach(hash_table, print_entry, NULL);
+	pthread_mutex_unlock(&pool_mutex);
 
 	return modified_any;
 }
@@ -662,6 +713,7 @@ gboolean replace_uri_base_path_regular_file(GHashTable *hash_table, const char *
 		slog_warn("Invalid input to replace_uri_base_path_regular_file.");
 		return FALSE;
 	}
+	pthread_mutex_lock(&pool_mutex);
 
 	dataset_info *info = (dataset_info *)g_hash_table_lookup(hash_table, old_base_uri);
 
@@ -679,9 +731,10 @@ gboolean replace_uri_base_path_regular_file(GHashTable *hash_table, const char *
 	else
 	{
 		slog_warn("%s was not found in the hash map.", old_base_uri);
+		pthread_mutex_unlock(&pool_mutex);
 		return FALSE;
 	}
-
+	pthread_mutex_unlock(&pool_mutex);
 	return TRUE;
 }
 
@@ -982,6 +1035,9 @@ int32_t stat_init(char *stat_hostfile,
 		// char *shm_env = getenv("HERCULES_SHM_STATE");
 		// if (shm_env != NULL)
 		{
+			pthread_mutexattr_init(&attr);
+			pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+			pthread_mutex_init(&pool_mutex, &attr);
 			slog_debug("[POSIX] Inheriting Hercules state from: %s", shm_name);
 			// open the shared memory file
 			int shm_fd = shm_open(shm_name, O_RDONLY, 0600);
@@ -1163,6 +1219,7 @@ int32_t stat_init(char *stat_hostfile,
 
 	// Get the address of the worker object.
 	ucp_worker_attr_t worker_attr;
+	memset(&worker_attr, 0, sizeof(worker_attr));
 	worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
 	status = ucp_worker_query(ucp_worker_meta, &worker_attr);
 	local_addr_len_meta = worker_attr.address_length;
@@ -1170,6 +1227,7 @@ int32_t stat_init(char *stat_hostfile,
 
 	// Get attributes of the particular worker address.
 	ucp_worker_address_attr_t attr;
+	memset(&attr, 0, sizeof(attr));
 	attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
 	ucp_worker_address_query(local_addr_meta, &attr);
 	local_meta_uid = attr.worker_uid;
@@ -1322,12 +1380,15 @@ int32_t stat_release()
 		iself if something was stored or NULL otherwise.
 	 */
 
+	pthread_mutex_lock(&pool_mutex);
 	g_array_free(imssd, TRUE);
 	g_array_free(free_imssd, TRUE);
 	// g_array_free(datasetd, TRUE);
 	// g_hash_table_unref(datasetd);
 	g_hash_table_destroy(datasetd);
 	g_hash_table_destroy(pool_hash_tables_datasetd);
+	pthread_mutex_unlock(&pool_mutex);
+	pthread_mutex_destroy(&pool_mutex);
 	// g_array_free(free_datasetd, TRUE);
 
 	pthread_mutex_lock(&lock_network);
@@ -1365,10 +1426,12 @@ int32_t stat_release()
 		slog_debug("Closing endpoing %" PRIu32 "/%" PRIu32, i, n_stat_servers);
 		close_ucx_endpoint(ucp_worker_meta, ep);
 		free(stat_addr[i]);
+		free(ep_contexts[i]);
 	}
 
 	free(stat_eps);
 	free(stat_addr);
+	free(ep_contexts);
 
 	pthread_mutex_unlock(&lock_network);
 	slog_debug("Ending stat_release");
@@ -1821,34 +1884,30 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 
 	// Adds the root directory on the pool of hash tables.
 	// Check first if it does not exist yet.
+	pthread_mutex_lock(&pool_mutex);
 	GHashTable *root_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, IMSS_ROOT);
 	if (!root_subdir_children_table)
 	{ // root not found.
-		slog_debug("root not found in the pool_hash_tables_datasetd")
-		    // GHashTable *root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
-		    root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
+		slog_debug("root not found in the pool_hash_tables_datasetd");
+		// GHashTable *root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
+		root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
 		if (!root_subdir_children_table)
 		{
 			perror("HERCULES_ERR_OPEN_IMSS_INIT_ROOT_SUBDIR_CHILDREN_TABLE");
 			slog_error("HERCULES_ERR_OPEN_IMSS_INIT_ROOT_SUBDIR_CHILDREN_TABLE");
 			g_hash_table_destroy(pool_hash_tables_datasetd);
 			pool_hash_tables_datasetd = NULL;
+			pthread_mutex_unlock(&pool_mutex);
 			return -1;
 		}
 		g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(IMSS_ROOT), root_subdir_children_table);
-
-		// root_directory_info = (dataset_info *)g_malloc(sizeof(dataset_info));
-		// if (!root_directory_info)
-		// {
-		// 	perror("HERCULES_ERR_OPEN_IMSS_MALLOC_ROOT_INFO");
-		// 	slog_error("HERCULES_ERR_OPEN_IMSS_MALLOC_ROOT_INFO");
-		// 	g_hash_table_destroy(pool_hash_tables_datasetd);
-		// 	pool_hash_tables_datasetd = NULL;
-		// 	return -1;
-		// }
-		// strncpy(root_directory_info->uri_, IMSS_ROOT, sizeof(root_directory_info->uri_));
-		// root_directory_info->type = TYPE_HERCULES_INSTANCE;
 	}
+	else
+	{
+		slog_debug("root FOUND in the pool_hash_tables_datasetd");
+		print_ghashtable();
+	}
+	pthread_mutex_unlock(&pool_mutex);
 
 	slog_debug("new_imss.info.num_storages=%d", new_imss.info.num_storages);
 	return new_imss.info.num_storages;
@@ -2332,6 +2391,7 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 
 		free(imss_.info.ips[i]);
 		free(imss_.conns.peer_addr[i]);
+		free(imss_.conns.ep_contexts[i]);
 	}
 	free(imss_.conns.eps);
 	free(imss_.info.ips);
@@ -3847,7 +3907,9 @@ int32_t rename_dataset_metadata_dir_dir(char *old_dir, char *rdir_dest)
 	// dataset_info *dataset_info_;
 
 	// Renames the children of the old directory.
+	pthread_mutex_lock(&pool_mutex);
 	GHashTable *parent_subdir_children_table = TIMING((GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, old_dir), "g_hash_table_lookup in rename_dataset_metadata_dir_dir", GHashTable *, 0);
+	pthread_mutex_unlock(&pool_mutex);
 	slog_debug("Replacing basepath of files in the directory %s", old_dir);
 	TIMING_NO_RETURN(replace_uri_base_path_dir(parent_subdir_children_table, old_dir, rdir_dest), "replace_uri_base_path_dir", 0);
 
@@ -6996,7 +7058,7 @@ int32_t free_imss(imss_info *imss_info_)
 {
 	for (int32_t i = 0; i < imss_info_->num_storages; i++)
 	{
-		free(imss_info_->ips[i]);
+		free(imss_info_->ips[i]);		
 	}
 
 	free(imss_info_->ips);

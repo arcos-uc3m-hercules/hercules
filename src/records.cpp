@@ -1,21 +1,22 @@
-#include <map>
-#include <mutex>
-#include <utility>
-#include <iostream>
-#include <cassert>
-#include <stdio.h>
-#include <vector>
-#include <algorithm>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/utsname.h>
-#include <inttypes.h>
-#include <cmath>
 #include "records.hpp"
-#include <condition_variable>
+#include "directory.h"
 #include "imss.h"
 #include "queue.h"
-#include "directory.h"
+#include "slog.h"
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <condition_variable>
+#include <inttypes.h>
+#include <iostream>
+#include <map>
+#include <mutex>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/utsname.h>
+#include <utility>
+#include <vector>
 
 using std::make_pair;
 using std::map;
@@ -27,7 +28,7 @@ extern StsHeader *mem_pool;
 
 // __thread
 extern int32_t current_dataset;	  // Dataset whose policy has been set last.
-extern dataset_info curr_dataset; // Currently managed dataset.
+extern thread_local dataset_info curr_dataset; // Currently managed dataset.
 extern imss curr_imss;
 
 extern std::mutex mtx;
@@ -54,9 +55,9 @@ map_records::~map_records()
 {
 	fprintf(stderr, "Freeing memory\n");
 	slog_debug("Freeing memory\n")
-	// freeAllMemory();
+	    // freeAllMemory();
 
-	delete mut;
+	    delete mut;
 }
 
 std::string map_records::get_head_element()
@@ -155,29 +156,29 @@ int32_t map_records::put(std::string key, void *address, uint64_t length, int re
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
 
-// 	// check if there are space to alloc this block.
-// 	double hercules_usage_percentage = get_storage_usage_percentage();
-// 	// fprintf(stderr, "Memory used: %.2f%%\n", hercules_usage_percentage);
-// 	slog_debug("Memory used: %.2f%%, reused_buffer=%d", hercules_usage_percentage, reused_buffer);
-// 	if (hercules_usage_percentage >= 80.0)
-// 	{
-// 		mut->unlock();
-// 		pthread_mutex_lock(&mutex_garbage);
-// 		fprintf(stderr, "[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
-// 		slog_debug("[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
-// 		// unlock garbage collector.
-// 		// pthread_mutex_lock(&mutex_garbage);
-// 		slog_debug("garbage collector mutex adquire");
-// #ifdef DPRINTF
-// 		fprintf(stderr, "Sending signal to gargabe collector.\n");
-// #endif
-// 		// Unlock the garbage collector.
-// 		pthread_cond_signal(&global_run_garbage_collector_cond);
-// 		// Simulated full capacity reached.
-// 		// return 2;
-// 		pthread_mutex_unlock(&mutex_garbage);
-// 		mut->lock();
-// 	}
+	// 	// check if there are space to alloc this block.
+	// 	double hercules_usage_percentage = get_storage_usage_percentage();
+	// 	// fprintf(stderr, "Memory used: %.2f%%\n", hercules_usage_percentage);
+	// 	slog_debug("Memory used: %.2f%%, reused_buffer=%d", hercules_usage_percentage, reused_buffer);
+	// 	if (hercules_usage_percentage >= 80.0)
+	// 	{
+	// 		mut->unlock();
+	// 		pthread_mutex_lock(&mutex_garbage);
+	// 		fprintf(stderr, "[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
+	// 		slog_debug("[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
+	// 		// unlock garbage collector.
+	// 		// pthread_mutex_lock(&mutex_garbage);
+	// 		slog_debug("garbage collector mutex adquire");
+	// #ifdef DPRINTF
+	// 		fprintf(stderr, "Sending signal to gargabe collector.\n");
+	// #endif
+	// 		// Unlock the garbage collector.
+	// 		pthread_cond_signal(&global_run_garbage_collector_cond);
+	// 		// Simulated full capacity reached.
+	// 		// return 2;
+	// 		pthread_mutex_unlock(&mutex_garbage);
+	// 		mut->lock();
+	// 	}
 
 	// fprintf(stderr, "total_size=%ld bytes, quantity_occupied=%ld bytes\n",total_size, quantity_occupied);
 	// TODO: lock until garbage collector finish.
@@ -774,12 +775,13 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 	std::unique_lock<std::mutex> lock(*mut);
 	std::vector<string> vec;
 
+	slog_debug("rdir_dest=%s", rdir_dest.c_str());
+
 	size_t len_old_dir = old_dir.length();
 	int found = 0;
 	string key, new_path;
 	size_t len_curr_key = 0;
 	dataset_info *data = NULL;
-	// GNode *aux_gnode = NULL;
 	for (const auto &it : buffer)
 	{
 		key = it.first;
@@ -848,11 +850,10 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
 	return 0;
 }
 
-
 /**
  * @brief Check all elements into the garbage collector in order to free or reutilisate its memory.
  * @param item Element pointing to an Hercules block.
- * @return 0 is returned if the memory is pushed to the memory pool, if the memory is actually freed 
+ * @return 0 is returned if the memory is pushed to the memory pool, if the memory is actually freed
  * the size of that memory is returned.
  */
 int32_t map_records::cleaning(char server_type)
@@ -950,7 +951,7 @@ int32_t map_records::cleaning(char server_type)
  * @brief Check if the memory used by the block pointing by "item" will be reused (pushed on the memory pool)
  * or if it will be actually freed.
  * @param item Element pointing to an Hercules block.
- * @return 0 is returned if the memory is pushed to the memory pool, if the memory is actually freed 
+ * @return 0 is returned if the memory is pushed to the memory pool, if the memory is actually freed
  * the size of that memory is returned.
  */
 uint64_t map_records::FreeMemory(std::map<std::string, BufferValue>::iterator item)
@@ -977,11 +978,11 @@ uint64_t map_records::FreeMemory(std::map<std::string, BufferValue>::iterator it
 }
 
 /**
- * @brief deletes the dataset blocks. It decides between actually free the memory 
+ * @brief deletes the dataset blocks. It decides between actually free the memory
  * or insert it on the memory pool
- * 
- * @param  new_key uri of the dataset to be deleted. 
- * @return int32_t -1 if no block has not been removed. 
+ *
+ * @param  new_key uri of the dataset to be deleted.
+ * @return int32_t -1 if no block has not been removed.
  * 0 if all the memory blocks has been inserted into the memory pool,
  * a positive value indicating the amount of memory that has been freed.
  */
@@ -1124,7 +1125,7 @@ char *map_records::GetDataOfFile(string file_name, uint64_t *file_size_occupied)
 	// std::sort(vec.begin(), vec.end());
 	// sort elements by the block number.
 	std::sort(vec.begin(), vec.end(), [](const std::string &a, const std::string &b)
-			  { return extractNumber(a) < extractNumber(b); });
+		  { return extractNumber(a) < extractNumber(b); });
 
 	// Sum the extra size for the block numbers represented as integers.
 	*file_size_occupied += extra_size;
@@ -1204,7 +1205,7 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 		// if broadcast map is empty, we wait
 		std::unique_lock<std::mutex> lk(mtx);
 		cv.wait(lk, [this]
-				{ return get_broadcast_size() > 0; });
+			{ return get_broadcast_size() > 0; });
 		// get the first element of the broadcast map.
 		auto firstElement = buffer_broadcast.begin();
 		expected_key = firstElement->first;
@@ -1336,7 +1337,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 				continue;
 			}
 			block_number = stoi(block, 0, 10); //  string to number.
-			pos -= 1;						   // -1 to skip '$' on the data uri.
+			pos -= 1;			   // -1 to skip '$' on the data uri.
 			data_uri = key.substr(0, pos);	   // substract the data uri from the key.
 			file_name = data_uri.substr(strlen("imss://"));
 			sprintf(expected_uri, "imss://%s", file_name.c_str());
@@ -1469,20 +1470,20 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 				continue_exe = 1;
 
 				slog_time("%d,%d,%s,%lu,%f,%f,%f,%f,%f,%f,%lu,%f,%f,%s",
-						  number_active_storage_servers,
-						  server_id,
-						  data_hostname,
-						  written_bytes_in_disk,
-						  (double)written_bytes_in_disk / 1024 / 1024,
-						  (double)written_bytes_in_disk / 1024 / 1024 / 1024,
-						  time_taken_for_writting,
-						  (double)written_bytes_in_disk / time_taken_for_writting,
-						  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024,
-						  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024 / 1024,
-						  block_size,
-						  time_taken_for_collecting,
-						  time_taken_for_merge,
-						  POLICY);
+					  number_active_storage_servers,
+					  server_id,
+					  data_hostname,
+					  written_bytes_in_disk,
+					  (double)written_bytes_in_disk / 1024 / 1024,
+					  (double)written_bytes_in_disk / 1024 / 1024 / 1024,
+					  time_taken_for_writting,
+					  (double)written_bytes_in_disk / time_taken_for_writting,
+					  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024,
+					  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024 / 1024,
+					  block_size,
+					  time_taken_for_collecting,
+					  time_taken_for_merge,
+					  POLICY);
 
 				int find = erase_snapshot_element(key);
 				if (find)
@@ -1623,7 +1624,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 				continue;
 			}
 			block_number = stoi(block, 0, 10); //  string to number.
-			pos -= 1;						   // -1 to skip '$' on the data uri.
+			pos -= 1;			   // -1 to skip '$' on the data uri.
 			data_uri = key.substr(0, pos);	   // substract the data uri from the key.
 			file_name = data_uri.substr(strlen("imss://"));
 			sprintf(expected_uri, "imss://%s", file_name.c_str());
@@ -1756,20 +1757,20 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 				continue_exe = 1;
 
 				slog_time("%d,%d,%s,%lu,%f,%f,%f,%f,%f,%f,%lu,%f,%f,%s",
-						  number_active_storage_servers,
-						  server_id,
-						  data_hostname,
-						  written_bytes_in_disk,
-						  (double)written_bytes_in_disk / 1024 / 1024,
-						  (double)written_bytes_in_disk / 1024 / 1024 / 1024,
-						  time_taken_for_writting,
-						  (double)written_bytes_in_disk / time_taken_for_writting,
-						  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024,
-						  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024 / 1024,
-						  block_size,
-						  time_taken_for_collecting,
-						  time_taken_for_merge,
-						  POLICY);
+					  number_active_storage_servers,
+					  server_id,
+					  data_hostname,
+					  written_bytes_in_disk,
+					  (double)written_bytes_in_disk / 1024 / 1024,
+					  (double)written_bytes_in_disk / 1024 / 1024 / 1024,
+					  time_taken_for_writting,
+					  (double)written_bytes_in_disk / time_taken_for_writting,
+					  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024,
+					  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024 / 1024,
+					  block_size,
+					  time_taken_for_collecting,
+					  time_taken_for_merge,
+					  POLICY);
 
 				int find = erase_snapshot_element(key);
 				if (find)
