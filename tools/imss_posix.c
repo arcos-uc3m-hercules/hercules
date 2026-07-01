@@ -508,7 +508,7 @@ __attribute__((constructor)) void imss_posix_init(void)
 
 				if (shm_ptr != MAP_FAILED)
 				{
-					// 3. Populate our freshly allocated global map with the inherited records
+					// Populate the allocated global map with the inherited records
 					slog_debug("Discovered inherited state from parent PID %d. Deserializing...", getppid());
 					map_fd_deserialize(map_fd, shm_ptr, shm_size);
 
@@ -989,13 +989,13 @@ pid_t fork(void)
 		slog_debug("The child is unlocking the mutex");
 		pthread_mutex_unlock(&lock_network);
 		slog_live("[POSIX] Child process");
-		ucp_context_client = NULL;
-		ucp_worker_meta = NULL;
-		ucp_worker_data = NULL;
-		local_addr_meta = NULL;
-		local_addr_data = NULL;
-		stat_eps = NULL;
-		stat_addr = NULL;
+		// ucp_context_client = NULL;
+		// ucp_worker_meta = NULL;
+		// ucp_worker_data = NULL;
+		// local_addr_meta = NULL;
+		// local_addr_data = NULL;
+		// stat_eps = NULL;
+		// stat_addr = NULL;
 
 		// slog_debug("ucp_worker_meta=%p", &ucp_worker_meta);
 		// slog_debug("ucp_worker_meta=%p", &ucp_worker_data);s
@@ -1019,13 +1019,13 @@ pid_t fork(void)
 		// pthread_mutex_init(&lock_network, NULL);
 		slog_live("[POSIX] Parent process, child pid=%d", pid);
 
-		ucp_context_client = NULL;
-		ucp_worker_meta = NULL;
-		ucp_worker_data = NULL;
-		local_addr_meta = NULL;
-		local_addr_data = NULL;
-		stat_eps = NULL;
-		stat_addr = NULL;
+		// ucp_context_client = NULL;
+		// ucp_worker_meta = NULL;
+		// ucp_worker_data = NULL;
+		// local_addr_meta = NULL;
+		// local_addr_data = NULL;
+		// stat_eps = NULL;
+		// stat_addr = NULL;
 
 		print_worker_pointer(ucp_worker_meta);
 		init_network_resources(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank, IMSS_ROOT);
@@ -4153,6 +4153,8 @@ int execv(const char *pathname, char *const argv[])
 		return real_execv(pathname, argv);
 	}
 
+	errno = 0;
+
 	slog_debug("[POSIX] Running execv, pathname=%s\n", pathname);
 	// generate unique SHM filename
 	char shm_name_hash_table[256];
@@ -4185,8 +4187,27 @@ int execv(const char *pathname, char *const argv[])
 		close(shm_fd_map_fd);
 	}
 
+	// serialize the hierarchical map to shared memory.
+	char shm_name_hiermap[256];
+	snprintf(shm_name_hiermap, sizeof(shm_name_hiermap), "/hercules_state_hiermap_%d", getpid());
+	slog_debug("shm_name_hiermap=%s", shm_name_hiermap);
+
+	int shm_fd_hiermap = shm_open(shm_name_hiermap, O_CREAT | O_RDWR, 0600);
+	if (shm_fd_hiermap >= 0)
+	{
+		HierarchicalMapSerialize(hierarchical_map, shm_fd_hiermap);
+
+		close(shm_fd_hiermap);
+		slog_debug("Hierarchical map has been serialized to %s", shm_name_hiermap);
+	}
+	else
+	{
+		slog_error("Failed to open shared memory for hierarchical map serialization.");
+	}
+
 	int ret = real_execv(pathname, argv);
 
+	int original_errno = errno;
 	// only reached if real_execve fails
 	if (shm_fd_hash_table >= 0)
 	{
@@ -4195,9 +4216,11 @@ int execv(const char *pathname, char *const argv[])
 	}
 	if (shm_fd_map_fd >= 0)
 	{
-		slog_debug("Unlinking shm_name_map_fd")
+		slog_debug("Unlinking shm_name_map_fd");
 		    shm_unlink(shm_name_map_fd);
 	}
+	errno = original_errno;
+	slog_debug("[POSIX] Ending execv, %s\n", pathname);
 
 	return ret;
 }
@@ -4216,16 +4239,18 @@ int execv(const char *pathname, char *const argv[])
 
 int execve(const char *pathname, char *const argv[], char *const envp[])
 {
+	if (!real_execve)
 	real_execve = (int (*)(const char *, char *const *, char *const *))dlsym(RTLD_NEXT, "execve");
+
 	if (!init)
 	{
 		return real_execve(pathname, argv, envp);
 	}
 
-	slog_debug("[POSIX] Running execve, pathname=%s\n", pathname);
+	slog_debug("[POSIX] init execve, pathname=%s\n", pathname);
 
 	// generate unique SHM filename
-	char shm_name_hash_table[256];
+	char shm_name_hash_table[256] = {"\0"};
 	snprintf(shm_name_hash_table, sizeof(shm_name_hash_table), "/hercules_state_hashmap_%d", getpid());
 	slog_debug("shm_name_hash_table=%s", shm_name_hash_table);
 
@@ -4255,6 +4280,26 @@ int execve(const char *pathname, char *const argv[], char *const envp[])
 		close(shm_fd_map_fd);
 	}
 
+	// serialize the hierarchical map to shared memory.
+	char shm_name_hiermap[256];
+	snprintf(shm_name_hiermap, sizeof(shm_name_hiermap), "/hercules_state_hiermap_%d", getpid());
+	slog_debug("shm_name_hiermap=%s", shm_name_hiermap);
+
+	int shm_fd_hiermap = shm_open(shm_name_hiermap, O_CREAT | O_RDWR, 0600);
+	if (shm_fd_hiermap >= 0)
+	{
+
+		HierarchicalMapSerialize(hierarchical_map, shm_fd_hiermap);
+
+		close(shm_fd_hiermap);
+		slog_debug("Hierarchical map has been serialized to %s", shm_name_hiermap);
+	}
+	else
+	{
+		slog_error("Failed to open shared memory for hierarchical map serialization.");
+	}
+
+	slog_debug("[POSIX] Running execve, pathname=%s\n", pathname);
 	int ret = real_execve(pathname, argv, envp);
 
 	// only reached if real_execve fails
@@ -4265,7 +4310,7 @@ int execve(const char *pathname, char *const argv[], char *const envp[])
 	}
 	if (shm_fd_map_fd >= 0)
 	{
-		slog_debug("Unlinking shm_name_map_fd")
+		slog_debug("Unlinking shm_name_map_fd");
 		    shm_unlink(shm_name_map_fd);
 	}
 
