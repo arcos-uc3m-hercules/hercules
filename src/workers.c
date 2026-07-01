@@ -2598,7 +2598,6 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			slog_debug("[RENAME_DIR_DIR_OP]");
 			std::size_t found = key.find(',');
 			ret = -1;
-			// ret = 0;
 			// check if the old key and new key has been passed in the string separed by a comma.
 			if (found != std::string::npos)
 			{
@@ -4062,13 +4061,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				std::unique_lock<std::mutex> lck(operation_lock);
 				ret = hierarchical_map->HierarchicalMapRenameRegularFile(old_key, new_key);
 				slog_live("rename metadata stat worker=%d", ret);
-
-				// RENAME TREE
-				// if (ret != -1)
-				// {
-				// 	ret = GTree_rename((char *)old_key_tree.c_str(), (char *)new_key_tree.c_str());
-				// 	slog_debug("[RENAME] GTree_rename=%d", ret);
-				// }
 			}
 
 			if (ret == -1)
@@ -4125,6 +4117,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				else
 				{
+					int err = hierarchical_map->HierarchicalMapGet(new_key, &address_, &block_size_rtvd);
+					if (err != 0)
+					{
+						strcpy(((dataset_info*)address_)->uri_, new_key.c_str());
+					}
 					response_msg = MSG_RENAME_OP;
 				}
 

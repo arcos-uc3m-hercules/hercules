@@ -737,7 +737,10 @@ int close(int fd)
 		}
 		// Set offset to 0.
 		// map_fd_update_value(map_fd, pathname, fd, 0);
-		map_fd_erase(map_fd, fd);
+		if (map_fd_erase(map_fd, fd) == -1)
+		{
+			slog_error("Error erasing fd %d from the map_fd", fd);
+		}
 		// TODO: check this.
 		if (real_close(fd) == -1)
 			// {
@@ -1796,10 +1799,12 @@ int fclose(FILE *fp)
 	if (!real_fclose)
 		real_fclose = (int (*)(FILE *))dlsym(RTLD_NEXT, __func__);
 
-	if (!init)
+	if (!init || inside_printf_hook)
 	{
 		return real_fclose(fp);
 	}
+
+	inside_printf_hook = true;
 
 	errno = 0;
 	int ret = 0;
@@ -1830,7 +1835,9 @@ int fclose(FILE *fp)
 		map_fd_update_value(map_fd, pathname, fd, 0);
 		map_fd_erase(map_fd, fd);
 		// TODO: TO CHECK!
-		// real_fclose(fp);
+		int errno_aux = errno;
+		real_fclose(fp);
+		errno = errno_aux;
 		// free(pathname);
 	}
 	else
@@ -1839,6 +1846,8 @@ int fclose(FILE *fp)
 		// fprintf(stderr, "Calling Real 'fclose', fd=%d, ret=%d\n", fd, ret);
 		ret = real_fclose(fp);
 	}
+	inside_printf_hook = false;
+
 	return ret;
 }
 
@@ -1861,7 +1870,7 @@ size_t fwrite(const void *buf, size_t size, size_t count, FILE *fp)
 		const char *pathname = pathname_ob.c_str();
 		size_t to_write = size * count;
 
-		unsigned long offset = -1;
+		off_t offset = -1;
 		slog_live("[POSIX]. Calling Hercules 'fwrite', pathname=%s, to_write=%zu, size=%zu, count=%zu, fd=%d", pathname, to_write, size, count, fd);
 
 		// return 0 immediately if either size or count is zero
@@ -1910,7 +1919,6 @@ ssize_t readv(int fd, const struct iovec *iov, int iovcnt)
 	{
 		const char *pathname = pathname_ob.c_str();
 		slog_live("[POSIX]. Calling Hercules 'readv', pathname=%s, ret=%ld\n", pathname, ret);
-		unsigned long offset = 0;
 		/* Find the total number of bytes to be written.  */
 		size_t bytes = 0;
 		for (int i = 0; i < iovcnt; ++i)
@@ -1984,8 +1992,9 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 	if (!pathname_ob.empty())
 	{
 		const char *pathname = pathname_ob.c_str();
+		slog_live("[POSIX]. Calling Hercules 'writev', pathname=%s", pathname);
 
-		unsigned long offset = -1;
+		off_t offset = -1;
 		/* Find the total number of bytes to be written.  */
 		size_t bytes = 0;
 		for (int i = 0; i < iovcnt; ++i)
@@ -1994,6 +2003,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 			if (SSIZE_MAX - bytes < iov[i].iov_len)
 			{
 				errno = EINVAL;
+				slog_live("[POSIX]. Ending Hercules 'writev', pathname=%s", pathname)
 				return -1;
 			}
 			bytes += iov[i].iov_len;
@@ -2025,7 +2035,6 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt)
 				break;
 		}
 
-		slog_live("[POSIX]. Calling Hercules 'writev', pathname=%s", pathname);
 		ret = generalWrite(pathname, fd, buffer, bytes, offset);
 		slog_live("[POSIX]. Ending Hercules 'writev', pathname=%s, ret=%ld, errno=%d:%s\n", pathname, ret, errno, strerror(errno));
 	}
@@ -2057,7 +2066,6 @@ ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 		const char *pathname = pathname_ob.c_str();
 
 		slog_live("[POSIX]. Calling Hercules 'pwritev', pathname=%s, fd=%d, offset=%d", pathname, fd, offset);
-		// unsigned long p = 0;
 		/* Find the total number of bytes to be written.  */
 		size_t bytes = 0;
 		for (int i = 0; i < iovcnt; ++i)
@@ -2320,7 +2328,7 @@ long int ftell(FILE *fp)
 	if (!pathname_ob.empty())
 	{
 		const char *pathname = pathname_ob.c_str();
-		unsigned long offset = 0;
+		off_t offset = 0;
 		slog_live("[POSIX]. Calling Hercules 'ftell', pathname=%s, fd=%d, errno=%d:%s", pathname, fd, errno, strerror(errno));
 
 		ret = map_fd_search(map_fd, pathname, fd, &offset);
@@ -2398,15 +2406,18 @@ FILE *fopen(const char *pathname, const char *mode)
 	{
 		slog_live("[POSIX]. Calling Hercules 'fopen', pathname=%s", pathname);
 		uint64_t ret_ds;
-		unsigned long offset = 0;
 		int flags = 0, oflags = 0;
 
 		if ((flags = __sflags_(mode, &oflags)) == 0)
+		{
+			inside_printf_hook = false;
 			return (NULL);
+		}
 
 		file = real_fopen("/dev/null", mode);
 		if (file == NULL)
 		{
+			inside_printf_hook = false;
 			return NULL;
 		}
 		ret = file->_fileno; // get file descriptor.
@@ -2415,10 +2426,11 @@ FILE *fopen(const char *pathname, const char *mode)
 
 		ret = generalOpen(new_path, oflags, ALLPERMS, ret);
 
-		slog_live("[POSIX]. Calling Hercules 'fopen', pathname=%s, ret=%d", pathname, ret);
+		slog_live("[POSIX]. Ending Hercules 'fopen', pathname=%s, ret=%d", pathname, ret);
 		if (ret < 0)
 		{
 			free(new_path);
+			inside_printf_hook = false;
 			return NULL;
 		}
 	}
@@ -2454,8 +2466,6 @@ FILE *fdopen(int fildes, const char *mode)
 	{
 		const char *pathname = pathname_ob.c_str();
 		uint64_t ret_ds;
-		unsigned long offset = 0;
-		// mode_t new_mode = 0;
 
 		int flags = 0, oflags = 0;
 
@@ -2559,10 +2569,12 @@ int fputs(const char *s, FILE *fp)
 	if (!real_fputs)
 		real_fputs = (int (*)(const char *, FILE *))dlsym(RTLD_NEXT, __func__);
 
-	if (!init)
+	if (!init || inside_printf_hook)
 	{
 		return real_fputs(s, fp);
 	}
+
+	inside_printf_hook = true;
 
 	errno = 0;
 	int ret = EOF;
@@ -2573,9 +2585,9 @@ int fputs(const char *s, FILE *fp)
 	{
 		const char *pathname = pathname_ob.c_str();
 		size_t to_write = strlen(s);
-		unsigned long offset = -1;
+		off_t offset = -1;
 
-		slog_live("[POSIX]. Calling Hercules 'fputs', pathname=%s, to_write=%ld", pathname, to_write);
+		slog_live("[POSIX]. Calling Hercules 'fputs', pathname=%s, to_write=%ld, fd=%d", pathname, to_write, fd);
 
 		size_t w_ret = generalWrite(pathname, fd, s, to_write, offset);
 		// fputs returns a non-negative number on success
@@ -2584,15 +2596,16 @@ int fputs(const char *s, FILE *fp)
 			ret = 1;
 		}
 
-		slog_live("[POSIX]. Ending Hercules 'fputs', pathname=%s, ret=%d\n", pathname, ret);
+		slog_live("[POSIX]. Ending Hercules 'fputs', pathname=%s, bytes_written=%zu, ret=%d", pathname, w_ret, ret);
 	}
 	else
 	{
-		// slog_full("[POSIX]. Calling real 'fputs', fd=%d", fd);
-		// fprintf(stderr, "Calling real fputs, fd=%d\n", fd);
+		slog_full("[POSIX]. Calling real 'fputs', fd=%d", fd);
 		ret = real_fputs(s, fp);
-		// slog_full("[POSIX]. Ending real 'fputs', fd=%d, ret=%d\n", fd, ret);
+		slog_full("[POSIX]. Ending real 'fputs', fd=%d, ret=%d", fd, ret);
 	}
+
+	inside_printf_hook = false;
 
 	return ret;
 }
@@ -2617,7 +2630,7 @@ int fputc(int c, FILE *fp)
 		const char *pathname = pathname_ob.c_str();
 		unsigned char c_char = (unsigned char)c;
 		size_t to_write = 1;
-		unsigned long offset = -1;
+		off_t offset = -1;
 
 		slog_live("[POSIX]. Calling Hercules 'fputc', pathname=%s", pathname);
 
@@ -2660,7 +2673,7 @@ int puts(const char *s)
 	{
 		const char *pathname = pathname_ob.c_str();
 		size_t to_write = strlen(s);
-		unsigned long offset = -1;
+		off_t offset = -1;
 
 		slog_live("[POSIX]. Calling Hercules 'puts', pathname=%s, to_write=%ld", pathname, to_write);
 
@@ -2674,6 +2687,9 @@ int puts(const char *s)
 		{
 			ret = 1;
 		}
+		// TO FIX: this allows flushing the data to the back end server in case "close" is not called.
+		// We have to implement a way to flush everything in the destructor.
+		imss_release(pathname);
 
 		slog_live("[POSIX]. Ending Hercules 'puts', pathname=%s, ret=%d\n", pathname, ret);
 	}
@@ -2687,7 +2703,7 @@ int puts(const char *s)
 	return ret;
 }
 
-ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, size_t offset)
+ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, off_t offset)
 {
 	// pthread_mutex_lock(&system_lock);
 	ssize_t ret = 0;
@@ -2699,11 +2715,12 @@ ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size,
 		update_offset = 1;
 		map_fd_search(map_fd, pathname, fd, &offset);
 		int fd_lkup = -1;
-		fd_lookup((char *)pathname, &fd_lkup, &ds_stat_n, &aux);
+		// fd_lookup((char *)pathname, &fd_lkup, &ds_stat_n, &aux);
+		struct elements elem = {};
+		fd_lookup(pathname, &fd_lkup, &elem);
+		ds_stat_n = elem.stats;
 		slog_live("current size=%ld", ds_stat_n.st_size);
 
-		// imss_getattr(pathname, &ds_stat_n);
-		// if (ret < 0)
 		if (fd_lkup == -1)
 		{
 			// errno = -ret;
@@ -2839,11 +2856,11 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 				errno = -ret_aux;
 				ret = -1;
 				slog_error("[POSIX] Error Hercules 'open', errno=%d:%s", errno, strerror(errno));
-				// pthread_mutex_unlock(&system_lock);
 				return ret;
 			}
 			stats.st_size = 0;
-			TIMING_NO_RETURN(HierarchicalMapUpdate(hierarchical_map, new_path, ret, stats), "generalOpen,map_fd_update_value", rank);
+			
+			TIMING_NO_RETURN(HierarchicalMapUpdate(hierarchical_map, new_path, ret, &stats, NULL), "generalOpen,map_fd_update_value", rank);
 		}
 	}
 	// pthread_mutex_unlock(&system_lock);
@@ -2884,7 +2901,6 @@ int open(const char *pathname, int flags, ...)
 		ret = generalOpen(new_path, flags, mode, -1);
 
 		slog_live("[POSIX] Ending Hercules 'open', mode=%o, ret=%d\n", mode, ret);
-		// if (ret < 0)
 		free(new_path);
 	}
 	else
@@ -3172,7 +3188,7 @@ off_t lseek(int fd, off_t offset, int whence)
 	if (!pathname_ob.empty())
 	{
 		const char *pathname = pathname_ob.c_str();
-		unsigned long p = 0;
+		off_t p = 0;
 		slog_live("[POSIX]. Calling Hercules 'lseek', pathname=%s, fd=%d, whence=%d, offset=%ld, errno=%d:%s", pathname, fd, whence, offset, errno, strerror(errno));
 		if (whence == SEEK_SET)
 		{
@@ -3240,7 +3256,7 @@ off64_t lseek64(int fd, off64_t offset, int whence)
 	if (!pathname_ob.empty())
 	{
 		const char *pathname = pathname_ob.c_str();
-		unsigned long p = 0;
+		off_t p = 0;
 		slog_live("[POSIX]. Calling Hercules 'lseek64', pathname=%s, fd=%d", pathname, fd);
 		slog_info("[POSIX]. whence=%d, offset=%ld", whence, offset);
 		if (whence == SEEK_SET)
@@ -3307,7 +3323,7 @@ int fseek(FILE *stream, long int offset, int whence)
 	if (!pathname_ob.empty())
 	{
 		const char *pathname = pathname_ob.c_str();
-		unsigned long p = 0;
+		off_t p = 0;
 		slog_live("[POSIX]. Calling Hercules 'fseek', pathname=%s, fd=%d", pathname, fd);
 		if (whence == SEEK_SET)
 		{
@@ -3474,7 +3490,8 @@ int generalFtruncate(const char *pathname, off_t length)
 	char *aux = nullptr;
 	int fd_lkup = -1;
 
-	fd_lookup(const_cast<char *>(pathname), &fd_lkup, &ds_stat_n, &aux);
+	struct elements elem = {};
+	fd_lookup(pathname, &fd_lkup, &elem);
 
 	if (fd_lkup == -1)
 	{
@@ -3483,6 +3500,7 @@ int generalFtruncate(const char *pathname, off_t length)
 		slog_error("[POSIX] Error Hercules 'ftruncate'  : %d:%s", errno, strerror(errno));
 		return ret;
 	}
+	ds_stat_n = elem.stats;
 
 	slog_live("[POSIX]. pathname=%s, length to truncate=%ld", pathname, length);
 
@@ -3544,7 +3562,7 @@ ssize_t write(int fd, const void *buf, size_t size)
 	if (!pathname_ob.empty())
 	{
 		const char *pathname = pathname_ob.c_str();
-		unsigned long offset = -1;
+		off_t offset = -1;
 		slog_live("[POSIX]. Calling Hercules 'write', pathname=%s, size=%lu, fd=%d", pathname, size, fd);
 
 		ret = TIMING(generalWrite(pathname, fd, buf, size, offset), "generalWrite", ssize_t, rank);
@@ -3581,10 +3599,12 @@ ssize_t read(int fd, void *buf, size_t size)
 	if (!real_read)
 		real_read = (ssize_t (*)(int, const void *, size_t))dlsym(RTLD_NEXT, __func__);
 
-	if (!init)
+	if (!init || inside_printf_hook)
 	{
 		return real_read(fd, buf, size);
 	}
+
+	inside_printf_hook = true;
 
 	errno = 0;
 	ssize_t ret;
@@ -3594,17 +3614,18 @@ ssize_t read(int fd, void *buf, size_t size)
 		const char *pathname = pathname_ob.c_str();
 		if (size <= 0)
 		{
+			inside_printf_hook = false;
 			return 0;
 		}
 
-		unsigned long offset = 0;
+		off_t offset = 0;
 		slog_live("[POSIX]. Calling Hercules 'read', pathname=%s, size=%ld, fd=%d.", pathname, size, fd);
-		// fprintf(stderr, "[POSIX]. Calling Hercules 'read', pathname=%s, size=%ld, fd=%d\n", pathname, size, fd);
 
 		if (fd < 0)
 		{
 			errno = EBADF;
 			slog_error("[POSIX] Error in Hercules while reading '%s', %d:%s", pathname, errno, strerror(errno));
+			inside_printf_hook = false;
 			return -1;
 		}
 
@@ -3645,25 +3666,16 @@ ssize_t read(int fd, void *buf, size_t size)
 			// change return value to -1.
 			ret = -1;
 		}
-		// fprintf(stderr, "[POSIX] Hercules read, pathname=%s, ret=%ld\n", pathname, ret);
-		// fprintf(stderr, "[POSIX ] READ HERCULES ret=%ld\n", ret);
 
 		slog_live("[POSIX]. End Hercules 'read', pathname=%s, ret=%zd, size=%ld, fd=%d\n", pathname, ret, size, fd);
-		// fprintf(stderr, "[POSIX]. Hercules 'read', size=%ld, fd=%d, ret=%lu, offset=%lu, errno=%d:%s\n", size, fd, ret, offset, errno, strerror(errno));
 	}
 	else
 	{
 		slog_full("[POSIX]. Calling real 'read', size=%ld, fd=%ld.", size, fd);
-		// unsigned long old_offset, new_offset;
-		// old_offset = lseek(fd, 0L, SEEK_CUR);
 		ret = real_read(fd, buf, size);
-		// new_offset = lseek(fd, 0L, SEEK_CUR);
-		// unsigned long offset = lseek(fd, 0L, SEEK_CUR);
-		// slog_full("[POSIX]. Ending real 'read', size=%ld, fd=%ld, ret=%d, old_offset=%d, new_offset=%d, errno=%d:%s.", size, fd, ret, old_offset, new_offset, errno, strerror(errno));
-		// fprintf(stderr, "[POSIX]. Real 'read', size=%ld, fd=%d, ret=%lu, offset=%lu, errno=%d:%s\n", size, fd, ret, offset, errno, strerror(errno));
-
-		slog_full("[POSIX]. Ending real 'read', size=%ld, fd=%ld, ret=%d", size, fd, ret);
+		slog_full("[POSIX]. Ending real 'read', size=%zu, fd=%ld, ret=%zd", size, fd, ret);
 	}
+	inside_printf_hook = false;
 	return ret;
 }
 
@@ -3779,7 +3791,7 @@ size_t fread(void *buf, size_t size, size_t count, FILE *fp)
 			return -1;
 		}
 
-		unsigned long offset = 0;
+		off_t offset = 0;
 		slog_live("[POSIX]. Calling Hercules 'fread', pathname=%s, size=%lu", pathname, count);
 		map_fd_search(map_fd, pathname, fd, &offset);
 
@@ -4116,6 +4128,11 @@ int chmod(const char *pathname, mode_t mode)
 	{
 		slog_live("[POSIX]. Calling Hercules 'chmod', pathname=%s", pathname);
 		ret = imss_chmod(new_path, mode);
+		if (ret < 0)
+		{
+			errno = -ret;
+			ret = -1;
+		}
 		slog_live("[POSIX]. End Hercules 'chmod', pathname=%s, ret=%d\n", pathname, ret);
 		free(new_path);
 	}
@@ -4399,17 +4416,17 @@ int dup2(int oldfd, int newfd)
 		else
 		{
 			// Close the target fd if it's already open
-			close(newfd);
-
-			ret = map_fd_dup(map_fd, oldfd, newfd);
-
+			ret = real_dup2(oldfd, newfd);
+			slog_debug("File descriptor = %d", ret);
 			if (ret == -1)
 			{
 				slog_error("[POSIX] Error Hercules in 'dup2', oldfd=%d tracking does not exist.", oldfd);
 			}
 			else
 			{
-				ret = newfd;
+				// ret = newfd;
+				map_fd_dup(map_fd, oldfd, newfd);
+				// TODO: add error condition.
 			}
 		}
 		slog_live("[POSIX]. End Hercules 'dup2', pathname=%s, ret=%d.", pathname, ret);
@@ -4418,6 +4435,7 @@ int dup2(int oldfd, int newfd)
 	{
 		slog_full("[POSIX]. Calling real 'dup2', oldfd=%d, newfd=%d.", oldfd, newfd);
 		ret = real_dup2(oldfd, newfd);
+		slog_full("[POSIX]. Calling real 'dup2', oldfd=%d, newfd=%d, ret=%d", oldfd, newfd, ret);
 	}
 
 	return ret;
@@ -4499,9 +4517,7 @@ DIR *opendir(const char *name)
 		int a = 1;
 		int ret = 0;
 		// int fd = 0;
-		unsigned long p = 0;
-
-		// fd = open(new_path, O_CREAT);
+		off_t p = 0;
 
 		dirp = real_opendir("/tmp");
 		// dirp = (DIR *)malloc(sizeof(DIR));
@@ -6110,15 +6126,6 @@ int fsync(int fd)
 // 	return real_wchdir(dirname);
 // }
 
-// static int (*real_fflush)(FILE * stream);
-// int fflush(FILE * stream) {
-// 	if(!real_fflush) {
-//         real_fflush = dlsym(RTLD_NEXT, "fflush");
-// 	}
-// 	fprintf(stderr, "Calling real fflush, fd=%d\n", stream->_fileno);
-// 	return real_fflush(stream);
-// }
-
 // int fprintf(FILE * stream, const char * format, ...)
 // {
 // 	if (!real_fprintf)
@@ -6177,7 +6184,6 @@ int fsync(int fd)
 
 char *getcwd(char *buf, size_t size)
 {
-	static char *(*real_getcwd)(char *, size_t) = nullptr;
 
 	if (!real_getcwd)
 	{
@@ -6188,6 +6194,8 @@ char *getcwd(char *buf, size_t size)
 	{
 		return real_getcwd(buf, size);
 	}
+
+	// inside_printf_hook = true;
 
 	char *curr_dir = getenv("PWD");
 	if (curr_dir != nullptr && !strncmp(curr_dir, MOUNT_POINT, strlen(MOUNT_POINT)))
@@ -6582,7 +6590,6 @@ int fchdir(int fd)
 // 	return ret;
 // }
 
-
 int vfprintf(FILE *fp, const char *format, va_list ap)
 {
 	if (!real_vfprintf)
@@ -6617,7 +6624,7 @@ int vfprintf(FILE *fp, const char *format, va_list ap)
 			// vsnprintf is a library function that accepts the va_list directl and processes every argument.
 			vsnprintf(buf.data(), buf.size(), format, ap);
 
-			unsigned long offset = -1;
+			off_t offset = -1;
 			slog_live("[POSIX]. Calling Hercules 'vfprintf', pathname=%s, to_write=%d", pathname, to_write);
 
 			ret = generalWrite(pathname, fd, buf.data(), to_write, offset);
@@ -6629,7 +6636,7 @@ int vfprintf(FILE *fp, const char *format, va_list ap)
 	{
 		slog_full("[POSIX]. Calling real 'vfprintf', fd=%d", fd);
 		ret = real_vfprintf(fp, format, ap);
-		slog_full("[POSIX]. Ending real 'vfprintf', fd=%d, ret=%d\n", fd, ret);
+		slog_full("[POSIX]. Ending real 'vfprintf', fd=%d, ret=%d", fd, ret);
 	}
 
 	inside_printf_hook = false;
@@ -6670,7 +6677,7 @@ int fprintf(FILE *fp, const char *format, ...)
 			std::vector<char> buf(to_write + 1);
 			vsnprintf(buf.data(), buf.size(), format, ap);
 
-			unsigned long offset = -1;
+			off_t offset = -1;
 			slog_live("[POSIX]. Calling Hercules 'fprintf', pathname=%s, to_write=%d", pathname, to_write);
 
 			ret = generalWrite(pathname, fd, buf.data(), to_write, offset);
@@ -6696,18 +6703,20 @@ int fflush(FILE *fp)
 	if (!real_fflush)
 		real_fflush = (int (*)(FILE *))dlsym(RTLD_NEXT, __func__);
 
-	if (!init)
+	if (!init || inside_printf_hook)
 	{
 		return real_fflush(fp);
 	}
 
 	errno = 0;
 	int ret = -1;
+	inside_printf_hook = true;
 
 	// fflush(NULL) is a special standard case that flushes ALL open streams
 	if (fp == NULL)
 	{
 		slog_full("[POSIX]. Calling real 'fflush' for all streams (fp=NULL)");
+		inside_printf_hook = false;
 		return real_fflush(NULL);
 	}
 
@@ -6725,17 +6734,19 @@ int fflush(FILE *fp)
 	}
 	else
 	{
-		slog_full("[POSIX]. Calling real 'fflush', fd=%d", fd);
+		slog_live("[POSIX]. Calling real 'fflush', fd=%d", fd);
 		ret = real_fflush(fp);
-		slog_full("[POSIX]. Ending real 'fflush', fd=%d, ret=%d\n", fd, ret);
+		slog_live("[POSIX]. Ending real 'fflush', fd=%d, ret=%d\n", fd, ret);
 	}
+
+	inside_printf_hook = false;
 
 	return ret;
 }
 
 extern "C" int __vfprintf_chk(FILE *fp, int flag, const char *format, va_list ap)
 {
-	slog_debug("Calling '__vfprintf_chk'")
+	slog_debug("Calling '__vfprintf_chk'");
     return vfprintf(fp, format, ap);
 }
 
@@ -6743,7 +6754,7 @@ extern "C" int __fprintf_chk(FILE *fp, int flag, const char *format, ...)
 {
     va_list ap;
     va_start(ap, format);
-	slog_debug("Calling __fprintf_chk")
+	slog_debug("Calling __fprintf_chk");
     int ret = vfprintf(fp, format, ap);
     va_end(ap);
     return ret;

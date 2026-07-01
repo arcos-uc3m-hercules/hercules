@@ -1,13 +1,13 @@
-#include <map>
-#include <iostream>
-#include <vector>
-#include <memory>
+#include <climits>
 #include <cstddef>
 #include <cstring>
-#include <climits>
-#include <sys/stat.h>
 #include <fcntl.h>
+#include <iostream>
+#include <map>
+#include <memory>
 #include <mutex>
+#include <sys/stat.h>
+#include <vector>
 
 #include "mapfd.hpp"
 #include "slog.h"
@@ -18,9 +18,9 @@ using std::string;
 struct FileDescription
 {
 	std::string pathname;
-	unsigned long offset;
+	off_t offset;
 
-	FileDescription(std::string path, unsigned long off)
+	FileDescription(std::string path, off_t off)
 	    : pathname(std::move(path)), offset(off) {}
 };
 
@@ -48,7 +48,7 @@ extern "C"
 		}
 	}
 
-	int map_fd_put(void *map, const char *pathname, const int fd, unsigned long offset)
+	int map_fd_put(void *map, const char *pathname, const int fd, off_t offset)
 	{
 		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
@@ -75,7 +75,7 @@ extern "C"
 		return 1;
 	}
 
-	void map_fd_update_value(void *map, const char *pathname, const int fd, unsigned long offset)
+	void map_fd_update_value(void *map, const char *pathname, const int fd, off_t offset)
 	{
 		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
@@ -88,7 +88,7 @@ extern "C"
 		}
 	}
 
-	void map_fd_update_fd(void *map, const char *pathname, const int fd, const int new_fd, unsigned long offset)
+	void map_fd_update_fd(void *map, const char *pathname, const int fd, const int new_fd, off_t offset)
 	{
 		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
@@ -103,11 +103,26 @@ extern "C"
 		}
 	}
 
-	void map_fd_erase(void *map, const int fd)
+	int map_fd_erase(void *map, const int fd)
 	{
+		if (map == nullptr)
+		{
+			return -1;
+		}
+		// slog_debug("Waiting fdlock");
 		std::unique_lock<std::mutex> lck(fdlock);
-		Map *m = reinterpret_cast<Map *>(map);
-		m->erase(fd);
+		Map *m = static_cast<Map *>(map);
+
+		// slog_debug("Erasing fd %d", fd);
+		size_t erased_count = m->erase(fd);
+		if (erased_count == 0)
+		{
+			return -1; // FD was not in the map
+		}
+
+		// slog_debug("File descriptor %d removed, erased_count=%zu", fd, erased_count);
+
+		return 1;
 	}
 
 	int map_fd_erase_by_pathname(void *map, const char *pathname)
@@ -142,7 +157,7 @@ extern "C"
 		return -1;
 	}
 
-	int map_fd_search(void *map, const char *pathname, const int fd, unsigned long *offset)
+	int map_fd_search(void *map, const char *pathname, const int fd, off_t *offset)
 	{
 		std::unique_lock<std::mutex> lck(fdlock);
 		Map *m = reinterpret_cast<Map *>(map);
@@ -205,7 +220,6 @@ extern "C"
 		}
 		return -1;
 	}
-
 
 	int map_fd_serialize(void *map, void **out_buf, size_t *out_size)
 	{
@@ -301,7 +315,7 @@ extern "C"
 		std::vector<std::shared_ptr<FileDescription>> unique_descs(num_descriptions);
 		for (uint32_t i = 0; i < num_descriptions; ++i)
 		{
-			unsigned long offset = 0;
+			off_t offset = 0;
 			read_bytes(&offset, sizeof(offset));
 
 			uint32_t path_len = 0;

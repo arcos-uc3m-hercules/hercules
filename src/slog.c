@@ -99,7 +99,6 @@ char cwd[512] = {0};
  * Append log info to log file.
  */
 void slog_to_file(char *out, const char *fname, SlogDate *sdate)
-
 {
     if (!init_slog)
     {
@@ -121,9 +120,9 @@ void slog_to_file(char *out, const char *fname, SlogDate *sdate)
     FILE *fp = NULL;
     // fprintf(stderr, "[SLOG] filename='%s'\n", filename);
     // if (fp == NULL)
-    {
+    // {
         fp = fopen(filename, "a");
-    }
+    // }
 
     if (fp == NULL)
     {
@@ -262,22 +261,22 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
         return;
     }
 
-    char *ld_preload_path = NULL;
-    char *original_ld_preload = getenv("LD_PRELOAD");
-    if (original_ld_preload != NULL)
-    {
-        // Make a copy of the string.
-        ld_preload_path = strdup(original_ld_preload);
-        if (ld_preload_path == NULL)
-        {
-            fprintf(stderr, "Error: strdup failed to allocate memory for LD_PRELOAD path.\n");
-            return;
-        }
+    // char *ld_preload_path = NULL;
+    // char *original_ld_preload = getenv("LD_PRELOAD");
+    // if (original_ld_preload != NULL)
+    // {
+    //     // Make a copy of the string.
+    //     ld_preload_path = strdup(original_ld_preload);
+    //     if (ld_preload_path == NULL)
+    //     {
+    //         fprintf(stderr, "Error: strdup failed to allocate memory for LD_PRELOAD path.\n");
+    //         return;
+    //     }
 
-        unsetenv("LD_PRELOAD");
-        // fprintf(stderr, "LD_PRELOAD=%s\n",ld_preload_path);
-        // fprintf(stderr, "LD_PRELOAD (copied, before unset): %s\n", ld_preload_path);
-    }
+    //     unsetenv("LD_PRELOAD");
+    //     // fprintf(stderr, "LD_PRELOAD=%s\n",ld_preload_path);
+    //     // fprintf(stderr, "LD_PRELOAD (copied, before unset): %s\n", ld_preload_path);
+    // }
 
     /* Lock thread for safe. */
     if (slg.td_safe)
@@ -422,23 +421,23 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
         {
             fprintf(stderr, "[ERROR][%s] <%s:%d> inside %s(): Can not deinitialize mutex: %s\n",
                     slg.fname, __FILE__, __LINE__, __func__, strerror(rc));
-            if (ld_preload_path != NULL)
-            {
-                setenv("LD_PRELOAD", ld_preload_path, 1);
-                free(ld_preload_path);
-                ld_preload_path = NULL;
-            }
+            // if (ld_preload_path != NULL)
+            // {
+            //     setenv("LD_PRELOAD", ld_preload_path, 1);
+            //     free(ld_preload_path);
+            //     ld_preload_path = NULL;
+            // }
             exit(EXIT_FAILURE);
         }
     }
 
-    if (ld_preload_path != NULL)
-    {
-        setenv("LD_PRELOAD", ld_preload_path, 1);
-        // Free the memory allocated by strdup.
-        free(ld_preload_path);
-        ld_preload_path = NULL;
-    }
+    // if (ld_preload_path != NULL)
+    // {
+    //     setenv("LD_PRELOAD", ld_preload_path, 1);
+    //     // Free the memory allocated by strdup.
+    //     free(ld_preload_path);
+    //     ld_preload_path = NULL;
+    // }
 
     // fprintf(stderr,"prev_errno=%d, actual_errno=%d\t", prev_errno, errno);
     errno = prev_errno;
