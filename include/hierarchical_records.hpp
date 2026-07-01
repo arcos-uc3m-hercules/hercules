@@ -36,7 +36,6 @@ public:
 	int32_t HierarchicalMapGetChildrenSerialized(std::string k, char **buffer, const int uri_size);
 	int32_t HierarchicalMapGet(std::string k, void **add_, uint64_t *size_);
 	ssize_t HierarchicalMapGetPrefetch(const std::string &base_key, uint32_t start_block_id, int num_data_servers, char *prefetch_buffer, size_t prefetch_size);
-	// void HierarchicalMapUpdate( const char *k, int v, struct stat stat_info);
 	int32_t HierarchicalMapRenameRegularFile(const std::string &oldname, const std::string &newname);
 	int32_t BackEndHierarchicalMapRenameDirDir(std::string old_dir, std::string rdir_dest, GNode **gnode);
 	// **  Garbage collector methods. **

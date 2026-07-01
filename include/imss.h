@@ -228,6 +228,8 @@ typedef struct
 extern "C"
 {
 #endif
+	void print_file_type(struct stat s, const char *pathname);
+	void print_ghashtable();
 	void print_worker_pointer(ucp_worker_h ucp_worker);
 
 	int GetValueFromInterval(dataset_info *curr_dataset, int data_id);
@@ -653,6 +655,7 @@ RETURNS:	0 - Resources were released successfully.
 	int ConcatLastSlashC(char *pathname);
 	int RemoveLastSlash(std::string &pathname);
 	int RemoveLastSlashC(char *pathname);
+
 
 	/**
 	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.

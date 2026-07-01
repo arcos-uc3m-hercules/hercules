@@ -37,7 +37,7 @@ extern "C"
 									const struct stat *stbuf, off_t off);
 
 	int is_alive(char *instance_name);
-	void fd_lookup(char *path, int *fd, struct stat *s, char **aux);
+	void fd_lookup(const char *path, int *fd, struct elements *elem);
 	void get_iuri(const char *path, /*output*/ char *uri);
 	int imss_truncate(const char *path, off_t offset);
 	int imss_access(const char *path, int permission);

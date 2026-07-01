@@ -441,21 +441,6 @@ ssize_t HierarchicalRecords::HierarchicalMapGetPrefetch(
 	return buffer_offset;
 }
 
-// void HierarchicalMapUpdate(void *hierarchical_map, const char *k, int v, struct stat stat_info)
-// {
-// 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
-
-// 	// Look up the parent directory's children map in 'hierarchical_map'.
-// 	Map *parent_children_map = HierarchicalMapGetChild(hierarchical_map, k);
-// 	if (parent_children_map != NULL)
-// 	{
-// 		map_update(parent_children_map, k, v, stat_info);
-// 	}
-// 	else
-// 	{
-// 		slog_debug("%s not found in the map", k);
-// 	}
-// }
 
 /**
  * @brief Rename the name of a regular file on the local hierarchical_map.

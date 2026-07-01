@@ -106,6 +106,7 @@ extern "C"
 		// fprintf(stderr, "ucx thread_mode=%d, %d\n", attr.thread_mode, UCS_THREAD_MODE_SERIALIZED);
 
 		ucp_worker_attr_t check_attr;
+		memset(&check_attr, 0, sizeof(check_attr));
 		check_attr.field_mask = UCP_WORKER_ATTR_FIELD_THREAD_MODE;
 		ucp_worker_query(*ucp_worker, &check_attr);
 
@@ -136,6 +137,9 @@ extern "C"
 		// status = ucp_config_read(NULL, NULL, &config);
 		// ucp_config_print(config, stdout, NULL, UCS_CONFIG_PRINT_CONFIG);
 		memset(&ucp_params, 0, sizeof(ucp_params));
+		memset(ucp_context, 0, sizeof(*ucp_context));
+		memset(ucp_worker, 0, sizeof(*ucp_worker));
+
 
 		/* UCP initialization */
 		// slog_info("Before ucp_config_read");

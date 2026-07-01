@@ -52,7 +52,7 @@ extern "C"
     char *checkHerculesPath(const char *pathname);
     char *convert_path(const char *name);
     int generalOpen(const char *new_path, int flags, mode_t mode, int createFd);
-    ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, size_t offset);
+    ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size, off_t offset);
     int generalFtruncate(const char *pathname, off_t length);
     int GeneralFAccessAt(int dirfd, const char *pathname, int mode, int flags, char *pathname_dir);
     void SetErrno(int value);
@@ -217,7 +217,6 @@ extern "C"
     static int (*real_utimensat)(int dirfd, const char *pathname, const struct timespec times[_Nullable 2], int flags) = NULL;
 
     static int (*real_ioctl)(int, unsigned long, ...) = NULL;
-	
     
 
     // static int (*real_syscall)(SYS_faccessat2, int dirfd, const char *path, int mode, int flags) = NULL;

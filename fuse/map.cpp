@@ -37,7 +37,7 @@ extern "C"
 		std::unique_lock<std::mutex> lck(map_lock);
 		std::pair<std::map<std::string, struct elements>::iterator, bool> ret;
 		Map *m = reinterpret_cast<Map *>(map);
-		struct elements p = {v, stat, aux};
+		struct elements p = {v, stat, aux, true};
 		ret = m->insert(std::pair<std::string, struct elements>(std::string(k), p));
 		if (ret.second == false)
 		{
@@ -50,7 +50,8 @@ extern "C"
 		std::unique_lock<std::mutex> lck(map_lock);
 		std::pair<std::map<std::string, struct elements>::iterator, bool> ret;
 		Map *m = reinterpret_cast<Map *>(map);
-		struct elements p = {v, stat, aux};
+		struct elements p = {v, stat, aux, true};
+		slog_debug("Inserting element %s, size=%d", k, stat.st_size);
 		ret = m->insert(std::pair<std::string, struct elements>(std::string(k), p));
 		if (ret.second == false)
 		{
@@ -58,12 +59,21 @@ extern "C"
 		}
 	}
 
-	void map_update(void *map, const char *k, int v, struct stat stat)
+	void map_update(void *map, const char *k, int v, struct stat *stat, char *aux)
 	{
 		std::unique_lock<std::mutex> lck(map_lock);
 		Map *m = reinterpret_cast<Map *>(map);
 		auto search = m->find(std::string(k));
-		search->second.stat = stat;
+		if (search != m->end())
+		{
+			search->second.stats = *stat;
+			search->second.dirty = true;
+			if (search->second.aux != aux && aux != NULL)
+			{
+				// free(search->second.aux); // free old buffer before overwrite
+				search->second.aux = aux;
+			}
+		}
 	}
 
 	// Removes the element with key "k" from the map "map".
@@ -85,10 +95,9 @@ extern "C"
 		}
 		int num_elements_erased = m->erase(std::string(k));
 		slog_debug("finish map_erase, num_elements_erased=%d", num_elements_erased);
-		// return ret;
 	}
 
-	int map_search(void *map, const char *k, int *v, struct stat *stat, char **aux)
+	int map_search(void *map, const char *k, struct elements *elem)
 	{
 		std::unique_lock<std::mutex> lck(map_lock);
 		Map *m = reinterpret_cast<Map *>(map);
@@ -96,11 +105,7 @@ extern "C"
 
 		if (search != m->end())
 		{
-			*v = search->second.fd;
-			*stat = search->second.stat;
-			// printf("map_search: %p\n", search->second.aux);
-			*aux = search->second.aux;
-			// printf("map_search aux: %p\n", *aux);
+			*elem = search->second;
 			return 1;
 		}
 		else

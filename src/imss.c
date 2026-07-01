@@ -117,6 +117,38 @@ key_t shared_memory_key;
 
 struct arguments args;
 
+void print_file_type(struct stat s, const char *pathname)
+{
+	slog_debug("File type (%s), mode=%x:", pathname, s.st_mode);
+	switch (s.st_mode & S_IFMT)
+	{
+	case S_IFBLK:
+		slog_debug("\tblock device");
+		break;
+	case S_IFCHR:
+		slog_debug("\tcharacter device");
+		break;
+	case S_IFDIR:
+		slog_debug("\tdirectory");
+		break;
+	case S_IFIFO:
+		slog_debug("\tFIFO/pipe");
+		break;
+	case S_IFLNK:
+		slog_debug("\tsymlink");
+		break;
+	case S_IFREG:
+		slog_debug("\tregular file");
+		break;
+	case S_IFSOCK:
+		slog_debug("\tsocket");
+		break;
+	default:
+		slog_debug("unknown?");
+		break;
+	}
+}
+
 void print_worker_pointer(ucp_worker_h ucp_worker)
 {
 	if (ucp_worker == NULL)
@@ -944,7 +976,7 @@ int32_t stat_init(char *stat_hostfile,
 	if (!pool_hash_tables_datasetd)
 	{
 		slog_debug("Init pool_hash_tables_datasetd");
-		char shm_name[256];
+		char shm_name[256] = {'\0'};
 		snprintf(shm_name, sizeof(shm_name), "/hercules_state_hashmap_%d", getpid());
 		slog_debug("shm_name=%s", shm_name);
 		// char *shm_env = getenv("HERCULES_SHM_STATE");
@@ -960,6 +992,7 @@ int32_t stat_init(char *stat_hostfile,
 				hercules_deserialize_pool(shm_fd);
 
 				close(shm_fd);
+				shm_unlink(shm_name);
 			}
 			else
 			{
@@ -2653,9 +2686,8 @@ int32_t create_dataset(char *dataset_uri,
 			/********** TO CHECK */
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
 			sprintf(err_msg, "Parent directory %s does not exists, required by %s", parent_dir, dataset_uri);
-			// sleep(5);
 			slog_error("%s", err_msg);
-			perror(err_msg);
+			// perror(err_msg);
 			return -ENOENT;
 		}
 		if (ret < 0 && ret != -3)
@@ -2767,8 +2799,6 @@ int32_t create_dataset(char *dataset_uri,
 	new_dataset->repl_factor = (repl_factor < new_dataset->n_servers) ? (repl_factor) : (new_dataset->n_servers);
 	new_dataset->repl_type = repl_type;
 
-	// new_dataset->initial_node = 0;
-
 	//*****NEXT LINE NEED FOR DIFERENT POLICIES TO WORK IN DISTRIBUTED*****//
 	strncpy(new_dataset->original_name, dataset_uri, URI_);
 	//*****BEFORE LINE NEED FOR DIFERENT POLICIES TO WORK IN DISTRIBUTED*****//
@@ -2797,10 +2827,7 @@ int32_t create_dataset(char *dataset_uri,
 	// else
 
 	new_dataset->type = file_type;
-	// if (new_dataset->capacity <= 0)
-	// {
 	new_dataset->capacity = MAX_NUM_INTERVALS;
-	// }
 	// new_dataset->intervals = g_hash_table_new(g_int_hash, g_int_equal);
 	// new_dataset->intervals = g_hash_table_new_full(int_pointer_hash, int_pointer_equal, key_destroy_func, key_destroy_func);
 	new_dataset->intervals = NULL; // (IntervalEntry **)calloc(new_dataset->capacity, sizeof(IntervalEntry *));
@@ -3289,7 +3316,8 @@ int32_t wait_malleability_changes(ucp_worker_h ucp_worker, uint64_t local_data_u
 
 int32_t get_malleability_changes(const char *dataset_uri, const char *failed_hostname)
 {
-	if (CONF_MALLEABILITY_STATUS != MALLEABILITY_CONF_ENABLED){
+	if (CONF_MALLEABILITY_STATUS != MALLEABILITY_CONF_ENABLED)
+	{
 		return -1;
 	}
 
@@ -3921,16 +3949,9 @@ int32_t rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 	// uint32_t m_srv = find_server(n_stat_servers, 0, (char *)old_dataset_uri, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
 	char first_parent_dir[URI_] = {0};
 	uint32_t m_srv = 0;
-	// int number_data_servers = 0;
 	int first_parent_offset = find_first_parent_dir((char *)old_dataset_uri, first_parent_dir);
 	slog_debug("old_dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", old_dataset_uri, first_parent_dir, first_parent_offset);
-	// if (first_parent_offset > 0)
-	// {
 	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
-	// // number_data_servers = 1;
-	// } else {
-	// number_data_servers = n_stat_servers;
-	// }
 
 	ep = stat_eps[m_srv];
 
@@ -3966,8 +3987,6 @@ int32_t rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 		return -1;
 	}
 
-	// char result[msg_length];
-	// char *result = (char *)malloc(msg_length * sizeof(char));
 	void *result = malloc(msg_length);
 	// msg_length = recv_data_opt(ucp_worker_meta, ep, &result, msg_length, local_meta_uid, 0);
 	msg_length = recv_data(ucp_worker_meta, ep, result, msg_length, local_meta_uid, 0);
@@ -4197,7 +4216,7 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int 
 	// keep the pointer of data.
 	*dataset_info_ = (dataset_info *)data;
 	// memcpy(dataset_info_, data, sizeof(dataset_info));
-	slog_debug("Uri get from server %d:%s", m_srv, (*dataset_info_)->uri_);
+	slog_debug("Uri get from metadata server %d:%s", m_srv, (*dataset_info_)->uri_);
 	// free(data);
 
 	return -3;
@@ -5437,7 +5456,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			}
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
 			sprintf(err_msg, "HERCULES_ERR_GET_NDATA_NO_KEY_AVAIL (%s), %s to server %d (%s), curr_imss_storages=%d", (char *)response_buffer, key_, server_id, curr_imss.info.ips[server_id], curr_imss_storages);
-			fprintf(stderr, "%s\n", err_msg);
+			// fprintf(stderr, "%s\n", err_msg);
 			slog_error("%s", err_msg);
 			errno = ENOENT;
 			return -1;
@@ -6495,7 +6514,7 @@ int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir)
 		slog_error("HERCULES_ERR_IMSS_FIND_LAST_PARENT_DIR_NULL");
 		return -1;
 	}
-	slog_debug("root=%s, root len=%d, dataset_uri=%s", IMSS_ROOT, IMSS_ROOT_LEN, dataset_uri);
+	// slog_debug("root=%s, root len=%d, dataset_uri=%s", IMSS_ROOT, IMSS_ROOT_LEN, dataset_uri);
 	// int last_parent_offset = 0;
 	size_t uri_len = strlen(dataset_uri);
 
@@ -6531,7 +6550,7 @@ int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir)
 	{
 		// Parent directory exists within the path after IMSS_ROOT
 		last_parent_offset_from_uri_start = (last_slash_in_path - dataset_uri);
-		slog_debug("last_parent_offset_from_uri_start=%d", last_parent_offset_from_uri_start);
+		// slog_debug("last_parent_offset_from_uri_start=%d", last_parent_offset_from_uri_start);
 		// last_parent_offset++;
 		strncpy(last_parent_dir, dataset_uri, last_parent_offset_from_uri_start);
 		last_parent_dir[last_parent_offset_from_uri_start] = '\0'; // To ensure null-termination.
@@ -6539,11 +6558,11 @@ int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir)
 	else
 	{ // the dataset is on the Hercules root.
 		// strcpy(last_parent_dir, dataset_uri);
-		slog_debug("root case");
+		// slog_debug("root case");
 		strncpy(last_parent_dir, IMSS_ROOT, IMSS_ROOT_LEN);
 		last_parent_offset_from_uri_start = 0;
 	}
-	slog_debug("last parent offset=%d, dataset_uri=%s, uri_len=%d, last parent dir=%s", last_parent_offset_from_uri_start, dataset_uri, uri_len, last_parent_dir);
+	// slog_debug("last parent offset=%d, dataset_uri=%s, uri_len=%d, last parent dir=%s", last_parent_offset_from_uri_start, dataset_uri, uri_len, last_parent_dir);
 	return last_parent_offset_from_uri_start;
 }
 
@@ -6976,7 +6995,9 @@ int32_t set_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, co
 int32_t free_imss(imss_info *imss_info_)
 {
 	for (int32_t i = 0; i < imss_info_->num_storages; i++)
+	{
 		free(imss_info_->ips[i]);
+	}
 
 	free(imss_info_->ips);
 

@@ -4,9 +4,13 @@
 #include "hash_table.h"
 #include "hercules.hpp"
 #include "hierarchical_map.hpp"
+#include "imss.h"
+#include "map.hpp"
 #include "mapprefetch.hpp"
 #include "slog.h"
+#include <cstdlib>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <libgen.h>
 #include <limits.h>
@@ -93,38 +97,6 @@ extern "C"
 	   TRM = 3;
 	 */
 
-	void print_file_type(struct stat s, const char *pathname)
-	{
-		slog_debug("File type (%s), mode=%x:", pathname, s.st_mode);
-		switch (s.st_mode & S_IFMT)
-		{
-		case S_IFBLK:
-			slog_debug("\tblock device");
-			break;
-		case S_IFCHR:
-			slog_debug("\tcharacter device");
-			break;
-		case S_IFDIR:
-			slog_debug("\tdirectory");
-			break;
-		case S_IFIFO:
-			slog_debug("\tFIFO/pipe");
-			break;
-		case S_IFLNK:
-			slog_debug("\tsymlink");
-			break;
-		case S_IFREG:
-			slog_debug("\tregular file");
-			break;
-		case S_IFSOCK:
-			slog_debug("\tsocket");
-			break;
-		default:
-			slog_debug("unknown?");
-			break;
-		}
-	}
-
 	int get_number_of_data_servers(int i_blk, int num_of_blk)
 	{
 		int32_t num_storages = 0;
@@ -176,7 +148,7 @@ extern "C"
 	 * @param s Pointer to the stat structure where the file attributes will be stored.
 	 * @param aux Pointer to the block 0 data.
 	 */
-	void fd_lookup(char *path, int *fd, struct stat *s, char **aux)
+	void fd_lookup(const char *path, int *fd, struct elements *elem)
 	{
 		*fd = -1;
 
@@ -185,22 +157,22 @@ extern "C"
 		// if (!strcmp(path, IMSS_ROOT))
 		// {
 		// }
-
-		// Seek for the fd on the map.
-		// size_t hierarchical_map_size = HierarchicalMapGetSize(hierarchical_map);
-		// char msg[PATH_MAX] = {0};
-		// sprintf(msg, "HierarchicalMapSearch %lu", hierarchical_map_size);
-		// int found = TIMING(HierarchicalMapSearch(hierarchical_map, path, fd, s, aux), msg, int, 0);
-		int found = HierarchicalMapSearch(hierarchical_map, path, fd, s, aux);
-
+		int found = HierarchicalMapSearch(hierarchical_map, path, elem);
+		slog_debug("found=%d", found);
 		if (found == -1)
 		{
 			// the file was not find.
 			slog_warn("file not found on the local map, %s", path);
 		}
+		else
+		{
+			*fd = elem->fd;
+		}
+
 		if (*fd != -1)
 		{ // print data if the fd exists.
-			slog_debug("path=%s, found=%d, fd=%d, stat.st_nlink=%lu", path, found, *fd, s->st_nlink);
+			slog_debug("path=%s, found=%d, fd=%d, stat.st_nlink=%lu", path, found, *fd, elem->stats.st_nlink);
+			print_file_type(elem->stats, path);
 		}
 	}
 
@@ -236,10 +208,9 @@ extern "C"
 		clock_t t = clock();
 		int ds = 0;
 		int fd = -1;
-		struct stat stats;
-		char *aux = nullptr;
+		struct elements elem = {};
 
-		fd_lookup(const_cast<char *>(path), &fd, &stats, &aux);
+		fd_lookup(path, &fd, &elem);
 		if (fd >= 0)
 		{
 			ds = fd;
@@ -249,9 +220,9 @@ extern "C"
 			return -ENOENT;
 		}
 
-		slog_debug("[imss_truncate] path=%s, requested length=%ld, current size=%ld", path, length, stats.st_size);
+		slog_debug("[imss_truncate] path=%s, requested length=%ld, current size=%ld", path, length, elem.stats.st_size);
 
-		if (stats.st_size == length)
+		if (elem.stats.st_size == length)
 		{
 			return 0;
 		}
@@ -261,13 +232,13 @@ extern "C"
 		// TODO: if the file is reduced, we have to tell the servers to delete the blocks from
 		// 'new_blocks' to 'stats.st_blocks'.
 
-		stats.st_size = length;
-		stats.st_blocks = new_blocks;
+		elem.stats.st_size = length;
+		elem.stats.st_blocks = new_blocks;
 
-		slog_debug("[imss_truncate] Updating stat, st_size=%ld, st_blocks=%ld", stats.st_size, stats.st_blocks);
+		slog_debug("[imss_truncate] Updating stat, st_size=%ld, st_blocks=%ld", elem.stats.st_size, elem.stats.st_blocks);
 
 		// Updated the metadata hierarchical map
-		HierarchicalMapUpdate(hierarchical_map, path, ds, stats);
+		HierarchicalMapUpdate(hierarchical_map, path, ds, &elem.stats, elem.aux);
 
 		t = clock() - t;
 		double time_taken = (static_cast<double>(t)) / CLOCKS_PER_SEC;
@@ -285,16 +256,17 @@ extern "C"
 	int imss_refresh(const char *path)
 	{
 		int32_t ret = 0;
-		struct stat *stats;
-		struct stat old_stats;
+		// struct stat *stats;
+		struct elements elem = {};
 		uint32_t ds = 0;
 		int fd = -1;
-		void *aux = NULL;
 		char *imss_path = (char *)path; // this pointer should not be free.
 		// Lookup the current file on the local front-end map.
-		fd_lookup((char *)imss_path, &fd, &old_stats, (char **)&aux);
+		slog_debug("Looking for %s", imss_path);
+		fd_lookup(imss_path, &fd, &elem);
 		if (fd >= 0)
 		{
+			slog_debug("Found with fd=%d", fd);
 			ds = fd;
 		}
 		else
@@ -303,8 +275,21 @@ extern "C"
 			return -ENOENT;
 		}
 
+		if (elem.aux == NULL)
+		{
+			slog_warn("Aux buffer for stat is NULL, initializating.");
+			elem.aux = (char *)malloc(sizeof(struct stat) + 1);
+			memset(elem.aux, 0, sizeof(struct stat));
+		}
+		// else
+		// {
+		// 	free(elem.aux);
+		// 	elem.aux = (char *)malloc(sizeof(struct stat) + 1);
+		// }
+
 		// get block 0 from data server.
-		ret = TIMING(get_ndata(imss_path, ds, 0, aux, 0, 0, SYNC, NULL, INITIAL_RECURSION), "get_ndata0,imss_refresh", int32_t, 0);
+		slog_debug("Getting block from remote metadata server");
+		ret = TIMING(get_ndata(imss_path, ds, 0, elem.aux, 0, 0, SYNC, NULL, INITIAL_RECURSION), "get_ndata0,imss_refresh", int32_t, 0);
 		if (ret < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN];
@@ -312,10 +297,18 @@ extern "C"
 			slog_error("[imss_refresh] %s", err_msg);
 			return -1;
 		}
-		stats = (struct stat *)aux;
+		elem.aux[ret] = {'\0'};
+		if (ret != sizeof(struct stat))
+		{
+			slog_error("[imss_refresh] short read: expected %lu, got %d", sizeof(struct stat), ret);
+			return -1;
+		}
+		memcpy(&elem.stats, elem.aux, sizeof(struct stat));
 
-		slog_debug("ret=%d, ds=%d, st_size=%ld, stats->st_nlink=%lu, old_stats.st_nlink=%lu", ret, ds, stats->st_size, stats->st_nlink, old_stats.st_nlink);
-		HierarchicalMapUpdate(hierarchical_map, imss_path, ds, *stats);
+		slog_debug("ret=%d, ds=%d, st_size=%ld, stats->st_nlink=%lu, old_stats.st_nlink=%lu", ret, ds, elem.stats.st_size, elem.stats.st_nlink, elem.stats.st_nlink);
+		HierarchicalMapUpdate(hierarchical_map, path, ds, &elem.stats, elem.aux);
+
+		print_file_type(elem.stats, path);
 
 		return 0;
 	}
@@ -371,10 +364,6 @@ extern "C"
 		// stbuf->st_gid = getgid();
 		// stbuf->st_blksize = IMSS_DATA_BSIZE; // block size in bytes.
 
-		// slog_debug("before get_type, imss_path=%s", imss_path);
-		// char type = TIMING(get_type(imss_path), "get type", char, 0);
-		// slog_debug("after get_type(%s):%c", imss_path, type);
-
 		int32_t ds = -1;
 		int fd = -1;
 		struct stat stats;
@@ -392,7 +381,8 @@ extern "C"
 		slog_debug("Calling fd loopkup");
 		// Seek for the dataset on the local map. If it not found,
 		// we open it.
-		TIMING_NO_RETURN(fd_lookup((char *)imss_path, &fd, &stats, &aux), "fd_lookup", 0);
+		struct elements elem = {};
+		fd_lookup(imss_path, &fd, &elem);
 		if (fd < 0)
 		{ // not found.
 			slog_debug("Opening dataset %s", imss_path);
@@ -402,8 +392,8 @@ extern "C"
 			{
 				int ret = 0;
 				// slog_debug("[imss_getattr] IMSS_BLKSIZE=%lu KBytes, IMSS_DATA_BSIZE=%lu Bytes", IMSS_BLKSIZE, IMSS_DATA_BSIZE);
-				void *data = NULL;
-				data = (void *)malloc(sizeof(struct stat) + 1);
+				char *data = NULL;
+				data = (char *)malloc(sizeof(struct stat) + 1);
 
 				if (data == NULL)
 				{
@@ -420,6 +410,7 @@ extern "C"
 					slog_error("Error getting data: %s", imss_path);
 					return -ENOENT;
 				}
+				data[ret] = '\0';
 				memcpy(&stats, data, sizeof(struct stat));
 				slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
 				// Put the file descriptor (ds), stats info and data on the local map.
@@ -431,8 +422,8 @@ extern "C"
 			else if (ds == -EEXIST)
 			{ // file aready exists on the remote metadata server.
 				int ret = 0;
-				void *data = NULL;
-				data = (void *)malloc(sizeof(struct stat) * sizeof(char) + 1);
+				char *data = NULL;
+				data = (char *)malloc(sizeof(struct stat) + 1);
 				if (data == NULL)
 				{
 					perror("HERCULES_ERR_GETATTR_MEMORY_ALLOC_2");
@@ -446,11 +437,11 @@ extern "C"
 					slog_error("Error getting data: %s", imss_path);
 					return -ENOENT;
 				}
+				data[ret] = '\0';
 				memcpy(&stats, data, sizeof(struct stat));
 				// pthread_mutex_lock(&lock_file);
 				slog_debug("file=%s, st_nlink=%lu", imss_path, stats.st_nlink);
 				// Put the file descriptor (ds), stats info and data on the local map.
-				// map_put(map, imss_path, ds, stats, (char *)data);
 				HierarchicalMapPut(hierarchical_map, imss_path, ds, stats, (char *)data);
 
 				return 0;
@@ -460,6 +451,10 @@ extern "C"
 				// fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
 				return -ENOENT;
 			}
+		}
+		else
+		{
+			stats = elem.stats;
 		}
 		memcpy(stbuf, &stats, sizeof(struct stat));
 
@@ -528,7 +523,9 @@ extern "C"
 		struct stat stats;
 		char *aux = NULL;
 		// Look for the 'file descriptor' of 'imss_path' in the local map.
-		fd_lookup((char *)imss_path, &fd, &stats, &aux);
+		struct elements elem = {};
+		fd_lookup(imss_path, &fd, &elem);
+		stats = elem.stats;
 		slog_info("[FUSE]imss_path=%s, fd looked up=%d", imss_path, fd);
 		// fprintf(stderr, "[FUSE]imss_path=%s, fd looked up=%d\n", imss_path, fd);
 		if (fd >= 0)
@@ -571,7 +568,7 @@ extern "C"
 			}
 			}
 
-			void *data = (void *)malloc(sizeof(struct stat) * sizeof(char) + 1);
+			char *data = (char *)malloc(sizeof(struct stat) + 1);
 			ret = TIMING(get_ndata((char *)imss_path, file_desc, 0, data, 0, 0, SYNC, NULL, INITIAL_RECURSION), "imss_open,get_ndata", int, 0);
 			if (ret < 0)
 			{
@@ -582,6 +579,7 @@ extern "C"
 				slog_error("%s", err_msg);
 				return -ENOENT;
 			}
+			data[ret] = {'\0'};
 
 			slog_debug("ret=%d, file_desc=%d", ret, file_desc);
 			memcpy(&stats, data, sizeof(struct stat));
@@ -610,7 +608,6 @@ extern "C"
 		*fh = file_desc;
 		/*if ((fi->flags & 3) != O_RDONLY)
 		  return -EACCES;*/
-		// free(imss_path);
 		return 0;
 	}
 
@@ -670,8 +667,9 @@ extern "C"
 		size_t total_bytes_scheduled = 0;
 		int fd = -1;
 		struct stat stats;
-		char *aux;
-		fd_lookup((char *)path, &fd, &stats, &aux);
+		struct elements elem = {};
+		fd_lookup(path, &fd, &elem);
+		stats = elem.stats;
 
 		if (fd < 0)
 			return -ENOENT;
@@ -809,7 +807,9 @@ extern "C"
 		struct stat stats;
 		char *aux;
 
-		fd_lookup((char *)rpath, &fd, &stats, &aux);
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
+		stats = elem.stats;
 		if (fd >= 0)
 			ds = fd;
 		else if (fd == -1)
@@ -952,8 +952,9 @@ extern "C"
 		// Look up file metadata.
 		int fd = -1;
 		struct stat stats;
-		char *aux;
-		fd_lookup((char *)path, &fd, &stats, &aux);
+		struct elements elem = {};
+		fd_lookup(path, &fd, &elem);
+		stats = elem.stats;
 
 		if (fd < 0)
 			return -ENOENT;
@@ -1141,13 +1142,13 @@ extern "C"
 		int fd;
 		struct stat stats;
 		char *aux;
-		// printf("imss_read aux before %p\n", aux);
-		fd_lookup((char *)rpath, &fd, &stats, &aux);
-		// printf("imss_read aux after %p\n", aux);
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
 		if (fd >= 0)
 			ds = fd;
 		else if (fd == -2)
 			return -ENOENT;
+		stats = elem.stats;
 
 		memset(buf, 0, size);
 		// Read remaining blocks
@@ -1366,11 +1367,10 @@ extern "C"
 		// printf("rpath=%s\n",rpath);
 		int fd;
 		struct stat stats;
-		char *aux;
-		// printf("imss_read aux before %p\n", aux);
-		fd_lookup((char *)rpath, &fd, &stats, &aux);
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
+		stats = elem.stats;
 
-		// printf("imss_read aux after %p\n", aux);
 		if (fd >= 0)
 			ds = fd;
 		else if (fd == -2)
@@ -1455,7 +1455,7 @@ extern "C"
 						free(rpath);
 						return 0;
 					}
-					memcpy(buf, aux + start_offset, to_read);
+					memcpy(buf, buf + start_offset, to_read);
 					byte_count += to_read;
 					++first;
 
@@ -1464,7 +1464,7 @@ extern "C"
 				else if (curr_blk != end_blk)
 				{
 					// memcpy(buf + byte_count, aux + HEADER, IMSS_DATA_BSIZE);
-					memcpy(buf + byte_count, aux, IMSS_DATA_BSIZE);
+					memcpy(buf + byte_count, buf, IMSS_DATA_BSIZE);
 					byte_count += IMSS_DATA_BSIZE;
 					// End block case
 				}
@@ -1473,7 +1473,7 @@ extern "C"
 
 					// Read the minimum between end_offset and filled (read_ = min(end_offset, filled))
 					int64_t pending = size - byte_count;
-					memcpy(buf + byte_count, aux, pending);
+					memcpy(buf + byte_count, buf, pending);
 					byte_count += pending;
 				}
 			}
@@ -1511,9 +1511,10 @@ extern "C"
 		int fd;
 		struct stat stats;
 		char *aux;
-		// printf("imss_read aux before %p\n", aux);
-		fd_lookup((char *)rpath, &fd, &stats, &aux);
-		// printf("imss_read aux after %p\n", aux);
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
+		stats = elem.stats;
+
 		if (fd >= 0)
 			ds = fd;
 		else if (fd == -2)
@@ -1763,7 +1764,6 @@ extern "C"
 		uint64_t space_in_block;
 		uint32_t filled = 0;
 		struct stat header;
-		char *aux = NULL;
 		// char *data_pointer = (char *)buf; // points to the buffer containing all bytes to be stored
 		const void *data_pointer = buf; // points to the buffer containing all bytes to be stored
 		const char *rpath = path;	// this pointer should not be free.
@@ -1771,7 +1771,9 @@ extern "C"
 
 		int fd = -1;
 		struct stat stats;
-		fd_lookup((char *)rpath, &fd, &stats, &aux);
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
+		stats = elem.stats;
 		if (fd >= 0)
 			ds = fd;
 		else if (fd == -1)
@@ -1867,8 +1869,9 @@ extern "C"
 			// if(size + off != stats.st_size){
 			stats.st_size = size + off;
 			stats.st_blocks = curr_blk - 1;
+			elem.stats = stats;
 			slog_debug("[imss_write] Updating stat, st_size=%ld, st_nlink=%lu", stats.st_size, stats.st_nlink);
-			HierarchicalMapUpdate(hierarchical_map, rpath, ds, stats);
+			HierarchicalMapUpdate(hierarchical_map, rpath, ds, &elem.stats, elem.aux);
 		}
 
 		t = clock() - t;
@@ -1905,7 +1908,9 @@ extern "C"
 
 		int fd;
 		struct stat stats;
-		fd_lookup((char *)rpath, &fd, &stats, &aux);
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
+		stats = elem.stats;
 		if (fd >= 0)
 			ds = fd;
 		else if (fd == -2)
@@ -2041,7 +2046,8 @@ extern "C"
 		stats.st_size = size + off;
 		stats.st_blocks = end_blk - 1;
 		pthread_mutex_lock(&lock);
-		HierarchicalMapUpdate(hierarchical_map, rpath, ds, stats);
+		elem.stats = stats;
+		HierarchicalMapUpdate(hierarchical_map, rpath, ds, &elem.stats, elem.aux);
 		pthread_mutex_unlock(&lock);
 		return size; /////////////
 	}
@@ -2069,10 +2075,9 @@ extern "C"
 
 		int fd;
 		struct stat stats;
-		char *aux;
-
-		fd_lookup((char *)rpath, &fd, &stats, &aux);
-		// printf("stats_size=%ld\n",stats.st_size);
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
+		stats = elem.stats;
 		if (stats.st_size < size)
 		{
 			end_blk = ceil((double)(offset + stats.st_size) / IMSS_DATA_BSIZE);
@@ -2320,8 +2325,9 @@ extern "C"
 		const char *rpath = path; // this pointer should not be free.
 
 		struct stat stats;
-		char *aux = NULL;
-		fd_lookup((char *)rpath, &fd, &stats, &aux);
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
+		stats = elem.stats;
 		if (fd >= 0)
 			ds = fd;
 		else
@@ -2364,6 +2370,8 @@ extern "C"
 		// slog_debug("Calling imss_flush_data");
 		// imss_flush_data();
 		// slog_debug("Ending imss_flush_data");
+		struct stat buf;
+		imss_getattr(path, &buf);
 
 		// Updates block 0 on the data server.
 		ds = imss_release(path);
@@ -2409,8 +2417,6 @@ extern "C"
 		if (res < 0)
 		{
 			slog_error("Cannot create new dataset.\n");
-			// fprintf(stderr, "Cannot create new dataset %s, may already exist.\n", path);
-			// free(rpath);
 			return res;
 		}
 		else
@@ -2440,13 +2446,15 @@ extern "C"
 		print_file_type(ds_stat, path);
 
 		// Write initial block
-		void *buff = (void *)malloc(sizeof(struct stat) + 1);
-		memcpy(buff, &ds_stat, sizeof(struct stat));
-		pthread_mutex_lock(&lock); // lock.
+		size_t stats_size = sizeof(struct stat);
+		char *buff = (char *)malloc(stats_size + 1);
+		memcpy(buff, &ds_stat, stats_size);
+		buff[stats_size] = {'\0'};
+		// pthread_mutex_lock(&lock); // lock.
 		// stores block 0.
 		// fprintf(stdout, "size of stat=%lu bytes\n", sizeof(struct stat));
 		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0, SYNC, INITIAL_RECURSION);
-		pthread_mutex_unlock(&lock); // unlock.
+		// pthread_mutex_unlock(&lock); // unlock.
 		if (ret < 0)
 		{
 			slog_error("HERCULES_ERR_IMSS_CREATE_SET_DATA_0");
@@ -2534,18 +2542,6 @@ extern "C"
 		char *buff = NULL;
 		int ret = 0;
 		// pthread_mutex_lock(&lock);
-		// if (!stats)
-		// {
-		// 	stats = &aux_stats;
-		// 	// if we pass the stat, we skip this.
-		// 	slog_debug("Calling fd_lookup");
-		// 	fd_lookup((char *)imss_path, &fd, stats, &buff);
-		// }
-		// else
-		// {
-		// 	slog_debug("stat has been passed");
-		// 	buff = (char *)stats;
-		// }
 
 		int file_desc = 0;
 		// if (fd >= 0)
@@ -2664,21 +2660,22 @@ extern "C"
 		clock_gettime(CLOCK_REALTIME, &spec);
 		uint32_t file_desc;
 
-		char *rpath = (char *)calloc(MAX_PATH, sizeof(char));
-		// get_iuri(path, rpath);
-
 		// Assing file handler and create dataset
 		int fd;
 		struct stat stats;
-		char *buff;
-		fd_lookup((char *)rpath, &fd, &stats, &buff);
+		char *buff = NULL;
+
+		struct elements elem = {};
+		fd_lookup(path, &fd, &elem);
+		stats = elem.stats;
+		buff = elem.aux;
 
 		if (fd >= 0)
 			file_desc = fd;
 		else if (fd == -2)
 			return -ENOENT;
 		else
-			file_desc = open_dataset(rpath, 0);
+			file_desc = open_dataset((char *)path, 0);
 
 		if (file_desc < 0)
 		{
@@ -2733,10 +2730,13 @@ extern "C"
 		switch (_case)
 		{
 		case 0:
+		{
 			slog_debug("[FUSE]Entering case 0 ");
 			get_iuri(new_path_1, rpath1);
 			get_iuri(new_path_2, rpath2);
-			fd_lookup(new_path_1, &fd, &stats, &aux);
+			struct elements elem = {};
+			fd_lookup(new_path_1, &fd, &elem);
+			stats = elem.stats;
 			if (fd >= 0)
 			{
 				file_desc = fd;
@@ -2752,6 +2752,7 @@ extern "C"
 				}
 				aux = (char *)malloc(sizeof(struct stat) + 1);
 				ret = get_ndata(new_path_1, file_desc, 0, aux, 0, 0, SYNC, NULL, INITIAL_RECURSION);
+				aux[ret] = {'\0'};
 				memcpy(&stats, aux, sizeof(struct stat));
 				pthread_mutex_lock(&lock_file);
 				// map_put(map, new_path_1, file_desc, stats, aux);
@@ -2762,11 +2763,11 @@ extern "C"
 				// 	map_init_prefetch(map_prefetch, new_path_1, PREFETCH * IMSS_DATA_BSIZE);
 				// }
 				pthread_mutex_unlock(&lock_file);
-				// free(aux);
 			}
 			res = create_dataset((char *)rpath2, POLICY, N_BLKS, IMSS_BLKSIZE, REPL_FACTOR, REPL_TYPE, N_SERVERS, new_path_1, 3, TYPE_REGULAR_FILE); // TODO: CHECK file type.
 
 			break;
+		}
 		case 1:
 			slog_debug("[FUSE]Entering case 1 ");
 			// rpath1 = new_path_1;
@@ -2818,8 +2819,12 @@ extern "C"
 		// Assing file handler and create dataset
 		int fd;
 		struct stat stats;
-		char *buff;
-		fd_lookup(rpath, &fd, &stats, &buff);
+		char *buff = NULL;
+
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
+		stats = elem.stats;
+		buff = elem.aux;
 
 		if (fd >= 0)
 			file_desc = fd;
@@ -2830,7 +2835,6 @@ extern "C"
 		if (file_desc < 0)
 		{
 			slog_error("[IMSS-FUSE]    Cannot open dataset.");
-			// fprintf(stderr, "[IMSS-FUSE]    Cannot open dataset.\n");
 			return -EACCES;
 		}
 
@@ -2838,6 +2842,7 @@ extern "C"
 
 		// Write initial block
 		memcpy(buff, &stats, sizeof(struct stat));
+		buff[sizeof(struct stat)] = {'\0'};
 
 		pthread_mutex_lock(&lock);
 		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION);
@@ -2850,7 +2855,6 @@ extern "C"
 			return ret_set_data;
 		}
 
-		free(rpath);
 		return 0;
 	}
 
@@ -2862,46 +2866,35 @@ extern "C"
 	int imss_chmod(const char *path, mode_t mode)
 	{
 
-		struct stat ds_stat;
-		uint32_t file_desc;
-		char *rpath = (char *)calloc(MAX_PATH, sizeof(char));
-		get_iuri(path, rpath);
-
-		// Assing file handler and create dataset
 		int fd;
-		struct stat stats;
-		void *buff = NULL;
-		fd_lookup(rpath, &fd, &stats, (char **)&buff);
 
-		if (fd >= 0)
-			file_desc = fd;
-		else if (fd == -2)
+		struct elements elem = {};
+		fd_lookup(path, &fd, &elem);
+		if (fd < 0)
 			return -ENOENT;
-		else
-			file_desc = open_dataset(rpath, 0);
-		if (file_desc < 0)
-		{
-			slog_error("[IMSS-FUSE]    Cannot open dataset.");
-			// fprintf(stderr, "[IMSS-FUSE]    Cannot open dataset.\n");
-		}
 
+		char *buff = elem.aux; // (void *)malloc(sizeof(struct stat) + 1);
+		struct stat ds_stat = elem.stats;
+
+		// int ret = imss_getattr(path, &ds_stat);
+		// if (ret != 0)
+		// {
+		// 	slog_error("HERCULES_ERR_IMSS_CHMOD_FILE_DOES_NOT_EXIST");
+		// 	return -ENOENT;
+		// }
+
+		slog_debug("st_mode=%lu, new mode=%lu", ds_stat.st_mode, mode);
 		pthread_mutex_lock(&lock);
-		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL, INITIAL_RECURSION);
-		pthread_mutex_unlock(&lock);
-
-		memcpy(&ds_stat, buff, sizeof(struct stat));
-
-		slog_debug("[imss_chmod] st_mode=%lu, new mode=%lu", ds_stat.st_mode, mode);
-		mode_t type = ds_stat.st_mode & 0xFFFF000;
-		// fprintf(stderr, "Hola hola hola %d\n", type >> 3);
+		mode_t type = ds_stat.st_mode & S_IFMT;
 		ds_stat.st_mode = mode | type;
-		slog_debug("[imss_chmod] After st_mode=%lu", ds_stat.st_mode);
+		slog_debug("After st_mode=%lu", ds_stat.st_mode);
 
 		// Write initial block
 		memcpy(buff, &ds_stat, sizeof(struct stat));
+		buff[sizeof(struct stat)] = '\0';
 
-		pthread_mutex_lock(&lock);
-		int32_t ret_set_data = set_data((char *)path, file_desc, 0, buff, 0, 0, SYNC, INITIAL_RECURSION);
+		int32_t ret_set_data = set_data((char *)path, fd, 0, buff, 0, 0, SYNC, INITIAL_RECURSION);
+
 		pthread_mutex_unlock(&lock);
 
 		if (ret_set_data == 1)
@@ -2910,22 +2903,29 @@ extern "C"
 			ret_set_data = 0;
 		}
 
-		free(rpath);
+		HierarchicalMapUpdate(hierarchical_map, path, fd, &ds_stat, buff);
+
+		print_file_type(ds_stat, path);
+
 		return ret_set_data;
 	}
 
 	int imss_chown(const char *path, uid_t uid, gid_t gid)
 	{
+		slog_debug("Calling chown");
 		struct stat ds_stat;
 		uint32_t file_desc;
-		char *rpath = (char *)path; // (char *)calloc(MAX_PATH, sizeof(char));
-		// get_iuri(path, rpath);
+		char *rpath = (char *)path;
+		int ret = 0;
 
 		// Assing file handler and create dataset
 		int fd;
 		struct stat stats;
 		char *buff = NULL;
-		fd_lookup((char *)rpath, &fd, &stats, &buff);
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
+		stats = elem.stats;
+		buff = elem.aux;
 
 		if (fd >= 0)
 			file_desc = fd;
@@ -2940,7 +2940,8 @@ extern "C"
 		}
 
 		pthread_mutex_lock(&lock);
-		get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL, INITIAL_RECURSION);
+		ret = get_ndata((char *)path, file_desc, 0, buff, 0, 0, SYNC, NULL, INITIAL_RECURSION);
+		buff[ret] = {'\0'};
 		pthread_mutex_unlock(&lock);
 
 		memcpy(&ds_stat, buff, sizeof(struct stat));
@@ -2957,7 +2958,6 @@ extern "C"
 		pthread_mutex_lock(&lock);
 		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION);
 		pthread_mutex_unlock(&lock);
-		// free(rpath);
 		return ret_set_data;
 	}
 
@@ -3449,7 +3449,10 @@ extern "C"
 		int fd = 0;
 		char *buff = NULL;
 		int old_exists = 0;
-		TIMING_NO_RETURN(fd_lookup((char *)old_path, &fd, &old_file_stat, &buff), "fd_lookup old_path", 0);
+		// TIMING_NO_RETURN(fd_lookup((char *)old_path, &fd, &old_file_stat, &buff), "fd_lookup old_path", 0);
+		struct elements old_elem = {};
+		fd_lookup(old_path, &fd, &old_elem);
+		old_file_stat = old_elem.stats;
 		if (fd >= 0)
 		{			// file found in the local map.
 			old_exists = 0; // 0 indicates the file exists.
@@ -3476,7 +3479,10 @@ extern "C"
 			// last_parent_offset == 0 means the hercules_path is on the root directory.
 			// Due origin file (old_path) will be moved to a new directory
 			// we check if the new parent directoy exists.
-			TIMING_NO_RETURN(fd_lookup(last_parent_dir, &fd, &new_parentdir_stat_n, &buff), "fd_lookup last parent dir", 0);
+			// TIMING_NO_RETURN(fd_lookup(last_parent_dir, &fd, &new_parentdir_stat_n, &buff), "fd_lookup last parent dir", 0);
+			struct elements parent_elem = {};
+			fd_lookup(last_parent_dir, &fd, &parent_elem);
+			new_parentdir_stat_n = parent_elem.stats;
 			if (fd >= 0)
 			{ // file found in the local map.
 				ret = 1;
@@ -3500,7 +3506,10 @@ extern "C"
 
 		// checks if the new path exists.
 		int new_exists = 0;
-		TIMING_NO_RETURN(fd_lookup((char *)new_path, &fd, &new_file_stat, &buff), "fd_lookup new path", 0);
+		// TIMING_NO_RETURN(fd_lookup((char *)new_path, &fd, &new_file_stat, &buff), "fd_lookup new path", 0);
+		struct elements new_elem = {};
+		fd_lookup(new_path, &fd, &new_elem);
+		new_file_stat = new_elem.stats;
 		if (fd >= 0)
 		{			// file found in the local map.
 			new_exists = 0; // 0 indicates the file exists.
@@ -3535,16 +3544,6 @@ extern "C"
 			aux_path = new_path;
 		}
 		slog_debug("new_exists=%d, aux_path=%s", new_exists, aux_path);
-		// get the basename of the path.
-		// size_t actual_basename_len = 0;
-		// name = get_basename(aux_path, &actual_basename_len);
-		// concat the MOUNT POINT.
-		// strcpy(full_path, MOUNT_POINT);
-		// // if the new path exists, we concat the dir name (hercules_path + strlen("imss://")) to the full path.
-		// // this makes the old directory to be stored inside the existing directory.
-		// if (new_exists)
-		// 	strcat(full_path, new_path + strlen("imss://"));
-		// strncat(full_path, name, actual_basename_len);
 
 		// slog_debug("pos=%d, full_path=%s, given_old_path=%s, hercules_path=%s, last_parent_dir=%s", pos, full_path, old_path, new_path, last_parent_dir);
 		slog_debug("pos=%d, given_old_path=%s, hercules_path=%s, last_parent_dir=%s", pos, old_path, new_path, last_parent_dir);
@@ -3569,7 +3568,9 @@ extern "C"
 				// perror("HERCULES_ERR_RENAME_DIR_NO_ELEMENTS_FOUND");
 				slog_warn("No elements to rename: %s to %s", old_path, new_path);
 			}
-			fd_lookup((char *)new_path, &fd, &new_file_stat, &buff);
+			// fd_lookup((char *)new_path, &fd, &new_file_stat, &buff);
+			fd_lookup(new_path, &fd, &new_elem);
+			new_file_stat = new_elem.stats;
 		}
 		else if (old_is_dir && !new_is_dir)
 		{ // old is a directory and new is a regular file: NOT POSSIBLE.
@@ -3585,19 +3586,6 @@ extern "C"
 			int slash_added = ConcatLastSlashC(new_path);
 			aux_path = old_path;
 			pos = 0;
-			// get the basename of the old regular file.
-			// TODO: change this to "strstr" or something similar to find the last slash.
-			// for (int c = 0; c < strlen(aux_path); ++c)
-			// {
-			// 	if (aux_path[c] == '/')
-			// 	{
-			// 		if (c + 1 < strlen(aux_path))
-			// 			pos = c;
-			// 	}
-			// }
-			// pos++; // +1 to avoid the found slash.
-			// memset(name, 0, sizeof(name));
-			// strncpy(name, aux_path + pos, strlen(aux_path) - pos);
 			size_t actual_basename_len = 0;
 			name = get_basename(aux_path, &actual_basename_len);
 			slog_debug("name=%s, aux_path=%s, strlen(aux_path)=%d, pos=%d", name, aux_path, strlen(aux_path), pos);
@@ -3686,7 +3674,7 @@ extern "C"
 		}
 		return shm_fd;
 	}
-	
+
 #ifdef __cplusplus
 }
 #endif
