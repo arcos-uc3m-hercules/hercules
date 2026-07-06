@@ -2,43 +2,43 @@
 #define IMSS_POSIX_H
 
 // #include "map.hpp"
+#include "cfg_parse.h"
+#include "flags.h"
+#include "hash_table.h"
 #include "hierarchical_map.hpp"
 #include "mapfd.hpp"
 #include "mapprefetch.hpp"
-#include "cfg_parse.h"
-#include "flags.h"
 #include "resolvepath.h"
 #include "tempname.h"
-#include "hash_table.h"
-#include <stdio.h>
-#include <stdint.h>
-#include <sys/types.h>
+#include <arpa/inet.h>
 #include <dlfcn.h>
 #include <errno.h>
-#include <unistd.h>
+#include <netinet/in.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/xattr.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
 #include <sys/statvfs.h>
+#include <sys/types.h>
 #include <sys/vfs.h> // statfs
+#include <sys/xattr.h>
+#include <unistd.h>
 // extern "C" {
     #include <imss_posix_api.h>
 // }
-#include <stdarg.h>
 #include <math.h>
-#include <sys/utsname.h>
+#include <stdarg.h>
 #include <sys/epoll.h>
 #include <sys/time.h>
+#include <sys/utsname.h>
 // Those are used by reports functions in stat.
-#include <pwd.h>
-#include <sys/sysmacros.h>
-#include <limits.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <pwd.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <sys/wait.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -65,7 +65,6 @@ extern "C"
 	void copy_stat_to_statx(const struct stat *src, struct statx *dest);
 	void ResolvePathsAndFD(const int fd_dir, const char *path_to_check, std::string &directory_path, char **file_path);
 	uint32_t GetRank();
-
 
     int __fxstat(int ver, int fd, struct stat *buf);
     
@@ -102,6 +101,7 @@ extern "C"
     static int (*real_open64)(const char *pathname, int flags, ...) = NULL;
     static int (*real_open)(const char *pathname, int flags, ...) = NULL;
     static int (*real_creat)(const char *pathname, mode_t mode) = NULL;
+	static int (*real_creat64)(const char *path, mode_t mode) = NULL;
     static FILE *(*real_fopen)(const char *pathname, const char *mode) = NULL;
     static FILE *(*real_fdopen)(int fildes, const char *mode) = NULL;
     static int (*real_fdclose)(FILE *stream, int *fdp) = NULL;
@@ -109,6 +109,7 @@ extern "C"
     // static FILE *(*real_fopen64)(const char * pathname, const char * mode) = NULL;
     static int (*real_access)(const char *pathname, int mode) = NULL;
     static int (*real_mkdir)(const char *path, mode_t mode) = NULL;
+	static int (*real_mkdirat)(int dirfd, const char *path, mode_t mode) = NULL;
     static ssize_t (*real_write)(int fd, const void *buf, size_t size) = NULL;
     static ssize_t (*real_read)(int fd, const void *buf, size_t size) = NULL;
     static int (*real_remove)(const char *name) = NULL;
@@ -118,6 +119,7 @@ extern "C"
     static int (*real_fchmodat)(int dir_fd, const char *pathname, mode_t mode, int flags) = NULL;
     static int (*real_fchownat)(int dir_fd, const char *pathname, uid_t owner, gid_t group, int flags) = NULL;
     static DIR *(*real_opendir)(const char *name) = NULL;
+	static DIR *(*real_fdopendir)(int fd) = NULL;
     static struct dirent *(*real_readdir)(DIR *dirp) = NULL;
     static struct dirent64 *(*real_readdir64)(DIR *dirp) = NULL;
     static int (*real_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count) = NULL;
@@ -130,9 +132,12 @@ extern "C"
     static int (*real_statfs)(const char *path, struct statfs *buf) = NULL;
     static char *(*real_realpath)(const char *path, char *resolved_path) = NULL;
 	static char *(*real__realpath_chk)(const char *pathname, char *resolved_path, size_t resolved_len) = NULL;
-    // static int (*real__openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
+	static int (*real__openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
     static int (*real_openat)(int dir_fd, const char *pathname, int flags, ...) = NULL;
+	static int (*real___openat_2)(int dirfd, const char *path, int flags) = NULL;
+	static int (*real_openat2)(int dirfd, const char *path, const struct open_how *how, size_t size) = NULL;
     // static int (*real__openat64)(int fd, const char *file, int oflag, ...) = NULL;
+	static int (*real_openat64)(int dirfd, const char *path, int flags, ...) = NULL;
     // static int (*real__openat64_2)(int fd, const char *file, int oflag) = NULL;
     // static int (*real__libc_openat)(int fd, const char *file, int oflag, ...) = NULL;
     static int (*real__libc_open64)(const char *file, int oflag, ...) = NULL;
@@ -145,7 +150,8 @@ extern "C"
     static int (*real_feof)(FILE *fp) = NULL;
     static long int (*real_ftell)(FILE *fp) = NULL;
     static int (*real_fputs)(const char *, FILE *) = NULL;
-	static int (*real_fputc)(int, FILE *) = NULL;
+	static int (*real_fputc)(int c, FILE *stream) = NULL;
+	static int (*real_putc)(int c, FILE *stream) = NULL;
 	static int (*real_puts)(const char *) = NULL;
 
     static void (*real_rewind)(FILE *stream) = NULL;
@@ -163,6 +169,7 @@ extern "C"
     static int (*real_execve)(const char *pathname, char *const argv[], char *const envp[]) = NULL;
     static int (*real_execv)(const char *pathname, char *const argv[]) = NULL;
     static char *(*real_getcwd)(char *buf, size_t size) = NULL;
+	static char *(*real_get_current_dir_name)(void) = NULL;
     static int (*real_change_to_directory)(char *, int, int) = NULL;
     static int (*real_bindpwd)(int) = NULL;
     static int (*real_epoll_ctl)(int epfd, int op, int fd, struct epoll_event *event) = NULL;
@@ -193,6 +200,7 @@ extern "C"
     static int (*real_syncfs)(int fd) = NULL;
     static int (*real_posix_fadvise)(int fd, off_t offset, off_t len, int advice) = NULL;
     // static int (*real_posix_fadvise64)(int fd, off64_t offset, off64_t len, int advice) = NULL;
+	static int (*real_fadvise64)(int fd, off_t offset, off_t len, int advice) = NULL;
     static int (*real_faccessat)(int dir_fd, const char *pathname, int mode, int flags) = NULL;
     static int (*real_faccessat2)(int dirfd, const char *pathname, int mode, int flags) = NULL;
 
@@ -218,8 +226,26 @@ extern "C"
 
     static int (*real_ioctl)(int, unsigned long, ...) = NULL;
     
+static ssize_t (*real_tee)(int fd_in, int fd_out, size_t size, unsigned int flags) = NULL;
+	static ssize_t (*real_splice)(int fd_in, off_t *_Nullable off_in, int fd_out, off_t *_Nullable off_out, size_t size, unsigned int flags) = NULL;
+	static ssize_t (*real_vmsplice)(int fd, const struct iovec *iov, size_t nr_segs, unsigned int flags) = NULL;
+	static int (*real_pipe2)(int pipefd[2], int flags) = NULL;
+	static int (*real_pipe)(int pipefd[2]) = NULL;
+	static FILE *(*real_popen)(const char *command, const char *type) = NULL;
+	static ssize_t (*real_pwritev2)(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) = NULL;
 
-    // static int (*real_syscall)(SYS_faccessat2, int dirfd, const char *path, int mode, int flags) = NULL;
+	static int (*real_fgetc)(FILE *stream) = NULL;
+	static int (*real_getchar)(void) = NULL;
+	static char *(*real_fgets)(char *s, int size, FILE *stream) = NULL;
+	static int (*real_ungetc)(int c, FILE *stream) = NULL;
+	static int (*real_setenv)(const char *name, const char *value, int overwrite) = NULL;
+
+	static int (*real_putw)(int w, FILE *stream) = NULL;
+	static int (*real_putchar)(int c) = NULL;
+
+	static size_t (*real_fwrite_unlocked)(const void *buf, size_t size, size_t count, FILE *stream) = NULL;
+	static int (*real_putc_unlocked)(int c, FILE *stream) = NULL;
+	static int (*real_putchar_unlocked)(int c) = NULL;
 
 #ifdef __cplusplus
 }

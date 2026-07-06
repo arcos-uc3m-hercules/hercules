@@ -2938,8 +2938,33 @@ int32_t create_dataset(char *dataset_uri,
 
 	// ack from the server.
 	size_t msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
-	void *response_buffer = (void *)malloc(msg_length * sizeof(char));
+	char *response_buffer = (char *)malloc((msg_length + 1) * sizeof(char));
+
 	msg_length = recv_data(ucp_worker_meta, ep, response_buffer, msg_length, local_meta_uid, SYNC);
+	response_buffer[msg_length] = '\0';
+	slog_debug(" after recv_data, msg_length=%zu", msg_length);
+	if (msg_length == 0)
+	{
+		// pthread_mutex_unlock(&lock_network);
+		perror("HERCULES_ERR_CREATE_DATASET_RECV_DATA_ACK_RESPONSE");
+		slog_error("HERCULES_ERR_CREATE_DATASET_RECV_DATA_ACK_RESPONSE");
+		free(response_buffer);
+		return -1;
+	}
+	slog_debug(" result=%s, msg_length=%zu", response_buffer, msg_length);
+
+	// Parse inode from response: format is "MSG_OK_OP <inode>"
+	ino_t server_inode = 0;
+	char msg_ok[64] = {0};
+	if (sscanf(response_buffer, "%63s %lu", msg_ok, &server_inode) == 2)
+	{
+		slog_debug("Received inode from server: %lu", server_inode);
+	}
+	else
+	{
+		slog_warn("Failed to parse inode from server response: %s", response_buffer);
+	}
+
 	free(response_buffer);
 
 	pthread_mutex_unlock(&lock_network);
@@ -2979,7 +3004,7 @@ int32_t create_dataset(char *dataset_uri,
 	// free(new_dataset);
 	slog_live("dataset_create: GInsert %d", entry_number);
 	// return ret;
-	return entry_number++;
+	return server_inode; // entry_number++;
 }
 
 /**

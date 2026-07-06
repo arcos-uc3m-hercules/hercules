@@ -120,6 +120,9 @@ extern imss curr_imss;
 
 size_t global_offset = 0;
 
+// Controls the inode number for new files.
+ino_t next_inode = 1000000;
+
 std::vector<PendingRequestInfo> pending_requests;
 
 // TODO: check if this variables can be moved to records.cpp
@@ -4275,7 +4278,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	{
 		size_t msg_length = 0;
 		void *data_ref = NULL;
-		SendConfirmationMessage(arguments, MSG_OK_OP);
+		char response[512] = {"\0"}; // TODO: check the size of this buffer.
+		sprintf(response, "%s %lu", MSG_OK_OP, ++next_inode);
+		SendConfirmationMessage(arguments, response);
 		// fprintf(stderr, "Set request %s\n", key.c_str());
 		switch (is_performance_operation)
 		{

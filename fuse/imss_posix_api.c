@@ -2705,6 +2705,11 @@ extern "C"
 	 */
 	int imss_mkdir(const char *path, mode_t mode)
 	{
+		if (!strcmp(path, "imss://"))
+		{
+			slog_debug("Trying to make the mount point %s", path);
+			return -17;
+		}
 		uint64_t fi;
 		int ret = -1;
 		// opened is equals to 2 to indicate this was not created with a 'open' syscall.
