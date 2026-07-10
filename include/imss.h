@@ -10,7 +10,7 @@
 #include "performance_records.hpp"
 
 // Maximum number of bytes assigned to a dataset or IMSS URI.
-#define URI_ 256
+#define URI_ 512
 
 // Maximum number of bytes retrieved from the imss deployment file per line.
 #define LINE_LENGTH 512

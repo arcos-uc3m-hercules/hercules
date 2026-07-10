@@ -27,6 +27,7 @@
 #define REQUEST_SIZE 1024
 #define RESPONSE_SIZE 1024
 #define MODE_SIZE 24
+#define NUMBER_SIZE 16
 #define BUFFER_SIZE 4 * 1024 * 1024
 
 #define UINT64_MAX_STR_LEN (sizeof(uint64_t) * 3 + 1)

@@ -1803,7 +1803,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 	// Code to be sent if the requested to-be-read key does not exist.
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
-	char mode[MODE_SIZE] = {0};
+	char mode[MODE_SIZE + 1] = {0};
 	const char *response_msg = NULL;
 
 	// Save the request to be served.
@@ -1811,12 +1811,12 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 	// Elements conforming the request.
 	uint32_t block_size_recv, block_offset;
-	char uri_[URI_] = {0};
+	char uri_[URI_ + 1] = {0};
 	size_t to_read = 0;
 	int sender = 0;
 
 	// Get the GET, SET, ..., operation (mode).
-	TIMING_NO_RETURN(sscanf(req, "%s", mode), "sscanf mode", arguments->thread_id);
+	TIMING_NO_RETURN(sscanf(req, "%" STR(MODE_SIZE) "s", mode), "sscanf mode", arguments->thread_id);
 
 	if (!strcmp(mode, "BROADCAST"))
 	{
@@ -2158,7 +2158,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 
 	if (!default_params)
 	{ // special case for "LOCALSETBLOCK" (shared memory).
-		sscanf(req, "%s %" PRIu32 " %" PRIu32 " %d %s %lu", mode, &block_size_recv, &block_offset, &shm_key, uri_, &to_read);
+		sscanf(req, "%" STR(MODE_SIZE) "s %" PRIu32 " %" PRIu32 " %d %" STR(URI_) "s %lu", mode, &block_size_recv, &block_offset, &shm_key, uri_, &to_read);
 		// fprintf(stderr, "request=%s, block_size_recv=%d, shm_key=%d\n", req, block_size_recv, shm_key);
 	}
 	else
@@ -3597,9 +3597,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 
 	uint32_t operation = 0; // Hercules instance or dataset structure.
-	char mode[MODE_SIZE] = {0};
-	char number[16] = {0};
-	char uri_[URI_] = {0};
+	char mode[MODE_SIZE + 1] = {0};
+	char number[NUMBER_SIZE + 1] = {0};
+	char uri_[URI_ + 1] = {0};
 	int extra_info = 0;
 	int num_characters_read = 0;
 	int num_input_read = 0;
@@ -3607,7 +3607,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 	// Save the request to be served.
 	slog_info("Request - '%s'", req);
-	// fprintf(stderr, "Request=%s\n", req);
 	if (!strcmp(req, MSG_DECOM_DATASERVERS))
 	{
 		acks_received++;
@@ -3628,7 +3627,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		return 0;
 	}
 	// TODO: GET and SET request does not have a consistent format. Try to change it.
-	num_input_read = sscanf(req, "%" PRIu32 " %s %s %s %n", &operation, mode, number, uri_, &num_characters_read);
+	num_input_read = sscanf(req, "%" PRIu32 " %" STR(MODE_SIZE) "s %" STR(NUMBER_SIZE) "s %" STR(URI_) "s %n", &operation, mode, number, uri_, &num_characters_read);
 
 	if (!strcmp(mode, "GET"))
 	{
@@ -4123,7 +4122,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					int err = hierarchical_map->HierarchicalMapGet(new_key, &address_, &block_size_rtvd);
 					if (err != 0)
 					{
-						strcpy(((dataset_info*)address_)->uri_, new_key.c_str());
+						strcpy(((dataset_info *)address_)->uri_, new_key.c_str());
 					}
 					response_msg = MSG_RENAME_OP;
 				}
@@ -4562,8 +4561,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	}
 	break;
 	default:
-		fprintf(stderr, "HERCULES_ERR_INVALID_SET_GET_CASE\n");
-		slog_error("HERCULES_ERR_INVALID_SET_GET_CASE");
+		fprintf(stderr, "HERCULES_ERR_INVALID_SET_GET_CASE: %s\n", arguments->curr_req);
+		slog_error("HERCULES_ERR_INVALID_SET_GET_CASE: %s\n", arguments->curr_req);
 		break;
 	}
 

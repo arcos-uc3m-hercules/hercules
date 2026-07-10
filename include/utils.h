@@ -19,6 +19,11 @@
 #define ANSI_COLOR_CYAN    "\x1b[36m"
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
+// Converts a compile-time constant into string text.
+#define _STR(x) #x
+#define STR(x) _STR(x)
+
+
 int get_hostname(char *buffer, size_t buffer_size);
 
 /**

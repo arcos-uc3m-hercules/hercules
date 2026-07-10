@@ -7083,7 +7083,7 @@ int32_t free_imss(imss_info *imss_info_)
 {
 	for (int32_t i = 0; i < imss_info_->num_storages; i++)
 	{
-		free(imss_info_->ips[i]);		
+		free(imss_info_->ips[i]);
 	}
 
 	free(imss_info_->ips);
