@@ -80,6 +80,8 @@ extern char *META_HOSTFILE;
 extern uint64_t METADATA_PORT; // Not default, 1 will fail
 extern int32_t N_META_SERVERS;
 extern uint32_t rank;
+extern int backend_init_status;
+extern pthread_once_t backend_init_once;
 
 #ifdef __cplusplus
 extern "C"
@@ -96,6 +98,47 @@ extern "C"
 	   DRM = 2;
 	   TRM = 3;
 	 */
+
+	void connect_backend_internal(void)
+	{
+		// Metadata server
+		if (TIMING(stat_init(META_HOSTFILE, METADATA_PORT, N_META_SERVERS, rank), "stat init", int32_t, rank) == -1)
+		{
+			// In case of error notify and exit
+			slog_error("Stat init failed, cannot connect to Metadata server.");
+			// imss_comm_cleanup();
+			// exit(1);
+			backend_init_status = 0;
+			return;
+		}
+
+		uint32_t num_active_storages = 0;
+		// Make the connection to all data servers.
+		int ret_open_imss = TIMING(open_imss(IMSS_ROOT, &num_active_storages), "open imss", int32_t, rank);
+		if (ret_open_imss < 0)
+		{
+			slog_fatal("Error creating HERCULES's resources, the process cannot be started.");
+			printf("Error creating HERCULES's resources, the process cannot be started. Please, make sure servers are running and clients can establish connections.\n");
+			// exit(1);
+			backend_init_status = 0;
+			return;
+		}
+
+		if (num_active_storages != N_SERVERS)
+		{
+			fprintf(stderr, "Number of storage servers does not match from the values retrieved from the metadata server. Setting from %d to %d\n", N_SERVERS, num_active_storages);
+			slog_warn("Number of storage servers does not match from the values retrieved from the metadata server. Setting from %d to %d\n", N_SERVERS, num_active_storages);
+			N_SERVERS = num_active_storages;
+		}
+
+		backend_init_status = 1;
+	}
+
+	int connect_backend(void)
+	{
+		pthread_once(&backend_init_once, connect_backend_internal);
+		return backend_init_status;
+	}
 
 	int get_number_of_data_servers(int i_blk, int num_of_blk)
 	{
@@ -205,6 +248,7 @@ extern "C"
 	 */
 	int imss_truncate(const char *path, off_t length)
 	{
+		ENSURE_BACKEND();
 		clock_t t = clock();
 		int ds = 0;
 		int fd = -1;
@@ -348,6 +392,7 @@ extern "C"
 	 */
 	int imss_getattr(const char *path, struct stat *stbuf)
 	{
+		ENSURE_BACKEND();
 		// Needed variables for the call
 		// char *buffer = NULL;
 		// char **refs = NULL;
@@ -408,6 +453,7 @@ extern "C"
 				if (ret < 0)
 				{
 					slog_error("Error getting data: %s", imss_path);
+					free(data);
 					return -ENOENT;
 				}
 				data[ret] = '\0';
@@ -435,6 +481,7 @@ extern "C"
 				if (ret < 0)
 				{
 					slog_error("Error getting data: %s", imss_path);
+					free(data);
 					return -ENOENT;
 				}
 				data[ret] = '\0';
@@ -448,7 +495,7 @@ extern "C"
 			}
 			else
 			{ // file does not exist on the remote metadata server.
-				// fprintf(stderr, "[IMSS-FUSE]	Cannot get dataset metadata.");
+				// fprintf(stderr, "[IMSS-FUSE] Cannot get dataset metadata.");
 				return -ENOENT;
 			}
 		}
@@ -461,15 +508,20 @@ extern "C"
 		int is_directory = S_ISDIR(stats.st_mode);
 		if (is_directory)
 		{
-			// if ((n_ent = get_dir(imss_path, &refs)) != -1)
+			char **refs = NULL;
+			int n_ent = 0;
+			if ((n_ent = get_dir(imss_path, &refs)) > 0)
 			{
-				stbuf->st_size = 4;
-				slog_debug("is a directory, setting st_nlink to 1");
-				stbuf->st_nlink = 1;
-				stbuf->st_mode = S_IFDIR | 0775;
-				// free all memory in refs.
-				// free_entries(&refs, n_ent);
+				free_entries(&refs, n_ent);
 			}
+			n_ent++;
+			stbuf->st_size = 4;
+			// slog_debug("is a directory, setting st_nlink to 1");
+			slog_debug("is a directory, setting st_nlink to %d", n_ent);
+			stbuf->st_nlink = n_ent; // 1;
+			stbuf->st_mode = S_IFDIR | 0775;
+			// free all memory in refs.
+			// free_entries(&refs, n_ent);
 		}
 		else
 		{
@@ -494,25 +546,21 @@ extern "C"
 
 	uint32_t imss_readdir(std::string imss_path, char ***buf, posix_fill_dir_t filler, off_t offset)
 	{
-		// Needed variables for the call
-		// char *buffer = NULL;
-		//  char **refs = NULL;
+		ENSURE_BACKEND();
 		uint32_t n_ent = 0;
-		// uint32_t imss_path_len = imss_path.length();
 
 		// TODO: "ls" when there is more than one "/".
 
 		slog_debug("[IMSS] imss_path=%s", imss_path.c_str());
 		// Call IMSS to get metadata
-		// int ret = 0;
 		n_ent = get_dir(imss_path, buf);
 		slog_debug("[IMSS] imss_path=%s, n_ent=%d", imss_path.c_str(), n_ent);
-		// buf = refs;
 		return n_ent;
 	}
 
 	int imss_open(const char *path, uint64_t *fh)
 	{
+		ENSURE_BACKEND();
 		int ret = -1;
 		// TODO -> Access control
 		// DEBUG
@@ -659,6 +707,7 @@ extern "C"
 
 	ssize_t imss_sread_prefetch_v2(const char *path, void *buf, size_t size, off_t offset)
 	{
+		ENSURE_BACKEND();
 		int eof_found = 0;
 		const char *rpath = path; // this pointer should not be free.
 
@@ -784,6 +833,7 @@ extern "C"
 
 	ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 	{
+		ENSURE_BACKEND();
 		int32_t length = 0;
 		int eof_found = 0;
 		const char *rpath = path; // this pointer should not be free.
@@ -949,6 +999,7 @@ extern "C"
 
 	ssize_t imss_read_async(const char *path, void *buf, size_t size, off_t offset)
 	{
+		ENSURE_BACKEND();
 		// Look up file metadata.
 		int fd = -1;
 		struct stat stats;
@@ -1119,8 +1170,7 @@ extern "C"
 
 	int imss_vread_prefetch(const char *path, char *buf, size_t size, off_t offset)
 	{
-
-		// printf("IMSS_READV size=%ld, path=%s\n", size, path);
+		ENSURE_BACKEND();
 		// Compute current block and offsets
 		int64_t curr_blk, end_blk, start_offset, end_offset;
 		int64_t first = 0;
@@ -1344,6 +1394,7 @@ extern "C"
 
 	int imss_vread_no_prefetch(const char *path, char *buf, size_t size, off_t offset)
 	{
+		ENSURE_BACKEND();
 		// printf("IMSS_READV size=%ld, path=%s, offset=%ld\n", size, path, offset);
 		// Compute current block and offsets
 		int64_t curr_blk, end_blk, start_offset, end_offset;
@@ -1488,8 +1539,7 @@ extern "C"
 
 	int imss_vread_2x(const char *path, char *buf, size_t size, off_t offset)
 	{
-
-		// printf("IMSS_READV size=%ld, path=%s, offset=%ld\n", size, path, offset);
+		ENSURE_BACKEND();
 		// Compute current block and offsets
 		int64_t curr_blk, end_blk, start_offset, end_offset;
 		int64_t first = 0;
@@ -1685,6 +1735,7 @@ extern "C"
 
 	ssize_t imss_read(const char *path, void *buf, size_t size, off_t offset)
 	{
+		ENSURE_BACKEND();
 		ssize_t ret;
 		// BEST_PERFORMANCE_READ (default 0)
 		if (BEST_PERFORMANCE_READ == 0)
@@ -1731,6 +1782,7 @@ extern "C"
 
 	ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 	{
+		ENSURE_BACKEND();
 		ssize_t ret;
 		clock_t t, tm, tmm;
 		tmm = 0;
@@ -2319,6 +2371,7 @@ extern "C"
 	 */
 	int imss_release(const char *path)
 	{
+		ENSURE_BACKEND();
 		// Update dates
 		int ds = 0;
 		int fd = 0;
@@ -2365,6 +2418,7 @@ extern "C"
 	 */
 	int imss_close(const char *path, int fd)
 	{
+		ENSURE_BACKEND();
 		int ret = 0;
 		int ds = 0;
 		// slog_debug("Calling imss_flush_data");
@@ -2403,6 +2457,7 @@ extern "C"
 
 	int imss_create(const char *path, mode_t mode, uint64_t *fh, int opened, char file_type)
 	{
+		ENSURE_BACKEND();
 		int ret = 0;
 		struct timespec spec;
 		// TODO check mode
@@ -2504,7 +2559,7 @@ extern "C"
 	 */
 	int imss_rmdir(const char *imss_path, struct stat *stats)
 	{
-
+		ENSURE_BACKEND();
 		// Needed variables for the call
 		char **refs = NULL;
 		int n_ent = 0;
@@ -2516,7 +2571,7 @@ extern "C"
 			if (n_ent > 1)
 			{
 				slog_debug("n_ent > 1");
-				return -EPERM;
+				return -ENOTEMPTY; //-EPERM;
 			}
 		}
 		else
@@ -2533,6 +2588,7 @@ extern "C"
 
 	int imss_unlink(const char *path, struct stat *stats)
 	{
+		ENSURE_BACKEND();
 		const char *imss_path = path; // this pointer should not be free.
 		slog_info("path=%s, imss_path=%s", path, imss_path);
 
@@ -2655,6 +2711,7 @@ extern "C"
 
 	int imss_utimens(const char *path, const struct timespec tv[2])
 	{
+		ENSURE_BACKEND();
 		struct stat ds_stat;
 		struct timespec spec;
 		clock_gettime(CLOCK_REALTIME, &spec);
@@ -2710,6 +2767,7 @@ extern "C"
 			slog_debug("Trying to make the mount point %s", path);
 			return -17;
 		}
+		ENSURE_BACKEND();
 		uint64_t fi;
 		int ret = -1;
 		// opened is equals to 2 to indicate this was not created with a 'open' syscall.
@@ -2719,6 +2777,7 @@ extern "C"
 
 	int imss_symlinkat(char *new_path_1, char *new_path_2, int _case)
 	{
+		ENSURE_BACKEND();
 		int ret = 0;
 		struct timespec spec;
 		// TODO check mode
@@ -2807,14 +2866,13 @@ extern "C"
 
 	int imss_flush(const char *path)
 	{
-
+		ENSURE_BACKEND();
 		if (error_print != 0)
 		{
 			int32_t err = error_print;
 			error_print = 0;
 			return err;
 		}
-		// struct stat ds_stat;
 		struct timespec spec;
 		clock_gettime(CLOCK_REALTIME, &spec);
 		uint32_t file_desc;
@@ -2870,23 +2928,16 @@ extern "C"
 
 	int imss_chmod(const char *path, mode_t mode)
 	{
-
 		int fd;
-
 		struct elements elem = {};
 		fd_lookup(path, &fd, &elem);
 		if (fd < 0)
 			return -ENOENT;
 
-		char *buff = elem.aux; // (void *)malloc(sizeof(struct stat) + 1);
-		struct stat ds_stat = elem.stats;
+		ENSURE_BACKEND();
 
-		// int ret = imss_getattr(path, &ds_stat);
-		// if (ret != 0)
-		// {
-		// 	slog_error("HERCULES_ERR_IMSS_CHMOD_FILE_DOES_NOT_EXIST");
-		// 	return -ENOENT;
-		// }
+		char *buff = elem.aux;
+		struct stat ds_stat = elem.stats;
 
 		slog_debug("st_mode=%lu, new mode=%lu", ds_stat.st_mode, mode);
 		pthread_mutex_lock(&lock);
@@ -2918,11 +2969,11 @@ extern "C"
 	int imss_chown(const char *path, uid_t uid, gid_t gid)
 	{
 		slog_debug("Calling chown");
+		ENSURE_BACKEND();
 		struct stat ds_stat;
 		uint32_t file_desc;
 		char *rpath = (char *)path;
 		int ret = 0;
-
 		// Assing file handler and create dataset
 		int fd;
 		struct stat stats;
@@ -2969,13 +3020,12 @@ extern "C"
 	// Function to recursively read and print files and directories.
 	int read_directory(const char *path, const char *parent)
 	{
+		ENSURE_BACKEND();
 		DIR *dir;
 		struct dirent *entry;
 		struct stat stat_buf;
 		char full_path[MAX_PATH] = {0};
 		char hercules_dir_path[MAX_PATH] = {0};
-		// char *basec = NULL;
-		// char *parent_bname = NULL;
 
 		// Open the directory.
 		dir = opendir(path);
@@ -2986,9 +3036,6 @@ extern "C"
 			return -1;
 		}
 		slog_debug("Reading dir=%s, parent=%s", path, parent);
-		// slog_debug("dirname=%s, basename=%s, parent=%s", path, dirname(strdup((char *)path)), basename(strdup((char *)path)), parent);
-		// basec = strdup(path);
-		// parent_bname = basename(basec);
 
 		// Read the directory entries.
 		while ((entry = readdir(dir)) != NULL)
@@ -3080,6 +3127,7 @@ extern "C"
 
 	int hercules_move_file_from_disk(int fd_old, const char *old_path, const char *new_path)
 	{
+		ENSURE_BACKEND();
 		struct stat old_file_stat;
 
 		int to_close = 0;
@@ -3177,6 +3225,7 @@ extern "C"
 
 	int HerculesMove(const char *given_old_path, const char *given_new_pathname, const char *hercules_path)
 	{
+		ENSURE_BACKEND();
 		int ret = 0;
 		char full_path[PATH_MAX] = {0}, name[PATH_MAX] = {0};
 		int old_is_dir = 0;
@@ -3448,6 +3497,8 @@ extern "C"
 			ret = -EPERM;
 			return ret;
 		}
+
+		ENSURE_BACKEND();
 
 		// TODO: check if they are locally instead of asking to the remote server.
 		// check old_path if it is a directory.

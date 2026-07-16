@@ -1683,7 +1683,7 @@ extern "C"
 			status = ucp_request_check_status(request);
 			iterations++;
 
-			// Alerta si lleva demasiados intentos esperando
+			// Warning if too long closing
 			if (iterations == 1000000)
 			{
 				slog_warn("The endpoint has been stuck in the UCS_INPROGRESS state for 1 million iterations. Is the remote server still up?");
@@ -1732,38 +1732,6 @@ extern "C"
 			fprintf(stderr, "failed to close ep %p\n", (void *)ep);
 		}
 	}
-
-	// ucs_status_t ep_flush(ucp_ep_h ep, ucp_worker_h worker)
-	// {
-	// 	void *request = NULL;
-	// 	// StsHeader *req_queue;
-	// 	// ucx_async_t *async;
-
-	// 	slog_debug("[COMM] Flushed endpoint started.");
-	// 	request = ucp_ep_flush_nb(ep, 0, empty_function);
-	// 	if (request == NULL)
-	// 	{
-	// 		return UCS_OK;
-	// 	}
-	// 	else if (UCS_PTR_IS_ERR(request))
-	// 	{
-	// 		return UCS_PTR_STATUS(request);
-	// 	}
-	// 	else
-	// 	{
-	// 		ucs_status_t status;
-	// 		slog_debug("[COMM] Flush waiting for completion.");
-	// 		do
-	// 		{
-	// 			ucp_worker_progress(worker);
-	// 			status = ucp_request_check_status(request);
-	// 		} while (status == UCS_INPROGRESS);
-	// 		ucp_request_free(request);
-	// 		slog_debug("[COMM] Flushed endpoint.");
-	// 		return status;
-	// 	}
-	// 	slog_debug("[COMM] Flushed endpoint.");
-	// }
 
 	ucs_status_t flush_ep(ucp_worker_h worker, ucp_ep_h ep)
 	{

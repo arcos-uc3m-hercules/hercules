@@ -1,17 +1,16 @@
 #define FUSE_USE_VERSION 26
-#include "map.hpp"
-#include "imss.h"
 #include "hercules.hpp"
+#include "imss.h"
+#include "map.hpp"
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
-#include <errno.h>
 // #include <unistd.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <time.h>
-#include <limits.h>
-
 
 #ifndef H_IMSS_POSIX_API
 #define H_IMSS_POSIX_API
@@ -29,21 +28,29 @@
 
 #include <dirent.h>
 
+#define ENSURE_BACKEND()                \
+	do                              \
+	{                               \
+		if (!connect_backend()) \
+			return -1;      \
+	} while (0)
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 	typedef int (*posix_fill_dir_t)(void *buf, const char *name,
-									const struct stat *stbuf, off_t off);
+					const struct stat *stbuf, off_t off);
 
 	int is_alive(char *instance_name);
+	void connect_backend_internal(void);
 	void fd_lookup(const char *path, int *fd, struct elements *elem);
 	void get_iuri(const char *path, /*output*/ char *uri);
 	int imss_truncate(const char *path, off_t offset);
 	int imss_access(const char *path, int permission);
 	int imss_refresh(const char *path);
 	int imss_getattr(const char *path, struct stat *stbuf);
-	
+
 	void free_entries(char ***refs, int n_ent);
 	uint32_t imss_readdir(std::string path, char ***buf, posix_fill_dir_t filler, off_t offset);
 	int imss_open(const char *path, uint64_t *fh);
@@ -78,7 +85,6 @@ extern "C"
 	int imss_close(const char *path, int fd);
 
 	int imss_serializate_hash_table(char *);
-
 
 #ifdef __cplusplus
 }

@@ -4022,6 +4022,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				}
 				else
 				{
+					slog_debug("dataset->n_open=%d", dataset->n_open);
 					response_msg = MSG_NODELETE_OP;
 				}
 				pthread_mutex_unlock(&memory_protect);
