@@ -3216,7 +3216,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 					old = (struct stat *)address_;
 					latest = (struct stat *)buffer;
 					slog_debug(" File size new %ld old %ld", latest->st_size, old->st_size);
-					latest->st_size = std::max(latest->st_size, old->st_size);
+					// TODO: check this.
+					// latest->st_size = std::max(latest->st_size, old->st_size);
 					// slog_debug(" buffer->st_size: %ld, block_offset=%ld", latest->st_size, block_offset);
 					slog_debug(" buffer->st_size: %ld, block_offset=%ld, old->st_nlink: %ld, new->st_nlink: %ld", latest->st_size, block_offset, old->st_nlink, latest->st_nlink);
 					// Overwrite block 0 data.

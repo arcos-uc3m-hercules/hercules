@@ -1021,7 +1021,6 @@ pid_t fork(void)
 	// errno = 0;
 	// pid_t pid = real_fork();
 
-
 	// if (pid == -1)
 	// {
 	// 	pthread_mutex_unlock(&lock_network);
@@ -3055,7 +3054,7 @@ int puts(const char *s)
 		{
 			ret = 1;
 		}
-		// TO FIX: this allows flushing the data to the back end server in case "close" is not called.
+		// TO FIX: this allows flushing the block 0 data to the back end server in case "close" is not called.
 		// We have to implement a way to flush everything in the destructor.
 		imss_release(pathname);
 
@@ -3109,7 +3108,8 @@ ssize_t generalWrite(const char *pathname, int fd, const void *buf, size_t size,
 
 	if (update_offset && ret >= 0)
 	{
-		if (ds_stat_n.st_size + size > ds_stat_n.st_size)
+		// ret is the actual bytes written.
+		if (ds_stat_n.st_size + ret > ds_stat_n.st_size)
 		{
 			slog_live("pathname=%s, updating , file size=%ld, current size=%ld, new local size=%d", pathname, ds_stat_n.st_size, size, ds_stat_n.st_size + size);
 			map_fd_update_value(map_fd, pathname, fd, ds_stat_n.st_size + size);
@@ -3190,8 +3190,8 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 		}
 		// if (ret == 0)
 		// {
-		// 	slog_live("[POSIX] Puting fd %d into map", ret);
-		// 	map_fd_put(map_fd, new_path, ret, p);
+		//  slog_live("[POSIX] Puting fd %d into map", ret);
+		//  map_fd_put(map_fd, new_path, ret, p);
 		// }
 		// else
 		if (ret > -1 && createFd == -1)
@@ -3239,6 +3239,26 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 			slog_live("[POSIX] Puting fd %d into map, passed from arguments.", createFd);
 			TIMING_NO_RETURN(map_fd_put(map_fd, new_path, createFd, p), "generalOpen,map_fd_put", rank);
 			ret = createFd;
+		}
+		
+		if (ret > -1 && (flags & O_TRUNC) && !(flags & O_DIRECTORY))
+		{ // truncate the file.
+			slog_live("Truncating the file %s", new_path);
+			int ret_aux = 0;
+			struct stat stats;
+			ret_aux = TIMING(imss_getattr(new_path, &stats), "generalOpen,imss_getattr", int, rank);
+			if (ret_aux < 0)
+			{
+				errno = -ret_aux;
+				ret = -1;
+				slog_error("[POSIX] Error Hercules 'open', errno=%d:%s", errno, strerror(errno));
+				return ret;
+			}
+			stats.st_size = 0;
+
+			TIMING_NO_RETURN(HierarchicalMapUpdate(hierarchical_map, new_path, ret, &stats, NULL), "generalOpen,map_fd_update_value", rank);
+
+			imss_release(new_path);
 		}
 	}
 	else
@@ -3974,14 +3994,13 @@ int truncate(const char *path, off_t length)
 
 		ret = TIMING(generalFtruncate(pathname, length), "generalFtruncate", int, rank);
 
-		slog_live("[POSIX]. Ending Hercules 'ftruncate', pathname=%s, length=%ld, ret=%d\n", pathname, length, ret);
+		slog_live("[POSIX]. Ending Hercules 'truncate', pathname=%s, length=%ld, ret=%d\n", pathname, length, ret);
 	}
 	else
 	{
-		slog_full("[POSIX]. Calling real 'ftruncate', length=%ld", length);
-		// fprintf(stderr, "[POSIX]. Calling real 'ftruncate', fd=%d, length=%ld\n", fd, length);
+		slog_full("[POSIX]. Calling real 'truncate', length=%ld", length);
 		ret = real_truncate(path, length);
-		slog_full("[POSIX]. Ending real 'ftruncate', ret=%d", ret);
+		slog_full("[POSIX]. Ending real 'truncate', ret=%d", ret);
 	}
 
 	return ret;
@@ -3989,8 +4008,6 @@ int truncate(const char *path, off_t length)
 
 int ftruncate(int fd, off_t length)
 {
-	// static int (*real_ftruncate)(int, off_t) = nullptr;
-
 	if (!real_ftruncate)
 	{
 		real_ftruncate = reinterpret_cast<int (*)(int, off_t)>(dlsym(RTLD_NEXT, __func__));
@@ -4072,15 +4089,19 @@ ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset)
 	if (!pathname_ob.empty())
 	{
 		const char *pathname = pathname_ob.c_str();
-		slog_live("[POSIX] Calling Hercules 'pwrite', pathname=%s, fd=%d, count=%ld, offset=%ld, errno=%d:%s", pathname, fd, count, offset, errno, strerror(errno));
-		// ret = imss_write(pathname, buf, count, offset);
+		slog_live("[POSIX] Calling Hercules 'pwrite', pathname=%s, fd=%d, count=%ld, offset=%ld", pathname, fd, count, offset);
+		if (offset < 0)
+		{
+			errno = EINVAL;
+			slog_live("[POSIX] Ending Hercules 'pwrite', pathname=%s, fd=%d, ret=%ld\n", pathname, fd, ret);
+			return -1;
+		}
 		ret = generalWrite(pathname, fd, buf, count, offset);
-		slog_live("[POSIX] Ending Hercules 'pwrite', pathname=%s, fd=%d, ret=%ld, count=%ld, offset=%ld, errno=%d:%s", pathname, fd, ret, count, offset, errno, strerror(errno));
+		slog_live("[POSIX] Ending Hercules 'pwrite', pathname=%s, fd=%d, ret=%ld, count=%ld, offset=%ld\n", pathname, fd, ret, count, offset);
 	}
 	else
 	{
 		slog_live("[POSIX] Calling Real 'pwrite', fd=%d, count=%ld, offset=%ld", fd, count, offset);
-		// fprintf(stderr, "[POSIX] Calling Real 'pwrite', fd=%d, count=%ld, offset=%ld, errno=%d:%s", fd, count, offset, errno, strerror(errno));
 		ret = real_pwrite(fd, buf, count, offset);
 	}
 	return ret;
@@ -4258,7 +4279,7 @@ ssize_t pread(int fd, void *buf, size_t count, off_t offset)
 			// The file offset is not changed.
 		}
 
-		slog_live("[POSIX]. End Hercules 'pread', pathname=%s, ret=%ld, size=%ld, offset=%d, fd=%d", pathname, ret, count, offset, fd);
+		slog_live("[POSIX]. End Hercules 'pread', pathname=%s, ret=%ld, size=%ld, offset=%d, fd=%d\n", pathname, ret, count, offset, fd);
 	}
 	else
 	{
@@ -4294,9 +4315,9 @@ ssize_t pread64(int fd, void *buf, size_t count, off_t offset)
 	}
 	else
 	{
-		slog_live("[POSIX]. Calling real 'pread64', size=%ld, fd=%d.", count, fd);
+		slog_full("[POSIX]. Calling real 'pread64', size=%ld, fd=%d.", count, fd);
 		ret = real_pread64(fd, buf, count, offset);
-		slog_live("[POSIX]. Ending real 'pread64', size=%ld, fd=%d, ret=%d", count, fd, ret);
+		slog_full("[POSIX]. Ending real 'pread64', size=%ld, fd=%d, ret=%d", count, fd, ret);
 	}
 	return ret;
 }
@@ -4734,7 +4755,6 @@ int execv(const char *pathname, char *const argv[])
 		if (map_fd_serialize(map_fd, &serializate_data, &out_size) == 0 && serializate_data)
 		{
 			slog_debug("Map map_fd has been serializated, out_size=%ld", out_size);
-			// ftruncate(shm_fd_map_fd, out_size);
 			write(shm_fd_map_fd, serializate_data, out_size);
 			if (serializate_data)
 			{
@@ -4831,7 +4851,6 @@ int execve(const char *pathname, char *const argv[], char *const envp[])
 		if (map_fd_serialize(map_fd, &serializate_data, &out_size) == 0 && serializate_data)
 		{
 			slog_debug("Map map_fd has been serializated, out_size=%ld", out_size);
-			// ftruncate(shm_fd_map_fd, out_size);
 			write(shm_fd_map_fd, serializate_data, out_size);
 			if (serializate_data)
 			{
@@ -7693,16 +7712,16 @@ int pipe2(int pipefd[2], int flags)
 	}
 	//	ScopedHookGuard guard(inside_printf_hook);
 
-	slog_live("[POSIX]. Calling real 'pipe2', flags=%u", flags);
+	slog_full("[POSIX]. Calling real 'pipe2', flags=%u", flags);
 	errno = 0;
 	int ret = real_pipe2(pipefd, flags);
 	if (ret == 0)
 	{
-		slog_live("[POSIX]. Ending real 'pipe2', pipefd[0]=%d, pipefd[1]=%d, ret=%d", pipefd[0], pipefd[1], ret);
+		slog_full("[POSIX]. Ending real 'pipe2', pipefd[0]=%d, pipefd[1]=%d, ret=%d", pipefd[0], pipefd[1], ret);
 	}
 	else
 	{
-		slog_live("[POSIX]. Ending real 'pipe2' failed, ret=%d", ret);
+		slog_full("[POSIX]. Ending real 'pipe2' failed, ret=%d", ret);
 	}
 
 	return ret;
@@ -7723,16 +7742,16 @@ int pipe(int pipefd[2])
 	}
 
 	//	ScopedHookGuard guard(inside_printf_hook);
-	slog_live("[POSIX]. Calling real 'pipe'");
+	slog_full("[POSIX]. Calling real 'pipe'");
 	errno = 0;
 	int ret = real_pipe(pipefd);
 	if (ret == 0)
 	{
-		slog_live("[POSIX]. Ending real 'pipe', pipefd[0]=%d, pipefd[1]=%d, ret=%d", pipefd[0], pipefd[1], ret);
+		slog_full("[POSIX]. Ending real 'pipe', pipefd[0]=%d, pipefd[1]=%d, ret=%d", pipefd[0], pipefd[1], ret);
 	}
 	else
 	{
-		slog_live("[POSIX]. Ending real 'pipe' failed, ret=%d", ret);
+		slog_full("[POSIX]. Ending real 'pipe' failed, ret=%d", ret);
 	}
 
 	return ret;
