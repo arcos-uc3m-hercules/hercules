@@ -13,12 +13,30 @@
     {
       "name": "debug",
       "displayName": "Debug Configuration",
-      "binaryDir": "${sourceDir}/build",
+      "binaryDir": "${sourceDir}/build-debug",
       "cacheVariables": {
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/install",
         "CMAKE_BUILD_TYPE": "Debug"
       }
+    },
+    {
+    "name": "asan",
+    "displayName": "AddressSanitizer Configuration",
+    "inherits": "debug",
+    "binaryDir": "${sourceDir}/build-asan",
+    "cacheVariables": {
+      "USE_ASAN": "ON"
     }
+  },
+  {
+    "name": "tsan",
+    "displayName": "ThreadSanitizer Configuration",
+    "inherits": "debug",
+    "binaryDir": "${sourceDir}/build-tsan",
+    "cacheVariables": {
+      "USE_TSAN": "ON"
+    }
+  }
   ],
   "buildPresets": [
     {
@@ -30,6 +48,16 @@
       "name": "debug",
       "configurePreset": "debug",
       "jobs": 8
-    }
+    },
+    {
+  "name": "asan",
+  "configurePreset": "asan",
+  "jobs": 8
+  },
+  {
+    "name": "tsan",
+    "configurePreset": "tsan",
+    "jobs": 8
+  }
   ]
 }

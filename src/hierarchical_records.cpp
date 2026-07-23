@@ -1,18 +1,20 @@
 /**
  * @file hierarchical_records.hpp
  * @author Genaro Sánchez-Gallegos, Javier Garcia-Blas, Jesus Carretero
- * @brief 
+ * @brief
  * @version 0.2
  * @date 2025-08-01
- * 
+ *
  * @copyright Copyright (c) 2025
- * 
+ *
  */
 #include "hierarchical_records.hpp"
+#include "comms.h"
 #include "imss.h"
 
 // to manage logs.
 #include "slog.h"
+#include <cstdio>
 
 int SERVER_ID;
 // for sincronization in the map.
@@ -43,33 +45,39 @@ HierarchicalRecords::~HierarchicalRecords()
 	}
 }
 
-std::vector<std::string> HierarchicalRecords::HierarchicalMapGetAllDirectories() {
-    std::vector<std::string> keys;
+std::vector<std::string> HierarchicalRecords::HierarchicalMapGetAllDirectories()
+{
+	std::vector<std::string> keys;
 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
-    for (const auto& pair : *(this->hiermap)) {
-        keys.push_back(pair.first);
-    }
-    return keys;
+	for (const auto &pair : *(this->hiermap))
+	{
+		keys.push_back(pair.first);
+	}
+	return keys;
 }
 
-std::vector<std::string> HierarchicalRecords::HierarchicalMapGetAllBlocks() {
-    std::vector<std::string> keys;
-    std::unique_lock<std::mutex> lck(hierarchical_map_lock);
-    
-    // iterates root directories.
-    for (const auto& dir_pair : *(this->hiermap)) {
-        
-        // child map.
-        std::shared_ptr<map_records> children_map = dir_pair.second;
-        
-        if (children_map != nullptr) {
-            for (auto const &[filename, record_value] : *children_map) {
-                keys.push_back(filename);
-            }
-        }
-    }
-    
-    return keys;
+std::vector<std::string> HierarchicalRecords::HierarchicalMapGetAllBlocks()
+{
+	std::vector<std::string> keys;
+	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
+
+	// iterates root directories.
+	for (const auto &dir_pair : *(this->hiermap))
+	{
+
+		// child map.
+		std::shared_ptr<map_records> children_map = dir_pair.second;
+
+		if (children_map != nullptr)
+		{
+			for (auto const &[filename, record_value] : *children_map)
+			{
+				keys.push_back(filename);
+			}
+		}
+	}
+
+	return keys;
 }
 
 size_t HierarchicalRecords::HierarchicalMapGetSize()
@@ -98,7 +106,7 @@ int HierarchicalRecords::InsertDirectory(const std::string &key)
 	return 1;
 }
 
-int HierarchicalRecords::CheckIfDirectory(const std::string& key, void *address)
+int HierarchicalRecords::CheckIfDirectory(const std::string &key, void *address)
 {
 	const char *k = key.c_str();
 	// TODO: check this for data or metadata, data have stats in block 0, but metadata has
@@ -149,25 +157,25 @@ int HierarchicalRecords::HierarchicalMapPut(std::string key, void *address, uint
 	double hercules_usage_percentage = get_storage_usage_percentage();
 	// fprintf(stderr, "Memory used: %.2f%%\n", hercules_usage_percentage);
 	slog_debug("Memory used: %.2f%%, reused_buffer=%d", hercules_usage_percentage, reused_buffer);
-// 	if (hercules_usage_percentage >= 80.0)
-// 	{
-// 		pthread_mutex_lock(&mutex_garbage);
-// 		fprintf(stderr, "[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
-// 		slog_debug("[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
-// 		// unlock garbage collector.
-// 		// pthread_mutex_lock(&mutex_garbage);
-// 		slog_debug("garbage collector mutex adquire");
-// #ifdef DPRINTF
-// 		fprintf(stderr, "Sending signal to gargabe collector.\n");
-// #endif
-// 		// Unlock the garbage collector.
-// 		pthread_cond_signal(&global_run_garbage_collector_cond);
-// 		// Simulated full capacity reached.
-// 		// pthread_mutex_unlock(&mutex_garbage);
-// 		pthread_cond_wait(&global_free_space_cond, &mutex_garbage);
-// 		pthread_mutex_unlock(&mutex_garbage);
-// 		// return 2;
-// 	}
+	// 	if (hercules_usage_percentage >= 80.0)
+	// 	{
+	// 		pthread_mutex_lock(&mutex_garbage);
+	// 		fprintf(stderr, "[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
+	// 		slog_debug("[Server %d] Hercules has reached the %.2f%% of the maximum data storage capacity. Calling garbage collector.\n", SERVER_ID, hercules_usage_percentage);
+	// 		// unlock garbage collector.
+	// 		// pthread_mutex_lock(&mutex_garbage);
+	// 		slog_debug("garbage collector mutex adquire");
+	// #ifdef DPRINTF
+	// 		fprintf(stderr, "Sending signal to gargabe collector.\n");
+	// #endif
+	// 		// Unlock the garbage collector.
+	// 		pthread_cond_signal(&global_run_garbage_collector_cond);
+	// 		// Simulated full capacity reached.
+	// 		// pthread_mutex_unlock(&mutex_garbage);
+	// 		pthread_cond_wait(&global_free_space_cond, &mutex_garbage);
+	// 		pthread_mutex_unlock(&mutex_garbage);
+	// 		// return 2;
+	// 	}
 
 	if (!reused_buffer)
 	{
@@ -300,7 +308,7 @@ char *HierarchicalRecords::HierarchicalMapListDir(const char *desired_dir, int32
 	// lck.unlock();
 
 	slog_debug("Directory %s has %d total elements, %d valid, %d dirty",
-			   desired_dir, num_children, valid_elements_count, num_dirty_child);
+		   desired_dir, num_children, valid_elements_count, num_dirty_child);
 
 	*numdir_elems = valid_elements_count;
 
@@ -378,11 +386,11 @@ int32_t HierarchicalRecords::HierarchicalMapGet(std::string k, void **add_, uint
 }
 
 ssize_t HierarchicalRecords::HierarchicalMapGetPrefetch(
-	const std::string &base_key,
-	uint32_t start_block_id,
-	int num_data_servers,
-	char *prefetch_buffer,
-	size_t prefetch_size)
+    const std::string &base_key,
+    uint32_t start_block_id,
+    int num_data_servers,
+    char *prefetch_buffer,
+    size_t prefetch_size)
 {
 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 
@@ -424,7 +432,7 @@ ssize_t HierarchicalRecords::HierarchicalMapGetPrefetch(
 		if (block_size_rtvd != BLOCK_DATA_SIZE)
 		{
 			slog_warn("Prefetch stop: block size mismatch for '%s'. Expected %lu, got %lu.",
-					  current_key.c_str(), BLOCK_DATA_SIZE, block_size_rtvd);
+				  current_key.c_str(), BLOCK_DATA_SIZE, block_size_rtvd);
 			break;
 		}
 
@@ -441,7 +449,6 @@ ssize_t HierarchicalRecords::HierarchicalMapGetPrefetch(
 	return buffer_offset;
 }
 
-
 /**
  * @brief Rename the name of a regular file on the local hierarchical_map.
  * @return On success, 1 is returned.
@@ -456,9 +463,23 @@ int32_t HierarchicalRecords::HierarchicalMapRenameRegularFile(const std::string 
 	std::shared_ptr<map_records> parent_children_map = get_child_unsafe(oldname.c_str());
 	if (parent_children_map != NULL)
 	{
-		// map_erase(parent_children_map, k);
-		// return map_rename(parent_children_map, oldname, newname);
-		return parent_children_map->rename_data_srv_worker(oldname, newname);
+		switch (SERVER_TYPE)
+		{
+		case TYPE_DATA_SERVER:
+		{
+			// map_erase(parent_children_map, k);
+			// return map_rename(parent_children_map, oldname, newname);
+			return parent_children_map->rename_data_srv_worker(oldname, newname);
+		}
+		case TYPE_METADATA_SERVER:
+		{
+			return parent_children_map->rename_metadata_stat_worker(oldname, newname);
+		}
+		default:
+			fprintf(stderr, "HERCULES_ERR_HIERARCHICAL_MAP_RENAME_REGULAR_FILE: Invalid server type: %c", SERVER_TYPE);
+			slog_error("HERCULES_ERR_HIERARCHICAL_MAP_RENAME_REGULAR_FILE: Invalid server type: %c", SERVER_TYPE);
+			return -1;
+		}
 	}
 	else
 	{

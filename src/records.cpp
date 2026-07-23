@@ -27,7 +27,7 @@ using std::string;
 extern StsHeader *mem_pool;
 
 // __thread
-extern int32_t current_dataset;	  // Dataset whose policy has been set last.
+extern int32_t current_dataset;		       // Dataset whose policy has been set last.
 extern thread_local dataset_info curr_dataset; // Currently managed dataset.
 extern imss curr_imss;
 
@@ -651,38 +651,48 @@ int32_t map_records::rename_data_srv_worker(const std::string &old_key, const st
 	std::unique_lock<std::mutex> lock(*mut);
 
 	// save partners for later deletion and new insertion of news paths
-	std::vector<string> vec;
+	std::vector<std::string> vec;
 
 	for (const auto &it : buffer)
 	{
-		string key = it.first;
+		std::string key = it.first;
 
-		int pos = key.find('$');
-		string path = key.substr(0, pos);
-		string block = key.substr(pos, key.length() + 1);
+		std::size_t pos = key.find('$');
+
+		// Prevent std::out_of_range if '$' is not found
+		if (pos == std::string::npos)
+		{
+			slog_debug("$ was not find in %s", key.c_str());
+			continue;
+		}
+
+		std::string path = key.substr(0, pos);
+		// extract until the end of the string
+		std::string block = key.substr(pos);
 
 		if (path.compare(old_key) == 0)
 		{
-			vec.insert(vec.begin(), key);
+			vec.push_back(key);
 		}
 	}
-	slog_debug("Rename data srv worker %s=%d", old_key.c_str(), vec.size());
+
+	slog_debug("Rename data srv worker %s=%zu", old_key.c_str(), vec.size());
+
 	// check if the vector is empty, meaning that the old_dir key is not valid.
-	if (vec.size() == 0)
+	if (vec.empty())
 	{
 		return -1;
 	}
 
-	std::vector<string>::iterator i;
+	std::vector<std::string>::iterator i;
 	for (i = vec.begin(); i < vec.end(); i++)
 	{
-		auto item = buffer.find(*i);
+		std::string key = *i;
+		std::size_t pos = key.find('$');
+		std::string block = key.substr(pos);
 
-		string key = *i;
-		int pos = key.find('$');
-		string block = key.substr(pos, key.length() + 1);
+		std::string new_path = new_key + block;
 
-		string new_path = new_key + block;
 		auto node = buffer.extract(key);
 		node.key() = new_path;
 		buffer.insert(std::move(node));

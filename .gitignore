@@ -17,6 +17,8 @@ tst/2_4_6_SERVERS_RESULTS.csv
 .aux
 kill_stat.sh
 build
+build-release
+build-debug
 build-asan
 build-tsan
 install

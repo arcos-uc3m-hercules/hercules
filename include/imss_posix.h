@@ -249,6 +249,12 @@ extern "C"
 
 	static int (*real_fflush)(FILE *) = NULL;
 
+	static ssize_t (*real_sendfile)(int, int, off_t *, size_t) = NULL;
+	static ssize_t (*real_sendfile64)(int, int, off64_t *, size_t) = NULL;
+
+	static int (*real_setxattr)(const char *, const char *, const void *, size_t, int) = NULL;
+	static int (*real_lsetxattr)(const char *, const char *, const void *, size_t, int) = NULL;
+
 #ifdef __cplusplus
 }
 #endif

@@ -214,7 +214,7 @@ extern "C"
 
 		if (*fd != -1)
 		{ // print data if the fd exists.
-			slog_debug("path=%s, found=%d, fd=%d, stat.st_nlink=%lu", path, found, *fd, elem->stats.st_nlink);
+			slog_debug("path=%s, found=%d, fd=%d, stat.st_nlink=%lu, stat.st_size=%lu", path, found, *fd, elem->stats.st_nlink, elem->stats.st_size);
 			print_file_type(elem->stats, path);
 		}
 	}
@@ -2700,8 +2700,10 @@ extern "C"
 			break;
 		}
 		default: // error deleting the dataset.
-			perror("ERR_HERCULES_UNLINK_DATASET");
-			slog_error("ERR_HERCULES_UNLINK_DATASET");
+			char msg_err[MAX_PATH] = {0};
+			snprintf(msg_err, MAX_PATH, "ERR_HERCULES_UNLINK_DATASET: %s", imss_path);
+			perror(msg_err);
+			slog_error("%s", msg_err);
 			ret = -1;
 			break;
 		}
@@ -3572,8 +3574,10 @@ extern "C"
 		}
 		else
 		{ // file not found in the local map.
+			// check in remote server.
 			new_exists = TIMING(imss_getattr(new_path, &new_file_stat), "imss_getattr new path", int, 0);
 		}
+
 		if (new_exists < 0)
 		{ // file does not exist.
 			// if the new path does not exists, new_is_dir takes the value of old_is_dir.
@@ -3686,7 +3690,8 @@ extern "C"
 			// TODO: check flags.
 			slog_debug("Moving Hercules regular file %s to Hercules regular file %s", old_path, new_path);
 
-			imss_unlink(new_path, NULL);
+			if (new_exists >= 0) // if exists, new path exists and must be deleted.
+				imss_unlink(new_path, NULL);
 
 			// printf("old_rpath=%s, new_rpath=%s\n",old_rpath, new_rpath);
 			// TODO   map_rename_prefetch(map_prefetch, old_rpath, new_rpath);
