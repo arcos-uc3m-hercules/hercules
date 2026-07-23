@@ -3203,7 +3203,7 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 			{
 				changes_found = 1;
 				slog_debug("New number of storage servers %d", local_imss_->info.num_storages);
-				PrintIntervals(curr_dataset);
+				// PrintIntervals(curr_dataset);
 			}
 		}
 		else
@@ -3291,6 +3291,12 @@ int32_t wait_malleability_changes(ucp_worker_h ucp_worker, uint64_t local_data_u
 
 int32_t get_malleability_changes(const char *dataset_uri, const char *failed_hostname)
 {
+
+	if (CONF_MALLEABILITY_STATUS != MALLEABILITY_CONF_ENABLED)
+	{
+		return -1;
+	}
+
 	char formated_uri[REQUEST_SIZE] = {0};
 	int32_t ret = -1;
 	size_t msg_length = 0;
@@ -4976,6 +4982,11 @@ void ClearIntervalsStructure(dataset_info *curr_dataset)
 
 int GetValueFromInterval(dataset_info *curr_dataset, int data_id)
 {
+	if (CONF_MALLEABILITY_STATUS != MALLEABILITY_CONF_ENABLED)
+	{
+		return -1;
+	}
+	
 	if (curr_dataset->num_intervals <= 0)
 	{
 		return -1;
@@ -6941,7 +6952,7 @@ int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const 
 	ucp_ep_h ep;
 
 	int chars_written = snprintf(key_, REQUEST_SIZE,
-				     "SETNETWORK %u %d",
+				     "SETBUFFNETWORK %u %d",
 				     srv_buf.block_count,
 				     number_of_servers);
 
@@ -7188,7 +7199,7 @@ std::vector<DiskBlock> deserialise_network_buffer(ucp_worker_h ucp_worker, uint6
 		if (!read_exact(&data_size, sizeof(data_size)))
 			break;
 
-		// data 
+		// data
 		blk.data.resize(data_size);
 		if (!read_exact(blk.data.data(), data_size))
 			break;

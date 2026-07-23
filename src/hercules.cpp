@@ -935,7 +935,7 @@ void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 		uint32_t temp_val = 0;
 
 		// Parse to a temporary integer, then verify if it matches a valid enum value
-		if (is_valid_uint32(raw_mode_str, &temp_val) != 0 && (temp_val == MODE_NETWORK || temp_val == MODE_DISK || temp_val == MODE_SHM))
+		if (is_valid_uint32(raw_mode_str, &temp_val) != 0 && (temp_val == MODE_NETWORK || temp_val == MODE_DISK || temp_val == MODE_SHM || temp_val == MODE_BUFF_NETWORK))
 		{
 			args->malleability_reorder_mode = (enum CommunicationMode)temp_val;
 		}

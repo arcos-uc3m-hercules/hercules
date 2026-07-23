@@ -61,8 +61,9 @@ int32_t id_server_to_modify = -1;
 char *node_to_use = NULL;
 int32_t acks_received = 0;
 // malleability time measure.
-clock_t global_malleability_t;
+// clock_t global_malleability_t;
 double global_malleability_time_taken = 0.0;
+std::chrono::time_point<std::chrono::steady_clock> start_time_commissioning;
 
 // Initial buffer address.
 // char *buffer_address;
@@ -290,9 +291,9 @@ void Attend_pending_requests()
 
 	// Process all requests that were pending when this was called.
 	std::vector<PendingRequestInfo> requests_to_attend;
-	pthread_mutex_lock(&mutex_malleability);
+	// pthread_mutex_lock(&mutex_malleability);
 	requests_to_attend.swap(pending_requests);
-	pthread_mutex_unlock(&mutex_malleability);
+	// pthread_mutex_unlock(&mutex_malleability);
 
 	char response[PATH_MAX] = {'\0'};
 	char list_of_active_nodes[PATH_MAX] = {'\0'};
@@ -312,6 +313,7 @@ void Attend_pending_requests()
 	int ret = -1;
 	// fprintf(stderr, "[AttendingPendingRequests] There are %d pending requests\n", pending_requests.size());
 	slog_malleability("There are %d pending requests", pending_requests.size());
+	slog_malleability("There are %d pending requests", requests_to_attend.size());
 	p_argv pending_argument;
 	for (const auto &pending_info : requests_to_attend)
 	{
@@ -447,64 +449,56 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 					continue;
 				}
 
-				ServerBuffer &srv_buf = server_buffers[next_server];
-				if (srv_buf.data.capacity() == 0)
-    				init_server_buffer(srv_buf);  // reserve max_size on first use
-
-				// Flush the buffer first if the next block would exceed max_size.
-				if (append_block_to_buffer(srv_buf, data_uri.c_str(), (int32_t)block_number, inner_value.data, (uint64_t)inner_value.size))
+				ServerBuffer &srv_buf = server_buffers[next_server]; // only used for MODE_DISK and MODE_BUFF_NETWORK
+				if (mode == CommunicationMode::MODE_DISK || mode == CommunicationMode::MODE_BUFF_NETWORK)
 				{
-					slog_debug("Buffer full for server %d (%zu bytes), flushing before appending.", next_server, srv_buf.data.size());
+					if (srv_buf.data.capacity() == 0)
+						init_server_buffer(srv_buf); // reserve max_size on first use
 
-					// Flush the full buffer.
-					int rc = 0;
-					if (mode == CommunicationMode::MODE_DISK)
+					// Flush the buffer first if the next block would exceed max_size.
+					if (append_block_to_buffer(srv_buf, data_uri.c_str(), (int32_t)block_number, inner_value.data, (uint64_t)inner_value.size))
 					{
-						rc = flush_server_buffer(next_server, srv_buf, malleability_checkpoint_path, data_hostname, number_active_storage_servers.load());
-					}
-					else
-					{
-						rc = flush_data_to_network(next_server, srv_buf, data_hostname, number_active_storage_servers.load());
-					}
+						slog_debug("Buffer full for server %d (%zu bytes), flushing before appending.", next_server, srv_buf.data.size());
 
-					if (rc < 0)
+						// Flush the full buffer.
+						int rc = 0;
+						if (mode == CommunicationMode::MODE_DISK)
+						{
+							rc = flush_server_buffer(next_server, srv_buf, malleability_checkpoint_path, data_hostname, number_active_storage_servers.load());
+						}
+						if (mode == CommunicationMode::MODE_BUFF_NETWORK)
+						{
+							rc = flush_data_to_network(next_server, srv_buf, data_hostname, number_active_storage_servers.load());
+						}
+
+						if (rc < 0)
+						{
+							slog_error("HERCULES_ERR_FLUSH_MID_LOOP, server=%d", next_server);
+							return -1;
+						}
+
+						reset_server_buffer(srv_buf);
+
+						// Now append the block that triggered the flush.
+						append_block_to_buffer(srv_buf, data_uri.c_str(), (int32_t)block_number, inner_value.data, (uint64_t)inner_value.size);
+					}
+				}
+				else
+				{ // MODE_NETWORK case.
+					// 	here we can send key.c_str() directly to reduce the number of operations.
+					if (set_data_server(data_uri.c_str(),
+							    (int32_t)block_number,
+							    inner_value.data,
+							    inner_value.size,
+							    0,
+							    next_server,
+							    number_active_storage_servers.load()) < 0)
 					{
-						slog_error("HERCULES_ERR_FLUSH_MID_LOOP, server=%d", next_server);
+						slog_error("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_SET_DATA");
+						fprintf(stderr, "HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_SET_DATA\n");
 						return -1;
 					}
-
-					reset_server_buffer(srv_buf);
-
-					// Now append the block that triggered the flush.
-					append_block_to_buffer(srv_buf, data_uri.c_str(), (int32_t)block_number, inner_value.data, (uint64_t)inner_value.size);
 				}
-
-				// check if the data will be moved by using the persistent storage or by network.
-				// if (mode == CommunicationMode::MODE_DISK)
-				// {
-				// Adds the data into the buffer corresponding to a specific server.
-				// append_block_to_buffer(server_buffers[next_server],
-				// 		       data_uri.c_str(),
-				// 		       (int32_t)block_number,
-				// 		       inner_value.data,
-				// 		       (uint64_t)inner_value.size);
-				// }
-				// else
-				// {
-				// 	// 	here we can send key.c_str() directly to reduce the number of operations.
-				// 	if (set_data_server(data_uri.c_str(),
-				// 			    (int32_t)block_number,
-				// 			    inner_value.data,
-				// 			    inner_value.size,
-				// 			    0,
-				// 			    next_server,
-				// 			    number_active_storage_servers.load()) < 0)
-				// 	{
-				// 		slog_error("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_SET_DATA");
-				// 		perror("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_SET_DATA");
-				// 		return -1;
-				// 	}
-				// }
 
 				total_data_moved += inner_value.size;
 				global_hierarchical_map->HierarchicalMapPutInGarbageCollector(inner_key.c_str());
@@ -512,26 +506,25 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 		}
 	}
 
-	// flush all per-server buffers to disk and notify them
-	if (mode == CommunicationMode::MODE_DISK)
+	// flush all per-server buffers to disk or network and notify the corresponding server.
+	if (mode == CommunicationMode::MODE_DISK || mode == CommunicationMode::MODE_BUFF_NETWORK)
 	{
 		for (auto &[srv_id, srv_buf] : server_buffers)
 		{
-			if (flush_server_buffer(srv_id, srv_buf, malleability_checkpoint_path, data_hostname, number_active_storage_servers.load()) < 0)
+			int rc = 0;
+			if (mode == CommunicationMode::MODE_DISK)
 			{
-				slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER server=%d", srv_id);
-				return -1;
+				rc = flush_server_buffer(srv_id, srv_buf, malleability_checkpoint_path, data_hostname, number_active_storage_servers.load());
 			}
-		}
-	}
-	else
-	{
-		for (auto &[srv_id, srv_buf] : server_buffers)
-		{
-
-			if (flush_data_to_network(srv_id, srv_buf, data_hostname, number_active_storage_servers.load()) < 0)
+			if (mode == CommunicationMode::MODE_BUFF_NETWORK)
 			{
-				slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER server=%d", srv_id);
+				rc = flush_data_to_network(srv_id, srv_buf, data_hostname, number_active_storage_servers.load());
+			}
+
+			if (rc < 0)
+			{
+				slog_error("HERCULES_ERR_FLUSH_MID_LOOP, server=%d", srv_id);
+				fprintf(stderr, "HERCULES_ERR_FLUSH_MID_LOOP, server=%d\n", srv_id);
 				return -1;
 			}
 		}
@@ -539,12 +532,9 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 
 	global_hierarchical_map->HierarchicalMapCleanGarbageCollector();
 
-
 	// fprintf(stderr, "++ number_of_blocks_sent=%d\n", number_of_blocks_sent);
 	slog_debug("++ number_of_blocks_sent=%d", number_of_blocks_sent);
 	imss_flush_data();
-	// Check for pending requests.
-	Attend_pending_requests();
 
 	return total_data_moved;
 }
@@ -634,7 +624,10 @@ void *move_blocks_2_server(void *th_argv)
 
 	// fprintf(stderr, "ACK to metadata server sent.\n");
 	slog_debug("ACK to metadata server sent, id_server_to_modify=%d", id_server_to_modify);
-	// if (id_server_to_modify != -1)
+
+	// Check for pending requests.
+	Attend_pending_requests();
+	
 	if (global_finish_dispatcher == FINISH_SERVER_STATUS)
 	{
 		malleability_status.store(MALLEABILITY_COMPLETE, std::memory_order_release);
@@ -993,8 +986,9 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 	}
 	else
 	{
-		// start timer to now how much time it takes the malleability.
-		global_malleability_t = clock();
+		// start timer to know how much time it takes the commissioning malleability.
+		start_time_commissioning = std::chrono::steady_clock::now();
+		// global_malleability_t = clock();
 		is_new_server_ready = false;
 
 		// Update the variables.
@@ -1012,16 +1006,6 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 
 		char command_to_exec[PATH_MAX * 2] = {0};
 		char *workdir = getenv("PWD");
-		// sprintf(command_to_exec,
-		// "( ssh %s 'cd %s && UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s %s/build/hercules_server d %d %d > %s/tmp/hercules_server_%d_log.txt 2>&1' ) &",
-		// 	node_to_use,
-		// 	workdir,
-		// 	arguments->args->configuration_file_path,
-		// 	arguments->args->hercules_path,
-		// 	id_server_to_modify,
-		// 	imss_info_struct->num_active_storages,
-		// 	arguments->args->hercules_path,
-		// 	id_server_to_modify);
 
 		sprintf(command_to_exec,
 			"cd %s && LD_LIBRARY_PATH=\"/opt/ohpc/pub/compiler/gcc/12.2.0/lib64:/usr/lib64:/lib64:$LD_LIBRARY_PATH\" "
@@ -1740,6 +1724,7 @@ void *hercules_ucx_server(void *th_argv)
 	void *map_server_eps = NULL;
 	map_server_eps = map_server_eps_create();
 	BLOCK_SIZE = arguments->blocksize * 1024;
+	start_time_commissioning = std::chrono::steady_clock::now(); // TODO: init the timer. Used just for the first server connected. To fix later.
 	// }
 
 	for (;;)
@@ -1989,7 +1974,7 @@ int store_block(p_argv *arguments, std::string key, const void *data_from_disk, 
 			return -1;
 		}
 
-		if (transfer_mode == CommunicationMode::MODE_NETWORK)
+		if (transfer_mode == CommunicationMode::MODE_NETWORK && expect_ack)
 			SendConfirmationMessage(arguments, MSG_OK_OP); // OK ack.
 		//  search for the block to know if it was previously stored.
 		ret = TIMING(hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd), "Does it exist? map->get", int, arguments->thread_id);
@@ -2580,6 +2565,12 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	{
 		more = SET_OP;
 		mode_type = CommunicationMode::MODE_NETWORK;
+		to_read_args = 1;
+	}
+	else if (!strcmp(mode, "SETBUFFNETWORK"))
+	{
+		more = SET_OP;
+		mode_type = CommunicationMode::MODE_BUFF_NETWORK;
 		to_read_args = 0;
 	}
 	else if (!strcmp(mode, "SETDISK"))
@@ -2867,10 +2858,10 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			client_create_ep_data(arguments->ucp_worker, &data_endpoints[id_server_to_modify], imss_->conns.peer_addr[id_server_to_modify], set_server_err_call_arg);
 			imss_->conns.eps[id_server_to_modify] = data_endpoints[id_server_to_modify];
 
-			global_malleability_t = clock() - global_malleability_t;
-			global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
+			// global_malleability_t = clock() - global_malleability_t;
+			// global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
 			// fprintf(stderr, "Server %" PRIu32 " connected in %.4f seconds\n", id_server_to_modify, global_malleability_time_taken);
-			slog_debug("Server %" PRIu32 " connected in %.4f seconds", id_server_to_modify, global_malleability_time_taken);
+			// slog_debug("Server %" PRIu32 " connected in %.4f seconds", id_server_to_modify, time_taken_req);
 
 			imss_info *imss_info_struct = &imss_->info;
 			// num_storages is increased inside AddIPS.
@@ -3668,10 +3659,11 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			// Send ACK once.
 			SendConfirmationMessage(arguments, MSG_OK_OP);
 		}
-		else if (mode_type == CommunicationMode::MODE_NETWORK)
+		else if (mode_type == CommunicationMode::MODE_BUFF_NETWORK)
 		{
+			CommunicationMode transfer_mode = CommunicationMode::MODE_DISK; // Same behaviour as MODE_DISK because the blocks has been deserialise from a buffer (in this case the buffer comes from network). To change this later to avoid confusions.
 			ServerBuffer srv_buf;
-			char file_path[PATH_MAX] = {0};
+			// char file_path[PATH_MAX] = {0};
 			int server_n_used_in_frontend = 0;
 			int expected_recv_args = 3;
 			slog_debug("Request: %s", req);
@@ -3683,13 +3675,14 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 				return -1;
 			}
 
-			std::vector<DiskBlock> list_of_blocks = deserialise_network_buffer(arguments->ucp_worker, arguments->worker_uid, arguments->server_ep, srv_buf.block_count); // deserialise_server_buffer(file_path);
+			// get the buffer from network.
+			std::vector<DiskBlock> list_of_blocks = deserialise_network_buffer(arguments->ucp_worker, arguments->worker_uid, arguments->server_ep, srv_buf.block_count);
 
 			for (const DiskBlock &blk : list_of_blocks)
 			{
 				key = blk.data_uri + "$" + std::to_string(blk.block_id);
 				slog_debug("Writting %s, size=%d ", key.c_str(), blk.data.size());
-				if (store_block(arguments, key, blk.data.data(), blk.data.size(), block_offset, server_n_used_in_frontend, snapshot_op, CommunicationMode::MODE_DISK, shm_key, 0) < 0)
+				if (store_block(arguments, key, blk.data.data(), blk.data.size(), block_offset, server_n_used_in_frontend, snapshot_op, transfer_mode, shm_key, 0) < 0)
 				{
 					slog_error("store_block failed for uri='%s' block=%d", blk.data_uri.c_str(), blk.block_id);
 					// TODO: decide whether to abort or continue with remaining blocks
@@ -4068,10 +4061,10 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		client_create_ep_data(arguments->ucp_worker, &data_endpoints[server_id_request], new_imss.conns.peer_addr[0], set_server_err_call_arg);
 
-		global_malleability_t = clock() - global_malleability_t;
-		global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
-		fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, global_malleability_time_taken);
-		slog_debug("Server %d connected in %.4f seconds", server_id_request, global_malleability_time_taken);
+		// global_malleability_t = clock() - global_malleability_t;
+		// global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
+		auto end_time_commisioning = std::chrono::steady_clock::now();
+		std::chrono::duration<double> time_taken_comm = end_time_commisioning - start_time_commissioning;
 
 		free(new_imss.conns.peer_addr[0]);
 		free(new_imss.conns.peer_addr);
@@ -4083,6 +4076,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
 		number_active_storage_servers.store(imss_info_struct->num_storages);
 		slog_debug("number_active_storage_servers=%d\n", number_active_storage_servers.load());
+
+		fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, time_taken_comm.count());
+		slog_debug("Server %d connected in %.4f seconds", server_id_request, time_taken_comm.count());
 
 		// signal to the Comissioning thread.
 		pthread_mutex_lock(&server_ready_mutex);
