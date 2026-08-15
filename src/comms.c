@@ -140,7 +140,6 @@ extern "C"
 		memset(ucp_context, 0, sizeof(*ucp_context));
 		memset(ucp_worker, 0, sizeof(*ucp_worker));
 
-
 		/* UCP initialization */
 		// slog_info("Before ucp_config_read");
 		// status = ucp_config_read(NULL, NULL, &config);
@@ -1140,40 +1139,6 @@ extern "C"
 		slog_debug("[COMM] Created client endpoint");
 		return status;
 	}
-
-	// ucs_status_t client_create_ep_metadata(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr)
-	// {
-	// 	ucp_ep_params_t ep_params;
-	// 	ucs_status_t status = UCS_OK;
-	// 	ucs_status_t ep_status = UCS_OK;
-
-	// 	/* Server creates an ep to the client on the data worker.
-	// 	 * This is not the worker the listener was created on.
-	// 	 * The client side should have initiated the connection, leading
-	// 	 * to this ep's creation */
-
-	// 	ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS |
-	// 						   UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE |
-	// 						   UCP_EP_PARAM_FIELD_ERR_HANDLER |
-	// 						   UCP_EP_PARAM_FIELD_USER_DATA;
-	// 	ep_params.address = peer_addr;
-	// 	ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-	// 	// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
-	// 	ep_params.err_handler.cb = err_cb_client;
-	// 	ep_params.err_handler.arg = (void *)metadata_err_call_arg;
-	// 	ep_params.user_data = &ep_status;
-
-	// 	// ucp_worker_print_info(worker, stderr);
-	// 	status = ucp_ep_create(worker, &ep_params, ep);
-	// 	if (status != UCS_OK)
-	// 	{
-	// 		fprintf(stderr, "failed to create an endpoint on the metadata server: (%s)\n", ucs_status_string(status));
-	// 		slog_error("failed to create an endpoint on the data metadata server: (%s)", ucs_status_string(status));
-	// 	}
-
-	// 	slog_debug("[COMM] Created client endpoint");
-	// 	return status;
-	// }
 
 	// Method sending a data structure with dynamic memory allocation fields.
 	int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_struct, int32_t data_type, uint64_t from)

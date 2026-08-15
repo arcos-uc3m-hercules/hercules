@@ -930,67 +930,51 @@ int32_t delete_imss(char *imss_uri, imss *imss_)
 /********************* METADATA SERVICE MANAGEMENT FUNCTIONS  *********************/
 /**********************************************************************************/
 
-// Method creating a communication channel with the IMSS metadata server. Besides, the stat_imss method initializes a set of elements that will be used through the session.
-int32_t stat_init(char *stat_hostfile,
-		  uint64_t port,
-		  int32_t num_stat_servers,
-		  uint32_t rank)
+/**
+ * @brief Helper to clean up allocated metadata resources safely on error.
+ *
+ */
+static void free_metadata_resources(FILE *stat_nodes_struct, char *stat_node, int servers)
 {
-	slog_debug("[IMSS] Calling stat_init.");
-	// fprintf(stderr, "[IMSS] Calling stat_init.\n");
-
-	// Number of metadata servers to connect to.
-	n_stat_servers = num_stat_servers;
-	slog_debug("n_stat_servers=%d", n_stat_servers);
-	// Initialize memory required to deal with metadata sockets.
-	stat_addr = (ucp_address_t **)malloc(n_stat_servers * sizeof(ucp_address_t *));
-	if (stat_addr == NULL)
+	if (stat_nodes_struct)
 	{
-		perror("HERCULES_ERR_IMSS_STAT_INIT_STAT_ADDR");
-		slog_error("HERCULES_ERR_IMSS_STAT_INIT_STAT_ADDR");
-		return -1;
+		fclose(stat_nodes_struct);
 	}
-
-	// Dataset whose policy was set last.
-	id_current_dataset = -1;
-	// Rank of the current process.
-	process_rank = rank;
-	// Next position within the imss vector to be occupied.
-	imssd_pos = 0;
-	// Next position within the dataset vector to be occupied.
-	datasetd_pos = 0;
-	// Current size of the imss array.
-	imssd_max_size = ELEMENTS;
-	// Current size of the dataset array.
-	datasetd_max_size = ELEMENTS;
-	int ret = 0;
-	ucs_status_t status = UCS_OK;
-
-	/* Initialize the UCX required objects */
-	// slog_debug("ucp_worker_meta=%p", &ucp_worker_meta);
-	// print_worker_pointer(ucp_worker_meta);
-	ret = init_context(&ucp_context_client, NULL, &ucp_worker_meta, CLIENT_SERVER_SEND_RECV_TAG);
-	// print_worker_pointer(ucp_worker_meta);
-	if (ret != 0)
+	if (stat_node)
 	{
-		slog_error("HERCULES_ERR_IMSS_STAT_INIT_INIT_CONTEXT");
-		perror("HERCULES_ERR_IMSS_STAT_INIT_INIT_CONTEXT");
+		free(stat_node);
+	}
+	if (stat_addr)
+	{
+		for (int i = 0; i < servers; i++)
+		{
+			if (stat_addr[i])
+			{
+				free(stat_addr[i]);
+			}
+		}
 		free(stat_addr);
-		return -1;
+		stat_addr = NULL;
 	}
-	ret = init_worker(ucp_context_client, &ucp_worker_data);
-	if (ret != 0)
+	if (stat_ids)
 	{
-		slog_error("HERCULES_ERR_IMSS_STAT_INIT_INIT_WORKER");
-		perror("HERCULES_ERR_IMSS_STAT_INIT_INIT_WORKER");
-		free(stat_addr);
-		return -1;
+		free(stat_ids);
+		stat_ids = NULL;
 	}
+	if (stat_eps)
+	{
+		free(stat_eps);
+		stat_eps = NULL;
+	}
+	if (ep_contexts)
+	{
+		free(ep_contexts);
+		ep_contexts = NULL;
+	}
+}
 
-	memset(&empty_dataset, 0, sizeof(dataset_info));
-	memset(&empty_imss, 0, sizeof(imss));
-	// memset(&att_deployment, 0, URI_);
-
+static int init_glib_structures(void)
+{
 	// Initialize the set of GArrays dealing with the underlying set of structures.
 	if (!imssd)
 	{
@@ -998,7 +982,6 @@ int32_t stat_init(char *stat_hostfile,
 		if ((imssd = g_array_sized_new(FALSE, FALSE, sizeof(imss), ELEMENTS)) == NULL)
 		{
 			perror("HERCULES_ERR_STATINIT_GARRAYIMSS");
-			free(stat_addr);
 			return -1;
 		}
 	}
@@ -1009,19 +992,16 @@ int32_t stat_init(char *stat_hostfile,
 		if ((free_imssd = g_array_sized_new(FALSE, FALSE, sizeof(int32_t), ELEMENTS)) == NULL)
 		{
 			perror("HERCULES_ERR_STATINIT_GARRAYIMSSREG");
-			free(stat_addr);
 			return -1;
 		}
 	}
 
-	// datasetd = g_array_sized_new(FALSE, FALSE, sizeof(dataset_info), ELEMENTS)
 	if (!datasetd)
 	{
 		slog_debug("Init datasetd");
 		if ((datasetd = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_dataset_data)) == NULL)
 		{
 			perror("HERCULES_ERR_STATINIT_GARRAYDATASET");
-			free(stat_addr);
 			return -1;
 		}
 	}
@@ -1032,6 +1012,7 @@ int32_t stat_init(char *stat_hostfile,
 		char shm_name[256] = {'\0'};
 		snprintf(shm_name, sizeof(shm_name), "/hercules_state_hashmap_%d", getpid());
 		slog_debug("shm_name=%s", shm_name);
+
 		// char *shm_env = getenv("HERCULES_SHM_STATE");
 		// if (shm_env != NULL)
 		{
@@ -1039,6 +1020,7 @@ int32_t stat_init(char *stat_hostfile,
 			pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 			pthread_mutex_init(&pool_mutex, &attr);
 			slog_debug("[POSIX] Inheriting Hercules state from: %s", shm_name);
+
 			// open the shared memory file
 			int shm_fd = shm_open(shm_name, O_RDONLY, 0600);
 			if (shm_fd >= 0)
@@ -1058,19 +1040,11 @@ int32_t stat_init(char *stat_hostfile,
 				if (pool_hash_tables_datasetd == NULL)
 				{
 					perror("HERCULES_ERR_STATINIT_GARRAYDATASETPOOL");
-					free(stat_addr);
 					return -1;
 				}
 			}
 		}
 	}
-
-	// if ((free_datasetd = g_array_sized_new(FALSE, FALSE, sizeof(int32_t), ELEMENTS)) == NULL)
-	// {
-	// 	perror("HERCULES_ERR_STATINIT_GARRAYDATASETREG");
-	// 	free(stat_addr);
-	// 	return -1;
-	// }
 
 	// Fill the free positions arrays.
 	for (int32_t i = 0; i < ELEMENTS; i++)
@@ -1079,11 +1053,15 @@ int32_t stat_init(char *stat_hostfile,
 		// g_array_insert_val(free_datasetd, i, i);
 	}
 
+	return 0;
+}
+
+static int resolve_network_interfaces(void)
+{
 	// Retrieve the hostname where the current process is running.
 	if (gethostname(client_node, 512) == -1)
 	{
 		perror("HERCULES_ERR_GETHOSTNAME");
-		free(stat_addr);
 		return -1;
 	}
 	len_client_node = strlen(client_node);
@@ -1117,7 +1095,7 @@ int32_t stat_init(char *stat_hostfile,
 					NULL, 0, NI_NUMERICHOST);
 			if (s != 0)
 			{
-				continue; // Error getting name, skip
+				continue;
 			}
 			slog_debug("name: %s, ip: %s", ifa->ifa_name, host);
 
@@ -1125,13 +1103,15 @@ int32_t stat_init(char *stat_hostfile,
 			// if (!strcmp(host, "127.0.0.1") != 0 || !strcmp(ifa->ifa_name, "idrac") != 0)
 			if (strcmp(ifa->ifa_name, "lo") == 0 || strcmp(ifa->ifa_name, "idrac") == 0)
 			{
+				slog_debug("Skip - name: %s, ip: %s", ifa->ifa_name, host);
 				continue;
 			}
-			// ignore idrac
+
+			slog_debug("Select - name: %s, ip: %s", ifa->ifa_name, host);
 			strncpy(client_ip, host, sizeof(client_ip) - 1);
 			client_ip[sizeof(client_ip) - 1] = '\0';
 			found_ip = 1;
-			break; // Found a valid non-restricted IP, stop looking.
+			break;
 		}
 	}
 
@@ -1139,74 +1119,43 @@ int32_t stat_init(char *stat_hostfile,
 
 	if (!found_ip)
 	{
-		// Fallback if no external IP is found
-		// strcpy(client_ip, "127.0.0.1");
 		slog_error("HERCULES_ERR_GETIP");
 		fprintf(stderr, "HERCULES_ERR_GETIP\n");
 		return -1;
 	}
 
-	// struct hostent *host_entry = NULL;
-	// // TO CHECK: The gethostbyname*(), gethostbyaddr*(), herror(), and hstrerror() functions are obsolete.
-	// // https://www.man7.org/linux/man-pages/man3/gethostbyname.3.html
-	// if ((host_entry = gethostbyname(client_node)) == NULL)
-	// {
-	// 	perror("HERCULES_ERR_GETHOSTBYNAME");
-	// 	slog_error("HERCULES_ERR_GETHOSTBYNAME");
-	// 	free(stat_addr);
-	// 	return -1;
-	// }
+	return 0;
+}
 
-	// strcpy(client_ip, inet_ntoa(*((struct in_addr *)host_entry->h_addr_list[0])));
-
-	// FILE entity managing the IMSS metadata hostfile.
+static int connect_to_metadata_servers(const char *stat_hostfile, uint64_t port, uint32_t rank)
+{
 	FILE *stat_nodes_struct = NULL;
-	// Number of characters successfully read from the line.
-	int n_chars = 0;
+	char *stat_node = NULL;
+	size_t l_size = 0; // LINE_LENGTH;
+	char request[REQUEST_SIZE] = {0};
 
 	// Open the file containing the IMSS metadata server nodes.
 	if ((stat_nodes_struct = fopen(stat_hostfile, "r+")) == NULL)
 	{
 		char error_msg[MAX_ERR_MSG_LEN];
-		sprintf(error_msg, "HERCULES_ERR_OPEN_STATFILE: %s", stat_hostfile);
+		snprintf(error_msg, sizeof(error_msg), "HERCULES_ERR_OPEN_STATFILE: %s", stat_hostfile);
 		perror(error_msg);
 		slog_error("%s", error_msg);
-		free(stat_addr);
 		return -1;
 	}
 
 	stat_ids = (uint32_t *)calloc(n_stat_servers, sizeof(uint32_t));
-	if (stat_ids == NULL)
-	{
-		perror("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_STAT_IDS");
-		slog_error("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_STAT_IDS");
-		exit(-1);
-	}
-
 	stat_eps = (ucp_ep_h *)calloc(n_stat_servers, sizeof(ucp_ep_h));
-	if (stat_eps == NULL)
-	{
-		perror("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_STAT_EPS");
-		slog_error("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_STAT_EPS");
-		free(stat_ids);
-		exit(-1);
-	}
-
 	ep_contexts = (client_ep_context_t **)calloc(n_stat_servers, sizeof(client_ep_context_t *));
-	if (ep_contexts == NULL)
-	{
-		perror("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_EP_CONTEXTS");
-		slog_error("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_EP_CONTEXTS");
-		free(stat_ids);
-		free(stat_eps);
-		exit(-1);
-	}
+	stat_addr = (ucp_address_t **)calloc(n_stat_servers, sizeof(ucp_address_t *));
 
-	char *stat_node = NULL;
-	size_t l_size = 0;//LINE_LENGTH;
-	
-	// Connect to all servers.
-	char request[REQUEST_SIZE] = {0};
+	if (!stat_ids || !stat_eps || !ep_contexts || !stat_addr)
+	{
+		perror("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC");
+		slog_error("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC");
+		free_metadata_resources(stat_nodes_struct, stat_node, n_stat_servers);
+		return -1;
+	}
 
 	// status = ucp_worker_get_address(ucp_worker_meta, &local_addr_meta, &local_addr_len_meta);
 
@@ -1214,7 +1163,13 @@ int32_t stat_init(char *stat_hostfile,
 	ucp_worker_attr_t worker_attr;
 	memset(&worker_attr, 0, sizeof(worker_attr));
 	worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
-	status = ucp_worker_query(ucp_worker_meta, &worker_attr);
+	ucs_status_t status = ucp_worker_query(ucp_worker_meta, &worker_attr);
+	if (status != UCS_OK)
+	{
+		free_metadata_resources(stat_nodes_struct, stat_node, n_stat_servers);
+		return -1;
+	}
+
 	local_addr_len_meta = worker_attr.address_length;
 	local_addr_meta = worker_attr.address;
 
@@ -1229,14 +1184,19 @@ int32_t stat_init(char *stat_hostfile,
 	slog_debug("Locking network, add=%p", &lock_network);
 	pthread_mutex_lock(&lock_network);
 
-	int oob_sock = -1;
 	for (int i = 0; i < n_stat_servers; i++)
 	{
 		// ucs_status_t status = UCS_OK;
 		size_t addr_len = 0;
 
 		// Save IMSS metadata deployment.
-		n_chars = getline(&stat_node, &l_size, stat_nodes_struct);
+		int n_chars = getline(&stat_node, &l_size, stat_nodes_struct);
+		if (n_chars <= 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			free_metadata_resources(stat_nodes_struct, stat_node, n_stat_servers);
+			return -1;
+		}
 
 		// Erase the new line character from the string.
 		if (stat_node[n_chars - 1] == '\n')
@@ -1247,81 +1207,63 @@ int32_t stat_init(char *stat_hostfile,
 		slog_debug("[IMSS] i=%d, stat_node=%s, port=%ld, rank=%" PRIu32 "", i, stat_node, port, rank);
 		slog_debug("[IMSS] Contacting stat dispatcher at %s:%ld", stat_node, port);
 
-		oob_sock = connect_common(stat_node, port, AF_INET);
+		int oob_sock = connect_common(stat_node, port, AF_INET);
 		if (oob_sock < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN];
-			sprintf(err_msg, "HERCULES_ERR_CONNECT-%s:%ld", stat_node, port);
+			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_CONNECT-%s:%ld", stat_node, port);
 			perror(err_msg);
-			free(ep_contexts);
-            free(stat_ids);
-            free(stat_eps);
-            free(stat_node);
-            free(stat_addr);
 			pthread_mutex_unlock(&lock_network);
+			free_metadata_resources(stat_nodes_struct, stat_node, n_stat_servers);
 			return -1;
 		}
 
-		sprintf(request, "%" PRIu32 " GET HELLO!", rank);
+		snprintf(request, REQUEST_SIZE, "%" PRIu32 " GET HELLO!", rank);
 		slog_debug("[IMSS] request=%s", request);
+
 		if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN];
-			sprintf(err_msg, "HERCULES_ERR_STAT_HELLO_2-%s:%ld", stat_node, port);
-			free(ep_contexts);
-            free(stat_ids);
-            free(stat_eps);
-            free(stat_node);
-            free(stat_addr);
-            close(oob_sock);
+			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_HELLO_2-%s:%ld", stat_node, port);
+			close(oob_sock);
 			pthread_mutex_unlock(&lock_network);
+			free_metadata_resources(stat_nodes_struct, stat_node, n_stat_servers);
 			return -1;
 		}
 
-		ret = recv(oob_sock, &addr_len, sizeof(addr_len), MSG_WAITALL);
-		if (ret < 0)
+		if (recv(oob_sock, &addr_len, sizeof(addr_len), MSG_WAITALL) < 0)
 		{
 			perror("HERCULES_ERR_IMSS_STAT_INIT_RECV_SOCK_ADDRLEN");
 			slog_error("HERCULES_ERR_IMSS_STAT_INIT_RECV_SOCK_ADDRLEN");
-			free(ep_contexts);
-            free(stat_ids);
-            free(stat_eps);
-            free(stat_node);
-            free(stat_addr);
-            close(oob_sock);
+			close(oob_sock);
 			pthread_mutex_unlock(&lock_network);
+			free_metadata_resources(stat_nodes_struct, stat_node, n_stat_servers);
 			return -1;
 		}
 
-		stat_addr[i] = (ucp_address *)malloc(addr_len);
+		stat_addr[i] = (ucp_address_t *)malloc(addr_len);
 		if (stat_addr[i] == NULL)
 		{
 			perror("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_STAT_ADDR");
 			slog_error("HERCULES_ERR_STAT_INIT_MEMORY_ALLOC_STAT_ADDR");
-			free(ep_contexts);
-            free(stat_ids);
-            free(stat_eps);
-            free(stat_node);
-            free(stat_addr);
-            close(oob_sock);
+			close(oob_sock);
 			pthread_mutex_unlock(&lock_network);
-			exit(-1);
+			free_metadata_resources(stat_nodes_struct, stat_node, n_stat_servers);
+			return -1;
 		}
-		ret = recv(oob_sock, stat_addr[i], addr_len, MSG_WAITALL);
-		if (ret < 0)
+
+		if (recv(oob_sock, stat_addr[i], addr_len, MSG_WAITALL) < 0)
 		{
 			perror("HERCULES_ERR_IMSS_STAT_INIT_RECV_SOCK_STATADDR");
 			slog_error("HERCULES_ERR_IMSS_STAT_INIT_RECV_SOCK_STATADDR");
-			free(ep_contexts);
-            free(stat_ids);
-            free(stat_eps);
-            free(stat_node);
-            free(stat_addr);
-            close(oob_sock);
+			close(oob_sock);
 			pthread_mutex_unlock(&lock_network);
+			free_metadata_resources(stat_nodes_struct, stat_node, n_stat_servers);
 			return -1;
 		}
+
 		// slog_debug("[IMSS] stat_addr=%s, len=%d", stat_addr[i], addr_len);
+
 		if (close(oob_sock) < 0)
 		{
 			perror("HERCULES_ERR_STAT_INIT_CLOSE_OOB_SOCK");
@@ -1330,30 +1272,108 @@ int32_t stat_init(char *stat_hostfile,
 
 		// client_create_ep_metadata(ucp_worker_meta, &stat_eps[i], stat_addr[i]);
 		// client_create_ep_data(ucp_worker_meta, &stat_eps[i], stat_addr[i], metadata_err_call_arg);
-		client_create_ep_data_with_context(ucp_worker_meta, &stat_eps[i], stat_addr[i], metadata_err_call_arg, &ep_contexts[i]);
+		status = client_create_ep_data_with_context(ucp_worker_meta, &stat_eps[i], stat_addr[i], metadata_err_call_arg, &ep_contexts[i]);
+		if (status != UCS_OK)
+		{
+			slog_error("HERCULES_ERR_CLIENT_CREATE_EP_DATA");
+			fprintf(stderr, "HERCULES_ERR_CLIENT_CREATE_EP_DATA");
+			pthread_mutex_unlock(&lock_network);
+			free_metadata_resources(stat_nodes_struct, stat_node, n_stat_servers);
+			return -1;
+		}
+
 		// client_create_ep_data_with_context(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], client_err_call_arg, &new_imss.conns.ep_contexts[i]);
 
 		slog_debug("created ep with %s:%ld", stat_node, port);
 	}
 
 	if (stat_node)
+	{
 		free(stat_node);
+	}
+
 	// Close the file.
 	if (fclose(stat_nodes_struct) != 0)
 	{
 		perror("HERCULES_ERR_STAT_INIT_FCLOSE_STATFILE");
-		perror("HERCULES_ERR_STAT_INIT_FCLOSE_STATFILE");
-		free(stat_ids);
-		free(stat_eps);
-		free(stat_node);
 		pthread_mutex_unlock(&lock_network);
+		free_metadata_resources(NULL, NULL, n_stat_servers);
 		return -1;
 	}
 
 	pthread_mutex_unlock(&lock_network);
 	slog_debug("Unlock network");
 
-	// TO CHECK: free memory.
+	return 0;
+}
+
+/**
+ * @brief Method creating a communication channel with the IMSS metadata server. Besides, the stat_imss method initializes a set of elements that will be used through the session.
+ *
+ */
+int32_t stat_init(char *stat_hostfile, uint64_t port, int32_t num_stat_servers, uint32_t rank)
+{
+	slog_debug("[IMSS] Calling stat_init.");
+	// fprintf(stderr, "[IMSS] Calling stat_init.\n");
+
+	// Number of metadata servers to connect to.
+	n_stat_servers = num_stat_servers;
+	slog_debug("n_stat_servers=%d", n_stat_servers);
+
+	// Dataset whose policy was set last.
+	id_current_dataset = -1;
+	// Rank of the current process.
+	process_rank = rank;
+	// Next position within the imss vector to be occupied.
+	imssd_pos = 0;
+	// Next position within the dataset vector to be occupied.
+	datasetd_pos = 0;
+	// Current size of the imss array.
+	imssd_max_size = ELEMENTS;
+	// Current size of the dataset array.
+	datasetd_max_size = ELEMENTS;
+
+	int ret = 0;
+
+	/* Initialize the UCX required objects */
+	// slog_debug("ucp_worker_meta=%p", &ucp_worker_meta);
+	// print_worker_pointer(ucp_worker_meta);
+
+	ret = init_context(&ucp_context_client, NULL, &ucp_worker_meta, CLIENT_SERVER_SEND_RECV_TAG);
+	// print_worker_pointer(ucp_worker_meta);
+	if (ret != 0)
+	{
+		slog_error("HERCULES_ERR_IMSS_STAT_INIT_INIT_CONTEXT");
+		perror("HERCULES_ERR_IMSS_STAT_INIT_INIT_CONTEXT");
+		return -1;
+	}
+
+	ret = init_worker(ucp_context_client, &ucp_worker_data);
+	if (ret != 0)
+	{
+		slog_error("HERCULES_ERR_IMSS_STAT_INIT_INIT_WORKER");
+		perror("HERCULES_ERR_IMSS_STAT_INIT_INIT_WORKER");
+		return -1;
+	}
+
+	memset(&empty_dataset, 0, sizeof(dataset_info));
+	memset(&empty_imss, 0, sizeof(imss));
+
+	if (init_glib_structures() != 0)
+	{
+		return -1;
+	}
+
+	if (resolve_network_interfaces() != 0)
+	{
+		return -1;
+	}
+
+	if (connect_to_metadata_servers(stat_hostfile, port, rank) != 0)
+	{
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -1688,261 +1708,261 @@ uint32_t get_dir(std::string requested_uri_obj, char ***items)
 int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 {
 
-    if (num_active_storages == NULL)
-    {
-        slog_error("HERCULES_ERR_INVALID_ADDRESS_STORAGES");
-        fprintf(stderr, "HERCULES_ERR_INVALID_ADDRESS_STORAGES");
-        return -1;
-    }
+	if (num_active_storages == NULL)
+	{
+		slog_error("HERCULES_ERR_INVALID_ADDRESS_STORAGES");
+		fprintf(stderr, "HERCULES_ERR_INVALID_ADDRESS_STORAGES");
+		return -1;
+	}
 
-    // New IMSS structure storing the entity to be created.
-    imss new_imss;
-    ucs_status_t status;
-    int32_t not_initialized = 0;
+	// New IMSS structure storing the entity to be created.
+	imss new_imss;
+	ucs_status_t status;
+	int32_t not_initialized = 0;
 
-    slog_live("[IMSS] starting function, imss_uri=%s", imss_uri);
-    // Retrieve the actual information from the metadata server.
-    int32_t imss_existance = stat_imss(imss_uri, &new_imss.info);
-    slog_live("[IMSS] imss_uri=%s, imss_existance=%d", imss_uri, imss_existance);
-    // Check if the requested IMSS did not exist or was already stored in the local vector.
-    switch (imss_existance)
-    {
-    case 0:
-    {
-        slog_fatal("HERCULES_ERR_OPEN_IMSS_NOT_EXISTS");
-        return -1;
-    }
-    case 2:
-    {
-        imss check_imss = g_array_index(imssd, imss, found_in);
-        slog_debug("check_imss.conns.matching_server=%d", check_imss.conns.matching_server);
-        if (check_imss.conns.matching_server != -2)
-        {
-            // instance has been already created.
-            slog_debug("Instance has been already creted.");
-            return -2;
-        }
-        slog_debug("freeing ips");
-        for (int32_t i = 0; i < check_imss.info.num_storages; i++)
-            free(check_imss.info.ips[i]);
+	slog_live("[IMSS] starting function, imss_uri=%s", imss_uri);
+	// Retrieve the actual information from the metadata server.
+	int32_t imss_existance = stat_imss(imss_uri, &new_imss.info);
+	slog_live("[IMSS] imss_uri=%s, imss_existance=%d", imss_uri, imss_existance);
+	// Check if the requested IMSS did not exist or was already stored in the local vector.
+	switch (imss_existance)
+	{
+	case 0:
+	{
+		slog_fatal("HERCULES_ERR_OPEN_IMSS_NOT_EXISTS");
+		return -1;
+	}
+	case 2:
+	{
+		imss check_imss = g_array_index(imssd, imss, found_in);
+		slog_debug("check_imss.conns.matching_server=%d", check_imss.conns.matching_server);
+		if (check_imss.conns.matching_server != -2)
+		{
+			// instance has been already created.
+			slog_debug("Instance has been already creted.");
+			return -2;
+		}
+		slog_debug("freeing ips");
+		for (int32_t i = 0; i < check_imss.info.num_storages; i++)
+			free(check_imss.info.ips[i]);
 
-        free(check_imss.info.ips);
-        not_initialized = 1;
-        break;
-    }
-    case -1:
-    {
-        return -1;
-    }
-    }
+		free(check_imss.info.ips);
+		not_initialized = 1;
+		break;
+	}
+	case -1:
+	{
+		return -1;
+	}
+	}
 
-    slog_debug("[IMSS] session_policy new_imss.info.num_active_storages=%ld, num_storages=%ld", new_imss.info.num_active_storages, new_imss.info.num_storages);
+	slog_debug("[IMSS] session_policy new_imss.info.num_active_storages=%ld, num_storages=%ld", new_imss.info.num_active_storages, new_imss.info.num_storages);
 
-    new_imss.conns.peer_addr = (ucp_address_t **)malloc(new_imss.info.num_storages * sizeof(ucp_address_t *));
-    new_imss.conns.id = (uint32_t *)calloc(new_imss.info.num_storages, sizeof(uint32_t));
-    new_imss.conns.eps = (ucp_ep_h *)calloc(new_imss.info.num_storages, sizeof(ucp_ep_h));
-    new_imss.conns.ep_contexts = (client_ep_context_t **)calloc(new_imss.info.num_storages, sizeof(client_ep_context_t *));
+	new_imss.conns.peer_addr = (ucp_address_t **)malloc(new_imss.info.num_storages * sizeof(ucp_address_t *));
+	new_imss.conns.id = (uint32_t *)calloc(new_imss.info.num_storages, sizeof(uint32_t));
+	new_imss.conns.eps = (ucp_ep_h *)calloc(new_imss.info.num_storages, sizeof(ucp_ep_h));
+	new_imss.conns.ep_contexts = (client_ep_context_t **)calloc(new_imss.info.num_storages, sizeof(client_ep_context_t *));
 
-    if (!new_imss.conns.peer_addr || !new_imss.conns.eps || !new_imss.conns.id)
-    {
-        perror("HERCULES_ERR_OPEN_IMSS_MEMORY_ALLOC");
-        slog_error("HERCULES_ERR_OPEN_IMSS_MEMORY_ALLOC");
-        exit(-1);
-    }
+	if (!new_imss.conns.peer_addr || !new_imss.conns.eps || !new_imss.conns.id)
+	{
+		perror("HERCULES_ERR_OPEN_IMSS_MEMORY_ALLOC");
+		slog_error("HERCULES_ERR_OPEN_IMSS_MEMORY_ALLOC");
+		exit(-1);
+	}
 
-    new_imss.conns.matching_server = -1;
+	new_imss.conns.matching_server = -1;
 
-    status = ucp_worker_get_address(ucp_worker_data, &local_addr_data, &local_addr_len_data);
-    ucp_worker_address_attr_t attr;
-    attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
-    ucp_worker_address_query(local_addr_data, &attr);
-    local_data_uid = attr.worker_uid;
+	status = ucp_worker_get_address(ucp_worker_data, &local_addr_data, &local_addr_len_data);
+	ucp_worker_address_attr_t attr;
+	attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
+	ucp_worker_address_query(local_addr_data, &attr);
+	local_data_uid = attr.worker_uid;
 
-    // fprintf(stderr, "Connecting to %d servers\n", new_imss.info.num_storages);
-    slog_debug("Connecting to %d servers", new_imss.info.num_storages);
-    for (int32_t i = 0; i < new_imss.info.num_storages; i++)
-    {
-        // fprintf(stderr, "node=%s, status=%d, new_imss.info.num_storages=%d\n", new_imss.info.ips[i], new_imss.info.status[i], new_imss.info.num_storages);
+	// fprintf(stderr, "Connecting to %d servers\n", new_imss.info.num_storages);
+	slog_debug("Connecting to %d servers", new_imss.info.num_storages);
+	for (int32_t i = 0; i < new_imss.info.num_storages; i++)
+	{
+		// fprintf(stderr, "node=%s, status=%d, new_imss.info.num_storages=%d\n", new_imss.info.ips[i], new_imss.info.status[i], new_imss.info.num_storages);
 
-        // skip current server.
-        int oob_sock = -1;
-        size_t addr_len = 0;
-        int ret = 0;
+		// skip current server.
+		int oob_sock = -1;
+		size_t addr_len = 0;
+		int ret = 0;
 
-        oob_sock = connect_common(new_imss.info.ips[i], new_imss.info.conn_port, AF_INET);
-        if (oob_sock < 0)
-        {
-            char err_msg[MAX_ERR_MSG_LEN];
-            sprintf(err_msg, "HERCULES_ERR_OPEN_IMSS_CONNECT_COMMON - i=%d - %s:%" PRIu16, i, new_imss.info.ips[i], new_imss.info.conn_port);
-            slog_error("%s", err_msg);
-            perror(err_msg);
+		oob_sock = connect_common(new_imss.info.ips[i], new_imss.info.conn_port, AF_INET);
+		if (oob_sock < 0)
+		{
+			char err_msg[MAX_ERR_MSG_LEN];
+			sprintf(err_msg, "HERCULES_ERR_OPEN_IMSS_CONNECT_COMMON - i=%d - %s:%" PRIu16, i, new_imss.info.ips[i], new_imss.info.conn_port);
+			slog_error("%s", err_msg);
+			perror(err_msg);
 
-            free(new_imss.conns.peer_addr);
-            free(new_imss.conns.id);
-            free(new_imss.conns.eps);
-            free(new_imss.conns.ep_contexts);
-            return -1;
-        }
+			free(new_imss.conns.peer_addr);
+			free(new_imss.conns.id);
+			free(new_imss.conns.eps);
+			free(new_imss.conns.ep_contexts);
+			return -1;
+		}
 
-        char request[REQUEST_SIZE] = {0};
-        sprintf(request, "%" PRIu32 " GET %s", process_rank, "HELLO!JOIN");
-        slog_live("ip_address=%s:%" PRIu16 ", local_data_uid=%d", new_imss.info.ips[i], new_imss.info.conn_port, local_data_uid);
-        // fprintf(stderr, "ip_address=%s:%d\n", new_imss.info.ips[i], new_imss.info.conn_port);
+		char request[REQUEST_SIZE] = {0};
+		sprintf(request, "%" PRIu32 " GET %s", process_rank, "HELLO!JOIN");
+		slog_live("ip_address=%s:%" PRIu16 ", local_data_uid=%d", new_imss.info.ips[i], new_imss.info.conn_port, local_data_uid);
+		// fprintf(stderr, "ip_address=%s:%d\n", new_imss.info.ips[i], new_imss.info.conn_port);
 
-        slog_info("Request: %s", request);
+		slog_info("Request: %s", request);
 
-        if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
-        {
-            perror("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
-            slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
-            
-            free(new_imss.conns.peer_addr);
-            free(new_imss.conns.id);
-            free(new_imss.conns.eps);
-            free(new_imss.conns.ep_contexts);
-            close(oob_sock);
-            return -1;
-        }
+		if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
+		{
+			perror("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
+			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
 
-        ret = recv(oob_sock, &addr_len, sizeof(addr_len), MSG_WAITALL);
-        if (ret < 0)
-        {
-            perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
-            slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
-            
-            free(new_imss.conns.peer_addr);
-            free(new_imss.conns.id);
-            free(new_imss.conns.eps);
-            free(new_imss.conns.ep_contexts);
-            close(oob_sock);
-            return -1;
-        }
+			free(new_imss.conns.peer_addr);
+			free(new_imss.conns.id);
+			free(new_imss.conns.eps);
+			free(new_imss.conns.ep_contexts);
+			close(oob_sock);
+			return -1;
+		}
 
-        new_imss.conns.peer_addr[i] = (ucp_address *)malloc(addr_len);
-        if (new_imss.conns.peer_addr[i] == NULL)
-        {
-            perror("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
-            slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
-            
-            free(new_imss.conns.peer_addr);
-            free(new_imss.conns.id);
-            free(new_imss.conns.eps);
-            free(new_imss.conns.ep_contexts);
-            close(oob_sock);
-            exit(-1);
-        }
+		ret = recv(oob_sock, &addr_len, sizeof(addr_len), MSG_WAITALL);
+		if (ret < 0)
+		{
+			perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
+			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
 
-        ret = recv(oob_sock, new_imss.conns.peer_addr[i], addr_len, MSG_WAITALL);
-        if (ret < 0)
-        {
-            perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
-            slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
-            
-            free(new_imss.conns.peer_addr);
-            free(new_imss.conns.id);
-            free(new_imss.conns.eps);
-            free(new_imss.conns.ep_contexts);
-            close(oob_sock);
-            return -1;
-        }
+			free(new_imss.conns.peer_addr);
+			free(new_imss.conns.id);
+			free(new_imss.conns.eps);
+			free(new_imss.conns.ep_contexts);
+			close(oob_sock);
+			return -1;
+		}
 
-        if (close(oob_sock) < 0)
-        {
-            perror("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
-            slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
-        }
+		new_imss.conns.peer_addr[i] = (ucp_address *)malloc(addr_len);
+		if (new_imss.conns.peer_addr[i] == NULL)
+		{
+			perror("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
+			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
 
-        new_imss.conns.id[i] = i;
-        // client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], &new_imss.info.status[i]);
+			free(new_imss.conns.peer_addr);
+			free(new_imss.conns.id);
+			free(new_imss.conns.eps);
+			free(new_imss.conns.ep_contexts);
+			close(oob_sock);
+			exit(-1);
+		}
 
-        client_create_ep_data_with_context(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], client_err_call_arg, &new_imss.conns.ep_contexts[i]);
-        slog_debug("Created endpoint with %s", (new_imss.info.ips)[i]);
-        // fprintf(stderr, "[IMSS] Created endpoint with %s\n", (new_imss.info.ips)[i]);
-        // Save the current socket value when the IMSS ip matches the clients' one.
-        slog_debug("ips=%s, client_node=%s, client_ip=%s", (new_imss.info.ips)[i], client_node, client_ip);
-        if (!strncmp((new_imss.info.ips)[i], client_node, len_client_node) || !strncmp((new_imss.info.ips)[i], client_ip, strlen(new_imss.info.ips[i])))
-        {
-            new_imss.conns.matching_server = i;
-            // fprintf(stderr, "Attach deployment found in %s\n", client_node);
-            matching_server_id = i;
-            // strcpy(att_deployment, imss_uri);
-        }
-    }
+		ret = recv(oob_sock, new_imss.conns.peer_addr[i], addr_len, MSG_WAITALL);
+		if (ret < 0)
+		{
+			perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
+			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
 
-    // new_imss.info.num_storages -= num_down_storages;
-    // NUM_DATA_SERVERS = new_imss.info.num_storages;
-    N_SERVERS = new_imss.info.num_storages;
-    *num_active_storages = new_imss.info.num_storages;
-    // NUM_DATA_SERVERS = new_imss.info.num_active_storages;
+			free(new_imss.conns.peer_addr);
+			free(new_imss.conns.id);
+			free(new_imss.conns.eps);
+			free(new_imss.conns.ep_contexts);
+			close(oob_sock);
+			return -1;
+		}
 
-    // char str_NUM_DATA_SERVERS[10] = {0};
-    // sprintf(str_NUM_DATA_SERVERS, "%d", new_imss.info.num_active_storages);
-    // // TO CHECK: do we already need this?
-    // setenv("HERCULES_CURR_ACTIVE_DATA_NODES", str_NUM_DATA_SERVERS, 1);
-    new_imss.info.session_plcy = get_policy_number(POLICY);
-    curr_imss = new_imss;
+		if (close(oob_sock) < 0)
+		{
+			perror("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
+			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
+		}
 
-    // If the struct was found within the vector but uninitialized, once updated, store it in the same position.
-    if (not_initialized)
-    {
-        slog_debug("Reinserting instace at same position");
-        g_array_remove_index(imssd, found_in);
-        g_array_insert_val(imssd, found_in, new_imss);
+		new_imss.conns.id[i] = i;
+		// client_create_ep_data(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], &new_imss.info.status[i]);
 
-        return 0;
-    }
+		client_create_ep_data_with_context(ucp_worker_data, &new_imss.conns.eps[i], new_imss.conns.peer_addr[i], client_err_call_arg, &new_imss.conns.ep_contexts[i]);
+		slog_debug("Created endpoint with %s", (new_imss.info.ips)[i]);
+		// fprintf(stderr, "[IMSS] Created endpoint with %s\n", (new_imss.info.ips)[i]);
+		// Save the current socket value when the IMSS ip matches the clients' one.
+		slog_debug("ips=%s, client_node=%s, client_ip=%s", (new_imss.info.ips)[i], client_node, client_ip);
+		if (!strncmp((new_imss.info.ips)[i], client_node, len_client_node) || !strncmp((new_imss.info.ips)[i], client_ip, strlen(new_imss.info.ips[i])))
+		{
+			new_imss.conns.matching_server = i;
+			// fprintf(stderr, "Attach deployment found in %s\n", client_node);
+			matching_server_id = i;
+			// strcpy(att_deployment, imss_uri);
+		}
+	}
 
-    // for (size_t k = 0; k < curr_imss.info.num_storages; k++)
-    // {
-    //  slog_debug("curr_imss.info.ips[%d]=%s", k, curr_imss.info.ips[k]);
-    // }
+	// new_imss.info.num_storages -= num_down_storages;
+	// NUM_DATA_SERVERS = new_imss.info.num_storages;
+	N_SERVERS = new_imss.info.num_storages;
+	*num_active_storages = new_imss.info.num_storages;
+	// NUM_DATA_SERVERS = new_imss.info.num_active_storages;
 
-    // if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
-    // {
-    //  // Open shared memory segment.
-    //  shared_memory_key = getKeySM();
-    //  // TIMING(shared_memory = getContentSM(shared_memory_key, SHM_SIZE), "Getting content from memory", SharedMemory *);
-    //  shared_memory = getContentSM(shared_memory_key, SHM_SIZE);
-    //  sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1); // Create or open named semaphore.
-    //  if (sem_shared_memory == SEM_FAILED)
-    //  {
-    //      perror("HERCULES_ERR_SHM_SEM_OPEN");
-    //      return -1;
-    //  }
-    // }
+	// char str_NUM_DATA_SERVERS[10] = {0};
+	// sprintf(str_NUM_DATA_SERVERS, "%d", new_imss.info.num_active_storages);
+	// // TO CHECK: do we already need this?
+	// setenv("HERCULES_CURR_ACTIVE_DATA_NODES", str_NUM_DATA_SERVERS, 1);
+	new_imss.info.session_plcy = get_policy_number(POLICY);
+	curr_imss = new_imss;
 
-    // Add the created struture into the underlying IMSSs.
-    GInsert(&imssd_pos, &imssd_max_size, (char *)&new_imss, imssd, free_imssd);
+	// If the struct was found within the vector but uninitialized, once updated, store it in the same position.
+	if (not_initialized)
+	{
+		slog_debug("Reinserting instace at same position");
+		g_array_remove_index(imssd, found_in);
+		g_array_insert_val(imssd, found_in, new_imss);
 
-    // Adds the root directory on the pool of hash tables.
-    // Check first if it does not exist yet.
-    pthread_mutex_lock(&pool_mutex);
-    GHashTable *root_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, IMSS_ROOT);
-    if (!root_subdir_children_table)
-    { // root not found.
-        slog_debug("root not found in the pool_hash_tables_datasetd");
-        // GHashTable *root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
-        root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
-        if (!root_subdir_children_table)
-        {
-            perror("HERCULES_ERR_OPEN_IMSS_INIT_ROOT_SUBDIR_CHILDREN_TABLE");
-            slog_error("HERCULES_ERR_OPEN_IMSS_INIT_ROOT_SUBDIR_CHILDREN_TABLE");
-            g_hash_table_destroy(pool_hash_tables_datasetd);
-            pool_hash_tables_datasetd = NULL;
-            pthread_mutex_unlock(&pool_mutex);
-            return -1;
-        }
-        g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(IMSS_ROOT), root_subdir_children_table);
-    }
-    else
-    {
-        slog_debug("root FOUND in the pool_hash_tables_datasetd");
-        print_ghashtable();
-    }
-    pthread_mutex_unlock(&pool_mutex);
+		return 0;
+	}
 
-    slog_debug("new_imss.info.num_storages=%d", new_imss.info.num_storages);
-    return new_imss.info.num_storages;
+	// for (size_t k = 0; k < curr_imss.info.num_storages; k++)
+	// {
+	//  slog_debug("curr_imss.info.ips[%d]=%s", k, curr_imss.info.ips[k]);
+	// }
+
+	// if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
+	// {
+	//  // Open shared memory segment.
+	//  shared_memory_key = getKeySM();
+	//  // TIMING(shared_memory = getContentSM(shared_memory_key, SHM_SIZE), "Getting content from memory", SharedMemory *);
+	//  shared_memory = getContentSM(shared_memory_key, SHM_SIZE);
+	//  sem_shared_memory = sem_open("/hercules_shm_sem", O_CREAT, 0644, 1); // Create or open named semaphore.
+	//  if (sem_shared_memory == SEM_FAILED)
+	//  {
+	//      perror("HERCULES_ERR_SHM_SEM_OPEN");
+	//      return -1;
+	//  }
+	// }
+
+	// Add the created struture into the underlying IMSSs.
+	GInsert(&imssd_pos, &imssd_max_size, (char *)&new_imss, imssd, free_imssd);
+
+	// Adds the root directory on the pool of hash tables.
+	// Check first if it does not exist yet.
+	pthread_mutex_lock(&pool_mutex);
+	GHashTable *root_subdir_children_table = (GHashTable *)g_hash_table_lookup(pool_hash_tables_datasetd, IMSS_ROOT);
+	if (!root_subdir_children_table)
+	{ // root not found.
+		slog_debug("root not found in the pool_hash_tables_datasetd");
+		// GHashTable *root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
+		root_subdir_children_table = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_ghashtable_entry);
+		if (!root_subdir_children_table)
+		{
+			perror("HERCULES_ERR_OPEN_IMSS_INIT_ROOT_SUBDIR_CHILDREN_TABLE");
+			slog_error("HERCULES_ERR_OPEN_IMSS_INIT_ROOT_SUBDIR_CHILDREN_TABLE");
+			g_hash_table_destroy(pool_hash_tables_datasetd);
+			pool_hash_tables_datasetd = NULL;
+			pthread_mutex_unlock(&pool_mutex);
+			return -1;
+		}
+		g_hash_table_insert(pool_hash_tables_datasetd, g_strdup(IMSS_ROOT), root_subdir_children_table);
+	}
+	else
+	{
+		slog_debug("root FOUND in the pool_hash_tables_datasetd");
+		print_ghashtable();
+	}
+	pthread_mutex_unlock(&pool_mutex);
+
+	slog_debug("new_imss.info.num_storages=%d", new_imss.info.num_storages);
+	return new_imss.info.num_storages;
 }
 
 int32_t AddBackEndServer2Imss(imss *local_imss_, int at_position)
@@ -2269,113 +2289,113 @@ int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, in
 
 int32_t release_network_resources(const char *imss_uri, int is_parent, int process_rank)
 {
-    imss imss_;
-    int32_t imss_position = -1;
-    char release_msg_data[] = "GET 2 0 RELEASE\0";
-    pthread_mutex_lock(&lock_network);
+	imss imss_;
+	int32_t imss_position = -1;
+	char release_msg_data[] = "GET 2 0 RELEASE\0";
+	pthread_mutex_lock(&lock_network);
 
-    if ((imss_position = find_imss(imss_uri, &imss_)) == -1)
-    {
-        perror("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_FIND_IMSS");
-        slog_error("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_FIND_IMSS");
-        pthread_mutex_unlock(&lock_network);
-        return -1;
-    }
+	if ((imss_position = find_imss(imss_uri, &imss_)) == -1)
+	{
+		perror("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_FIND_IMSS");
+		slog_error("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_FIND_IMSS");
+		pthread_mutex_unlock(&lock_network);
+		return -1;
+	}
 
-    // Release the set of connections to the corresponding IMSS.
-    slog_live("imss_position=%d, num_active_storages=%d, num_storages=%d", imss_position, imss_.info.num_active_storages, imss_.info.num_storages);
-    ucp_ep_h ep;
-    for (int32_t i = 0; i < imss_.info.num_storages; i++)
-    {
-        ep = imss_.conns.eps[i];
-        if (is_parent)
-        {
-            flush_ep(ucp_worker_data, ep);
-            slog_live("release_msg=%s to server %d", release_msg_data, i);
-            // close the endpoint in the server side.
-            if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, release_msg_data) == 0)
-            {
-                perror("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_SEND_REQ");
-                slog_error("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_SEND_REQ");
-                continue;
-            }
-        }
-        // close_ucx_endpoint(ucp_worker_data, ep);
-        // free(imss_.info.ips[i]);
-        // free(imss_.conns.peer_addr[i]);
-    }
-    
-    // flush the worker
-    ucs_status_t status = ucp_worker_flush(ucp_worker_data);
-    if (status != UCS_OK)
-    {
-        fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
-    }
-    
-    for (int32_t i = 0; i < imss_.info.num_storages; i++)
-    {
-        ep = imss_.conns.eps[i];
-        close_ucx_endpoint(ucp_worker_data, ep);
+	// Release the set of connections to the corresponding IMSS.
+	slog_live("imss_position=%d, num_active_storages=%d, num_storages=%d", imss_position, imss_.info.num_active_storages, imss_.info.num_storages);
+	ucp_ep_h ep;
+	for (int32_t i = 0; i < imss_.info.num_storages; i++)
+	{
+		ep = imss_.conns.eps[i];
+		if (is_parent)
+		{
+			flush_ep(ucp_worker_data, ep);
+			slog_live("release_msg=%s to server %d", release_msg_data, i);
+			// close the endpoint in the server side.
+			if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, release_msg_data) == 0)
+			{
+				perror("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_SEND_REQ");
+				slog_error("HERCULES_ERR_RELEASE_NETWORK_RESOURCES_SEND_REQ");
+				continue;
+			}
+		}
+		// close_ucx_endpoint(ucp_worker_data, ep);
+		// free(imss_.info.ips[i]);
+		// free(imss_.conns.peer_addr[i]);
+	}
 
-        free(imss_.info.ips[i]);
-        free(imss_.conns.peer_addr[i]);
-        imss_.info.ips[i] = NULL;
-        imss_.conns.peer_addr[i] = NULL;
-    }
-    free(imss_.conns.eps);
-    free(imss_.info.ips);
-    free(imss_.conns.peer_addr);
-    imss_.conns.eps = NULL;
-    imss_.info.ips = NULL;
-    imss_.conns.peer_addr = NULL;
+	// flush the worker
+	ucs_status_t status = ucp_worker_flush(ucp_worker_data);
+	if (status != UCS_OK)
+	{
+		fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
+	}
 
-    // Free UCX resources with the metadata server.
-    char release_msg_metadata[REQUEST_SIZE] = {0};
-    
-    snprintf(release_msg_metadata, REQUEST_SIZE, "%" PRIu32 " GET 2 RELEASE", process_rank);
-    
-    for (int32_t i = 0; i < n_stat_servers; i++)
-    {
-        ep = stat_eps[i];
-        if (is_parent)
-        {
-            flush_ep(ucp_worker_meta, ep);
-            slog_live("Request - %s", release_msg_metadata);
-            // request to close the endpoint on the server side.
-            if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, release_msg_metadata) == 0)
-            {
-                slog_error("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
-                perror("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
-                continue;
-            }
-        }
-        // close_ucx_endpoint(ucp_worker_meta, ep);
-        // free(stat_addr[i]);
-    }
-    
-    // flush the worker
-    status = ucp_worker_flush(ucp_worker_meta);
-    if (status != UCS_OK)
-    {
-        fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
-    }
-    
-    // close the metadata endpoints.
-    for (int32_t i = 0; i < n_stat_servers; i++)
-    {
-        ep = stat_eps[i];
-        close_ucx_endpoint(ucp_worker_meta, ep);
-        free(stat_addr[i]);
-        stat_addr[i] = NULL;
-    }
-    free(stat_eps);
-    free(stat_addr);
-    stat_eps = NULL;
-    stat_addr = NULL;
-    
-    pthread_mutex_unlock(&lock_network);
+	for (int32_t i = 0; i < imss_.info.num_storages; i++)
+	{
+		ep = imss_.conns.eps[i];
+		close_ucx_endpoint(ucp_worker_data, ep);
 
-    return 0;
+		free(imss_.info.ips[i]);
+		free(imss_.conns.peer_addr[i]);
+		imss_.info.ips[i] = NULL;
+		imss_.conns.peer_addr[i] = NULL;
+	}
+	free(imss_.conns.eps);
+	free(imss_.info.ips);
+	free(imss_.conns.peer_addr);
+	imss_.conns.eps = NULL;
+	imss_.info.ips = NULL;
+	imss_.conns.peer_addr = NULL;
+
+	// Free UCX resources with the metadata server.
+	char release_msg_metadata[REQUEST_SIZE] = {0};
+
+	snprintf(release_msg_metadata, REQUEST_SIZE, "%" PRIu32 " GET 2 RELEASE", process_rank);
+
+	for (int32_t i = 0; i < n_stat_servers; i++)
+	{
+		ep = stat_eps[i];
+		if (is_parent)
+		{
+			flush_ep(ucp_worker_meta, ep);
+			slog_live("Request - %s", release_msg_metadata);
+			// request to close the endpoint on the server side.
+			if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, release_msg_metadata) == 0)
+			{
+				slog_error("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
+				perror("HERCULES_ERR_STAT_RELEASE_SEND_REQ");
+				continue;
+			}
+		}
+		// close_ucx_endpoint(ucp_worker_meta, ep);
+		// free(stat_addr[i]);
+	}
+
+	// flush the worker
+	status = ucp_worker_flush(ucp_worker_meta);
+	if (status != UCS_OK)
+	{
+		fprintf(stderr, "Failed to flush worker: %s\n", ucs_status_string(status));
+	}
+
+	// close the metadata endpoints.
+	for (int32_t i = 0; i < n_stat_servers; i++)
+	{
+		ep = stat_eps[i];
+		close_ucx_endpoint(ucp_worker_meta, ep);
+		free(stat_addr[i]);
+		stat_addr[i] = NULL;
+	}
+	free(stat_eps);
+	free(stat_addr);
+	stat_eps = NULL;
+	stat_addr = NULL;
+
+	pthread_mutex_unlock(&lock_network);
+
+	return 0;
 }
 
 // Method releasing client-side and/or server-side resources related to a certain IMSS instance.
