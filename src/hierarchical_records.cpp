@@ -12,9 +12,10 @@
 #include "comms.h"
 #include "imss.h"
 
-// to manage logs.
-#include "slog.h"
+#include "slog.h" // to manage logs.
+#include <cstdint>
 #include <cstdio>
+#include <inttypes.h>
 
 int SERVER_ID;
 // for sincronization in the map.
@@ -151,6 +152,17 @@ int HierarchicalRecords::CheckIfDirectory(const std::string &key, void *address)
 	return ret;
 }
 
+/**
+ * @brief Insert a block in their corresponding map and increase the usage storage.
+ * 
+ * @param key uri of the block.
+ * @param address data of the block.
+ * @param length length of the block.
+ * @param reused_buffer indicates if a new buffer was allocated or if it was extracted from the reusable memory pool.
+ * @param @deprecated gnode pointer to the gnode in the tree storage version. For hierarchical maps it must be NULL.
+ * @param is_zero_block indicates if this is the zero block.
+ * @return int 0 on success, on error -1 is returned.
+ */
 int HierarchicalRecords::HierarchicalMapPut(std::string key, void *address, uint64_t length, int reused_buffer, GNode *gnode, int is_zero_block)
 {
 	// check if there are space to alloc this block.
@@ -176,11 +188,13 @@ int HierarchicalRecords::HierarchicalMapPut(std::string key, void *address, uint
 	// 		pthread_mutex_unlock(&mutex_garbage);
 	// 		// return 2;
 	// 	}
-
 	if (!reused_buffer)
 	{
-		// Increase only when a malloc was perform.
-		IncreaseMemoryOccupied(length);
+		// Increase only when a malloc was perform.		
+		if (IncreaseMemoryOccupied(length) == 0) {
+			fprintf(stderr, "Max memory has been reached: %.2f%%, quantity ocupied: %" PRId64 "/%" PRIu64, hercules_usage_percentage, quantity_occupied, max_storage_size);
+			return -1;
+		}
 	}
 
 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
@@ -214,7 +228,6 @@ int HierarchicalRecords::HierarchicalMapPut(std::string key, void *address, uint
 		CheckIfDirectory(key, address);
 	}
 
-	// return ret;
 	return 0;
 }
 
@@ -760,7 +773,7 @@ extern "C"
 	 * @param required_space Space to be used by the new block.
 	 * @return 1 if there are enough memory, 0 on other case.
 	 */
-	int IncreaseMemoryOccupied(int64_t required_space)
+	uint32_t IncreaseMemoryOccupied(int64_t required_space)
 	{
 		int ret = 1;
 		pthread_mutex_lock(&mutex_quantity_occupied);

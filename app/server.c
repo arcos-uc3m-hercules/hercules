@@ -276,7 +276,6 @@ int32_t main(int32_t argc, char **argv)
 
 	// init memory pool
 	slog_info("[main] before sts queue create");
-	// fprintf(stderr, "max_storage_size=%lu\n", max_storage_size);
 	fprintf(stderr, "Free memory: %lu GB\n", max_storage_size / GB);
 	if (max_storage_size == 0)
 	{
@@ -586,7 +585,7 @@ int32_t main(int32_t argc, char **argv)
 	IMSS_ROOT_LEN = strlen(IMSS_ROOT);
 	SERVER_ID = args.id;
 	BLOCK_SIZE = args.block_size * 1024;
-
+	
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));
 	hierarchical_map = new HierarchicalRecords(std::string(args.imss_uri));

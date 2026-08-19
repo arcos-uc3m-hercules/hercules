@@ -45,7 +45,7 @@ extern int data_ready;
 // to protect the amount of memory used.
 // pthread_mutex_t mutex_quantity_occupied = PTHREAD_MUTEX_INITIALIZER;
 
-map_records::map_records(const int64_t nsize)
+map_records::map_records(const uint64_t nsize)
 {
 	total_size = nsize;
 	mut = new std::mutex();
@@ -54,10 +54,10 @@ map_records::map_records(const int64_t nsize)
 map_records::~map_records()
 {
 	fprintf(stderr, "Freeing memory\n");
-	slog_debug("Freeing memory\n")
-	    // freeAllMemory();
+	slog_debug("Freeing memory\n");
+	// freeAllMemory();
 
-	    delete mut;
+	delete mut;
 }
 
 std::string map_records::get_head_element()

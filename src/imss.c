@@ -6380,7 +6380,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				msg_length = TIMING(get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context), "get_recv_data_length", size_t, process_rank);
 				if (msg_length == (size_t)-1)
 				{
-					slog_error("HERCULES_ERR_SET_DATA_CONNECTION_LOST");
+					slog_error("HERCULES_ERR_SET_DATA_GET_RECV_LENGTH_CONNECTION_LOST");
 					pthread_mutex_unlock(&lock_network);
 					if (deep > MAX_RETRIES)
 					{
@@ -6390,7 +6390,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 					int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 					if (changes_found == 1)
 						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1);
-					fprintf(stderr, "HERCULES_ERR_SET_DATA_CONNECTION_LOST\n");
+					fprintf(stderr, "HERCULES_ERR_SET_DATA_GET_RECV_LENGTH_CONNECTION_LOST\n");
 					return -ECANCELED;
 				}
 

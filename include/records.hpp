@@ -47,13 +47,13 @@ class map_records
 public:
 	map_records(const map_records &r);
 	map_records() = delete;
-	map_records(const int64_t nsize);
+	map_records(const uint64_t nsize);
 	~map_records();
-	void set_size(const int64_t nsize);
-	int64_t get_size();
+	void set_size(const uint64_t nsize);
+	uint64_t get_size();
 	// int CheckForMemorySpace(int64_t required_space);
 	// int IncreaseMemoryOccupied(int64_t required_space);
-	int DecreaseMemoryOccupied(int64_t freed_space);
+	int DecreaseMemoryOccupied(uint64_t freed_space);
 	// double get_storage_usage_percentage();
 	void print_map();
 	// char *list();
@@ -156,7 +156,7 @@ private:
 	std::map<std::string, std::pair<void *, uint64_t>> buffer_broadcast;
 	std::map<std::string, std::pair<int, __off_t>> buffer_fd;
 	// Mutex restricting access to structure.
-	int64_t total_size;
+	uint64_t total_size;
 	// int64_t quantity_occupied = 0;
 	std::mutex *mut;
 	// std::shared_mutex mut;

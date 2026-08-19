@@ -11,6 +11,7 @@
 #ifndef H_H_MAP_RECORDS
 #define H_H_MAP_RECORDS
 
+#include <cstdint>
 #include <map>
 #include "records.hpp"
 
@@ -63,7 +64,7 @@ extern "C"
 
 	// Memory usage.
 	double get_storage_usage_percentage();
-	int IncreaseMemoryOccupied(int64_t required_space);
+	uint32_t IncreaseMemoryOccupied(int64_t required_space);
 	int DecreaseMemoryOccupied(int64_t freed_space);
 	int CheckForMemorySpace(int64_t required_space);
 	int64_t get_size();

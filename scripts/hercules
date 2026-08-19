@@ -138,21 +138,7 @@ StopAllMetadata() {
     # fi
 }
 
-WakeUpServers() {
-    # NAME=$1 # Server type ("meta" or "data").
-    # shift
-    # hosts=("$@") # List of hostnames.
-    # # hosts=$2 # List of hostnames.
-
-    # # Wake up desired servers.
-    # for node in "${hosts[@]}"
-    # do
-    #     ( ssh $node "pkill -SIGUSR2 hercules_server" )
-    # done
-    # #set -x
-    # awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' "${HERCULES_DATA_HOSTFILE}" "${HERCULES_DATA_HOSTFILE_PROV}" > "${HERCULES_TEMPORAL_PATH}/data2up_index_$SLURM_JOB_ID"
-    # #set +x
-    # WaitForServers "data" "d" "up" ${hosts[@]}    
+WakeUpServers() {  
 
     NAME=$1 # Server type ("metadata" or "data").
     shift
@@ -160,9 +146,6 @@ WakeUpServers() {
     shift
     data_hosts=("$@") # List of hostnames.
 
-    # Read the index file.
-    #index_file="${HERCULES_TEMPORAL_PATH}/data2${ACTION}_index_${SLURM_JOB_ID}"
-    
     if [ ! -f "$index_file" ]; then
         echo "[WakeUpServers] Error: Index file not found at ${index_file}"
         return 1
@@ -206,7 +189,7 @@ WakeUpServers() {
                 echo "[+] Starting data server $REAL_ID on $node..."
             fi
             #srun --exclusive -N 1 -n 1 -c 1 -m block:block:block --mem=0 -w $node -- $COMMAND &
-            srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- $COMMAND &
+            srun  -N 1 -n 1 --cpus-per-task=4 --mem=0 -w $node -- $COMMAND &
         fi
         i=$(($i+1))
     done

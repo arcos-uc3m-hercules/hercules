@@ -110,7 +110,7 @@ extern "C"
 
 		map_put(parent_map, k, v, stat_info, aux);
 		slog_debug("Element %s inserted on the directory map %s", k, first_parent_dir);
-		print_file_type(stat_info, k);
+		// print_file_type(stat_info, k);
 
 		// If the newly added element is a directory, a new std::map for its children
 		// must also be created and stored in 'HierarchicalMap'.
