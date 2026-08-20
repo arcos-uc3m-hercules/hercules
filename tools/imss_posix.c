@@ -3324,7 +3324,7 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 
 			TIMING_NO_RETURN(HierarchicalMapUpdate(hierarchical_map, new_path, ret, &stats, NULL), "generalOpen,map_fd_update_value", rank);
 
-			imss_release(new_path);
+			imss_update(new_path, SET_TRUNCATE_OP);
 		}
 	}
 	else

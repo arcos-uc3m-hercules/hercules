@@ -5543,7 +5543,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			// new_recv->buffer_to_free = response_buffer;
 			new_recv->client_pointer = response_buffer;
 			void *ucx_req_handle = irecv_data(ucp_worker_data, response_buffer, msg_length, local_data_uid, new_recv);
-			// size_received_data = TIMING(recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async), "recv_data", size_t, process_rank);
 			if (UCS_PTR_IS_PTR(ucx_req_handle))
 			{
 				// The request is sending. The callback will be called.
@@ -6208,7 +6207,7 @@ int32_t wait_ack_set_data(char **response_buffer, ucp_ep_h ep, int async)
  * @brief Method storing a specific data element on the data backend.
  * @return 1 on success, on error -1 is returned.
  */
-int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int async, int deep)
+int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int async, int deep, hercules_modes_t op_type)
 {
 	int ret = 0;
 	int32_t n_server = 0;
@@ -6254,6 +6253,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
 		server_id = n_server_;
 		use_local = ((session_policy == LOCAL_ || session_policy == ZCOPY_) && server_id == matching_server_id);
+		const char *op_mode = get_protocol_command(op_type);
 
 		if (data_id == 0)
 			size = sizeof(struct stat);
@@ -6283,7 +6283,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 
 			void *content = setContentSMByID(shm_id, size, buffer);
 
-			sprintf(key_, "LOCALSETBLOCK %lu %ld %d %s$%d", size, offset, shm_id, curr_dataset->uri_, data_id);
+			snprintf(key_, REQUEST_SIZE, "LOCALSETBLOCK %lu %ld %d %s$%d", size, offset, shm_id, curr_dataset->uri_, data_id);
 
 			size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), "send_req", size_t, process_rank);
 			if (size_sent_req == 0)
@@ -6297,7 +6297,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				}
 				int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 				if (changes_found == 1)
-					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1);
+					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
 				fprintf(stderr, "HERCULES_ERR_SET_DATA_SEND_REQ: Failed to send local request\n");
 				return -ECANCELED;
 			}
@@ -6316,7 +6316,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				}
 				int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 				if (changes_found == 1)
-					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1);
+					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
 				fprintf(stderr, "HERCULES_ERR_SET_DATA_CONNECTION_LOST: Remote server disconnected\n");
 				return -ECANCELED;
 			}
@@ -6333,7 +6333,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		}
 		else
 		{ // non LOCAL policy.
-			sprintf(key_, "SET %lu %ld %s$%d %" PRIu32, size, offset, curr_dataset->uri_, data_id, curr_imss_storages);
+			snprintf(key_, REQUEST_SIZE, "%s %lu %ld %s$%d %" PRIu32, op_mode, size, offset, curr_dataset->uri_, data_id, curr_imss_storages);
 			slog_debug("Sending request %s to server %d (%s)", key_, server_id, node_hostname);
 
 			clock_t t = clock();
@@ -6349,7 +6349,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				}
 				int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 				if (changes_found == 1)
-					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1);
+					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
 				fprintf(stderr, "HERCULES_ERR_SET_REQ_SEND_REQ\n");
 				return -ECANCELED;
 			}
@@ -6368,10 +6368,12 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				else if (!UCS_PTR_IS_ERR(ucx_req_handle))
 				{
 					size_sent_data = size;
+					// delete new_send; // TODO: test this.
 				}
 				else
 				{
 					slog_error("Failed to initiate async send");
+					// delete new_send;
 				}
 			}
 			else
@@ -6389,7 +6391,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 					}
 					int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 					if (changes_found == 1)
-						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1);
+						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
 					fprintf(stderr, "HERCULES_ERR_SET_DATA_GET_RECV_LENGTH_CONNECTION_LOST\n");
 					return -ECANCELED;
 				}
@@ -6417,7 +6419,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 					int32_t changes_found = parse_malleability_message(response_buffer, node_hostname);
 					free(response_buffer);
 					if (changes_found == 1)
-						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1);
+						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
 					return -ECANCELED;
 				}
 

@@ -1888,7 +1888,7 @@ extern "C"
 			slog_debug("writting %" PRIu64 " kilobytes (%" PRIu64 " bytes) with an offset of %" PRIu64 " kilobytes (%" PRIu64 " bytes)", bytes_to_copy / 1024, bytes_to_copy, block_offset / 1024, block_offset);
 
 			// Send data to data server.
-			int32_t ret_set_data = TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO, INITIAL_RECURSION), "set_data", int32_t, -1);
+			int32_t ret_set_data = TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO, INITIAL_RECURSION, SET_OP), "set_data", int32_t, -1);
 			if (ret_set_data < 0)
 			{
 				slog_error("[imss_write] Error writing to Hercules.\n");
@@ -2399,7 +2399,52 @@ extern "C"
 		// memcpy(head, &stats, sizeof(struct stat));
 
 		// Updates the size of the file in the block 0.
-		int32_t ret_set_data = set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC, INITIAL_RECURSION);
+		int32_t ret_set_data = set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
+		if (ret_set_data < 0)
+		{
+			perror("HERCULES_ERR_IMSS_RELEASE_SET_DATA");
+			slog_error("HERCULES_ERR_IMSS_RELEASE_SET_DATA");
+			return ret_set_data;
+		}
+
+		return ds;
+	}
+
+	/**
+	 * @brief Updates the stats (block 0) on the remote data server of a dataset pointed by "path".
+	 * @return 0 on success, on error a negative value (< 0) is returned.
+	 */
+	int imss_update(const char *path, hercules_modes_t op_type)
+	{
+		ENSURE_BACKEND();
+		// Update dates
+		int ds = 0;
+		int fd = 0;
+		const char *rpath = path; // this pointer should not be free.
+
+		struct stat stats;
+		struct elements elem = {};
+		fd_lookup(rpath, &fd, &elem);
+		stats = elem.stats;
+		if (fd >= 0)
+			ds = fd;
+		else
+			return -ENOENT;
+
+		// Get time
+		struct timespec spec;
+		clock_gettime(CLOCK_REALTIME, &spec);
+
+		// Update time
+		stats.st_mtim = spec;
+		stats.st_ctim = spec;
+
+		// write metadata
+		slog_debug("stats.st_nlink=%lu, file size=%lu", stats.st_nlink, stats.st_size);
+		// memcpy(head, &stats, sizeof(struct stat));
+
+		// Updates the size of the file in the block 0.
+		int32_t ret_set_data = set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC, INITIAL_RECURSION, op_type);
 		if (ret_set_data < 0)
 		{
 			perror("HERCULES_ERR_IMSS_RELEASE_SET_DATA");
@@ -2508,7 +2553,7 @@ extern "C"
 		// pthread_mutex_lock(&lock); // lock.
 		// stores block 0.
 		// fprintf(stdout, "size of stat=%lu bytes\n", sizeof(struct stat));
-		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0, SYNC, INITIAL_RECURSION);
+		ret = set_data((char *)rpath, *fh, 0, buff, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
 		// pthread_mutex_unlock(&lock); // unlock.
 		if (ret < 0)
 		{
@@ -2753,7 +2798,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
 		pthread_mutex_unlock(&lock);
 
 		return ret_set_data;
@@ -2910,7 +2955,7 @@ extern "C"
 		buff[sizeof(struct stat)] = {'\0'};
 
 		pthread_mutex_lock(&lock);
-		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
 		pthread_mutex_unlock(&lock);
 		if (ret_set_data < 0)
 		{
@@ -2951,7 +2996,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 		buff[sizeof(struct stat)] = '\0';
 
-		int32_t ret_set_data = set_data((char *)path, fd, 0, buff, 0, 0, SYNC, INITIAL_RECURSION);
+		int32_t ret_set_data = set_data((char *)path, fd, 0, buff, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
 
 		pthread_mutex_unlock(&lock);
 
@@ -3014,7 +3059,7 @@ extern "C"
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
 		pthread_mutex_lock(&lock);
-		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION);
+		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
 		pthread_mutex_unlock(&lock);
 		return ret_set_data;
 	}

@@ -33,14 +33,6 @@
 #define SPLIT_READV 9
 #define SPLIT_WRITEV 10
 
-#define GET_OP 0
-#define SET_OP 1
-
-// #define GET_OP_STR "GET"
-// #define SET_OP_STR "SET"
-// #define MALL_OP_STR "MALLEABILITY"
-// Metadata operations.
-
 #define LOCAL_DATASET_UPDATE 0
 
 extern HierarchicalRecords *hierarchical_map;

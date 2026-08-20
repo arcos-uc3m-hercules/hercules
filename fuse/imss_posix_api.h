@@ -86,6 +86,8 @@ extern "C"
 
 	int imss_serializate_hash_table(char *);
 
+	int imss_update(const char *path, hercules_modes_t op_type);
+
 #ifdef __cplusplus
 }
 #endif

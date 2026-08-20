@@ -7,7 +7,6 @@
 #define GB 1073741824UL
 
 #include <string>
-// #include <cstring>
 #include "imss.h"
 #include "arg_parser.h"
 #include "cfg_parse.h"
@@ -15,7 +14,15 @@
 static u_int16_t HERCULES_THREAD_POOL_SIZE = 1;
 extern u_int16_t CONF_MALLEABILITY_STATUS;
 extern u_int16_t ASYNC_IO;
-// using std::string;
+
+static inline const char* get_protocol_command(hercules_modes_t op) {
+    switch (op) {
+        case GET_OP: return PROTOCOL_CMD_GET;
+        case SET_OP: return PROTOCOL_CMD_SET;
+        case SET_TRUNCATE_OP: return PROTOCOL_CMD_TRUNCATE;
+        default:          return PROTOCOL_CMD_SET;
+    }
+}
 
 #ifdef __cplusplus
 extern "C"

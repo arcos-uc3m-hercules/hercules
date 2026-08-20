@@ -414,7 +414,6 @@ void *move_blocks_2_server(void *th_argv)
 	char key_[REQUEST_SIZE] = {0};
 
 	// Map to use.
-	// HierarchicalMap *hiermap = hierarchical_map->hiermap;
 	// Get all the keys of this server.
 	std::vector<std::string> block_keys = hierarchical_map->HierarchicalMapGetAllDirectories();
 
@@ -1785,7 +1784,7 @@ int CheckForMalleability(const p_argv *arguments, const char *req)
 
 /**
  * @brief Connects a new server to the current deployment and updates all required structures.
- * 
+ *
  * @param arguments Pointer to thread arguments and worker context structure.
  * @param req Request to handle.
  * @return int 1 on success, -1 on error.
@@ -1959,7 +1958,7 @@ int process_add_server(p_argv *arguments, const char *req)
 
 /**
  * @brief Fills the variables with the corresponding value according to the action given the "mode".
- * 
+ *
  * @param arguments Pointer to thread arguments and worker context structure.
  * @param req request received in the server.
  * @param mode alias to the action to be handle by the server, e.g., SET, GET, LOCALGET.
@@ -1969,7 +1968,7 @@ int process_add_server(p_argv *arguments, const char *req)
  * @param snapshot_op int pointer to indicate if this is a snapshot operation.
  * @return int 0 on success, 1 in a special case where malleability is in progress, or -1 if mode is not valid.
  */
-int determine_operation_flags(p_argv *arguments, const char *req, const char *mode, int64_t *more, int *is_shared_memory, int *default_params, int *snapshot_op)
+int determine_operation_flags(p_argv *arguments, const char *req, const char *mode, int64_t *more, int *is_shared_memory, int *default_params, int *snapshot_op, bool *truncate)
 {
 	if (!strcmp(mode, "GET"))
 	{
@@ -1985,6 +1984,11 @@ int determine_operation_flags(p_argv *arguments, const char *req, const char *mo
 	{
 		*more = SET_OP;
 	}
+	else if (!strcmp(mode, "SET_TRUNCATE"))
+    {
+        *more = SET_OP; 
+		*truncate = true;
+    }
 	else if (!strcmp(mode, "LOCALGET"))
 	{
 		*more = GET_OP;
@@ -2007,7 +2011,7 @@ int determine_operation_flags(p_argv *arguments, const char *req, const char *mo
 		*more = SET_OP;
 		*snapshot_op = 1;
 	}
-	else 
+	else
 	{
 		// mode is not valid.
 		fprintf(stderr, "HERCULES_ERR_OP_FLAGS_INVALID_MODE");
@@ -2937,7 +2941,9 @@ int handle_write_operation(
     int shm_key,
     HierarchicalRecords *hierarchical_map,
     map_records *map,
-    StsHeader *mem_pool)
+    StsHeader *mem_pool,
+	bool truncate
+)
 {
 	// Local state variables for map output
 	void *address_ = nullptr;
@@ -3287,12 +3293,25 @@ int handle_write_operation(
 					// pthread_mutex_unlock(&memory_protect);
 					return -1;
 				}
+
+				if (msg_length < sizeof(struct stat))
+                {
+					fprintf(stderr, "HERCULES_ERR_DATA_WORKER_WRITE_INVALID_BLOCK_0_LENGTH");
+                    slog_error("HERCULES_ERR_DATA_WORKER_WRITE_INVALID_BLOCK_0_LENGTH");
+                    free(buffer);
+                    SendConfirmationMessage(arguments, MSG_ERROR_OP);
+                    return -1;
+                }
 				pthread_mutex_lock(&memory_protect);
 				old = static_cast<struct stat *>(address_);
 				latest = static_cast<struct stat *>(buffer);
 				slog_debug(" File size new %ld old %ld", latest->st_size, old->st_size);
-				// TODO: check this.
-				// latest->st_size = std::max(latest->st_size, old->st_size);
+
+				// if the file have to be truncated, we do not check for the max size.
+				if (!truncate)
+                { 	
+                    latest->st_size = std::max(latest->st_size, old->st_size);
+                }
 				// slog_debug(" buffer->st_size: %ld, block_offset=%ld", latest->st_size, block_offset);
 				slog_debug(" buffer->st_size: %ld, block_offset=%ld, old->st_nlink: %ld, new->st_nlink: %ld", latest->st_size, block_offset, old->st_nlink, latest->st_nlink);
 				// Overwrite block 0 data.
@@ -3474,6 +3493,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	int default_params = 1;
 	int snapshot_op = 0;
 	key_t shm_key = -1;
+	bool truncate = false;
 
 	char mode[MODE_SIZE + 1] = {0};
 	uint32_t block_size_recv = 0, block_offset = 0;
@@ -3490,8 +3510,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		return handle_admin_commands(arguments, req, mode, map);
 	}
 
-	// checks the mode and updates the given pointers. 
-	ret = determine_operation_flags(arguments, req, mode, &io_operation, &is_shared_memory, &default_params, &snapshot_op);
+	// checks the mode and updates the given pointers.
+	ret = determine_operation_flags(arguments, req, mode, &io_operation, &is_shared_memory, &default_params, &snapshot_op, &truncate);
 	if (ret != 0)
 	{
 		return ret;
@@ -3505,14 +3525,13 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	}
 	else
 	{ // default parameters, the request follows the basic format.
-		TIMING_NO_RETURN(sscanf(req, "%s %" PRIu32 " %" PRIu32 " %s %lu",
+		TIMING_NO_RETURN(sscanf(req, "%" STR(MODE_SIZE) "s %" PRIu32 " %" PRIu32 " %" STR(URI_) "s %lu",
 					mode, &block_size_recv, &block_offset, uri_, &to_read),
-				 "sscanf requeest", arguments->thread_id);
+				 "sscanf request", arguments->thread_id);
 	}
 
-	std::string key;
-	key.assign((const char *)uri_);
-	
+	std::string key(uri_);
+
 	if (io_operation == GET_OP)
 	{ // read actions.
 		return handle_read_operation(arguments, key, block_size_recv, block_offset, to_read, is_shared_memory, shm_key, map_server_eps);
@@ -3530,7 +3549,9 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 		    shm_key,
 		    hierarchical_map,
 		    map.get(), // map.get() returns the raw pointer, handle_write_operation does not need the ownership of map.
-		    mem_pool);
+		    mem_pool,
+			truncate
+		);
 	}
 
 	slog_error("HERCULES_ERR_SRV_WORKER_UNSUPPORTED_MODE: %s", mode);

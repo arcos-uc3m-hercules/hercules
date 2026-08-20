@@ -114,6 +114,17 @@ const static int32_t DEFAULT_ANALYSIS_WINDOW_SIZE = 20;
 // To synchronize network operations.
 static pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
+// Default hercules actions to handle files
+typedef enum {
+    GET_OP = 0,
+    SET_OP = 1,
+	SET_TRUNCATE_OP = 2
+} hercules_modes_t;
+
+static const char* const PROTOCOL_CMD_GET = "GET";
+static const char* const PROTOCOL_CMD_SET = "SET";
+static const char* const PROTOCOL_CMD_TRUNCATE = "SET_TRUNCATE";
+
 /**
  * Macro to measure the time spend by function_to_call.
  * char*::print_comment: comment to be concatenated to the elapsed time.
