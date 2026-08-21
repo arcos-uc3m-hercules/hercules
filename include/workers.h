@@ -21,10 +21,11 @@
 #define RENAME_DIR_DIR_OP 6
 #define CLOSE_OP 7
 #define OPEN_OP 8
-#define READV2_OP 11
-#define UNLINK_OP 12
 #define INSTANCE_OP 9
 #define PERFORMANCE_OP 10
+#define READV2_OP 11
+#define UNLINK_OP 12
+#define DISK_OP 13
 #define DECOMISSIONING_OP 20
 
 #define WRITE_OP 1
@@ -35,7 +36,7 @@
 
 #define LOCAL_DATASET_UPDATE 0
 
-extern HierarchicalRecords *hierarchical_map;
+extern HierarchicalRecords *global_hierarchical_map;
 extern HierarchicalRecords *garbage_collector_map;
 
 // Set of arguments passed to each server thread.
@@ -155,7 +156,5 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls);
  * @return 0 on success, on error -1 is returned.
  */
 void *move_blocks_2_server(void *th_argv);
-
-
 
 #endif

@@ -8,20 +8,20 @@
  */
 static inline int clock_gettime(int clock_id, struct timespec *ts)
 {
-    struct timeval tv;
+	struct timeval tv;
 
-    if (clock_id != CLOCK_REALTIME)
-    {
-        errno = EINVAL;
-        return -1;
-    }
-    if (gettimeofday(&tv, NULL) < 0)
-    {
-        return -1;
-    }
-    ts->tv_sec = tv.tv_sec;
-    ts->tv_nsec = tv.tv_usec * 1000;
-    return 0;
+	if (clock_id != CLOCK_REALTIME)
+	{
+		errno = EINVAL;
+		return -1;
+	}
+	if (gettimeofday(&tv, NULL) < 0)
+	{
+		return -1;
+	}
+	ts->tv_sec = tv.tv_sec;
+	ts->tv_nsec = tv.tv_usec * 1000;
+	return 0;
 }
 
 #endif /* DARWIN */
@@ -31,23 +31,23 @@ static inline int clock_gettime(int clock_id, struct timespec *ts)
  */
 void slog_get_date(SlogDate *sdate)
 {
-    time_t rawtime;
-    struct tm timeinfo;
-    struct timespec now;
-    rawtime = time(NULL);
-    localtime_r(&rawtime, &timeinfo);
+	time_t rawtime;
+	struct tm timeinfo;
+	struct timespec now;
+	rawtime = time(NULL);
+	localtime_r(&rawtime, &timeinfo);
 
-    /* Get System Date-time. */
-    sdate->year = timeinfo.tm_year + 1900;
-    sdate->mon = timeinfo.tm_mon + 1;
-    sdate->day = timeinfo.tm_mday;
-    sdate->hour = timeinfo.tm_hour;
-    sdate->min = timeinfo.tm_min;
-    sdate->sec = timeinfo.tm_sec;
+	/* Get System Date-time. */
+	sdate->year = timeinfo.tm_year + 1900;
+	sdate->mon = timeinfo.tm_mon + 1;
+	sdate->day = timeinfo.tm_mday;
+	sdate->hour = timeinfo.tm_hour;
+	sdate->min = timeinfo.tm_min;
+	sdate->sec = timeinfo.tm_sec;
 
-    /* Get micro seconds. */
-    clock_gettime(CLOCK_MONOTONIC, &now);
-    sdate->usec = now.tv_nsec / 10000000;
+	/* Get micro seconds. */
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	sdate->usec = now.tv_nsec / 10000000;
 }
 
 /*
@@ -55,19 +55,19 @@ void slog_get_date(SlogDate *sdate)
  */
 const char *slog_version(int min)
 {
-    static char verstr[128];
+	static char verstr[128];
 
-    if (min)
-    { /* Get only version numbers. (eg. 1.4.85) */
-        sprintf(verstr, "%d.%d.%d", SLOGVERSION_MAJOR, SLOGVERSION_MINOR, SLOGBUILD_NUM);
-    }
-    else
-    { /* Get version in full format. eg 1.4 build 85 (Jan 21 2017). */
-        sprintf(verstr, "%d.%d build %d (%s)",
-                SLOGVERSION_MAJOR, SLOGVERSION_MINOR, SLOGBUILD_NUM, __DATE__);
-    }
+	if (min)
+	{ /* Get only version numbers. (eg. 1.4.85) */
+		sprintf(verstr, "%d.%d.%d", SLOGVERSION_MAJOR, SLOGVERSION_MINOR, SLOGBUILD_NUM);
+	}
+	else
+	{ /* Get version in full format. eg 1.4 build 85 (Jan 21 2017). */
+		sprintf(verstr, "%d.%d build %d (%s)",
+			SLOGVERSION_MAJOR, SLOGVERSION_MINOR, SLOGBUILD_NUM, __DATE__);
+	}
 
-    return verstr;
+	return verstr;
 }
 
 /*
@@ -75,19 +75,19 @@ const char *slog_version(int min)
  */
 char *strclr(const char *clr, char *str, ...)
 {
-    static char output[MAXMSG + 120];
-    char string[MAXMSG];
+	static char output[MAXMSG + 120];
+	char string[MAXMSG];
 
-    /* Read args. */
-    va_list args;
-    va_start(args, str);
-    vsprintf(string, str, args);
-    va_end(args);
+	/* Read args. */
+	va_list args;
+	va_start(args, str);
+	vsprintf(string, str, args);
+	va_end(args);
 
-    /* Colorize string. */
-    sprintf(output, "%s%s%s", clr, string, CLR_RESET);
+	/* Colorize string. */
+	sprintf(output, "%s%s%s", clr, string, CLR_RESET);
 
-    return output;
+	return output;
 }
 
 // TODO: check this for multithreading.
@@ -100,42 +100,41 @@ char cwd[512] = {0};
  */
 void slog_to_file(char *out, const char *fname, SlogDate *sdate)
 {
-    if (!init_slog)
-    {
-        return;
-    }
-    
+	if (!init_slog)
+	{
+		return;
+	}
 
-    char filename[PATH_MAX] = {0};
+	char filename[PATH_MAX] = {0};
 
-    if (slg.filestamp)
-    { /* Create log filename with date. (eg example-2017-01-21.log) */
-        snprintf(filename, sizeof(filename), "%s/%s-%02d-%02d-%02d.log",
-                 cwd, fname, sdate->year, sdate->mon, sdate->day);
-    }
-    else
-    { /* Create log filename using regular name. (eg example.log) */
-        snprintf(filename, sizeof(filename), "%s.log", fname);
-    }
-    FILE *fp = NULL;
-    // fprintf(stderr, "[SLOG] filename='%s'\n", filename);
-    // if (fp == NULL)
-    // {
-        fp = fopen(filename, "a");
-    // }
+	if (slg.filestamp)
+	{ /* Create log filename with date. (eg example-2017-01-21.log) */
+		snprintf(filename, sizeof(filename), "%s/%s-%02d-%02d-%02d.log",
+			 cwd, fname, sdate->year, sdate->mon, sdate->day);
+	}
+	else
+	{ /* Create log filename using regular name. (eg example.log) */
+		snprintf(filename, sizeof(filename), "%s.log", fname);
+	}
+	FILE *fp = NULL;
+	// fprintf(stderr, "[SLOG] filename='%s'\n", filename);
+	// if (fp == NULL)
+	// {
+	fp = fopen(filename, "a");
+	// }
 
-    if (fp == NULL)
-    {
-        fprintf(stderr, "[SLOG] Error opening file='%s'\n", filename);
-        return;
-    }
+	if (fp == NULL)
+	{
+		fprintf(stderr, "[SLOG] Error opening file='%s'\n", filename);
+		return;
+	}
 
-    /* Append log line to log file. */
-    fprintf(fp, "%s", out);
+	/* Append log line to log file. */
+	fprintf(fp, "%s", out);
 
-    fclose(fp);
+	fclose(fp);
 
-    // opened = 1;
+	// opened = 1;
 }
 
 // void AppendToFile(char *out)
@@ -158,65 +157,65 @@ void slog_to_file(char *out, const char *fname, SlogDate *sdate)
  */
 int parse_config(const char *cfg_name)
 {
-    FILE *fp;
-    char *line = NULL;
-    size_t len = 0;
-    ssize_t read;
-    int ret = 0;
+	FILE *fp;
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	int ret = 0;
 
-    fp = fopen(cfg_name, "r");
-    if (fp == NULL)
-    {
-        return 0;
-    }
+	fp = fopen(cfg_name, "r");
+	if (fp == NULL)
+	{
+		return 0;
+	}
 
-    /* Reading *.cfg file line-by-line. */
-    while ((read = getline(&line, &len, fp)) != -1)
-    {
-        /* Find level in file. */
-        if (strstr(line, "LOGLEVEL") != NULL)
-        {
-            /* Get max log level to print in stdout. */
-            slg.level = atoi(line + 8);
-            ret = 1;
-        }
-        if (strstr(line, "LOGFILELEVEL") != NULL)
-        {
-            /* Level required to write in file. */
-            slg.file_level = atoi(line + 12);
-            ret = 1;
-        }
-        else if (strstr(line, "LOGTOFILE") != NULL)
-        {
-            /*
-             * Get max log level to write in file.
-             * If 0 will not write to file.
-             */
-            slg.to_file = atoi(line + 9);
-            ret = 1;
-        }
-        else if (strstr(line, "PRETTYLOG") != NULL)
-        {
-            /* If 1 will output with color. */
-            slg.pretty = atoi(line + 9);
-            ret = 1;
-        }
-        else if (strstr(line, "FILESTAMP") != NULL)
-        {
-            /* If 1 will add date to log name. */
-            slg.filestamp = atoi(line + 9);
-            ret = 1;
-        }
-    }
+	/* Reading *.cfg file line-by-line. */
+	while ((read = getline(&line, &len, fp)) != -1)
+	{
+		/* Find level in file. */
+		if (strstr(line, "LOGLEVEL") != NULL)
+		{
+			/* Get max log level to print in stdout. */
+			slg.level = atoi(line + 8);
+			ret = 1;
+		}
+		if (strstr(line, "LOGFILELEVEL") != NULL)
+		{
+			/* Level required to write in file. */
+			slg.file_level = atoi(line + 12);
+			ret = 1;
+		}
+		else if (strstr(line, "LOGTOFILE") != NULL)
+		{
+			/*
+			 * Get max log level to write in file.
+			 * If 0 will not write to file.
+			 */
+			slg.to_file = atoi(line + 9);
+			ret = 1;
+		}
+		else if (strstr(line, "PRETTYLOG") != NULL)
+		{
+			/* If 1 will output with color. */
+			slg.pretty = atoi(line + 9);
+			ret = 1;
+		}
+		else if (strstr(line, "FILESTAMP") != NULL)
+		{
+			/* If 1 will add date to log name. */
+			slg.filestamp = atoi(line + 9);
+			ret = 1;
+		}
+	}
 
-    /* Cleanup. */
-    if (line)
-    {
-        free(line);
-    }
-    fclose(fp);
+	/* Cleanup. */
+	if (line)
+	{
+		free(line);
+	}
+	fclose(fp);
 
-    return ret;
+	return ret;
 }
 
 /*
@@ -225,21 +224,21 @@ int parse_config(const char *cfg_name)
  */
 char *slog_get(SlogDate *pDate, char *msg, ...)
 {
-    static char output[MAXMSG + 120];
-    char string[MAXMSG];
+	static char output[MAXMSG + 120];
+	char string[MAXMSG];
 
-    /* Read args. */
-    va_list args;
-    va_start(args, msg);
-    vsprintf(string, msg, args);
-    va_end(args);
+	/* Read args. */
+	va_list args;
+	va_start(args, msg);
+	vsprintf(string, msg, args);
+	va_end(args);
 
-    /* Generate output string with date. */
-    sprintf(output, "%02d.%02d.%02d-%02d:%02d:%02d.%02d - %s",
-            pDate->year, pDate->mon, pDate->day, pDate->hour,
-            pDate->min, pDate->sec, pDate->usec, string);
+	/* Generate output string with date. */
+	sprintf(output, "%02d.%02d.%02d-%02d:%02d:%02d.%02d - %s",
+		pDate->year, pDate->mon, pDate->day, pDate->hour,
+		pDate->min, pDate->sec, pDate->usec, string);
 
-    return output;
+	return output;
 }
 
 /*
@@ -248,199 +247,205 @@ char *slog_get(SlogDate *pDate, char *msg, ...)
  */
 void slog(int flag, char const *caller_name, const char *msg, ...)
 {
-    // saves the current "errno" value to be returned by hercules after slog finished.
-    int prev_errno = errno;
+	// saves the current "errno" value to be returned by hercules after slog finished.
+	int prev_errno = errno;
 
-    if (flag > slg.level || (slg.level >= SLOG_READ && flag != SLOG_READ))
-    {
-        return;
-    }
+	// if (flag > slg.level || (slg.level >= SLOG_READ && flag != SLOG_READ))
+	if (flag > slg.level)
+	{
+		return;
+	}
 
-    if (flag != SLOG_TIME && slg.level == SLOG_TIME)
-    {
-        return;
-    }
+	if (flag != SLOG_TIME && slg.level == SLOG_TIME)
+	{
+		return;
+	}
 
-    // char *ld_preload_path = NULL;
-    // char *original_ld_preload = getenv("LD_PRELOAD");
-    // if (original_ld_preload != NULL)
-    // {
-    //     // Make a copy of the string.
-    //     ld_preload_path = strdup(original_ld_preload);
-    //     if (ld_preload_path == NULL)
-    //     {
-    //         fprintf(stderr, "Error: strdup failed to allocate memory for LD_PRELOAD path.\n");
-    //         return;
-    //     }
+	if (flag != SLOG_MALLEABILITY && slg.level == SLOG_MALLEABILITY)
+	{
+		return;
+	}
 
-    //     unsetenv("LD_PRELOAD");
-    //     // fprintf(stderr, "LD_PRELOAD=%s\n",ld_preload_path);
-    //     // fprintf(stderr, "LD_PRELOAD (copied, before unset): %s\n", ld_preload_path);
-    // }
+	// char *ld_preload_path = NULL;
+	// char *original_ld_preload = getenv("LD_PRELOAD");
+	// if (original_ld_preload != NULL)
+	// {
+	//     // Make a copy of the string.
+	//     ld_preload_path = strdup(original_ld_preload);
+	//     if (ld_preload_path == NULL)
+	//     {
+	//         fprintf(stderr, "Error: strdup failed to allocate memory for LD_PRELOAD path.\n");
+	//         return;
+	//
 
-    /* Lock thread for safe. */
-    if (slg.td_safe)
-    {
-        int rc;
-        if ((rc = pthread_mutex_lock(&slog_mutex)))
-        {
-            fprintf(stderr, "[ERROR][%s] <%s:%d> inside %s(): Can not lock mutex: %s\n",
-                    slg.fname, __FILE__, __LINE__, __func__, strerror(rc));
-            exit(EXIT_FAILURE);
-        }
-    }
+	//     unsetenv("LD_PRELOAD");
+	//     // fprintf(stderr, "LD_PRELOAD=%s\n",ld_preload_path);
+	//     // fprintf(stderr, "LD_PRELOAD (copied, before unset): %s\n", ld_preload_path);
+	// }
 
-    SlogDate mdate;
-    char string[MAXMSG + 120];
-    char in_string[MAXMSG];
-    char prints[MAXMSG + 240];
-    char color[32], alarm[32];
-    char *output;
+	/* Lock thread for safe. */
+	if (slg.td_safe)
+	{
+		int rc;
+		if ((rc = pthread_mutex_lock(&slog_mutex)))
+		{
+			fprintf(stderr, "[ERROR][%s] <%s:%d> inside %s(): Can not lock mutex: %s\n",
+				slg.fname, __FILE__, __LINE__, __func__, strerror(rc));
+			exit(EXIT_FAILURE);
+		}
+	}
 
-    slog_get_date(&mdate);
-    /* Place zero-valued bytes. */
-    bzero(string, sizeof(string));
-    bzero(in_string, sizeof(in_string));
-    bzero(prints, sizeof(prints));
-    bzero(color, sizeof(color));
-    bzero(alarm, sizeof(alarm));
+	SlogDate mdate;
+	char string[MAXMSG + 120];
+	char in_string[MAXMSG];
+	char prints[MAXMSG + 240];
+	char color[32], alarm[32];
+	char *output;
 
-    /* Read args. */
-    va_list args;
-    va_start(args, msg);
-    vsprintf(in_string, msg, args);
-    va_end(args);
+	slog_get_date(&mdate);
+	/* Place zero-valued bytes. */
+	bzero(string, sizeof(string));
+	bzero(in_string, sizeof(in_string));
+	bzero(prints, sizeof(prints));
+	bzero(color, sizeof(color));
+	bzero(alarm, sizeof(alarm));
 
-    // if(slg.rank!=-1)
-    sprintf(string, "[%d][%ld][%d:%s][%s]\t>\t%s", getpid(), pthread_self(), errno, strerror(errno), caller_name, in_string);
+	/* Read args. */
+	va_list args;
+	va_start(args, msg);
+	vsprintf(in_string, msg, args);
+	va_end(args);
 
-    /* Check logging levels. */
-    if ((flag <= slg.level || flag <= slg.file_level))
-    {
-        /* Handle flags. */
-        switch (flag)
-        {
-        case SLOG_NONE:
-            strncpy(prints, string, sizeof(string));
-            break;
-        case SLOG_LIVE:
-            strncpy(color, CLR_NORMAL, sizeof(color));
-            strncpy(alarm, "LIVE", sizeof(alarm));
-            break;
-        case SLOG_INFO:
-            strncpy(color, CLR_GREEN, sizeof(color));
-            strncpy(alarm, "INFO", sizeof(alarm));
-            break;
-        case SLOG_WARN:
-            strncpy(color, CLR_YELLOW, sizeof(color));
-            strncpy(alarm, "WARN", sizeof(alarm));
-            break;
-        case SLOG_DEBUG:
-            strncpy(color, CLR_BLUE, sizeof(color));
-            strncpy(alarm, "DEBUG", sizeof(alarm));
-            break;
-        case SLOG_ERROR:
-            strncpy(color, CLR_RED, sizeof(color));
-            strncpy(alarm, "ERROR", sizeof(alarm));
-            break;
-        case SLOG_FATAL:
-            strncpy(color, CLR_RED, sizeof(color));
-            strncpy(alarm, "FATAL", sizeof(alarm));
-            break;
-        case SLOG_PANIC:
-            strncpy(color, CLR_RED, sizeof(color));
-            strncpy(alarm, "PANIC", sizeof(alarm));
-            break;
-        case SLOG_TIME:
-            strncpy(color, CLR_GREEN, sizeof(color));
-            strncpy(alarm, "TIME", sizeof(alarm));
-            slg.to_console = 0;
-            break;
-        case SLOG_FULL:
-            strncpy(color, CLR_BLUE, sizeof(color));
-            strncpy(alarm, "FULL", sizeof(alarm));
-            break;
-        case SLOG_READ:
-            strncpy(color, CLR_GREEN, sizeof(color));
-            strncpy(alarm, "READ", sizeof(alarm));
-            slg.to_console = 0;
-            break;
-        default:
-            strncpy(prints, string, sizeof(string));
-            flag = SLOG_NONE;
-            break;
-        }
+	// if(slg.rank!=-1)
+	sprintf(string, "[%d][%ld][%d:%s][%s]\t>\t%s", getpid(), pthread_self(), errno, strerror(errno), caller_name, in_string);
 
-        /* Print output. */
-        if (slg.exclusive && flag <= slg.level)
-            if (slg.to_console != 0)
-                if (flag <= slg.level || slg.pretty)
-                {
-                    if (flag != SLOG_NONE)
-                    {
-                        sprintf(prints, "[%s] %s", strclr(color, alarm), string);
-                    }
-                    if (flag >= slg.level)
-                    {
-                        printf("%s", slog_get(&mdate, (char *)"%s\n", prints));
-                    }
-                }
+	/* Check logging levels. */
+	if ((flag <= slg.level || flag <= slg.file_level))
+	{
+		/* Handle flags. */
+		switch (flag)
+		{
+		case SLOG_NONE:
+			strncpy(prints, string, sizeof(string));
+			break;
+		case SLOG_LIVE:
+			strncpy(color, CLR_NORMAL, sizeof(color));
+			strncpy(alarm, "LIVE", sizeof(alarm));
+			break;
+		case SLOG_INFO:
+			strncpy(color, CLR_GREEN, sizeof(color));
+			strncpy(alarm, "INFO", sizeof(alarm));
+			break;
+		case SLOG_WARN:
+			strncpy(color, CLR_YELLOW, sizeof(color));
+			strncpy(alarm, "WARN", sizeof(alarm));
+			break;
+		case SLOG_DEBUG:
+			strncpy(color, CLR_BLUE, sizeof(color));
+			strncpy(alarm, "DEBUG", sizeof(alarm));
+			break;
+		case SLOG_ERROR:
+			strncpy(color, CLR_RED, sizeof(color));
+			strncpy(alarm, "ERROR", sizeof(alarm));
+			break;
+		case SLOG_FATAL:
+			strncpy(color, CLR_RED, sizeof(color));
+			strncpy(alarm, "FATAL", sizeof(alarm));
+			break;
+		case SLOG_PANIC:
+			strncpy(color, CLR_RED, sizeof(color));
+			strncpy(alarm, "PANIC", sizeof(alarm));
+			break;
+		case SLOG_TIME:
+			strncpy(color, CLR_GREEN, sizeof(color));
+			strncpy(alarm, "TIME", sizeof(alarm));
+			slg.to_console = 0;
+			break;
+		case SLOG_FULL:
+			strncpy(color, CLR_BLUE, sizeof(color));
+			strncpy(alarm, "FULL", sizeof(alarm));
+			break;
+		case SLOG_READ:
+			strncpy(color, CLR_GREEN, sizeof(color));
+			strncpy(alarm, "READ", sizeof(alarm));
+			slg.to_console = 0;
+			break;
+		default:
+			strncpy(prints, string, sizeof(string));
+			flag = SLOG_NONE;
+			break;
+		}
 
-        /* Save log in file. */
-        if (slg.to_file && flag <= slg.file_level)
-        {
-            if (slg.pretty)
-            {
-                if (flag != SLOG_NONE)
-                {
-                    sprintf(prints, "[%s] %s", strclr(color, alarm), string);
-                }
-                // output = slog_get(&mdate, (char *)"%s\n", prints);
-            }
-            else
-            {
-                if (flag != SLOG_NONE)
-                {
-                    sprintf(prints, "[%s] %s", alarm, string);
-                }
-            }
-            output = slog_get(&mdate, (char *)"%s\n", prints);
+		/* Print output. */
+		if (slg.exclusive && flag <= slg.level)
+			if (slg.to_console != 0)
+				if (flag <= slg.level || slg.pretty)
+				{
+					if (flag != SLOG_NONE)
+					{
+						sprintf(prints, "[%s] %s", strclr(color, alarm), string);
+					}
+					if (flag >= slg.level)
+					{
+						printf("%s", slog_get(&mdate, (char *)"%s\n", prints));
+					}
+				}
 
-            /* Add log line to file. */
-            // if (!opened)
-            slog_to_file(output, slg.fname, &mdate);
-            // AppendToFile(output);
-        }
-    }
+		/* Save log in file. */
+		if (slg.to_file && flag <= slg.file_level)
+		{
+			if (slg.pretty)
+			{
+				if (flag != SLOG_NONE)
+				{
+					sprintf(prints, "[%s] %s", strclr(color, alarm), string);
+				}
+				// output = slog_get(&mdate, (char *)"%s\n", prints);
+			}
+			else
+			{
+				if (flag != SLOG_NONE)
+				{
+					sprintf(prints, "[%s] %s", alarm, string);
+				}
+			}
+			output = slog_get(&mdate, (char *)"%s\n", prints);
 
-    /* Unlock mutex. */
-    if (slg.td_safe)
-    {
-        int rc;
-        if ((rc = pthread_mutex_unlock(&slog_mutex)))
-        {
-            fprintf(stderr, "[ERROR][%s] <%s:%d> inside %s(): Can not deinitialize mutex: %s\n",
-                    slg.fname, __FILE__, __LINE__, __func__, strerror(rc));
-            // if (ld_preload_path != NULL)
-            // {
-            //     setenv("LD_PRELOAD", ld_preload_path, 1);
-            //     free(ld_preload_path);
-            //     ld_preload_path = NULL;
-            // }
-            exit(EXIT_FAILURE);
-        }
-    }
+			/* Add log line to file. */
+			// if (!opened)
+			slog_to_file(output, slg.fname, &mdate);
+			// AppendToFile(output);
+		}
+	}
 
-    // if (ld_preload_path != NULL)
-    // {
-    //     setenv("LD_PRELOAD", ld_preload_path, 1);
-    //     // Free the memory allocated by strdup.
-    //     free(ld_preload_path);
-    //     ld_preload_path = NULL;
-    // }
+	/* Unlock mutex. */
+	if (slg.td_safe)
+	{
+		int rc;
+		if ((rc = pthread_mutex_unlock(&slog_mutex)))
+		{
+			fprintf(stderr, "[ERROR][%s] <%s:%d> inside %s(): Can not deinitialize mutex: %s\n",
+				slg.fname, __FILE__, __LINE__, __func__, strerror(rc));
+			// if (ld_preload_path != NULL)
+			// {
+			//     setenv("LD_PRELOAD", ld_preload_path, 1);
+			//     free(ld_preload_path);
+			//     ld_preload_path = NULL;
+			// }
+			exit(EXIT_FAILURE);
+		}
+	}
 
-    // fprintf(stderr,"prev_errno=%d, actual_errno=%d\t", prev_errno, errno);
-    errno = prev_errno;
+	// if (ld_preload_path != NULL)
+	// {
+	//     setenv("LD_PRELOAD", ld_preload_path, 1);
+	//     // Free the memory allocated by strdup.
+	//     free(ld_preload_path);
+	//     ld_preload_path = NULL;
+	// }
+
+	// fprintf(stderr,"prev_errno=%d, actual_errno=%d\t", prev_errno, errno);
+	errno = prev_errno;
 }
 
 // void slog_close()
@@ -450,97 +455,98 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
 
 void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int debugColor, int filestamp, int t_safe, unsigned int rank)
 {
-    // int status = 0;
+	// int status = 0;
 
-    /* Set up default values. */
-    slg.level = lvl;           /* Get max log level to print in stdout. */
-    slg.file_level = lvl;      /* Level required to write in file. */
-    slg.to_file = writeFile;   /* Get max log level to write in file. If 0 will not write to file.*/
-    slg.pretty = debugColor;   /* If 1 will output with color. */
-    slg.filestamp = filestamp; /* If 1 will add date to log name. */
-    slg.to_console = debugConsole;
-    slg.td_safe = t_safe;
-    slg.fname = fname;
-    slg.exclusive = 1; /* If 1 will exclude other levels different to the chose one */
-    slg.rank = rank;   /* Identifier used when multiple process are writing over the same file */
+	/* Set up default values. */
+	slg.level = lvl;	   /* Get max log level to print in stdout. */
+	slg.file_level = lvl;	   /* Level required to write in file. */
+	slg.to_file = writeFile;   /* Get max log level to write in file. If 0 will not write to file.*/
+	slg.pretty = debugColor;   /* If 1 will output with color. */
+	slg.filestamp = filestamp; /* If 1 will add date to log name. */
+	slg.to_console = debugConsole;
+	slg.td_safe = t_safe;
+	slg.fname = fname;
+	slg.exclusive = 1; /* If 1 will exclude other levels different to the chose one */
+	slg.rank = rank;   /* Identifier used when multiple process are writing over the same file */
 
-    if (getcwd(cwd, sizeof(cwd)) == NULL)
-    {
-        perror("[SLOG] Error getting the current working directory.");
-        return;
-    }
+	if (getcwd(cwd, sizeof(cwd)) == NULL)
+	{
+		perror("[SLOG] Error getting the current working directory.");
+		return;
+	}
 
+	/* Init mutex sync. */
+	if (t_safe)
+	{
+		/* Init mutex attribute. */
+		pthread_mutexattr_t m_attr;
+		int rc;
+		if ((rc = pthread_mutexattr_init(&m_attr)) ||
+		    (rc = pthread_mutexattr_settype(&m_attr, PTHREAD_MUTEX_RECURSIVE)) ||
+		    (rc = pthread_mutex_init(&slog_mutex, &m_attr)) ||
+		    (rc = pthread_mutexattr_destroy(&m_attr)))
+		{
+			fprintf(stderr, "[ERROR] <%s:%d> inside %s(): Can not initialize mutex: %s\n",
+				__FILE__, __LINE__, __func__, strerror(rc));
+			slg.td_safe = 0;
+		}
+	}
 
-    /* Init mutex sync. */
-    if (t_safe)
-    {
-        /* Init mutex attribute. */
-        pthread_mutexattr_t m_attr;
-        int rc;
-        if ((rc = pthread_mutexattr_init(&m_attr)) ||
-            (rc = pthread_mutexattr_settype(&m_attr, PTHREAD_MUTEX_RECURSIVE)) ||
-            (rc = pthread_mutex_init(&slog_mutex, &m_attr)) ||
-            (rc = pthread_mutexattr_destroy(&m_attr)))
-        {
-            fprintf(stderr, "[ERROR] <%s:%d> inside %s(): Can not initialize mutex: %s\n",
-                    __FILE__, __LINE__, __func__, strerror(rc));
-            slg.td_safe = 0;
-        }
-    }
+	init_slog = 1;
 
-    init_slog = 1;
+	// /* Parse config file. */
+	// if (conf != NULL)
+	// {
+	//     slg.fname = fname;
+	//     status = parse_config(conf);
+	// }
 
-    // /* Parse config file. */
-    // if (conf != NULL)
-    // {
-    //     slg.fname = fname;
-    //     status = parse_config(conf);
-    // }
-
-    // /* Handle config parser status. */
-    // if (!status)
-    // {
-    //     slog(0, SLOG_INFO, "Initializing logger values without config");
-    // }
-    // else
-    // {
-    //     slog(0, SLOG_INFO, "Loading logger config from: %s", conf);
-    // }
+	// /* Handle config parser status. */
+	// if (!status)
+	// {
+	//     slog(0, SLOG_INFO, "Initializing logger values without config");
+	// }
+	// else
+	// {
+	//     slog(0, SLOG_INFO, "Loading logger config from: %s", conf);
+	// }
 }
 
 int getLevel(char *str)
 {
-    // int str_as_num = atoi(str);
-    int ret = -1;
+	// int str_as_num = atoi(str);
+	int ret = -1;
 
-    if (!strcmp(str, "SLOG_NONE"))
-        ret = SLOG_NONE;
-    if (!strcmp(str, "SLOG_LIVE"))
-        ret = SLOG_LIVE;
-    if (!strcmp(str, "SLOG_DEBUG"))
-        ret = SLOG_DEBUG;
-    if (!strcmp(str, "SLOG_WARN"))
-        ret = SLOG_WARN;
-    if (!strcmp(str, "SLOG_INFO"))
-        ret = SLOG_INFO;
-    if (!strcmp(str, "SLOG_ERROR"))
-        ret = SLOG_ERROR;
-    if (!strcmp(str, "SLOG_FATAL"))
-        ret = SLOG_FATAL;
-    if (!strcmp(str, "SLOG_PANIC"))
-        ret = SLOG_PANIC;
-    if (!strcmp(str, "SLOG_TIME"))
-        ret = SLOG_TIME;
-    if (!strcmp(str, "SLOG_FULL"))
-        ret = SLOG_FULL;
-    if (!strcmp(str, "SLOG_READ"))
-        ret = SLOG_READ;
+	if (!strcmp(str, "SLOG_NONE"))
+		ret = SLOG_NONE;
+	if (!strcmp(str, "SLOG_LIVE"))
+		ret = SLOG_LIVE;
+	if (!strcmp(str, "SLOG_DEBUG"))
+		ret = SLOG_DEBUG;
+	if (!strcmp(str, "SLOG_WARN"))
+		ret = SLOG_WARN;
+	if (!strcmp(str, "SLOG_INFO"))
+		ret = SLOG_INFO;
+	if (!strcmp(str, "SLOG_ERROR"))
+		ret = SLOG_ERROR;
+	if (!strcmp(str, "SLOG_FATAL"))
+		ret = SLOG_FATAL;
+	if (!strcmp(str, "SLOG_PANIC"))
+		ret = SLOG_PANIC;
+	if (!strcmp(str, "SLOG_TIME"))
+		ret = SLOG_TIME;
+	if (!strcmp(str, "SLOG_FULL"))
+		ret = SLOG_FULL;
+	if (!strcmp(str, "SLOG_READ"))
+		ret = SLOG_READ;
+	if (!strcmp(str, "SLOG_MALLEABILITY"))
+		ret = SLOG_MALLEABILITY;
 
-    if (ret == -1)
-    {
-        fprintf(stderr, "Invalid option, setting SLOG_PANIC as default");
-        ret = SLOG_PANIC;
-    }
+	if (ret == -1)
+	{
+		fprintf(stderr, "Invalid option, setting SLOG_PANIC as default");
+		ret = SLOG_PANIC;
+	}
 
-    return ret;
+	return ret;
 }

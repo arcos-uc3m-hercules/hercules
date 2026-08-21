@@ -17,10 +17,12 @@ tst/2_4_6_SERVERS_RESULTS.csv
 .aux
 kill_stat.sh
 build
+build-sanitazer
 build-release
 build-debug
 build-asan
 build-tsan
+build-*
 install
 bash
 TODO
@@ -52,4 +54,3 @@ stuff/dummy/*
 *.txt
 
 
-build-*

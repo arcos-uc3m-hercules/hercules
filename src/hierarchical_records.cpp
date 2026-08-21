@@ -549,7 +549,6 @@ int32_t HierarchicalRecords::BackEndHierarchicalMapRenameDirDir(std::string old_
 			sprintf(msg, "BackEndHierarchicalMapRenameDirDir,rename_metadata_dir_stat_worker %ld", map->get_buffer_size());
 			ret = TIMING(map->rename_metadata_dir_stat_worker(old_dir, rdir_dest, gnode), msg, int, 0);
 			// (*gnode) = map->find(old_dir).second.gnode;
-			// BufferValue *entry = map->find(first_parent_dir);
 			BufferValue *entry = parent_map->find(old_dir);
 			if (entry != nullptr)
 				*gnode = entry->gnode;
@@ -679,24 +678,25 @@ int32_t HierarchicalRecords::HierarchicalMapCleanGarbageCollector()
 {
 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 
-	slog_debug("Running HierarchicalMapCleanGarbageCollector");
-	fprintf(stderr, "Running HierarchicalMapCleanGarbageCollector\n");
+	slog_malleability("Running HierarchicalMapCleanGarbageCollector");
+	// fprintf(stderr, "Running HierarchicalMapCleanGarbageCollector\n");
 	double old_hercules_usage_percentage = get_storage_usage_percentage();
 	uint64_t total_freed_memory = 0;
 	for (const auto &pair : *this->hiermap)
 	{
 		const std::string &key = pair.first;
-		slog_debug("Running garbage collector for %s", key.c_str());
-		fprintf(stderr, "Running garbage collector for %s\n", key.c_str());
+		slog_malleability("Running garbage collector for %s", key.c_str());
+		// fprintf(stderr, "Running garbage collector for %s\n", key.c_str());
 		const std::shared_ptr<map_records> &map = pair.second;
 		// std::cout << "Key: " << key << ", Value Data: " << record_ptr->data << std::endl;
 		total_freed_memory += map->cleaning(SERVER_TYPE);
-		slog_debug("---\n");
+		slog_malleability("Ending garbage collector for %s", key.c_str());
 	}
-	fprintf(stderr, "[HierarchicalMapCleanGarbageCollector] Freed memory: %lu bytes (%lu MB)\n", total_freed_memory, total_freed_memory / MB);
+	// fprintf(stderr, "[HierarchicalMapCleanGarbageCollector] Freed memory: %lu bytes (%lu MB)\n", total_freed_memory, total_freed_memory / MB);
 	DecreaseMemoryOccupied(total_freed_memory);
 	double new_hercules_usage_percentage = get_storage_usage_percentage();
-	fprintf(stderr, "Memory freed: %.2f%%\n", new_hercules_usage_percentage - old_hercules_usage_percentage);
+	// fprintf(stderr, "Memory freed: %.2f%%\n", new_hercules_usage_percentage - old_hercules_usage_percentage);
+	slog_malleability("Memory freed: %.2f%%", new_hercules_usage_percentage - old_hercules_usage_percentage);
 	return 0;
 }
 

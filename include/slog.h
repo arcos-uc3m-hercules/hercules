@@ -132,6 +132,7 @@ static int init_slog = 0;
 #define SLOG_TIME 8
 #define SLOG_FULL 9
 #define SLOG_READ 10
+#define SLOG_MALLEABILITY 11
 
 // Comment the following line to remove logs calls on compilation time.
 //#define DPRINTF
@@ -169,6 +170,9 @@ static int init_slog = 0;
 
 #define slog_read(...) \
     slog(SLOG_READ, __func__, __VA_ARGS__);
+
+#define slog_malleability(...) \
+    slog(SLOG_MALLEABILITY, __func__, __VA_ARGS__);
 
 #else
 #define slog_none(...) ;

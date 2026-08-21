@@ -588,7 +588,7 @@ int32_t main(int32_t argc, char **argv)
 	
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));
-	hierarchical_map = new HierarchicalRecords(std::string(args.imss_uri));
+	global_hierarchical_map = new HierarchicalRecords(std::string(args.imss_uri));
 	garbage_collector_map = new HierarchicalRecords(std::string(args.imss_uri));
 
 	// copy the reference to a global map.
@@ -886,6 +886,7 @@ int32_t main(int32_t argc, char **argv)
 
 	ret = ready(tmp_file_path, "OK");
 	fprintf(stdout, ANSI_COLOR_GREEN "[%s] %c-server %d is ready, status code=%d" ANSI_COLOR_RESET "\n", args.data_hostname, args.type, args.id, ret);
+	fflush(stdout);
 	slog_debug("[%s] %c-server %d is ready, status code=%d", args.data_hostname, args.type, args.id, ret);
 	// Wait for threads to finish.
 	for (int32_t i = 0; i < total_threads; i++)
@@ -994,10 +995,10 @@ int32_t main(int32_t argc, char **argv)
 		free(region_locks);
 	}
 
-	if (hierarchical_map != nullptr)
+	if (global_hierarchical_map != nullptr)
 	{
-		delete hierarchical_map;
-		hierarchical_map = nullptr;
+		delete global_hierarchical_map;
+		global_hierarchical_map = nullptr;
 	}
 
 	// Close publisher socket.

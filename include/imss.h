@@ -1,13 +1,14 @@
 #ifndef IMSS_WRAP_
 #define IMSS_WRAP_
 
+#include "comms.h"
 #include <glib.h>
+#include <mutex>
 #include <stdint.h>
 #include <ucp/api/ucp.h>
-#include "comms.h"
 // to manage logs.
-#include "slog.h"
 #include "performance_records.hpp"
+#include "slog.h"
 
 // Maximum number of bytes assigned to a dataset or IMSS URI.
 #define URI_ 512
@@ -64,11 +65,40 @@ extern ucp_address_t *local_addr_data;
 extern uint64_t local_meta_uid;
 extern uint64_t local_data_uid;
 
-
 /* TCP variables. */
 extern char client_node[512];	// Node name where the client is running.
 extern int32_t len_client_node; // Length of the previous node name.
-extern char client_ip[16];		// IP number of the node where the client is taking execution.
+extern char client_ip[16];	// IP number of the node where the client is taking execution.
+
+extern std::mutex mutex_hercules_struct;
+
+enum CommunicationMode
+{
+	MODE_NETWORK,
+	MODE_DISK,
+	MODE_SHM,
+	MODE_BUFF_NETWORK,
+	MODE_UNDEFINED
+};
+
+#define SERVER_BUFFER_MAX_SIZE (1ULL * 1024ULL * 1024ULL * 1024ULL) // GB
+// #define SERVER_BUFFER_MAX_SIZE (64ULL * 1024ULL * 1024ULL) // MB
+// #define SERVER_BUFFER_MAX_SIZE (1024ULL * 1024ULL) // KB
+
+struct ServerBuffer
+{
+	std::vector<uint8_t> data; // serialised records
+	uint32_t block_count = 0;
+	size_t max_size = SERVER_BUFFER_MAX_SIZE;
+	size_t offset = 0; // current write position
+};
+
+struct DiskBlock
+{
+	std::string data_uri;
+	int32_t block_id;
+	std::vector<uint8_t> data;
+};
 
 // /* Hercules objects */
 // extern imss curr_imss;
@@ -136,7 +166,7 @@ typedef struct
 	ucp_ep_h *eps;
 	uint32_t *id;
 	// Array to store the contexts of each endpoint.
-    client_ep_context_t **ep_contexts;
+	client_ep_context_t **ep_contexts;
 } imss_conn;
 
 // Structure merging the previous couple.
@@ -199,8 +229,8 @@ typedef struct
 	char link[256];
 	int is_link;
 
-	int n_open;						// how many process has the file open.
-	char status[128];				// delete the dataset when "dest" is set.
+	int n_open;			// how many process has the file open.
+	char status[128];		// delete the dataset when "dest" is set.
 	int32_t n_servers_when_created; // Number of active servers when this dataset is created.
 	// GHashTable *intervals = NULL;
 	int num_intervals = 0;
@@ -294,7 +324,7 @@ RETURNS:	 0 - Initialization procedure was successfully performed.
 	// int32_t init_imss(char *imss_uri, char *hostfile, char *meta_hostfile, int32_t n_servers, uint16_t conn_port, uint64_t buff_size, uint32_t deployment, const char *binary_path, uint16_t meta_port);
 
 	int32_t open_imss(char *imss_uri, uint32_t *num_active_storages);
-	int32_t AddBackEndServer2Imss(imss* local_imss_, int at_position);
+	int32_t AddBackEndServer2Imss(imss *local_imss_, int at_position);
 
 	/* Method releasing client-side and/or server-side resources related to a certain IMSS instance.
 
@@ -411,7 +441,7 @@ RETURNS:	 0 - Release operation took place successfully.
 RETURNS:	 0 - Release operation took place successfully.
 -1 - In case of error.*/
 	int32_t writev_multiple(const char *buf, int32_t dataset_id, int64_t data_id,
-							int64_t end_blk, int64_t start_offset, int64_t end_offset, int64_t IMSS_DATA_BSIZE, int64_t size);
+				int64_t end_blk, int64_t start_offset, int64_t end_offset, int64_t IMSS_DATA_BSIZE, int64_t size);
 
 	/*Method renaming a dataset in metadata.
 
@@ -430,14 +460,14 @@ RETURNS:	 0 - Release operation took place successfully.
 RETURNS:	 0 - Release operation took place successfully.
 -1 - In case of error.*/
 	int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest, int32_t dataset_id,
-											  int32_t data_id);
+						  int32_t data_id);
 
 	/*Method renaming a dataset in srv_worker.
 
 RETURNS:	 0 - Release operation took place successfully.
 -1 - In case of error.*/
 	int32_t rename_dataset_srv_worker(char *old_dataset_uri, char *new_dataset_uri, int32_t dataset_id,
-									  int32_t data_id);
+					  int32_t data_id);
 
 	int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, int32_t data_id);
 
@@ -479,13 +509,13 @@ RETURNS:	 0 - Release operation took place successfully.
 	// Method retrieving a multiple datasets
 	int32_t
 	readv_multiple(char *dataset_uri,
-				   int32_t dataset_id,
-				   int32_t curr_block,
-				   int32_t prefetch,
-				   char *buffer,
-				   uint64_t BLOCKSIZE,
-				   int64_t start_offset,
-				   int64_t size);
+		       int32_t dataset_id,
+		       int32_t curr_block,
+		       int32_t prefetch,
+		       char *buffer,
+		       uint64_t BLOCKSIZE,
+		       int64_t start_offset,
+		       int64_t size);
 
 	/**
 	 * @brief Method retrieving a data element associated to a certain dataset
@@ -521,16 +551,16 @@ RETURNS:	 0 - Release operation took place successfully.
 	 * error.
 	 */
 	size_t get_data_mall(int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int32_t num_storages);
-	
+
 	/**
 	 * @brief Method to send performance metrics recorded by a client to the Malleability Manager.
-	 * 
+	 *
 	 * @param ep endpoint to the Malleability Manager.
 	 * @param dataset_uri // TOCHECK: this could be not necessary.
 	 * @param m_srv id of the Metadata server acting like the Malleability Manager (see stat_ids[]).
 	 * @return int32_t 0 on success, -1 in other case.
 	 */
-	int32_t send_performance_metrics(ucp_ep_h ep, const char  *dataset_uri, uint32_t m_srv);
+	int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t m_srv);
 
 	/* Method storing a specific data element.
 	RECEIVES:	dataset_id - Number identifying the concerned dataset among the client's session.
@@ -546,7 +576,37 @@ RETURNS:	 0 - The requested block was successfully stored.
 
 	int32_t set_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
 
+	/**
+	 * @brief Send data to a server by network.
+	 */
 	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server, uint32_t num_of_servers);
+	int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const char *data_hostname, int number_of_servers);
+
+	/**
+	 * @brief Send data to a server by copying the blocks to disk.
+	 */
+	// int32_t set_data_server_disk(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server, uint32_t num_of_servers);
+
+	/**
+	* @brief Concatenates the given uri length, uri, block id, block size and block data into a serialized buffer.
+	This function does not copy the data to persistent storage or send it by network. See "flush_server_buffer".
+	Serialise one block into a ServerBuffer struct. Used for Snapshoting the data to other server when blocks are being moved.
+	* @return Returns true if the buffer is full and must be flushed before appending.
+	*/
+	bool append_block_to_buffer(ServerBuffer &srv_buf, const char *data_uri, int32_t data_id, const void *block_data, uint64_t block_size);
+	void init_server_buffer(ServerBuffer &srv_buf);
+	void reset_server_buffer(ServerBuffer &srv_buf);
+
+	/**
+	 * @brief Deserialise a list of blocks from a file stored in disk.
+	 */
+	std::vector<DiskBlock> deserialise_server_buffer(const char *file_path);
+	std::vector<DiskBlock> deserialise_network_buffer(ucp_worker_h ucp_worker, uint64_t worker_uid, ucp_ep_h server_ep, uint32_t expected_block_count);
+
+	/**
+	 * @brief flush one server's buffer: write to disk and notify the remote server that the data is ready.
+	 */
+	int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *malleability_checkpoint_path, const char *data_hostname, int number_of_servers);
 
 	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char *key);
 
@@ -648,6 +708,8 @@ RETURNS:	0 - Resources were released successfully.
 	int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root);
 	int32_t release_network_resources(const char *imss_uri, int is_parent, int process_rank);
 	int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, int server_id_to_remove, int new_number_of_servers);
+	// int32_t ReleaseSpecificDataServerNetworkResourcesServer(imss *imss_, int is_parent, int server_id_to_remove, int new_number_of_servers);
+	void print_ips(imss *imss_);
 
 	int find_first_parent_dir(const char *dataset_uri, char *first_parent_dir);
 	int find_last_parent_dir(const char *dataset_uri, char *last_parent_dir);
