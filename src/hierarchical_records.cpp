@@ -154,7 +154,7 @@ int HierarchicalRecords::CheckIfDirectory(const std::string &key, void *address)
 
 /**
  * @brief Insert a block in their corresponding map and increase the usage storage.
- * 
+ *
  * @param key uri of the block.
  * @param address data of the block.
  * @param length length of the block.
@@ -190,8 +190,9 @@ int HierarchicalRecords::HierarchicalMapPut(std::string key, void *address, uint
 	// 	}
 	if (!reused_buffer)
 	{
-		// Increase only when a malloc was perform.		
-		if (IncreaseMemoryOccupied(length) == 0) {
+		// Increase only when a malloc was perform.
+		if (IncreaseMemoryOccupied(length) == 0)
+		{
 			fprintf(stderr, "Max memory has been reached: %.2f%%, quantity ocupied: %" PRId64 "/%" PRIu64, hercules_usage_percentage, quantity_occupied, max_storage_size);
 			return -1;
 		}
@@ -205,7 +206,7 @@ int HierarchicalRecords::HierarchicalMapPut(std::string key, void *address, uint
 	find_last_parent_dir(k, first_parent_dir);
 	// fprintf(stderr, "Putting %s on the hierarchical map %s.\n", k, first_parent_dir);
 
-	// // Retrieve the map for the parent directory's children from 'hierarchical_map'.
+	// Retrieve the map for the parent directory's children from 'hierarchical_map'.
 	auto it = this->hiermap->find(first_parent_dir);
 	std::shared_ptr<map_records> parent_map = nullptr;
 	if (it == this->hiermap->end())
@@ -233,9 +234,7 @@ int HierarchicalRecords::HierarchicalMapPut(std::string key, void *address, uint
 
 std::shared_ptr<map_records> HierarchicalRecords::HierarchicalMapGetDir(const char *k)
 {
-	// std::unique_lock<std::mutex> lck(hierarchical_map_lock_aux);
 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
-	// HierarchicalMap *hiermap = reinterpret_cast<HierarchicalMap *>(hierarchical_map);
 
 	return get_dir_unsafe(k);
 }
@@ -698,6 +697,11 @@ int32_t HierarchicalRecords::HierarchicalMapCleanGarbageCollector()
 	// fprintf(stderr, "Memory freed: %.2f%%\n", new_hercules_usage_percentage - old_hercules_usage_percentage);
 	slog_malleability("Memory freed: %.2f%%", new_hercules_usage_percentage - old_hercules_usage_percentage);
 	return 0;
+}
+
+int64_t HierarchicalRecords::GetStorageUsage()
+{
+	return quantity_occupied;
 }
 
 // Non-blocking functions.

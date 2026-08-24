@@ -39,6 +39,7 @@ public:
 	ssize_t HierarchicalMapGetPrefetch(const std::string &base_key, uint32_t start_block_id, int num_data_servers, char *prefetch_buffer, size_t prefetch_size);
 	int32_t HierarchicalMapRenameRegularFile(const std::string &oldname, const std::string &newname);
 	int32_t BackEndHierarchicalMapRenameDirDir(std::string old_dir, std::string rdir_dest, GNode **gnode);
+	int64_t GetStorageUsage();
 	// **  Garbage collector methods. **
 	int32_t HierarchicalMapPutInGarbageCollector(const std::string &key);
 	int32_t HierarchicalMapPopFromGarbageCollector(const std::string &key);
