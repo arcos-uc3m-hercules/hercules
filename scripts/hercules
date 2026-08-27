@@ -449,12 +449,19 @@ if [[ "$SLURM" -eq "1" ]]; then
         echo "[-] Slurm is active but is not defined. Please, run export SLURM_JOB_ID=<jod id>"
         exit 1
     fi
+    ## If slurm is enabled, we concat the job id to the configuration file.
+    CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
     if [[ ( "${STATUS}" = "start" || "${STATUS}" = "add" ) ]]; then
-        ## If slurm is enabled, we concat the job id to the configuration file to create a new one.
-        CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
-        # Copy if the file does not exist.
+        # Copy if the file does not exist (only on start/add).
         if [[ ! -f "${CURR_HERCULES_CONF_FILE}" ]]; then
             cp "${FILE}" "${CURR_HERCULES_CONF_FILE}"
+        fi
+    else
+        # For stop/remove, the job-specific config should already exist from the start.
+        if [[ ! -f "${CURR_HERCULES_CONF_FILE}" ]]; then
+            echo "## Error: Job-specific configuration file '${CURR_HERCULES_CONF_FILE}' not found."
+            echo "## It should have been created during 'hercules start'. Falling back to '${FILE}'."
+            CURR_HERCULES_CONF_FILE="${FILE}"
         fi
     fi
 else 
