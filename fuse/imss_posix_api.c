@@ -525,9 +525,12 @@ extern "C"
 		}
 		else
 		{
-			stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0);
+			// stbuf->st_blocks = ceil((double)stbuf->st_size / 512.0);
+			stbuf->st_blocks = (stbuf->st_size + 511) >> 9;
 			// break;
 		}
+
+		slog_debug("file size = %d, stbuf->st_blocks = %ld", stbuf->st_size, stbuf->st_blocks)
 
 		return 0;
 	}

@@ -1572,7 +1572,6 @@ uint32_t get_dir(std::string requested_uri_obj, char ***items)
 			return -1;
 		}
 
-		// if (!strncmp("$ERRIMSS_NO_KEY_AVAIL$", (const char *)elements, 22))
 		if (ret == -1)
 		{
 			pthread_mutex_unlock(&lock_network);
@@ -1632,7 +1631,6 @@ uint32_t get_dir(std::string requested_uri_obj, char ***items)
 
 	int pos = 1;
 	slog_debug("from m_srv=%d to %d", m_srv, m_srv + number_metadata_servers);
-	// for (int i = 0; i < number_metadata_servers; i++)
 	for (int i = m_srv; i < m_srv + number_metadata_servers; i++)
 	{
 		// char *curr = (char *)elements;

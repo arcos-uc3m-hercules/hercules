@@ -213,7 +213,7 @@ static int init_slog = 0;
     /* Flags */
     typedef struct
     {
-        const char *fname;
+        char fname[PATH_MAX];
         short file_level;
         short level;
         short to_file;
@@ -290,6 +290,12 @@ static int init_slog = 0;
      * RETURN: (void)
      */
     void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int debugColor, int filestamp, int t_safe, unsigned int rank);
+
+    /**
+     * @brief Returns the name of the written file.
+     * 
+     */
+    void slog_finish();
 
     /**
      * @brief Close the file descriptor of the log file.

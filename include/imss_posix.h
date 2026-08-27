@@ -40,6 +40,8 @@
 #include <sys/sysmacros.h>
 #include <sys/wait.h>
 
+#define ALIGN_UP(val, alignment) (((val) + ((alignment) - 1)) & ~((alignment) - 1))
+
 #ifdef __cplusplus
 extern "C"
 {

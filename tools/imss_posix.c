@@ -114,7 +114,7 @@ void SetErrno(int value)
 	errno = -value;
 }
 
-void copy_stat_to_statx(const struct stat *src, struct statx *dest)
+void copy_stat_to_statx(const struct stat *src, struct statx *dest, unsigned int requested_mask)
 {
 	if (!src || !dest)
 	{
@@ -123,33 +123,112 @@ void copy_stat_to_statx(const struct stat *src, struct statx *dest)
 
 	memset(dest, 0, sizeof(struct statx)); // Initialize to zero
 
-	dest->stx_mask = STATX_BASIC_STATS; // Indicates which fields are valid
-	dest->stx_blksize = src->st_blksize;
+	// We only provide basic POSIX attributes from struct stat.
+	// Set stx_mask to reflect exactly what we are returning to the caller.
+	dest->stx_mask = requested_mask & STATX_BASIC_STATS;
+
 	dest->stx_attributes = 0; // stat does not provide equivalent attributes
+	dest->stx_attributes_mask = 0;
+
+	if (dest->stx_mask & STATX_TYPE || dest->stx_mask & STATX_MODE)
+	{
+		dest->stx_mode = src->st_mode;
+	}
+
+	if (dest->stx_mask & STATX_NLINK)
+	{
+		dest->stx_nlink = src->st_nlink;
+	}
+
+	if (dest->stx_mask & STATX_UID)
+	{
+		dest->stx_uid = src->st_uid;
+	}
+
+	if (dest->stx_mask & STATX_GID)
+	{
+		dest->stx_gid = src->st_gid;
+	}
+
+	if (dest->stx_mask & STATX_SIZE)
+	{
+		dest->stx_size = src->st_size;
+	}
+
+	if (dest->stx_mask & STATX_BLOCKS)
+	{
+		dest->stx_blocks = ((uint64_t)src->st_size + 511) >> 9;
+		dest->stx_blksize = src->st_blksize;
+	}
+
+	if (dest->stx_mask & STATX_ATIME)
+	{
+		dest->stx_atime.tv_sec = src->st_atim.tv_sec;
+		dest->stx_atime.tv_nsec = src->st_atim.tv_nsec;
+	}
+
+	if (dest->stx_mask & STATX_MTIME)
+	{
+		dest->stx_mtime.tv_sec = src->st_mtim.tv_sec;
+		dest->stx_mtime.tv_nsec = src->st_mtim.tv_nsec;
+	}
+
+	if (dest->stx_mask & STATX_CTIME)
+	{
+		dest->stx_ctime.tv_sec = src->st_ctim.tv_sec;
+		dest->stx_ctime.tv_nsec = src->st_ctim.tv_nsec;
+	}
+
+#ifdef _STATX_BTIME
+	// struct stat does not provide creation time (btime).
+	// Ensure we do not claim to provide it in the mask.
+	dest->stx_mask &= ~STATX_BTIME;
+	dest->stx_btime.tv_sec = 0;
+	dest->stx_btime.tv_nsec = 0;
+#endif
 
 	dest->stx_dev_major = major(src->st_dev);
 	dest->stx_dev_minor = minor(src->st_dev);
 	dest->stx_rdev_major = major(src->st_rdev);
 	dest->stx_rdev_minor = minor(src->st_rdev);
-
-	dest->stx_mode = src->st_mode;
-	dest->stx_uid = src->st_uid;
-	dest->stx_gid = src->st_gid;
-	dest->stx_ino = src->st_ino;
-	dest->stx_size = src->st_size;
-	dest->stx_blocks = src->st_blocks;
-	dest->stx_nlink = src->st_nlink;
-
-	// Convert timestamps
-	dest->stx_atime.tv_sec = src->st_atime;
-	dest->stx_mtime.tv_sec = src->st_mtime;
-	dest->stx_ctime.tv_sec = src->st_ctime;
-#ifdef _STATX_BTIME
-	dest->stx_btime.tv_sec = 0;
-#endif
 }
 
-int __fxstat(int ver, int fd, struct stat *buf);
+void print_statxbuf(const struct statx *stxbuf)
+{
+	if (!stxbuf)
+	{
+		slog_error("[DEBUG statx] Buffer pointer is NULL\n");
+		return;
+	}
+
+	slog_debug("STATX BUFFER\n");
+	slog_debug("stx_mask            : 0x%" PRIx32 "\n", stxbuf->stx_mask);
+	slog_debug("stx_blksize         : %" PRIu32 "\n", stxbuf->stx_blksize);
+	slog_debug("stx_attributes      : 0x%" PRIx64 "\n", stxbuf->stx_attributes);
+	slog_debug("stx_nlink           : %" PRIu32 "\n", stxbuf->stx_nlink);
+	slog_debug("stx_uid             : %" PRIu32 "\n", stxbuf->stx_uid);
+	slog_debug("stx_gid             : %" PRIu32 "\n", stxbuf->stx_gid);
+	slog_debug("stx_mode            : 0%" PRIo16 "\n", stxbuf->stx_mode);
+	slog_debug("stx_ino             : %" PRIu64 "\n", stxbuf->stx_ino);
+	slog_debug("stx_size            : %" PRIu64 " bytes\n", stxbuf->stx_size);
+	slog_debug("stx_blocks          : %" PRIu64 " (512-byte blocks)\n", stxbuf->stx_blocks);
+	slog_debug("stx_attributes_mask : 0x%" PRIx64 "\n", stxbuf->stx_attributes_mask);
+
+	// Timestamps (Seconds . Nanoseconds)
+	slog_debug("stx_atime           : %" PRId64 ".%09" PRIu32 "\n", (int64_t)stxbuf->stx_atime.tv_sec, stxbuf->stx_atime.tv_nsec);
+	slog_debug("stx_btime           : %" PRId64 ".%09" PRIu32 "\n", (int64_t)stxbuf->stx_btime.tv_sec, stxbuf->stx_btime.tv_nsec);
+	slog_debug("stx_ctime           : %" PRId64 ".%09" PRIu32 "\n", (int64_t)stxbuf->stx_ctime.tv_sec, stxbuf->stx_ctime.tv_nsec);
+	slog_debug("stx_mtime           : %" PRId64 ".%09" PRIu32 "\n", (int64_t)stxbuf->stx_mtime.tv_sec, stxbuf->stx_mtime.tv_nsec);
+
+	// Device Numbers
+	slog_debug("stx_rdev_major      : %" PRIu32 "\n", stxbuf->stx_rdev_major);
+	slog_debug("stx_rdev_minor      : %" PRIu32 "\n", stxbuf->stx_rdev_minor);
+	slog_debug("stx_dev_major       : %" PRIu32 "\n", stxbuf->stx_dev_major);
+	slog_debug("stx_dev_minor       : %" PRIu32 "\n", stxbuf->stx_dev_minor);
+	slog_debug("=========================\n");
+}
+
+// int __fxstat(int ver, int fd, struct stat *buf);
 
 void WarnOperationNotSupported(const char *call_name, const char *pathname)
 {
@@ -581,11 +660,6 @@ __attribute__((constructor)) void imss_posix_init(void)
 		slog_debug("No inherited state found. Running with a fresh tracking map.");
 	}
 
-	// if (args.logging.hercules_debug_file > 0)
-	// {
-	// 	printf("Log path = %s\n", log_path);
-	// 	fflush(stdout);
-	// }
 	// slog_info(",Time(msec), Comment, RetCode");
 	slog_time("%d,TIMING,Time(s),Msg", rank);
 
@@ -682,7 +756,6 @@ void __attribute__((destructor)) run_me_last()
 
 		slog_live("End 'run_me_last', pid=%d", g_pid);
 		init = 0;
-		// slog_close();
 	}
 }
 
@@ -3306,7 +3379,7 @@ int generalOpen(const char *new_path, int flags, mode_t mode, int createFd)
 			TIMING_NO_RETURN(map_fd_put(map_fd, new_path, createFd, p), "generalOpen,map_fd_put", rank);
 			ret = createFd;
 		}
-		
+
 		if (ret > -1 && (flags & O_TRUNC) && !(flags & O_DIRECTORY))
 		{ // truncate the file.
 			slog_live("Truncating the file %s", new_path);
@@ -5236,14 +5309,14 @@ int getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
 	return real_getdents(fd, dirp, count);
 }
 
-struct dirent entry;
-int to_read = 1;
-char **ori_buf = NULL;
-uint32_t n_ent = 0;
-uint32_t imss_path_len = 0;
-clock_t t;
-int init_loop_timer = 1;
-int init_number = 0;
+static thread_local struct dirent entry;
+thread_local int to_read = 1;
+thread_local char **ori_buf = NULL;
+thread_local uint32_t n_ent = 0;
+thread_local uint32_t imss_path_len = 0;
+thread_local clock_t t;
+thread_local int init_loop_timer = 1;
+thread_local int init_number = 0;
 struct dirent *readdir(DIR *dirp)
 {
 	if (!real_readdir)
@@ -5255,7 +5328,6 @@ struct dirent *readdir(DIR *dirp)
 	}
 
 	errno = 0;
-	size_t ret;
 	std::string pathname_obj = map_fd_search_by_val(map_fd, dirfd(dirp));
 	if (!pathname_obj.empty())
 	{
@@ -5347,6 +5419,7 @@ struct dirent *readdir(DIR *dirp)
 
 			// name of file
 			strncpy(entry.d_name, token, len);
+			entry.d_name[len] = '\0';
 
 			// if (pos % 1000 == 0 || pos == n_ent) // TODO: comments this lines, only for debug.
 			// {									 // print a message every 1000 files.
@@ -5379,7 +5452,9 @@ struct dirent *readdir(DIR *dirp)
 			}
 			else
 			{
-				entry.d_reclen = ceil((double)(strlen(token) - 4) / 8) * 8 + 24;
+				// entry.d_reclen = ceil((double)(strlen(token) - 4) / 8) * 8 + 24;
+				size_t base_len = offsetof(struct dirent, d_name) + len + 1;
+				entry.d_reclen = ALIGN_UP(base_len, 8);
 			}
 			slog_live("[imss_posix] path_searched = %s, entry.d_name=%s", path_search, entry.d_name);
 
@@ -5451,9 +5526,22 @@ int closedir(DIR *dirp)
 		return real_closedir(dirp);
 	}
 
+	if (!dirp)
+	{
+		slog_error("dirp is null");
+		errno = EBADF;
+		return -1;
+	}
+
+	int fd = dirfd(dirp);
+	if (fd == -1)
+	{
+		slog_error("Invalid file descriptor -1");
+		return -1;
+	}
+
 	errno = 0;
 	int ret = -1;
-	int fd = dirfd(dirp);
 	std::string pathname_ob = map_fd_search_by_val(map_fd, fd);
 	if (!pathname_ob.empty())
 	{
@@ -5463,9 +5551,14 @@ int closedir(DIR *dirp)
 		{
 			slog_debug("Trying to close the mount point %s", pathname);
 			// stores the file descriptor "ret" into the map "map_fd".
-			slog_live("[POSIX] Erasing fd %d from map", ret);
+			slog_live("[POSIX] Erasing fd %d from map", fd);
 			map_fd_erase(map_fd, fd);
-			return ret;
+
+			if (real_closedir(dirp) == -1)
+			{
+				slog_error("Cannot close aux fd used by HERCULES %d", fd);
+			}
+			return 0;
 		}
 		ret = imss_close(pathname, fd);
 		if (ret)
@@ -5487,6 +5580,12 @@ int closedir(DIR *dirp)
 		}
 		errno = original_errno;
 		slog_live("[POSIX]. Ending Hercules 'closedir', pathname=%s, fd=%d, ret=%d\n", pathname, fd, ret);
+
+		if (ori_buf != NULL)
+		{
+			free_entries(&ori_buf, n_ent);
+			ori_buf = NULL;
+		}
 
 		to_read = 1;
 		n_ent = 0;
@@ -6424,13 +6523,28 @@ int statx(int dirfd, const char *pathname, int flags, unsigned int mask, struct 
 		return real_statx(dirfd, pathname, flags, mask, statxbuf);
 	}
 
+	// Resolve the absolute path considering dirfd
+	char abs_path[PATH_MAX] = {0};
+	if (pathname && pathname[0] == '/')
+	{
+		strncpy(abs_path, pathname, PATH_MAX - 1);
+	}
+	else if (dirfd == AT_FDCWD)
+	{
+		if (getcwd(abs_path, PATH_MAX - 1) != NULL)
+		{
+			strncat(abs_path, "/", PATH_MAX - strlen(abs_path) - 1);
+			strncat(abs_path, pathname, PATH_MAX - strlen(abs_path) - 1);
+		}
+	}
+
 	errno = 0;
 	int ret;
 	struct stat buf;
-	char *new_path = checkHerculesPath(pathname);
+	char *new_path = checkHerculesPath(abs_path[0] != '\0' ? abs_path : pathname);
 	if (new_path != NULL)
 	{
-		slog_live("[POSIX]. Calling Hercules 'statx', new_path=%s", new_path);
+		slog_live("[POSIX]. Calling Hercules 'statx', pathname=%s, new_path=%s", pathname, new_path);
 		imss_refresh(new_path);
 		ret = imss_getattr(new_path, &buf);
 		if (ret < 0)
@@ -6440,9 +6554,10 @@ int statx(int dirfd, const char *pathname, int flags, unsigned int mask, struct 
 		}
 		else
 		{
-			copy_stat_to_statx(&buf, statxbuf);
+			copy_stat_to_statx(&buf, statxbuf, mask);
 		}
-		slog_live("[POSIX]. Ending Hercules 'statx', new_path=%s, ret=%d\n", new_path, ret);
+		slog_live("[POSIX]. Ending Hercules 'statx', new_path=%s, file size=%d, ret=%d\n", new_path, statxbuf->stx_size, ret);
+		// print_statxbuf(statxbuf);
 		free(new_path);
 	}
 	else
@@ -8091,7 +8206,7 @@ extern "C" int setxattr(const char *path, const char *name, const void *value, s
 			return -1;
 		}
 
-		// TODO: 
+		// TODO:
 		ret = 0;
 
 		slog_live("[POSIX] Ending Hercules 'setxattr', ret=%d\n", ret);
@@ -8141,7 +8256,7 @@ extern "C" int lsetxattr(const char *path, const char *name, const void *value, 
 			return -1;
 		}
 
-		// TODO: 
+		// TODO:
 		ret = 0;
 
 		slog_live("[POSIX] Ending Hercules 'lsetxattr', ret=%d\n", ret);

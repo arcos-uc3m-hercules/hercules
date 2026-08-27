@@ -1,4 +1,5 @@
 #include "slog.h"
+#include <stdio.h>
 
 #ifdef DARWIN
 
@@ -98,34 +99,23 @@ char cwd[512] = {0};
 /*
  * Append log info to log file.
  */
-void slog_to_file(char *out, const char *fname, SlogDate *sdate)
+void slog_to_file(char *out, const char *fname)
 {
 	if (!init_slog)
 	{
 		return;
 	}
 
-	char filename[PATH_MAX] = {0};
-
-	if (slg.filestamp)
-	{ /* Create log filename with date. (eg example-2017-01-21.log) */
-		snprintf(filename, sizeof(filename), "%s/%s-%02d-%02d-%02d.log",
-			 cwd, fname, sdate->year, sdate->mon, sdate->day);
-	}
-	else
-	{ /* Create log filename using regular name. (eg example.log) */
-		snprintf(filename, sizeof(filename), "%s.log", fname);
-	}
 	FILE *fp = NULL;
 	// fprintf(stderr, "[SLOG] filename='%s'\n", filename);
 	// if (fp == NULL)
 	// {
-	fp = fopen(filename, "a");
+	fp = fopen(fname, "a");
 	// }
 
 	if (fp == NULL)
 	{
-		fprintf(stderr, "[SLOG] Error opening file='%s'\n", filename);
+		fprintf(stderr, "[SLOG] Error opening file='%s'\n", fname);
 		return;
 	}
 
@@ -413,7 +403,7 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
 
 			/* Add log line to file. */
 			// if (!opened)
-			slog_to_file(output, slg.fname, &mdate);
+			slog_to_file(output, slg.fname);
 			// AppendToFile(output);
 		}
 	}
@@ -453,9 +443,48 @@ void slog(int flag, char const *caller_name, const char *msg, ...)
 //     CloseFile();
 // }
 
+/**
+ * @note this function cannot print inside __attribute__((destructor)).
+ *
+ */
+void slog_finish()
+{
+	if (!init_slog)
+	{
+		return;
+	}
+
+	// printf( "Logs have been written in %s\n", slg.fname);
+	printf("Logs have been written in %s\n", slg.fname);
+	fflush(stdout);
+}
+
 void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int debugColor, int filestamp, int t_safe, unsigned int rank)
 {
-	// int status = 0;
+	if (getcwd(cwd, sizeof(cwd)) == NULL)
+	{
+		perror("[SLOG] Error getting the current working directory.");
+		return;
+	}
+
+	SlogDate mdate;
+	slog_get_date(&mdate);
+	char filename[PATH_MAX] = {0};
+	if (filestamp)
+	{ /* Create log filename with date. (eg example-2017-01-21.log) */
+		snprintf(filename, sizeof(filename), "%s/%s-%02d-%02d-%02d.log",
+			 cwd, fname, mdate.year, mdate.mon, mdate.day);
+	}
+	else
+	{ /* Create log filename using regular name. (eg example.log) */
+		snprintf(filename, sizeof(filename), "%s.log", fname);
+	}
+
+	if (debugConsole)
+	{
+		printf("Log path = %s\n", filename);
+		fflush(stdout);
+	}
 
 	/* Set up default values. */
 	slg.level = lvl;	   /* Get max log level to print in stdout. */
@@ -465,15 +494,9 @@ void slog_init(const char *fname, int lvl, int writeFile, int debugConsole, int 
 	slg.filestamp = filestamp; /* If 1 will add date to log name. */
 	slg.to_console = debugConsole;
 	slg.td_safe = t_safe;
-	slg.fname = fname;
+	strncpy(slg.fname, filename, PATH_MAX);
 	slg.exclusive = 1; /* If 1 will exclude other levels different to the chose one */
 	slg.rank = rank;   /* Identifier used when multiple process are writing over the same file */
-
-	if (getcwd(cwd, sizeof(cwd)) == NULL)
-	{
-		perror("[SLOG] Error getting the current working directory.");
-		return;
-	}
 
 	/* Init mutex sync. */
 	if (t_safe)
