@@ -5734,7 +5734,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		slog_debug("[IMSS] Request to data %d (%s) - '%s' to server %d (%s)", n_server_, node_hostname, key_, server_id, curr_imss.info.ips[server_id]);
 
 		auto start_time_req = std::chrono::steady_clock::now();
-		size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
+		size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), key_, size_t, process_rank);
 		if (size_sent_req == 0)
 		{
 			slog_error("HERCULES_ERR_GET_NDATA_SEND_REQ");
@@ -6337,8 +6337,8 @@ size_t get_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, voi
 			if (errno != EAGAIN)
 			{
 				pthread_mutex_unlock(&lock_network);
-				slog_error("HERCULES_ERR_GETDATA_RECV");
-				perror("HERCULES_ERR_GETDATA_RECV");
+				slog_error("HERCULES_ERR_GET_DATA_MALL_RECV");
+				perror("HERCULES_ERR_GET_DATA_MALL_RECV");
 				return 0;
 			}
 			else
@@ -6666,7 +6666,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 
 			// clock_t t = clock();
 			auto start_time_req = std::chrono::steady_clock::now();
-			size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), "send_req", size_t, process_rank);
+			size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), key_, size_t, process_rank);
 			if (size_sent_req == 0)
 			{
 				slog_error("HERCULES_ERR_SET_REQ_SEND_REQ");

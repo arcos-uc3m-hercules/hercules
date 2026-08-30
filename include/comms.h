@@ -92,6 +92,12 @@ const static char add_server_err_call_arg[] = "add backend server ep";
 const static char ucx_server_err_call_arg[] = "ucx server ep";
 const static char set_server_err_call_arg[] = "set server ep";
 
+typedef enum 
+{
+	FRONTEND = 0,
+	BACKEND = 1
+} proccess_type_t;
+
 // Is malleability enabled?
 typedef enum
 {

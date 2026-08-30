@@ -28,6 +28,8 @@
 /*
    -----------	IMSS Global variables, filled at the beggining or by default -----------
  */
+proccess_type_t process_type = proccess_type_t::FRONTEND;
+
 int32_t error_print = 0; // Temporal solution maybe to change in the future.
 
 extern char *IMSS_ROOT;

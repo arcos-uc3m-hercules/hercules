@@ -1758,9 +1758,7 @@ void *hercules_ucx_server(void *th_argv)
 			}
 		} while (msg_tag == NULL);
 
-		clock_t t;
-		double time_taken;
-		t = clock();
+		auto start_time = std::chrono::steady_clock::now();
 
 		slog_debug("Message length=%ld bytes from %" PRIu64, info_tag.length, info_tag.sender_tag);
 		msg = (msg_req_t *)malloc(info_tag.length);
@@ -1885,12 +1883,12 @@ void *hercules_ucx_server(void *th_argv)
 			pthread_exit((void *)-1);
 		}
 
-		t = clock() - t;
+		auto end_time = std::chrono::steady_clock::now();
+		std::chrono::duration<double> time_taken = end_time - start_time; // in seconds
 
 		// fflush(stdout);
 
-		time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
-		slog_info("Serving time %f s\n", time_taken);
+		slog_info("Serving time %f s, request=%s\n", time_taken, req);
 
 		// status = flush_ep(arguments->ucp_worker, ep);
 		// slog_debug("flush_ep completed with status %d (%s)\n", status, ucs_status_string(status));
@@ -3297,7 +3295,14 @@ int handle_write_operation(
 
 				perror("HERCULES_ERR_WORKER_MAPPUT");
 				slog_error("HERCULES_ERR_WORKER_MAPPUT");
+				if (reused_memory == 0)
+				{
 				free(buffer);
+				}
+				else
+				{
+					StsQueue.push(mem_pool, buffer);
+				}
 				return -1;
 			}
 		}
@@ -3308,7 +3313,14 @@ int handle_write_operation(
 			// We copy the temporal buffer into the one that is already on the map.
 			memcpy((char *)address_ + block_offset, (char *)buffer + block_offset, msg_length);
 			pthread_mutex_unlock(&memory_protect);
+			if (reused_memory == 0)
+			{
 			free(buffer);
+			}
+			else
+			{
+				StsQueue.push(mem_pool, buffer);
+			}
 			buffer = NULL;
 		}
 	}

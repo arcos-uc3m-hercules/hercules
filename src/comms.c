@@ -18,6 +18,7 @@ static sa_family_t ai_family = AF_INET;
 
 /* asynchronous writes stuff */
 extern void *map_ep; // map_ep used for async write
+extern proccess_type_t process_type;
 // extern int32_t is_client; // used to make sure the server doesn't do map_ep stuff
 pthread_mutex_t map_ep_mutex;
 pthread_mutex_t lock_ucx_comm = PTHREAD_MUTEX_INITIALIZER;
@@ -111,14 +112,17 @@ extern "C"
 		ucp_worker_query(*ucp_worker, &check_attr);
 
 		// To check if UCX has multithreading support.
-		// if (check_attr.thread_mode != UCS_THREAD_MODE_MULTI)
-		// {
-		// 	fprintf(stderr, "CRITICAL WARNING: UCX downgraded thread mode to %d! Multi-threaded access will crash.\n", check_attr.thread_mode);
-		// }
-		// else
-		// {
-		// 	fprintf(stderr, "Worker is running in UCS_THREAD_MODE_MULTI.\n");
-		// }
+		if (process_type == proccess_type_t::BACKEND)
+		{
+			if (check_attr.thread_mode != ucs_thread_mode_t::UCS_THREAD_MODE_MULTI)
+			{
+				fprintf(stderr, "CRITICAL WARNING: UCX downgraded thread mode to %d! Multi-threaded access will crash.\n", check_attr.thread_mode);
+			}
+			else
+			{
+				fprintf(stderr, "Worker is running in UCS_THREAD_MODE_MULTI.\n");
+			}
+		}
 
 		// slog_debug("[COMM] Inicializated worker result: %d", ret);
 		return ret;
@@ -1064,7 +1068,6 @@ extern "C"
 		// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
 		ep_params.err_handler.cb = err_cb_client;
 		ep_params.err_handler.arg = (void *)user_data_args;
-		;
 		// ep_params.err_handler.arg = &server_status;
 		ep_params.user_data = (void *)user_data_args;
 
@@ -1134,7 +1137,8 @@ extern "C"
 			fprintf(stderr, "failed to create an endpoint on the data server: (%s)\n", ucs_status_string(status));
 			slog_error("failed to create an endpoint on the data server: (%s)", ucs_status_string(status));
 			// free(user_data_args_aux);
-		} else
+		}
+		else
 		{
 			slog_debug("[COMM] Created client endpoint");
 		}

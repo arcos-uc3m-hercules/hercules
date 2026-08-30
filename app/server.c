@@ -1,7 +1,9 @@
 #include "map_ep.hpp"
 #include "memalloc.h"
 #include "metadata_stat.h"
+#include "policies.h"
 #include "records.hpp"
+#include "utils.h"
 #include <cstdlib>
 #include <inttypes.h>
 #include <pthread.h>
@@ -10,9 +12,8 @@
 #include <string.h>
 #include <sys/signal.h>
 #include <unistd.h>
-#include "policies.h"
-#include "utils.h"
 
+proccess_type_t process_type = proccess_type_t::BACKEND;
 extern int number_of_hosts;
 extern imss_info imss_copy;
 extern int SERVER_ID;
@@ -75,7 +76,6 @@ extern pthread_cond_t global_run_shutdown_cond;
 
 char main_err_call_arg[] = "main server";
 extern char tmp_file_action[20];
-
 
 /**
  * @brief Comunicates data servers to metadata servers to
