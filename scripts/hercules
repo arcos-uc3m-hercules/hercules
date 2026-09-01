@@ -1,6 +1,6 @@
 #!/bin/bash
 ## Hercules ad hoc file system deployment script.
-## Last modification: 22/02/2026
+## Last modification: 01/09/2026
 ## Genaro Sanchez-Gallegos
 ## Javier Garcia-Blas
 ## Jesus Carretero
@@ -252,7 +252,7 @@ WaitForServers() {
         if [ "$status" -gt 0 ]; then
             echo "[Error: $status] It has not been possible to "${ACTION}" a ${SERVER_NAME} server on ${node}, please verify the configuration file and logs."
             echo "Command output: $output"
-            exit 1
+            KillAllChildProcesses 1
         fi
         
         if [[ "${VERBOSE}" -eq "1" ]]; then
@@ -262,6 +262,28 @@ WaitForServers() {
         set +x
     done
 }
+
+## Kills all background child processes in this session.
+KillAllChildProcesses() {
+    local main_pid=$$
+
+    echo "[!] Terminating child processes..."
+    
+    # send SIGTERM to all child processes of this PID
+    pkill -TERM -P "$main_pid" 2>/dev/null
+
+    sleep 1
+
+    # force kill any remaining direct children
+    pkill -KILL -P "$main_pid" 2>/dev/null
+    wait 2>/dev/null
+    local cleanup_status=$?
+
+    echo "[!] All child processes terminated."
+    
+    exit "$cleanup_status"
+}
+
 
 STATUS=$1
 if [ ! -z "$1" ]; then
@@ -711,35 +733,41 @@ export HERCULES_INIT_NUM_DATA="${INIT_HERCULES_NUM_DATA}"
 if [ ! -z "$HERCULES_METADATA_HOSTFILE" ]; then
     # echo "${HERCULES_METADATA_HOSTFILE} was set"
     if [[ "$SLURM" -eq "1" ]]; then
-        # If slurm is enabled, we added the slurm job id to the meta hostfile.
-        METADATA_HOSTFILE_BASENAME=$(basename "${HERCULES_METADATA_HOSTFILE}")
-        NEW_VAL="${HERCULES_TEMPORAL_PATH}/${METADATA_HOSTFILE_BASENAME}_${SLURM_JOB_ID}"
-        ## Replace the old metadata hostfile name with the new one containing the job id.
-        update_config_line "METADATA_HOSTFILE" "${NEW_VAL}" "${CURR_HERCULES_CONF_FILE}"
-        HERCULES_METADATA_HOSTFILE=${NEW_VAL}
+        if [[ "${HERCULES_METADATA_HOSTFILE}" != *_${SLURM_JOB_ID} ]]; then
+            # If slurm is enabled, we added the slurm job id to the meta hostfile.
+            METADATA_HOSTFILE_BASENAME=$(basename "${HERCULES_METADATA_HOSTFILE}")
+            NEW_VAL="${HERCULES_TEMPORAL_PATH}/${METADATA_HOSTFILE_BASENAME}_${SLURM_JOB_ID}"
+            ## Replace the old metadata hostfile name with the new one containing the job id.
+            update_config_line "METADATA_HOSTFILE" "${NEW_VAL}" "${CURR_HERCULES_CONF_FILE}"
+            HERCULES_METADATA_HOSTFILE=${NEW_VAL}
+        fi
     fi
 fi
 
 if [ ! -z "${HERCULES_DATA_HOSTFILE}" ]; then
     if [[ "$SLURM" -eq "1" ]]; then
-        # If slurm is enabled, we added the slurm job id to the data hostfile.
-        DATA_HOSTFILE_BASENAME=$(basename "${HERCULES_DATA_HOSTFILE}")
-        NEW_VAL="${HERCULES_TEMPORAL_PATH}/${DATA_HOSTFILE_BASENAME}_${SLURM_JOB_ID}"
-        ## Replace the old data hostfile name with the new one containing the job id.
-        update_config_line "DATA_HOSTFILE" "${NEW_VAL}" "${CURR_HERCULES_CONF_FILE}"
-        HERCULES_DATA_HOSTFILE=${NEW_VAL}
+        if [[ "${HERCULES_DATA_HOSTFILE}" != *_${SLURM_JOB_ID} ]]; then
+            # If slurm is enabled, we added the slurm job id to the data hostfile.
+            DATA_HOSTFILE_BASENAME=$(basename "${HERCULES_DATA_HOSTFILE}")
+            NEW_VAL="${HERCULES_TEMPORAL_PATH}/${DATA_HOSTFILE_BASENAME}_${SLURM_JOB_ID}"
+            ## Replace the old data hostfile name with the new one containing the job id.
+            update_config_line "DATA_HOSTFILE" "${NEW_VAL}" "${CURR_HERCULES_CONF_FILE}"
+            HERCULES_DATA_HOSTFILE=${NEW_VAL}
+        fi
     fi
 fi
 
 
 if [ ! -z "${HERCULES_ALLOC_DATA_HOSTFILE}" ]; then
     if [[ "$SLURM" -eq "1" ]]; then
-        # If slurm is enabled, we added the slurm job id to the data hostfile.
-        ALLOC_DATA_HOSTFILE_BASENAME=$(basename "${HERCULES_ALLOC_DATA_HOSTFILE}")
-        NEW_VAL="${HERCULES_TEMPORAL_PATH}/${ALLOC_DATA_HOSTFILE_BASENAME}_${SLURM_JOB_ID}"
-        ## Replace the old alloc data hostfile name with the new one containing the job id.
-        update_config_line "ALLOC_DATA_HOSTFILE" "$NEW_VAL" "$CURR_HERCULES_CONF_FILE"
-        HERCULES_ALLOC_DATA_HOSTFILE=${NEW_VAL}
+        if [[ "${HERCULES_ALLOC_DATA_HOSTFILE}" != *_${SLURM_JOB_ID} ]]; then
+            # If slurm is enabled, we added the slurm job id to the data hostfile.
+            ALLOC_DATA_HOSTFILE_BASENAME=$(basename "${HERCULES_ALLOC_DATA_HOSTFILE}")
+            NEW_VAL="${HERCULES_TEMPORAL_PATH}/${ALLOC_DATA_HOSTFILE_BASENAME}_${SLURM_JOB_ID}"
+            ## Replace the old alloc data hostfile name with the new one containing the job id.
+            update_config_line "ALLOC_DATA_HOSTFILE" "$NEW_VAL" "$CURR_HERCULES_CONF_FILE"
+            HERCULES_ALLOC_DATA_HOSTFILE=${NEW_VAL}
+        fi
     fi
 fi
 # set +x
