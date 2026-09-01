@@ -57,7 +57,7 @@ std::atomic<uint32_t> number_active_storage_servers{0};
 std::atomic<uint32_t> prev_number_active_storage_servers{0};
 int32_t id_server_to_modify = -1;
 char *node_to_use = NULL;
-int32_t acks_received = 0;
+std::atomic<int32_t> acks_received{0};
 // malleability time measure.
 clock_t global_malleability_t;
 double global_malleability_time_taken = 0.0;
@@ -120,7 +120,7 @@ HierarchicalRecords *garbage_collector_map = nullptr;
 extern imss curr_imss;
 
 // Controls the inode number for new files.
-ino_t next_inode = 1000000;
+std::atomic<ino_t> next_inode{1000000};
 
 size_t global_offset = 0;
 
@@ -2381,6 +2381,7 @@ int handle_unlink_op(p_argv *arguments, const std::string &key, uint32_t block_o
 		return -1;
 	}
 
+	pthread_mutex_lock(&memory_protect);
 	struct stat *header = (struct stat *)address_;
 
 	// decrease the number of links.
@@ -2398,6 +2399,7 @@ int handle_unlink_op(p_argv *arguments, const std::string &key, uint32_t block_o
 	{
 		response_msg = MSG_NODELETE_OP;
 	}
+	pthread_mutex_unlock(&memory_protect);
 
 	ret = SendConfirmationMessage(arguments, response_msg);
 	if (ret == 0)
@@ -2567,7 +2569,9 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 			if (is_shared_memory)
 			{
 				// put the private data on the shared memory.
+				pthread_mutex_lock(&memory_protect);
 				void *content = setContentSMByID(shm_key, to_read, (char *)address_ + block_offset);
+				pthread_mutex_unlock(&memory_protect);
 				const char *response = MSG_OK_OP;
 
 				if (content == NULL)
@@ -2594,7 +2598,9 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 			{
 				if (arguments->args->async_io == SYNC)
 				{ // Synchronous.
+					pthread_mutex_lock(&memory_protect);
 					ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
+					pthread_mutex_unlock(&memory_protect);
 				}
 				else
 				{ // Asynchronous.
@@ -3918,8 +3924,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	{
 		acks_received++;
 		int expected_acks = arguments->args->num_data_servers + 1;
-		fprintf(stderr, "[%d/%d] ACK received: %s\n", acks_received, expected_acks, req);
-		slog_malleability("[%d/%d] ACK received: %s", acks_received, expected_acks, req);
+		fprintf(stderr, "[%d/%d] ACK received: %s\n", acks_received.load(), expected_acks, req);
+		slog_malleability("[%d/%d] ACK received: %s", acks_received.load(), expected_acks, req);
 		if (acks_received >= expected_acks)
 		{
 			Attend_pending_requests();
@@ -4036,6 +4042,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		free(new_imss.conns.peer_addr[0]);
 		free(new_imss.conns.peer_addr);
 
+		pthread_mutex_lock(&mutext_malleability);
 		imss_info *imss_info_struct = curr_global_imss_info;
 		// num_storages is increased inside AddIPS.
 		fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
@@ -4043,6 +4050,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
 		number_active_storage_servers.store(imss_info_struct->num_storages);
 		slog_debug("number_active_storage_servers=%d\n", number_active_storage_servers.load());
+		pthread_mutex_unlock(&mutext_malleability);
 
 		fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, time_taken_comm.count());
 		slog_debug("Server %d connected in %.4f seconds", server_id_request, time_taken_comm.count());
@@ -4542,7 +4550,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		size_t msg_length = 0;
 		void *data_ref = NULL;
 		char response[512] = {"\0"};
-		sprintf(response, "%s %lu", MSG_OK_OP, ++next_inode);
+		sprintf(response, "%s %lu", MSG_OK_OP, next_inode.fetch_add(1, std::memory_order_relaxed));
 		SendConfirmationMessage(arguments, response);
 		switch (operation_type)
 		{
@@ -4589,7 +4597,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					sprintf(err_msg, "HERCULES_ERR_STAT_SET_OP_MEMORY_ALLOC: %s", key.c_str());
 					perror(err_msg);
 					slog_error("%s", err_msg);
-					pthread_mutex_lock(&memory_protect);
+					pthread_mutex_unlock(&memory_protect);
 					return -1;
 				}
 				int32_t insert_successful = -1;
@@ -4598,7 +4606,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					ret = TIMING(recv_dynamic_stream(arguments->ucp_worker, arguments->server_ep, buffer, IMSS_INFO, arguments->worker_uid, length), "recv_dynamic_stream IMSS_INFO", int32_t, arguments->thread_id);
 					// save the pointer to the hercules instance to be access on malleability.
 					// arguments->hercules_info_struct = (imss_info *)buffer;
+					pthread_mutex_lock(&mutext_malleability);
 					curr_global_imss_info = (imss_info *)buffer;
+					pthread_mutex_unlock(&mutext_malleability);
 					slog_debug("Hercules Instance received, num of initial servers = %d", curr_global_imss_info->num_storages);
 				}
 				else
