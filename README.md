@@ -24,6 +24,7 @@ Cosmin Petre
     - [2. Intercepting I/O calls](#2-intercepting-io-calls)
     - [3. Stopping Metadata and Data storage servers](#3-stopping-metadata-and-data-storage-servers)
   - [Without Slurm](#without-slurm)
+  - [Running with Docker](#running-with-docker)
   - [Configuration file](#configuration-file)
     - [Malleability parameters](#optional-malleability-parameters)
     - [Fault tolerance parameters](#optional-fault-tolerance-parameters)
@@ -274,6 +275,42 @@ node2
 node3
 ```
 
+## Running with Docker
+
+Hercules can be easily deployed and tested using Docker containers.
+
+### 1. Build the Docker image
+```bash
+docker build -t hercules .
+```
+
+### 2. Single container (Interactive)
+Run the container interactively. This automatically starts the Hercules services and opens an interactive shell:
+```bash
+docker run -it --rm hercules
+```
+Inside the container, execute commands through Hercules using the `hrun` shortcut:
+```bash
+hrun touch /mnt/hercules/file.txt
+hrun ls -la /mnt/hercules/
+```
+Alternatively, intercept I/O manually:
+```bash
+export HERCULES_CONF=/hercules/conf/hercules.conf
+export LD_PRELOAD=/hercules/code/build/tools/libhercules_posix.so
+ls -la /mnt/hercules/
+```
+
+### 3. Client-Server deployment with Docker Compose
+To deploy a separated server and client environment:
+```bash
+docker compose up -d
+docker attach hercules-client
+```
+Inside `hercules-client`, use `hrun <command>` to interact with the storage servers. To stop the deployment:
+```bash
+docker compose down
+```
 
 ## Configuration file
 <!-- Configuration File (_hercules.conf_) -->

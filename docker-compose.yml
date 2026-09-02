@@ -1,0 +1,32 @@
+services:
+  hercules-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hercules:latest
+    container_name: hercules-server
+    hostname: hercules-server
+    ports:
+      - "7500:7500"
+      - "8500:8500"
+    stdin_open: true
+    tty: true
+
+  hercules-client:
+    image: hercules:latest
+    container_name: hercules-client
+    hostname: hercules-client
+    depends_on:
+      - hercules-server
+    entrypoint: ["/bin/bash", "-c"]
+    command: >
+      "echo 'hercules-server' > /hercules/data &&
+       echo 'hercules-server' > /hercules/metadata &&
+       echo '===================================================' &&
+       echo '  Hercules Client Container is Ready' &&
+       echo '  Use: hrun <filesystem_command>' &&
+       echo '  Example: hrun ls -la /mnt/hercules/' &&
+       echo '===================================================' &&
+       exec bash"
+    stdin_open: true
+    tty: true

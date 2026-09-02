@@ -26,11 +26,14 @@ RUN mkdir /hercules
 
 ENV GIT_SSL_NO_VERIFY=1
 WORKDIR /hercules
-RUN git clone https://github.com/arcos-uc3m-hercules/hercules.git code
+#RUN git clone https://github.com/arcos-uc3m-hercules/hercules.git code
+COPY . /hercules/code/
 WORKDIR /hercules/code
-RUN mkdir build
-WORKDIR /hercules/code/build
-RUN cmake .. && make -j
+#RUN mkdir build
+#WORKDIR /hercules/code/build
+#RUN cmake .. && make -j
+RUN cmake --preset default
+RUN cmake --build --preset default --target install 
 
 
 #hercules start -m /hercules/metadata -d /hercules/data -f /hercules/code/conf/hercules.conf.sample
@@ -49,12 +52,19 @@ ENV H_BUILD_PATH=/hercules/code/build
 ENV H_BASH_PATH=/hercules/code/bash
 
 
-ENV PATH="$PATH:/hercules/code/build:/hercules/code/bash"
+ENV PATH="$PATH:/hercules/code/install/bin:/hercules/code/bash"
 
 RUN ssh-keygen -t rsa -q -f "/root/.ssh/id_rsa" -N ""
 RUN cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
 RUN mkdir /var/run/sshd && chmod 0755 /var/run/sshd
 
 EXPOSE 22 7500 8500
-ENTRYPOINT service ssh restart && hercules start -m /hercules/metadata -d /hercules/data -f /hercules/conf/hercules.conf && tail -f /dev/null
+RUN echo 'alias hrun="HERCULES_CONF=/hercules/conf/hercules.conf LD_PRELOAD=/hercules/code/build/tools/libhercules_posix.so"' >> /root/.bashrc && \
+    echo 'alias hrun="HERCULES_CONF=/hercules/conf/hercules.conf LD_PRELOAD=/hercules/code/build/tools/libhercules_posix.so"' >> /etc/bash.bashrc && \
+    printf '#!/bin/bash\nHERCULES_CONF=/hercules/conf/hercules.conf LD_PRELOAD=/hercules/code/build/tools/libhercules_posix.so exec "$@"\n' > /usr/local/bin/hrun && \
+    chmod +x /usr/local/bin/hrun
+
+COPY docker/entrypoint.sh entrypoint.sh
+RUN chmod +x entrypoint.sh
+ENTRYPOINT ["./entrypoint.sh"]
 
