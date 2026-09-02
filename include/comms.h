@@ -92,7 +92,7 @@ const static char add_server_err_call_arg[] = "add backend server ep";
 const static char ucx_server_err_call_arg[] = "ucx server ep";
 const static char set_server_err_call_arg[] = "set server ep";
 
-typedef enum 
+typedef enum
 {
 	FRONTEND = 0,
 	BACKEND = 1
@@ -123,15 +123,18 @@ const static int32_t DEFAULT_TOLERANCE_DECOMMISIONING = 300;
 static pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
 // Default hercules actions to handle files
-typedef enum {
-    GET_OP = 0,
-    SET_OP = 1,
+typedef enum
+{
+	GET_OP = 0,
+	SET_OP = 1,
 	SET_TRUNCATE_OP = 2
 } hercules_modes_t;
 
-static const char* const PROTOCOL_CMD_GET = "GET";
-static const char* const PROTOCOL_CMD_SET = "SET";
-static const char* const PROTOCOL_CMD_TRUNCATE = "SET_TRUNCATE";
+static const char *const PROTOCOL_CMD_GET = "GET";
+static const char *const PROTOCOL_CMD_SET = "SET";
+static const char *const PROTOCOL_CMD_TRUNCATE = "SET_TRUNCATE";
+static const char *const PROTOCOL_CMD_SET_ASYNC = "SET_ASYNC";
+static const char *const PROTOCOL_CMD_TRUNCATE_ASYNC = "SET_TRUNCATE_ASYNC";
 
 /**
  * Macro to measure the time spend by function_to_call.
@@ -204,7 +207,15 @@ struct ServerSendRequest
 {
 	void *ucx_handle; // The handle returned by ucp_tag_send_nbx
 	char *buffer_to_free;
-	ServerSendRequest() : buffer_to_free(nullptr) {}
+	ServerSendRequest() : ucx_handle(nullptr), buffer_to_free(nullptr) {}
+	~ServerSendRequest()
+	{
+		if (buffer_to_free != nullptr)
+		{
+			free(buffer_to_free);
+			buffer_to_free = nullptr;
+		}
+	}
 };
 
 /**
@@ -229,27 +240,27 @@ typedef struct
 	char msg[200];
 } client_ep_context_t;
 
-#define CHKERR_ACTION(_cond, _msg, _action)          \
-    do                                               \
-    {                                                \
-        if (_cond)                                   \
-        {                                            \
+#define CHKERR_ACTION(_cond, _msg, _action)                      \
+	do                                                       \
+	{                                                        \
+		if (_cond)                                       \
+		{                                                \
 			fprintf(stderr, "Failed to %s\n", _msg); \
 			_action;                                 \
-        }                                            \
+		}                                                \
 	} while (0)
 
 #define CHKERR_JUMP(_cond, _msg, _label) \
 	CHKERR_ACTION(_cond, _msg, goto _label)
 
-#define CHKERR_JUMP_RETVAL(_cond, _msg, _label, _retval)                       \
-    do                                                                         \
-    {                                                                          \
-        if (_cond)                                                             \
-        {                                                                      \
+#define CHKERR_JUMP_RETVAL(_cond, _msg, _label, _retval)                                   \
+	do                                                                                 \
+	{                                                                                  \
+		if (_cond)                                                                 \
+		{                                                                          \
 			fprintf(stderr, "Failed to %s, return value %d\n", _msg, _retval); \
 			goto _label;                                                       \
-        }                                                                      \
+		}                                                                          \
 	} while (0)
 
 #ifdef __cplusplus

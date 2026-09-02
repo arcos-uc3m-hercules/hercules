@@ -6,22 +6,41 @@
 #define MB 1048576L
 #define GB 1073741824UL
 
-#include <string>
-#include "imss.h"
 #include "arg_parser.h"
 #include "cfg_parse.h"
+#include "imss.h"
+#include <string>
 
 static u_int16_t HERCULES_THREAD_POOL_SIZE = 1;
 extern u_int16_t CONF_MALLEABILITY_STATUS;
 extern u_int16_t ASYNC_IO;
 
-static inline const char* get_protocol_command(hercules_modes_t op) {
-    switch (op) {
-        case GET_OP: return PROTOCOL_CMD_GET;
-        case SET_OP: return PROTOCOL_CMD_SET;
-        case SET_TRUNCATE_OP: return PROTOCOL_CMD_TRUNCATE;
-        default:          return PROTOCOL_CMD_SET;
-    }
+static inline const char *get_protocol_command(hercules_modes_t op, int async = 0)
+{
+	if (async == 1)
+	{ // ASYNC
+		switch (op)
+		{
+		case SET_OP:
+			return PROTOCOL_CMD_SET_ASYNC;
+		case SET_TRUNCATE_OP:
+			return PROTOCOL_CMD_TRUNCATE_ASYNC;
+		default:
+			return PROTOCOL_CMD_SET_ASYNC;
+		}
+	}
+	// SYNC
+	switch (op)
+	{
+	case GET_OP:
+		return PROTOCOL_CMD_GET;
+	case SET_OP:
+		return PROTOCOL_CMD_SET;
+	case SET_TRUNCATE_OP:
+		return PROTOCOL_CMD_TRUNCATE;
+	default:
+		return PROTOCOL_CMD_SET;
+	}
 }
 
 #ifdef __cplusplus
@@ -72,11 +91,10 @@ extern "C"
 
 	void getBlockInformation(std::string key, int *block_number, std::string *data_uri, std::string *file_name);
 
-    
-    #ifdef __cplusplus
+#ifdef __cplusplus
 }
 #endif
-    
-    std::string GetBaseUri(const std::string &key);
+
+std::string GetBaseUri(const std::string &key);
 
 #endif

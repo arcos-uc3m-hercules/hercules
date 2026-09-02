@@ -5830,22 +5830,30 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			ServerRecvRequest *new_recv = new ServerRecvRequest();
 			// new_recv->buffer_to_free = response_buffer;
 			new_recv->client_pointer = response_buffer;
+			outstanding_sends++;
 			void *ucx_req_handle = irecv_data(ucp_worker_data, response_buffer, msg_length, local_data_uid, new_recv);
 			if (UCS_PTR_IS_PTR(ucx_req_handle))
 			{
-				// The request is sending. The callback will be called.
+				// The request is receiving asynchronously. The callback will decrement outstanding_sends.
 				size_received_data = msg_length;
-				outstanding_sends++;
 			}
 			else if (UCS_PTR_IS_ERR(ucx_req_handle))
 			{
-				slog_error("Failed to initiate async send on server.");
-				fprintf(stderr, "Failed to initiate async send on server.");
+				slog_error("Failed to initiate async recv on server.");
+				fprintf(stderr, "Failed to initiate async recv on server.");
+				if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+				{
+					outstanding_sends--;
+				}
 			}
 			else
 			{
-				// It completed immediately.
+				// It completed immediately. The callback is NOT called.
 				size_received_data = msg_length;
+				if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+				{
+					outstanding_sends--;
+				}
 			}
 		}
 		else
@@ -6568,7 +6576,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
 		server_id = n_server_;
 		use_local = ((session_policy == LOCAL_ || session_policy == ZCOPY_) && server_id == matching_server_id);
-		const char *op_mode = get_protocol_command(op_type);
+		const char *op_mode = get_protocol_command(op_type, async);
 
 		if (data_id == 0)
 			size = sizeof(struct stat);
@@ -6691,21 +6699,29 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			{
 				async_data_worker_progress(curr_imss_storages);
 				ServerSendRequest *new_send = new ServerSendRequest();
+				outstanding_sends++;
 				void *ucx_req_handle = isend_data2(ucp_worker_data, ep, (void *)buffer, size, local_data_uid, new_send);
 				if (UCS_PTR_IS_PTR(ucx_req_handle))
 				{
+					// In-flight async send. Callback will decrement outstanding_sends upon completion.
 					size_sent_data = size;
-					outstanding_sends++;
 				}
 				else if (!UCS_PTR_IS_ERR(ucx_req_handle))
 				{
+					// Completed immediately. Callback is NOT called.
 					size_sent_data = size;
-					// delete new_send; // TODO: test this.
+					if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+					{
+						outstanding_sends--;
+					}
 				}
 				else
 				{
 					slog_error("Failed to initiate async send");
-					// delete new_send;
+					if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+					{
+						outstanding_sends--;
+					}
 				}
 			}
 			else

@@ -4,6 +4,7 @@
 #include "hercules.hpp"
 #include "imss.h"
 #include "map_server_eps.hpp"
+#include "map_ep.hpp"
 #include "performance_records.hpp"
 #include "policies.h"
 #include "records.hpp"
@@ -2021,12 +2022,13 @@ int process_add_server(p_argv *arguments, const char *req)
 			}
 		}
 
-		slog_debug("connecting to %s:%" PRIu16, added_hostname, imss_->info.conn_port);
-		oob_sock = connect_common(added_hostname, 85000, AF_INET);
+		uint64_t conn_port = (imss_->info.conn_port != 0) ? imss_->info.conn_port : ((arguments->args && arguments->args->data_port) ? arguments->args->data_port : 8500);
+		slog_debug("connecting to %s:%" PRIu64, added_hostname, conn_port);
+		oob_sock = connect_common(added_hostname, conn_port, AF_INET);
 		if (oob_sock < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%" PRIu32 " - %s:%d", id_server_to_modify, added_hostname, imss_->info.conn_port);
+			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%" PRIu32 " - %s:%" PRIu64, id_server_to_modify, added_hostname, conn_port);
 			slog_error("%s", err_msg);
 			perror(err_msg);
 			return -1;
@@ -2114,7 +2116,7 @@ int process_add_server(p_argv *arguments, const char *req)
  * @param to_read_args int pointer stating if to_read arguments should be parsed.
  * @return int 0 on success, 1 in a special case where malleability is in progress, or -1 if mode is not valid.
  */
-int determine_operation_flags(p_argv *arguments, const char *req, const char *mode, int64_t *more, int *is_shared_memory, int *default_params, int *snapshot_op, bool *truncate, CommunicationMode *mode_type, int *to_read_args)
+int determine_operation_flags(p_argv *arguments, const char *req, const char *mode, int64_t *more, int *is_shared_memory, int *default_params, int *snapshot_op, bool *truncate, CommunicationMode *mode_type, int *to_read_args, bool *expect_ack)
 {
 	if (!strcmp(mode, "GET"))
 	{
@@ -2135,10 +2137,26 @@ int determine_operation_flags(p_argv *arguments, const char *req, const char *mo
 			return ret;
 		}
 	}
+	else if (!strcmp(mode, "SET_ASYNC"))
+	{
+		*more = SET_OP;
+		*expect_ack = false;
+		int ret = CheckForMalleability(arguments, arguments->curr_req);
+		if (ret != 0)
+		{
+			return ret;
+		}
+	}
 	else if (!strcmp(mode, "SET_TRUNCATE"))
 	{
 		*more = SET_OP;
 		*truncate = true;
+	}
+	else if (!strcmp(mode, "SET_TRUNCATE_ASYNC"))
+	{
+		*more = SET_OP;
+		*truncate = true;
+		*expect_ack = false;
 	}
 	else if (!strcmp(mode, "SETNETWORK"))
 	{
@@ -2604,23 +2622,42 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 				}
 				else
 				{ // Asynchronous.
-				  // Create a tracking struct and add it to our list.
+					char *send_buffer = (char *)malloc(to_read);
+					if (send_buffer == NULL)
+					{
+						slog_error("HERCULES_ERR_ASYNC_READ_MEM_ERR %zu bytes.", to_read);
+						return -1;
+					}
+					pthread_mutex_lock(&memory_protect);
+					memcpy(send_buffer, (char *)address_ + block_offset, to_read);
+					pthread_mutex_unlock(&memory_protect);
+
+					// Create a tracking struct and add it to our list.
 					ServerSendRequest *new_send = new ServerSendRequest();
-					void *ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid, new_send);
+					new_send->buffer_to_free = send_buffer;
+					outstanding_sends++;
+					void *ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, send_buffer, to_read, arguments->worker_uid, new_send);
 					if (UCS_PTR_IS_PTR(ucx_req_handle))
 					{
-						// The request is sending. The callback will handle cleanup.
+						// The request is sending. The callback will handle cleanup and decrement outstanding_sends.
 					}
 					else if (UCS_PTR_IS_ERR(ucx_req_handle))
 					{
 						slog_error("Failed to initiate async send on server.");
 						fprintf(stderr, "Failed to initiate async send on server.");
-						// The send function already cleaned up new_send.
+						if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+						{
+							outstanding_sends--;
+						}
 					}
-					// else
-					// {
-					// It completed immediately. The send function also cleaned up.
-					// }
+					else
+					{
+						// It completed immediately. isend_data2 already cleaned up new_send and send_buffer via ~ServerSendRequest().
+						if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+						{
+							outstanding_sends--;
+						}
+					}
 				}
 			}
 		}
@@ -2661,8 +2698,8 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 		slog_debug("prefetch_size=%" PRIu64 "", prefetch_size);
 
 		// create the prefetching block.
-		char *prefetch_buffer = new(std::nothrow) char[prefetch_size];
-		if (prefetch_buffer == nullptr)
+		char *prefetch_buffer = (char *)malloc(prefetch_size);
+		if (prefetch_buffer == NULL)
 		{
 			slog_error("HERCULES_ERR_SRV_WORKER_HELPER_READV2_OP_PREFETCH_MEM_ERR %ld bytes.", prefetch_size);
 			return -1;
@@ -2672,7 +2709,7 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 		if (delimiter_pos == std::string::npos)
 		{
 			slog_error("Invalid format. Key: %s", key.c_str());
-			delete[] prefetch_buffer;
+			free(prefetch_buffer);
 			return -1;
 		}
 
@@ -2688,7 +2725,7 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 		slog_debug("buffer_offset=%zu", buffer_offset);
 		if (buffer_offset == 0)
 		{
-			delete[] prefetch_buffer;
+			free(prefetch_buffer);
 			slog_debug("Sending not found code: %s", err_code);
 			//  Send the error code msg.
 			ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
@@ -2705,25 +2742,28 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 		// Create a tracking struct and add it to our list.
 		ServerSendRequest *new_send = new ServerSendRequest();
 		new_send->buffer_to_free = prefetch_buffer;
+		outstanding_sends++;
 
 		void *ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, (char *)prefetch_buffer, buffer_offset, arguments->worker_uid, new_send);
 		if (UCS_PTR_IS_PTR(ucx_req_handle))
 		{
-			// The request is sending. The callback will handle cleanup.
+			// The request is sending. The callback will handle cleanup and decrement outstanding_sends.
 		}
 		else if (UCS_PTR_IS_ERR(ucx_req_handle))
 		{
 			slog_error("Failed to initiate async send on server.");
 			fprintf(stderr, "Failed to initiate async send on server.");
-			// The send function already cleaned up new_send.
-			delete[] prefetch_buffer;
-			delete new_send;
+			if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+			{
+				outstanding_sends--;
+			}
 		}
 		else
 		{
-			// It completed immediately. The send function also cleaned up.
-			// delete[] prefetch_buffer;
-			// delete new_send;
+			if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+			{
+				outstanding_sends--;
+			}
 		}
 
 		break;
@@ -3608,7 +3648,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	}
 
 	// checks the mode and updates the given pointers.
-	ret = determine_operation_flags(arguments, req, mode, &io_operation, &is_shared_memory, &default_params, &snapshot_op, &truncate, &mode_type, &to_read_args);
+	bool expect_ack = true;
+	ret = determine_operation_flags(arguments, req, mode, &io_operation, &is_shared_memory, &default_params, &snapshot_op, &truncate, &mode_type, &to_read_args, &expect_ack);
 	if (ret != 0)
 	{
 		return ret;
@@ -3714,7 +3755,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			    truncate,
 			    transfer_mode,
 			    NULL,
-			    true);
+			    expect_ack);
 		}
 	}
 
@@ -3979,14 +4020,16 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		size_t addr_len = 0;
 		int ret = 0;
 		char *added_hostname = uri_;
-		slog_debug("connecting to %s:8500", number);
-		oob_sock = connect_common(number, 85000, AF_INET);
+		uint64_t target_port = (arguments->args && arguments->args->data_port) ? arguments->args->data_port : 8500;
+		slog_debug("connecting to %s:%" PRIu64, number, target_port);
+		oob_sock = connect_common(number, target_port, AF_INET);
 		if (oob_sock < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			sprintf(err_msg, "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%d - %s:%d", server_id_request, new_imss.info.ips[server_id_request], new_imss.info.conn_port);
+			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%d - %s:%" PRIu64, server_id_request, number, target_port);
 			slog_error("%s", err_msg);
 			perror(err_msg);
+			free(new_imss.conns.peer_addr);
 			return -1;
 		}
 

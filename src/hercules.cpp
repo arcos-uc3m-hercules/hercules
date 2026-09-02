@@ -812,7 +812,7 @@ int getConfiguration(struct arguments *args)
 	else
 	{
 		args->prefetch_size = 0;
-		printf("Prefetching is not enable.\n");
+		// printf("Prefetching is not enable.\n");
 	}
 
 	if (args->prefetch_size < 0)
@@ -1059,11 +1059,10 @@ void getBlockInformation(std::string key, int *block_number, std::string *data_u
 	// strcpy(file_name, data_uri.substr(strlen("imss://").c_str()));
 }
 
-
 std::string GetBaseUri(const std::string &key)
 {
-    const auto pos = key.rfind('$');
-    if (pos != std::string::npos)
-        return key.substr(0, pos);
-    return key;
+	const auto pos = key.rfind('$');
+	if (pos != std::string::npos)
+		return key.substr(0, pos);
+	return key;
 }

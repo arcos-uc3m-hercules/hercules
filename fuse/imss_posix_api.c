@@ -1899,6 +1899,10 @@ extern "C"
 				slog_error("[imss_write] Error writing to Hercules.\n");
 				fprintf(stderr, "[imss_write] Error writing to Hercules: %s\n", strerror(-ret_set_data));
 				error_print = ret_set_data;
+				if (ASYNC_IO == ASYNC)
+				{
+					async_data_worker_progress(0);
+				}
 				return ret_set_data;
 			}
 

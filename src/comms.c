@@ -294,15 +294,12 @@ extern "C"
 		// Free the request handle and the tracking struct.
 		ucp_request_free(request);
 
-		if (completed_req->buffer_to_free != nullptr)
-		{
-			delete[] completed_req->buffer_to_free;
-		}
-
 		delete completed_req;
 		size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
-		// fprintf(stderr, "Petition send, decresing outstanding_sends=%zu\n", current_outstanding);
-		outstanding_sends--;
+		if (current_outstanding > 0)
+		{
+			outstanding_sends--;
+		}
 	}
 
 	/**
@@ -331,7 +328,11 @@ extern "C"
 		// free the UCX handle.
 		ucp_request_free(request);
 
-		outstanding_sends--;
+		size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
+		if (current_outstanding > 0)
+		{
+			outstanding_sends--;
+		}
 	}
 
 	/**

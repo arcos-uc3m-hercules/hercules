@@ -42,6 +42,16 @@
 
 #define ALIGN_UP(val, alignment) (((val) + ((alignment) - 1)) & ~((alignment) - 1))
 
+#ifndef _STAT_VER
+#if defined(__x86_64__)
+#define _STAT_VER 1
+#elif defined(__aarch64__)
+#define _STAT_VER 0
+#else
+#define _STAT_VER 3
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C"
 {
