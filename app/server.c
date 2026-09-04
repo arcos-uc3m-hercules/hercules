@@ -262,13 +262,11 @@ int32_t main(int32_t argc, char **argv)
 	/* Set memory pool size */
 	max_storage_size = args.storage_size * GB;
 	quantity_occupied = 0;
-	// get max RAM we could use for storage
-	max_system_ram_allowed = (uint64_t)sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGESIZE) * RAM_STORAGE_USE_PCT;
-
-	// fprintf(stderr, "max_system_ram_allowed=%lu\n", max_system_ram_allowed);
+	// get the 75% of the max RAM we could use for storage
+	max_system_ram_allowed = (uint64_t)sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGESIZE) * RAM_STORAGE_USE_PCT;
 
 	// make sure we don't use more memory than available
-	if (max_storage_size >= max_system_ram_allowed || max_storage_size == 0)
+	if (max_storage_size > max_system_ram_allowed || max_storage_size == 0)
 	{
 		max_storage_size = max_system_ram_allowed;
 	}
