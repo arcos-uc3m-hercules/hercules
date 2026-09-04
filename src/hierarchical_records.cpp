@@ -404,6 +404,17 @@ ssize_t HierarchicalRecords::HierarchicalMapGetPrefetch(
     char *prefetch_buffer,
     size_t prefetch_size)
 {
+	if (prefetch_buffer == nullptr || prefetch_size == 0)
+	{
+		return 0;
+	}
+
+	if (num_data_servers <= 0)
+	{
+		slog_warn("Invalid number of data servers, using 1 as default.");
+		num_data_servers = 1;
+	}
+
 	std::unique_lock<std::mutex> lck(hierarchical_map_lock);
 
 	// Find the parent map just ONCE.
@@ -441,9 +452,9 @@ ssize_t HierarchicalRecords::HierarchicalMapGetPrefetch(
 			break; // Block not found, end of data.
 		}
 
-		if (block_size_rtvd != BLOCK_DATA_SIZE)
+		if (address == nullptr || block_size_rtvd != BLOCK_DATA_SIZE)
 		{
-			slog_warn("Prefetch stop: block size mismatch for '%s'. Expected %lu, got %lu.",
+			slog_warn("Prefetch stop: block size mismatch or null address for '%s'. Expected %lu, got %lu.",
 				  current_key.c_str(), BLOCK_DATA_SIZE, block_size_rtvd);
 			break;
 		}
@@ -454,7 +465,11 @@ ssize_t HierarchicalRecords::HierarchicalMapGetPrefetch(
 
 		// Update offsets and the next block ID.
 		buffer_offset += RECORD_SIZE;
-		current_block_id += num_data_servers;
+		if (UINT32_MAX - (uint32_t)num_data_servers < current_block_id)
+		{
+			break;
+		}
+		current_block_id += (uint32_t)num_data_servers;
 	}
 
 	// The mutex is automatically unlocked here when 'lck' goes out of scope.

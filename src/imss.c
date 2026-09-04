@@ -6000,9 +6000,9 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 	}
 	slog_debug("curr_imss_storages=%d", curr_imss_storages);
 
-	if (replication_factor < 0 || curr_imss_storages < 0)
+	if (replication_factor <= 0 || curr_imss_storages <= 0)
 	{
-		fprintf(stderr, "HERCULES_ERR_GET_NDATA_BAD_PARAMS");
+		fprintf(stderr, "HERCULES_ERR_GET_NDATA_BAD_PARAMS\n");
 		slog_error("HERCULES_ERR_GET_NDATA_BAD_PARAMS");
 		return -1;
 	}
@@ -6022,15 +6022,6 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset->n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset->n_servers, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
 
 		repl_servers[i] = n_server_;
-
-		// Check if the current connection is the local one (if there is).
-		// if (repl_servers[i] == curr_dataset->local_conn)
-		// {
-		// 	// Move the local connection to the first one to be requested.
-		// 	aux_conn = repl_servers[0];
-		// 	repl_servers[0] = repl_servers[i];
-		// 	repl_servers[i] = aux_conn;
-		// }
 	}
 
 	char key_[REQUEST_SIZE] = {0};
@@ -6041,10 +6032,19 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 	pthread_mutex_lock(&lock_network);
 
 	int offset = 0;
-	// acording to the current number of servers, it calculates the approximate size for prefetching.
-	// number of blocks on the server plus the size to store each block id on the string.
-	size_t size_used_per_server = (total_read_size / curr_imss_storages) + (num_blocks_to_read / curr_imss_storages) * sizeof(uint32_t);
-	slog_debug("Prefetch size=%ld", size_used_per_server);
+	// Calculate the approximate size for prefetching based on blocks requested per server
+	size_t num_blocks_per_server = (num_blocks_to_read + curr_imss_storages - 1) / curr_imss_storages;
+	if (num_blocks_per_server == 0)
+	{
+		num_blocks_per_server = 1;
+	}
+	size_t block_size = curr_dataset->data_entity_size;
+	if (block_size == 0)
+	{
+		block_size = 512 * 1024;
+	}
+	size_t size_used_per_server = num_blocks_per_server * (sizeof(uint32_t) + block_size);
+	slog_debug("size_used_per_server=%ld", size_used_per_server);
 
 	// Request the concerned block to the involved servers.
 	for (int32_t i = 0; i < replication_factor; i++)
@@ -6059,9 +6059,7 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 			sprintf(mode, "GET");
 		}
 
-		//  Key related to the requested data element.
-		// sprintf(key_, "%s %lu %ld %s$%d %ld", mode, READV2_OP, offset, curr_dataset->uri_, data_id, to_read);
-		sprintf(key_, "%s %lu %ld %s$%d %ld", mode, READV2_OP, offset, curr_dataset->uri_, data_id, size_used_per_server);
+		sprintf(key_, "%s %u %d %s$%d %lu", mode, (uint32_t)READV2_OP, offset, curr_dataset->uri_, data_id, (unsigned long)size_used_per_server);
 		ep = curr_imss.conns.eps[repl_servers[i]];
 		slog_debug("[IMSS] Request to data %d - '%s' to server %d", n_server_, key_, repl_servers[i]);
 		size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), ("send_req", key_), size_t, process_rank);
@@ -6077,9 +6075,6 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		double time_taken;
 		t = clock();
 		msg_length = TIMING(get_recv_data_length(ucp_worker_data, local_data_uid), "get_recv_data_length", size_t, process_rank);
-		// ucp_tag_recv_info_t info_tag;
-		// ucp_tag_message_h msg_tag;
-		// msg_length = TIMING(get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t, process_rank);
 		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
 		{
@@ -6092,7 +6087,6 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
 		*buffer_prefetch = (void *)malloc(msg_length + 1);
-		// void *response_buffer = &(*buffer_prefetch);
 		if (*buffer_prefetch == NULL)
 		{
 			perror("HERCULES_ERR_GET_NDATA_PREFETCH_MEMORY_ALLOCATION");
@@ -6101,40 +6095,25 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 			return -2;
 		}
 
-		// if (async == ASYNC)
-		// {
-		// 	ucs_status_ptr_t status_ptr;
-		// 	status_ptr = start_recv_data_async(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid);
-		// 	if (UCS_PTR_IS_ERR(status_ptr))
-		// 	{
-		// 		slog_error("[COMM] Error running start_recv_data_async, status: %s", ucs_status_string(UCS_PTR_STATUS(status_ptr)));
-		// 		return -2;
-		// 	}
-		// 	*buffer_request = status_ptr;
-		// }
-		// else
-		{
-			// original
 			t = clock();
 			msg_length = TIMING(recv_data(ucp_worker_data, ep, *buffer_prefetch, msg_length, local_data_uid, SYNC), "recv_data", size_t, process_rank);
 			t = clock() - t;
 			time_taken += ((double)t) / (CLOCKS_PER_SEC);
-		}
 
 		slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
 		{
-			if (errno != EAGAIN)
+			free(*buffer_prefetch);
+			*buffer_prefetch = NULL;
+			// if (errno != EAGAIN)
 			{
 				slog_error("ERR_HERCULES_GETDATA_RECV_PREFETCH");
 				perror("ERR_HERCULES_GETDATA_RECV_PREFETCH");
 				pthread_mutex_unlock(&lock_network);
-				free(*buffer_prefetch);
-				*buffer_prefetch = NULL;
 				return -2;
 			}
-			else
-				break;
+			// else
+			//	break;
 		}
 
 		// Check if the requested key was correctly retrieved.

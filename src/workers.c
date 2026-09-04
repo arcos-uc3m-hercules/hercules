@@ -3,8 +3,8 @@
 #include "comms.h"
 #include "hercules.hpp"
 #include "imss.h"
-#include "map_server_eps.hpp"
 #include "map_ep.hpp"
+#include "map_server_eps.hpp"
 #include "performance_records.hpp"
 #include "policies.h"
 #include "records.hpp"
@@ -2665,37 +2665,24 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 	}
 	case READV2_OP:
 	{
-		// use the prefetch size calculated on the front-end.
-		uint64_t prefetch_size = to_read;
-
 		const uint32_t BLOCK_ID_SIZE = sizeof(uint32_t);
 		const size_t BLOCK_DATA_SIZE = BLOCK_SIZE;
 		const size_t RECORD_SIZE = BLOCK_ID_SIZE + BLOCK_DATA_SIZE;
-		slog_debug("BLOCK_ID_SIZE=%lu, BLOCK_DATA_SIZE=%lu, RECORD_SIZE=%lu, prefetch_size=%lu", BLOCK_ID_SIZE, BLOCK_DATA_SIZE, RECORD_SIZE, prefetch_size);
 
-		if (prefetch_size <= 0)
+		// Use the configured prefetch size if set, otherwise use to_read requested by client
+		uint64_t prefetch_size = arguments->args->prefetch_size;
+		if (prefetch_size == 0 || to_read > prefetch_size)
 		{
-			// use the prefetch size defined on the configuration file.
-			prefetch_size = arguments->args->prefetch_size;
+			prefetch_size = to_read;
 		}
 
 		if (prefetch_size < RECORD_SIZE)
 		{
 			slog_warn("Record size %lu is bigger than prefetch size %lu", RECORD_SIZE, prefetch_size);
-			// record size is bigger than the defined prefetch size.
-			// use the record size.
 			prefetch_size = RECORD_SIZE;
 		}
 
-		// if (prefetch_size <= 0)
-		// {
-		// 	slog_error("HERCULES_ERR_SRV_WORKER_HELPER_READV2_OP_PREFETCH_INVALID_SIZE, %" PRIu64 " bytes.", prefetch_size);
-		// 	fprintf(stderr, "WARNING: Invalid prefetch size, using a block size of %" PRIu64 " bytes instead.\n", BLOCK_SIZE);
-		// 	// use the defined block size as prefetch size.
-		// 	prefetch_size = BLOCK_SIZE;
-		// }
-
-		slog_debug("prefetch_size=%" PRIu64 "", prefetch_size);
+		slog_debug("BLOCK_ID_SIZE=%lu, BLOCK_DATA_SIZE=%lu, RECORD_SIZE=%lu, prefetch_size=%lu", BLOCK_ID_SIZE, BLOCK_DATA_SIZE, RECORD_SIZE, prefetch_size);
 
 		// create the prefetching block.
 		char *prefetch_buffer = (char *)malloc(prefetch_size);
@@ -2714,11 +2701,28 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 		}
 
 		std::string base_key = key.substr(0, delimiter_pos);
-		uint32_t current_block_id = (uint32_t)std::stoul(key.substr(delimiter_pos + 1));
+		const char *id_str = key.c_str() + delimiter_pos + 1;
+		char *endptr = NULL;
+		unsigned long val = strtoul(id_str, &endptr, 10);
+		if (endptr == id_str || *endptr != '\0')
+		{
+			slog_error("Invalid block ID in key: %s", key.c_str());
+			free(prefetch_buffer);
+			return -1;
+		}
+		uint32_t current_block_id = (uint32_t)val;
+
+		int num_data_servers = arguments->args->num_data_servers;
+		if (num_data_servers <= 0)
+		{
+			slog_warn("Invalid num of data storage servers, using 1 as default.");
+			num_data_servers = 1;
+		}
+
 		ssize_t buffer_offset = hierarchical_map->HierarchicalMapGetPrefetch(
 		    base_key,
 		    current_block_id,
-		    arguments->args->num_data_servers,
+		    num_data_servers,
 		    prefetch_buffer,
 		    prefetch_size);
 
@@ -2751,15 +2755,17 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 		}
 		else if (UCS_PTR_IS_ERR(ucx_req_handle))
 		{
-			slog_error("Failed to initiate async send on server.");
-			fprintf(stderr, "Failed to initiate async send on server.");
+			slog_error("Failed to initiate async send on server: %s", ucs_status_string(UCS_PTR_STATUS(ucx_req_handle)));
+			fprintf(stderr, "Failed to initiate async send on server: %s\n", ucs_status_string(UCS_PTR_STATUS(ucx_req_handle)));
 			if (outstanding_sends.load(std::memory_order_relaxed) > 0)
 			{
 				outstanding_sends--;
 			}
+			return -1;
 		}
 		else
 		{
+			// It completed immediately. isend_data2 already cleaned up new_send and prefetch_buffer via ~ServerSendRequest().
 			if (outstanding_sends.load(std::memory_order_relaxed) > 0)
 			{
 				outstanding_sends--;
@@ -3343,7 +3349,7 @@ int handle_write_operation(
 				slog_error("HERCULES_ERR_WORKER_MAPPUT");
 				if (reused_memory == 0)
 				{
-				free(buffer);
+					free(buffer);
 				}
 				else
 				{
@@ -3361,7 +3367,7 @@ int handle_write_operation(
 			pthread_mutex_unlock(&memory_protect);
 			if (reused_memory == 0)
 			{
-			free(buffer);
+				free(buffer);
 			}
 			else
 			{

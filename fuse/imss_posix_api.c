@@ -7,21 +7,28 @@
 #include "imss.h"
 #include "map.hpp"
 #include "mapprefetch.hpp"
+#include "prefetch_cache.hpp"
 #include "slog.h"
+#include <algorithm>
 #include <cstdlib>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <libgen.h>
 #include <limits.h>
+#include <map>
 #include <math.h>
+#include <memory>
+#include <mutex>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <vector>
 
 #define HEADER sizeof(uint32_t)
 
@@ -69,6 +76,8 @@ extern pthread_mutex_t mutex_prefetch;
 #define MAX_PATH 256
 extern pthread_mutex_t lock;
 pthread_mutex_t lock_file = PTHREAD_MUTEX_INITIALIZER;
+
+static PrefetchCacheV2 g_prefetch_cache_v2;
 
 // extern int32_t IMSS_DEBUG;
 
@@ -285,6 +294,7 @@ extern "C"
 
 		// Updated the metadata hierarchical map
 		HierarchicalMapUpdate(hierarchical_map, path, ds, &elem.stats, elem.aux);
+		g_prefetch_cache_v2.invalidate(path);
 
 		t = clock() - t;
 		double time_taken = (static_cast<double>(t)) / CLOCKS_PER_SEC;
@@ -534,7 +544,7 @@ extern "C"
 
 		slog_debug("file size = %d, stbuf->st_blocks = %ld", stbuf->st_size, stbuf->st_blocks)
 
-		return 0;
+		    return 0;
 	}
 
 	/*
@@ -675,7 +685,6 @@ extern "C"
 		char *current_ptr = (char *)received_buffer;
 		char *end_ptr = current_ptr + received_length;
 
-		// block_map.clear();
 		uint32_t block_id = 0;
 		void *data_ptr = 0;
 		while (current_ptr + RECORD_SIZE <= end_ptr)
@@ -695,17 +704,17 @@ extern "C"
 	int find_data_on_prefetch(void *destination_buf, size_t curr_blk, ssize_t to_read, size_t offset_in_block, std::map<uint32_t, void *> &block_map)
 	{
 		// search the block on the block map.
-		auto it = block_map.find(curr_blk);
+		auto it = block_map.find((uint32_t)curr_blk);
 		if (it != block_map.end())
 		{
 			void *data = it->second;
-			slog_debug("Block %d found, reading %lu bytes", curr_blk, to_read);
+			slog_debug("Block %lu found, reading %lu bytes", curr_blk, to_read);
 			memcpy(destination_buf, (char *)data + offset_in_block, to_read);
 			return 1;
 		}
 		else
 		{
-			slog_warn("Block %u is not in the prefetch.", curr_blk);
+			slog_warn("Block %lu is not in the prefetch.", curr_blk);
 			return 0;
 		}
 	}
@@ -741,13 +750,10 @@ extern "C"
 			return 0;
 		}
 
-		/*
-		No data transfer shall occur past the current end-of-file. If the starting position is at or after the end-of-file, 0 shall be returned. If the file refers to a device special file, the result of subsequent read() requests is implementation-defined.
-		ref: https://linux.die.net/man/3/read
-		*/
-		if (offset + size > stats.st_size)
+		// Clamp read size if reading beyond end-of-file
+		if (offset + size > (size_t)stats.st_size)
 		{
-			return 0;
+			size = stats.st_size - offset;
 		}
 
 		size_t blocks_launched = 0;
@@ -757,9 +763,7 @@ extern "C"
 
 		slog_debug("TotalSizeToRead=%ld (%ld kb), start_offset=%ld, start_blk=%ld, end_blk=%ld, num_of_blks=%ld, offset=%ld, IMSS_DATA_BSIZE=%ld, stats.st_size=%ld", size, size / 1024, offset, start_blk, end_blk, num_blocks_to_read, offset, IMSS_DATA_BSIZE, stats.st_size);
 
-		std::map<uint32_t, void *> block_map;
-		std::vector<void *> prefetch_buffers_to_free;
-		slog_debug("blocks_launched=%d, num_blocks_to_read=%d", blocks_launched, num_blocks_to_read);
+		slog_debug("blocks_launched=%zu, num_blocks_to_read=%zu", blocks_launched, num_blocks_to_read);
 		size_t current_block_id = 0;
 		size_t offset_in_block = 0;
 		size_t max_read_for_block = 0;
@@ -780,9 +784,9 @@ extern "C"
 			remaining_bytes_in_request = size - total_bytes_scheduled;
 			bytes_to_read_in_block = std::min(max_read_for_block, remaining_bytes_in_request);
 
-			// check the prefetch before requesting new nada.
+			// check the prefetch cache before requesting new data.
 			slog_debug("block %ld, reading %lu bytes, offset(byte_count)=%lu", current_block_id, bytes_to_read_in_block, total_bytes_scheduled);
-			found = find_data_on_prefetch((char *)buf + total_bytes_scheduled, current_block_id, bytes_to_read_in_block, offset_in_block, block_map);
+			found = g_prefetch_cache_v2.get_data(path, (uint32_t)current_block_id, (char *)buf + total_bytes_scheduled, offset_in_block, bytes_to_read_in_block);
 			if (!found)
 			{
 				void *prefetch_buffer_block = NULL;
@@ -790,11 +794,9 @@ extern "C"
 				been_read = get_ndata_prefetch((char *)path, ds, current_block_id, &prefetch_buffer_block, size, num_blocks_to_read);
 				if (been_read > 0 && prefetch_buffer_block != NULL)
 				{
-					prefetch_buffers_to_free.push_back(prefetch_buffer_block);
-					parse_prefetch_buffer(prefetch_buffer_block, been_read, block_map);
-					slog_debug("Prefetch buffer contains %lu blocks.", block_map.size());
+					g_prefetch_cache_v2.put_buffer(path, prefetch_buffer_block, been_read, IMSS_DATA_BSIZE);
 					// get the current expected block.
-					found = find_data_on_prefetch((char *)buf + total_bytes_scheduled, current_block_id, bytes_to_read_in_block, offset_in_block, block_map);
+					found = g_prefetch_cache_v2.get_data(path, (uint32_t)current_block_id, (char *)buf + total_bytes_scheduled, offset_in_block, bytes_to_read_in_block);
 					if (!found)
 					{
 						// fatal error. error is not on the back-end.
@@ -805,13 +807,17 @@ extern "C"
 				}
 				else
 				{
+					if (prefetch_buffer_block != NULL)
+					{ // only called if something fails inside get_ndata_prefetch.
+						free(prefetch_buffer_block);
+					}
 					eof_found = 1;
 				}
 			}
 
 			total_bytes_scheduled += bytes_to_read_in_block;
 			blocks_launched++;
-			// If eof was found, we end the while bucle to avoid trying to read
+			// If eof was found, we end the while loop to avoid trying to read
 			// additional blocks.
 			if (eof_found)
 			{
@@ -827,12 +833,6 @@ extern "C"
 		// total_amount_read += byte_count;
 		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, total_bytes_scheduled);
 
-		// clean the memory of all prefetch buffers.
-		slog_debug("Cleaning up %lu prefetch buffers.", prefetch_buffers_to_free.size());
-		for (void *buffer : prefetch_buffers_to_free)
-		{
-			free(buffer);
-		}
 		return total_bytes_scheduled;
 	}
 
@@ -1933,6 +1933,7 @@ extern "C"
 			elem.stats = stats;
 			slog_debug("[imss_write] Updating stat, st_size=%ld, st_nlink=%lu", stats.st_size, stats.st_nlink);
 			HierarchicalMapUpdate(hierarchical_map, rpath, ds, &elem.stats, elem.aux);
+			g_prefetch_cache_v2.invalidate(rpath);
 		}
 
 		t = clock() - t;
@@ -2473,6 +2474,7 @@ extern "C"
 	int imss_close(const char *path, int fd)
 	{
 		ENSURE_BACKEND();
+		g_prefetch_cache_v2.invalidate(path);
 		int ret = 0;
 		int ds = 0;
 		// slog_debug("Calling imss_flush_data");
@@ -2676,6 +2678,7 @@ extern "C"
 			// TO CHECK: see inner comment.
 			delete_dataset_srv_worker(imss_path, fd, 0);
 			HierarchicalMapErase(hierarchical_map, imss_path);
+			g_prefetch_cache_v2.invalidate(imss_path);
 			// pthread_mutex_unlock(&lock_file);
 
 			// slog_debug("Calling map_release_prefetch %s", path);
@@ -2851,6 +2854,8 @@ extern "C"
 		}
 
 		HierarchicalMapErase(hierarchical_map, rpath2);
+		g_prefetch_cache_v2.invalidate(rpath2);
+		g_prefetch_cache_v2.invalidate(new_path_1);
 		slog_debug("HierarchicalMapErase(hierarchical_map, rpath:%s)", rpath2);
 		// if(ret < 1){
 		// 	slog_debug("No elements erased by map_erase, ret:%d", ret);
