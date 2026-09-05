@@ -1,6 +1,9 @@
 #ifndef PREFETCH_CACHE_HPP
 #define PREFETCH_CACHE_HPP
 
+#include "imss.h"
+#include <algorithm>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -8,7 +11,12 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <queue>
+#include <set>
 #include <string>
+#include <utility>
+
+extern uint64_t IMSS_DATA_BSIZE;
 
 /**
  * @brief Node managing the lifetime of a raw prefetch buffer received from a server.
@@ -38,17 +46,55 @@ struct PrefetchBlockEntry
 };
 
 /**
- * @brief Thread-safe client-side cache storing prefetched block records for open files.
+ * @brief Work item representing a background prefetch request for a block range.
+ */
+struct PrefetchTask
+{
+	std::string path;
+	int32_t dataset_id;
+	uint32_t start_block_id;
+	size_t num_blocks;
+	size_t total_read_size;
+};
+
+/**
+ * @brief Thread-safe client-side cache storing prefetched block records for open files,
+ *        with an integrated background request queue and worker loop.
  */
 class PrefetchCacheV2
 {
-private:
+      private:
 	std::mutex mtx;
 	std::map<std::string, std::map<uint32_t, PrefetchBlockEntry>> file_cache;
 
-public:
-	PrefetchCacheV2() {}
-	~PrefetchCacheV2() { clear(); }
+	std::mutex queue_mtx;
+	std::condition_variable queue_cv;
+	std::queue<PrefetchTask> tasks;
+	std::set<std::pair<std::string, uint32_t>> in_flight_tasks;
+	bool stop_requested{false};
+
+      public:
+	PrefetchCacheV2() : stop_requested(false) {}
+	~PrefetchCacheV2()
+	{
+		stop_worker();
+		clear();
+	}
+
+	int has_block(const char *path, uint32_t block_id)
+	{
+		if (path == nullptr)
+		{
+			return 0;
+		}
+		std::unique_lock<std::mutex> lck(mtx);
+		auto it_file = file_cache.find(std::string(path));
+		if (it_file == file_cache.end())
+		{
+			return 0;
+		}
+		return (it_file->second.find(block_id) != it_file->second.end()) ? 1 : 0;
+	}
 
 	int get_data(const char *path, uint32_t block_id, void *dst, size_t offset_in_block, size_t bytes_to_read)
 	{
@@ -100,6 +146,88 @@ public:
 
 			block_map[block_id] = entry;
 			current_ptr += RECORD_SIZE;
+		}
+	}
+
+	int submit_request(const char *path, int32_t dataset_id, uint32_t start_block_id, size_t num_blocks, size_t total_read_size)
+	{
+		if (path == nullptr || num_blocks == 0)
+		{
+			return 0;
+		}
+		std::string path_str(path);
+		{
+			std::unique_lock<std::mutex> lck(queue_mtx);
+			if (stop_requested)
+			{
+				return 0;
+			}
+			auto key = std::make_pair(path_str, start_block_id);
+			if (in_flight_tasks.find(key) != in_flight_tasks.end())
+			{
+				return 0; // Already queued or in flight
+			}
+			in_flight_tasks.insert(key);
+			tasks.push({path_str, dataset_id, start_block_id, num_blocks, total_read_size});
+		}
+		queue_cv.notify_one();
+		return 1;
+	}
+
+	void stop_worker()
+	{
+		{
+			std::unique_lock<std::mutex> lck(queue_mtx);
+			stop_requested = true;
+		}
+		queue_cv.notify_all();
+	}
+
+	void worker_loop()
+	{
+		while (true)
+		{
+			PrefetchTask task;
+			{
+				std::unique_lock<std::mutex> lck(queue_mtx);
+				while (!stop_requested && tasks.empty())
+				{
+					queue_cv.wait(lck);
+				}
+				if (stop_requested && tasks.empty())
+				{
+					break;
+				}
+				if (!tasks.empty())
+				{
+					task = tasks.front();
+					tasks.pop();
+				}
+				else
+				{
+					continue;
+				}
+			}
+
+			if (!has_block(task.path.c_str(), task.start_block_id))
+			{
+				void *prefetch_buf = nullptr;
+				ssize_t been_read = get_ndata_prefetch((char *)task.path.c_str(), task.dataset_id, (int32_t)task.start_block_id, &prefetch_buf, task.total_read_size, task.num_blocks);
+				if (been_read > 0 && prefetch_buf != nullptr)
+				{
+					size_t blk_size = (IMSS_DATA_BSIZE > 0) ? (size_t)IMSS_DATA_BSIZE : (512 * 1024);
+					put_buffer(task.path.c_str(), prefetch_buf, (size_t)been_read, blk_size);
+				}
+				else if (prefetch_buf != nullptr)
+				{
+					free(prefetch_buf);
+				}
+			}
+
+			{
+				std::unique_lock<std::mutex> lck(queue_mtx);
+				in_flight_tasks.erase(std::make_pair(task.path, task.start_block_id));
+			}
 		}
 	}
 

@@ -61,6 +61,10 @@ extern "C"
 	int imss_vread_prefetch(const char *path, char *buf, size_t size, off_t offset);
 	int imss_vread_no_prefetch(const char *path, char *buf, size_t size, off_t offset);
 	ssize_t imss_sread_prefetch_v2(const char *path, void *buf, size_t size, off_t offset);
+	void prefetch_cache_worker_loop(void);
+	void prefetch_cache_stop_worker(void);
+	int prefetch_cache_submit(const char *path, int32_t ds, uint32_t start_blk, size_t num_blks, size_t read_size);
+	int prefetch_cache_has_block(const char *path, uint32_t block_id);
 	int imss_vread_2x(const char *path, char *buf, size_t size, off_t offset);
 	ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off);
 	int imss_split_writev(const char *path, const char *buf, size_t size, off_t off);

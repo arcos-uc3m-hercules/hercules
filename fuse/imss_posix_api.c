@@ -60,24 +60,43 @@ extern uint16_t MULTIPLE_READ;
 extern uint16_t MULTIPLE_WRITE;
 
 extern char *BUFFERPREFETCH;
-extern char prefetch_path[256];
 extern char *MOUNT_POINT;
 
-extern int32_t prefetch_first_block;
-extern int32_t prefetch_last_block;
-extern int32_t prefetch_pos;
-
-extern int16_t prefetch_ds;
-extern int32_t prefetch_offset;
-
-extern pthread_cond_t cond_prefetch;
-extern pthread_mutex_t mutex_prefetch;
+// Prefetch variables.
+static char prefetch_path[256];
+static int32_t prefetch_first_block = -1;
+static int32_t prefetch_last_block = -1;
+static int32_t prefetch_pos = 0;
+static int16_t prefetch_ds = 0;
+static int32_t prefetch_offset = 0;
+static pthread_cond_t cond_prefetch;
+static pthread_mutex_t mutex_prefetch;
 
 #define MAX_PATH 256
 extern pthread_mutex_t lock;
 pthread_mutex_t lock_file = PTHREAD_MUTEX_INITIALIZER;
-
 static PrefetchCacheV2 g_prefetch_cache_v2;
+extern struct arguments args;
+
+void prefetch_cache_worker_loop(void)
+{
+	g_prefetch_cache_v2.worker_loop();
+}
+
+void prefetch_cache_stop_worker(void)
+{
+	g_prefetch_cache_v2.stop_worker();
+}
+
+int prefetch_cache_submit(const char *path, int32_t ds, uint32_t start_blk, size_t num_blks, size_t read_size)
+{
+	return g_prefetch_cache_v2.submit_request(path, ds, start_blk, num_blks, read_size);
+}
+
+int prefetch_cache_has_block(const char *path, uint32_t block_id)
+{
+	return g_prefetch_cache_v2.has_block(path, block_id);
+}
 
 // extern int32_t IMSS_DEBUG;
 
@@ -822,6 +841,33 @@ extern "C"
 			if (eof_found)
 			{
 				break;
+			}
+		}
+
+		// Asynchronous Lookahead Prefetching:
+		// If prefetching is enabled and we have not reached EOF, calculate the next block window
+		// (lookahead window based on prefetch_size) and schedule a background task with the
+		// prefetch worker thread to fetch upcoming blocks into g_prefetch_cache_v2 in advance.
+		if (args.prefetch_size > 0 && !eof_found)
+		{
+			size_t total_file_blocks = (stats.st_size + IMSS_DATA_BSIZE - 1) / IMSS_DATA_BSIZE;
+			if (end_blk < total_file_blocks)
+			{
+				size_t prefetch_start_blk = end_blk + 1;
+				size_t lookahead_blocks = (args.prefetch_size + IMSS_DATA_BSIZE - 1) / IMSS_DATA_BSIZE;
+				if (lookahead_blocks == 0)
+				{
+					lookahead_blocks = 1;
+				}
+				size_t remaining_in_file = total_file_blocks - prefetch_start_blk + 1;
+				size_t prefetch_count = std::min(lookahead_blocks, remaining_in_file);
+
+				if (!g_prefetch_cache_v2.has_block(path, (uint32_t)prefetch_start_blk))
+				{
+					size_t prefetch_read_size = prefetch_count * IMSS_DATA_BSIZE;
+					slog_debug("[PREFETCH] Triggering background lookahead prefetch for '%s': start_blk=%zu, count=%zu, size=%zu", path, prefetch_start_blk, prefetch_count, prefetch_read_size);
+					g_prefetch_cache_v2.submit_request(path, ds, (uint32_t)prefetch_start_blk, prefetch_count, prefetch_read_size);
+				}
 			}
 		}
 

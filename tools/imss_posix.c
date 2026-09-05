@@ -58,19 +58,10 @@ uint16_t BEST_PERFORMANCE_READ = 0; // if 1    then n_servers < threshold => SRE
 
 uint16_t MULTIPLE_READ = 0;  // 1=vread with prefetch, 2=vread without prefetch, 3=vread_2x 4=imss_split_readv(distributed) else sread
 uint16_t MULTIPLE_WRITE = 0; // 1=writev(only 1 server), 2=imss_split_writev(distributed) else swrite
-char prefetch_path[256];
-int32_t prefetch_first_block = -1;
-int32_t prefetch_last_block = -1;
-int32_t prefetch_pos = 0;
-pthread_t prefetch_t;
-int16_t prefetch_ds = 0;
-int32_t prefetch_offset = 0;
-char *prefetch_uri = NULL;
 
-pthread_cond_t cond_prefetch;
+pthread_t prefetch_t;
+static int prefetch_thread_active = 0;
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-// pthread_mutex_t lock2 = PTHREAD_MUTEX_INITIALIZER;
-// pthread_mutex_t system_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void *hierarchical_map = NULL;
 void *map_prefetch;
@@ -693,17 +684,18 @@ __attribute__((constructor)) void imss_posix_init(void)
 	// void *root_stat_map = map_create();
 	// Hierarchical map used to store the "stats" maps.
 	hierarchical_map = HierarchicalMapCreate(std::string(IMSS_ROOT));
-	if (MULTIPLE_READ == 1)
+	if (args.prefetch_size > 0)
 	{
-		int ret = 0;
-		pthread_attr_t tattr;
-		ret = pthread_attr_init(&tattr);
-		ret = pthread_attr_setdetachstate(&tattr, PTHREAD_CREATE_DETACHED);
-
-		if (pthread_create(&prefetch_t, &tattr, prefetch_function, NULL) == -1)
+		int ret = pthread_create(&prefetch_t, NULL, prefetch_function, NULL);
+		if (ret != 0)
 		{
+			slog_error("ERRIMSS_PREFETCH_DEPLOY: Failed to create prefetch thread: %s", strerror(ret));
 			perror("ERRIMSS_PREFETCH_DEPLOY");
-			pthread_exit(NULL);
+		}
+		else
+		{
+			prefetch_thread_active = 1;
+			slog_info("[POSIX] Background prefetch thread initialized successfully.");
 		}
 	}
 
@@ -740,6 +732,14 @@ void __attribute__((destructor)) run_me_last()
 		slog_live("[POSIX] stat_release()");
 		// releases endpoints created with the METADATA servers.
 		stat_release();
+		if (prefetch_thread_active)
+		{
+			slog_live("[POSIX] Stopping prefetch thread...");
+			prefetch_cache_stop_worker();
+			pthread_join(prefetch_t, NULL);
+			prefetch_thread_active = 0;
+			slog_live("[POSIX] Prefetch thread joined successfully.");
+		}
 		// free_prefetch(map_prefetch);
 		imss_comm_cleanup();
 	}
@@ -4415,8 +4415,14 @@ ssize_t pread(int fd, void *buf, size_t count, off_t offset)
 		// }
 		// else
 		{
-			// ret = imss_read(pathname, buf, count, offset);
-			ret = imss_sread(pathname, buf, count, offset);
+			if (args.prefetch_size > 0)
+			{
+				ret = imss_sread_prefetch_v2(pathname, buf, count, offset);
+			}
+			else
+			{
+				ret = imss_sread(pathname, buf, count, offset);
+			}
 			// The file offset is not changed.
 		}
 
@@ -4450,7 +4456,14 @@ ssize_t pread64(int fd, void *buf, size_t count, off_t offset)
 		const char *pathname = pathname_ob.c_str();
 		slog_live("[POSIX]. Calling Hercules 'pread64', pathname=%s, size=%ld, offset=%ld, fd=%ld.", pathname, count, offset, fd);
 
-		ret = imss_sread(pathname, buf, count, offset);
+		if (args.prefetch_size > 0)
+		{
+			ret = imss_sread_prefetch_v2(pathname, buf, count, offset);
+		}
+		else
+		{
+			ret = imss_sread(pathname, buf, count, offset);
+		}
 		// The file offset is not changed.
 
 		slog_live("[POSIX]. End Hercules 'pread64', pathname=%s, ret=%ld, size=%ld, offset=%d, fd=%d", pathname, ret, count, offset, fd);
@@ -4499,7 +4512,14 @@ size_t fread(void *buf, size_t size, size_t count, FILE *fp)
 		slog_live("[POSIX]. Calling Hercules 'fread', pathname=%s, size=%lu", pathname, count);
 		map_fd_search(map_fd, pathname, fd, &offset);
 
-		ret = imss_sread(pathname, buf, count, offset);
+		if (args.prefetch_size > 0)
+		{
+			ret = imss_sread_prefetch_v2(pathname, buf, count, offset);
+		}
+		else
+		{
+			ret = imss_sread(pathname, buf, count, offset);
+		}
 
 		if (ret > 0) // Success case.
 		{
@@ -8490,34 +8510,10 @@ extern "C" ssize_t sendfile64(int out_fd, int in_fd, off64_t *_Nullable offset, 
 
 void *prefetch_function(void *th_argv)
 {
-	for (;;)
-	{
-
-		pthread_mutex_lock(&lock);
-		while (prefetch_ds < 0)
-		{
-			pthread_cond_wait(&cond_prefetch, &lock);
-		}
-
-		if (prefetch_first_block < prefetch_last_block && prefetch_first_block != -1)
-		{
-			// printf("Se activo Prefetch path:%s$%d-$%d\n",prefetch_path, prefetch_first_block, prefetch_last_block);
-			int exist_first_block, exist_last_block, position;
-			char *buf = map_get_buffer_prefetch(map_prefetch, prefetch_path, &exist_first_block, &exist_last_block);
-			int err = readv_multiple(prefetch_uri, prefetch_ds, prefetch_first_block, prefetch_last_block, buf, IMSS_BLKSIZE, prefetch_offset, IMSS_DATA_BSIZE * (prefetch_last_block - prefetch_first_block));
-			if (err == -1)
-			{
-				pthread_mutex_unlock(&lock);
-				continue;
-			}
-			map_update_prefetch(map_prefetch, prefetch_path, prefetch_first_block, prefetch_last_block);
-		}
-
-		prefetch_ds = -1;
-		pthread_mutex_unlock(&lock);
-	}
-
-	pthread_exit(NULL);
+	slog_info("[POSIX] Background prefetch worker started.");
+	prefetch_cache_worker_loop();
+	slog_info("[POSIX] Background prefetch worker finished.");
+	return NULL;
 }
 
 // #ifdef __cplusplus
