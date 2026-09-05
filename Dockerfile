@@ -29,23 +29,18 @@ WORKDIR /hercules
 #RUN git clone https://github.com/arcos-uc3m-hercules/hercules.git code
 COPY . /hercules/code/
 WORKDIR /hercules/code
-#RUN mkdir build
-#WORKDIR /hercules/code/build
-#RUN cmake .. && make -j
 RUN cmake --preset default
 RUN cmake --build --preset default --target install 
 
 
-#hercules start -m /hercules/metadata -d /hercules/data -f /hercules/code/conf/hercules.conf.sample
-
 WORKDIR /hercules
-RUN echo "localhost" > data
-RUN echo "localhost" > metadata
+RUN echo "localhost" > /hercules/data
+RUN echo "localhost" > /hercules/metadata
 RUN mkdir conf
-RUN cp /hercules/code/conf/hercules.conf.sample /hercules/conf/hercules.conf
+RUN cp /hercules/code/conf/hercules-template.conf /hercules/conf/hercules.conf
+RUN sed -ri 's|DATA_HOSTFILE = /home/data_hostfile|DATA_HOSTFILE = /hercules/data|g' /hercules/conf/hercules.conf
+RUN sed -ri 's|METADATA_HOSTFILE = /home/meta_hostfile|METADATA_HOSTFILE = /hercules/metadata|g' /hercules/conf/hercules.conf
 RUN sed -ri 's|/home/hercules|/hercules/code|g' /hercules/conf/hercules.conf
-RUN sed -ri 's|DATA_HOSTFILE = /home/user/data_hostfile|DATA_HOSTFILE = /hercules/data|g' /hercules/conf/hercules.conf
-RUN sed -ri 's|METADATA_HOSTFILE = /home/user/meta_hostfile|METADATA_HOSTFILE = /hercules/metadata|g' /hercules/conf/hercules.conf
 RUN cp /hercules/conf/hercules.conf /etc/
 ENV H_PATH=/hercules/code
 ENV H_BUILD_PATH=/hercules/code/build
@@ -67,4 +62,3 @@ RUN echo 'alias hrun="HERCULES_CONF=/hercules/conf/hercules.conf LD_PRELOAD=/her
 COPY docker/entrypoint.sh entrypoint.sh
 RUN chmod +x entrypoint.sh
 ENTRYPOINT ["./entrypoint.sh"]
-

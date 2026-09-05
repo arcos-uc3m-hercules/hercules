@@ -6,6 +6,8 @@ services:
     image: hercules:latest
     container_name: hercules-server
     hostname: hercules-server
+    volumes:
+      - ./conf:/hercules/conf
     ports:
       - "7500:7500"
       - "8500:8500"
@@ -18,6 +20,8 @@ services:
     hostname: hercules-client
     depends_on:
       - hercules-server
+    volumes:
+      - ./conf:/hercules/conf
     entrypoint: ["/bin/bash", "-c"]
     command: >
       "echo 'hercules-server' > /hercules/data &&
