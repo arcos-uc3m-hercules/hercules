@@ -6115,7 +6115,8 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		if (!strncmp((const char *)*buffer_prefetch, "$ERRIMSS_NO_KEY_AVAIL$", 22))
 		{ // key not avaiable on the remote server.
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			sprintf(err_msg, "HERCULES_ERR_GET_NDATA_PREFETCH_NO_KEY_AVAIL, %s$%d to server %d (%s), curr_imss_storages=%d", curr_dataset->uri_, data_id, repl_servers[i], curr_imss.info.ips[i], curr_imss_storages);
+			// TO CHECK: prefetching can fail if the block of an specific file to be retrieved is deleted in parallel by another process. 
+			// sprintf(err_msg, "HERCULES_ERR_GET_NDATA_PREFETCH_NO_KEY_AVAIL, %s$%d to server %d (%s), curr_imss_storages=%d", curr_dataset->uri_, data_id, repl_servers[i], curr_imss.info.ips[i], curr_imss_storages);
 			fprintf(stderr, "%s\n", err_msg);
 			slog_error("%s", err_msg);
 			free(*buffer_prefetch);

@@ -184,6 +184,11 @@ int32_t main(int32_t argc, char **argv)
 		return 0;
 	}
 
+	if (args.async_io == ASYNC)
+	{
+		fprintf(stderr, "Asynchronous IO: %" PRIu32 "\n", args.async_io);
+	}
+
 	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-start", args.hercules_path, args.type, args.id);
 
 	hercules_thread_pool_size = args.thread_pool;
