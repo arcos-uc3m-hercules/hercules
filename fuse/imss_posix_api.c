@@ -941,9 +941,9 @@ extern "C"
 		*out_bytes_to_read = std::min(max_in_blk, remaining);
 	}
 
-	ssize_t imss_read_blocks_async(const char *path, int ds, void *buf,
-				       size_t total_size, off_t offset,
-				       size_t start_blk, size_t num_blocks_to_read)
+	static ssize_t imss_read_blocks_async(const char *path, int ds, void *buf,
+					      size_t total_size, off_t offset,
+					      size_t start_blk, size_t num_blocks_to_read)
 	{
 		const size_t MAX_CONCURRENT_REQUESTS = 32;
 		size_t num_slots = std::min(num_blocks_to_read, MAX_CONCURRENT_REQUESTS);
@@ -1101,6 +1101,41 @@ extern "C"
 		return total_bytes_completed;
 	}
 
+	static ssize_t imss_read_blocks_sync(const char *path, int ds, void *buf,
+					     size_t total_size, off_t offset,
+					     size_t start_blk, size_t num_blocks_to_read)
+	{
+		size_t total_bytes_read = 0;
+		for (size_t i = 0; i < num_blocks_to_read; ++i)
+		{
+			size_t block_id = 0;
+			size_t offset_in_block = 0;
+			size_t to_read = 0;
+
+			imss_calc_block_slice(i, start_blk, offset, total_size, total_bytes_read,
+					      &block_id, &offset_in_block, &to_read);
+
+			if (to_read == 0)
+			{
+				break;
+			}
+
+			ssize_t been_read = TIMING(get_ndata((char *)path, ds, block_id,
+							     (char *)buf + total_bytes_read,
+							     to_read, offset_in_block, SYNC,
+							     NULL, INITIAL_RECURSION),
+						   "get_ndata", ssize_t, -1);
+			if (been_read < 0)
+			{
+				return been_read;
+			}
+
+			total_bytes_read += (size_t)been_read;
+		}
+
+		return (ssize_t)total_bytes_read;
+	}
+
 	ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 	{
 		ENSURE_BACKEND();
@@ -1130,18 +1165,9 @@ extern "C"
 
 		ssize_t bytes_read = 0;
 
-		// for a single block to read, we do not run asynch at all.
-		if (num_blocks == 1)
+		if (ASYNC_IO == SYNC || num_blocks == 1)
 		{
-			size_t block_id = 0;
-			size_t offset_in_block = 0;
-			size_t to_read = 0;
-			imss_calc_block_slice(0, start_blk, offset, adjusted_size, 0,
-					      &block_id, &offset_in_block, &to_read);
-
-			bytes_read = TIMING(get_ndata((char *)path, ds, block_id, buf,
-						      to_read, offset_in_block, SYNC, NULL, INITIAL_RECURSION),
-					    "get_ndata", ssize_t, -1);
+			bytes_read = imss_read_blocks_sync(path, ds, buf, adjusted_size, offset, start_blk, num_blocks);
 			if (bytes_read < 0)
 			{
 				return bytes_read;
@@ -1149,7 +1175,6 @@ extern "C"
 		}
 		else
 		{
-			// for a multiple blocks to read, we run asynch pipelined.
 			bytes_read = imss_read_blocks_async(path, ds, buf, adjusted_size, offset, start_blk, num_blocks);
 			if (bytes_read < 0)
 			{
