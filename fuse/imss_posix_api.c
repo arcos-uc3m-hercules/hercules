@@ -882,157 +882,278 @@ extern "C"
 		return total_bytes_scheduled;
 	}
 
+	static inline int imss_read_validate_bounds(const char *path, off_t offset, size_t size,
+						    int *out_ds, struct stat *out_stats,
+						    size_t *out_adjusted_size,
+						    size_t *out_start_blk, size_t *out_end_blk,
+						    size_t *out_num_blocks)
+	{
+		int fd = -1;
+		struct elements elem = {};
+		fd_lookup(path, &fd, &elem);
+		if (fd < 0)
+		{
+			return -ENOENT;
+		}
+		*out_ds = fd;
+		*out_stats = elem.stats;
+
+		// offset at or past EOF, or 0 bytes requested
+		if (offset >= elem.stats.st_size || size == 0)
+		{
+			*out_adjusted_size = 0;
+			*out_start_blk = 0;
+			*out_end_blk = 0;
+			*out_num_blocks = 0;
+			return 0; // 0 bytes to read (EOF or empty)
+		}
+
+		// adjust read size if reading beyond EOF
+		size_t adjusted_size = size;
+		if (offset + adjusted_size > (size_t)elem.stats.st_size)
+		{
+			adjusted_size = (size_t)(elem.stats.st_size - offset);
+		}
+
+		size_t start_blk = offset / IMSS_DATA_BSIZE + 1; // +1 to skip metadata block 0
+		size_t end_blk = (offset + adjusted_size + IMSS_DATA_BSIZE - 1) / IMSS_DATA_BSIZE;
+		size_t num_blocks = end_blk - start_blk + 1;
+
+		*out_adjusted_size = adjusted_size;
+		*out_start_blk = start_blk;
+		*out_end_blk = end_blk;
+		*out_num_blocks = num_blocks;
+
+		return 1; // Valid range to read
+	}
+
+	static inline void imss_calc_block_slice(size_t block_idx, size_t start_blk, off_t offset,
+						 size_t total_adjusted_size, size_t total_bytes_scheduled,
+						 size_t *out_block_id, size_t *out_offset_in_block,
+						 size_t *out_bytes_to_read)
+	{
+		*out_block_id = start_blk + block_idx;
+		size_t offset_in_blk = (block_idx == 0) ? (offset % IMSS_DATA_BSIZE) : 0;
+		size_t max_in_blk = IMSS_DATA_BSIZE - offset_in_blk;
+		size_t remaining = total_adjusted_size - total_bytes_scheduled;
+
+		*out_offset_in_block = offset_in_blk;
+		*out_bytes_to_read = std::min(max_in_blk, remaining);
+	}
+
+	ssize_t imss_read_blocks_async(const char *path, int ds, void *buf,
+				       size_t total_size, off_t offset,
+				       size_t start_blk, size_t num_blocks_to_read)
+	{
+		const size_t MAX_CONCURRENT_REQUESTS = 32;
+		size_t num_slots = std::min(num_blocks_to_read, MAX_CONCURRENT_REQUESTS);
+
+		struct AsyncReadSlot
+		{
+			void *ucx_handle;
+			char *temp_buffer;
+			size_t final_offset_in_buf;
+			size_t bytes_to_read;
+			size_t block_id;
+			bool in_use;
+		};
+
+		std::vector<AsyncReadSlot> slots(num_slots);
+		for (size_t i = 0; i < num_slots; ++i)
+		{
+			slots[i].in_use = false;
+			slots[i].ucx_handle = NULL;
+			slots[i].temp_buffer = (char *)malloc(IMSS_DATA_BSIZE);
+			if (slots[i].temp_buffer == NULL)
+			{
+				for (size_t j = 0; j < i; ++j)
+				{
+					free(slots[j].temp_buffer);
+				}
+				slog_error("Failed to allocate temporary buffer for async read.");
+				fprintf(stderr, "HERCULES_ERR_READ_ASYNC: Failed to allocate temporary buffer for async read.\n");
+				return -ENOMEM;
+			}
+		}
+
+		size_t blocks_launched = 0;
+		size_t blocks_completed = 0;
+		size_t total_bytes_scheduled = 0;
+		ssize_t total_bytes_completed = 0;
+		int fatal_error = 0;
+
+		while (blocks_completed < num_blocks_to_read && !fatal_error)
+		{
+			// Issue new requests into available slots
+			if (blocks_launched < num_blocks_to_read)
+			{
+				for (size_t i = 0; i < num_slots; ++i)
+				{
+					if (!slots[i].in_use && blocks_launched < num_blocks_to_read)
+					{
+						size_t block_id = 0;
+						size_t offset_in_blk = 0;
+						size_t bytes_to_read = 0;
+
+						imss_calc_block_slice(blocks_launched, start_blk, offset,
+								      total_size, total_bytes_scheduled,
+								      &block_id, &offset_in_blk, &bytes_to_read);
+
+						if (bytes_to_read == 0)
+						{
+							blocks_launched++;
+							blocks_completed++;
+							continue;
+						}
+
+						slots[i].final_offset_in_buf = total_bytes_scheduled;
+						slots[i].bytes_to_read = bytes_to_read;
+						slots[i].block_id = block_id;
+						slots[i].ucx_handle = NULL;
+
+						ssize_t ret = TIMING(get_ndata((char *)path, ds, block_id,
+									       slots[i].temp_buffer, bytes_to_read,
+									       offset_in_blk, ASYNC,
+									       &slots[i].ucx_handle, INITIAL_RECURSION),
+								     "get_ndata", ssize_t, -1);
+
+						if (ret < 0)
+						{
+							slog_error("Failed to launch async get_ndata for block %zu", block_id);
+							fatal_error = 1;
+							break;
+						}
+
+						slots[i].in_use = true;
+						total_bytes_scheduled += bytes_to_read;
+						blocks_launched++;
+						slog_debug("block %zu requested asynchronously", block_id);
+					}
+				}
+			}
+
+			// Check for and process completed requests
+			for (size_t i = 0; i < num_slots; ++i)
+			{
+				if (slots[i].in_use)
+				{
+					ucs_status_t status = ucp_request_check_status(slots[i].ucx_handle);
+					if (status == UCS_OK)
+					{
+						slog_debug("block %zu complete", slots[i].block_id);
+						ucp_request_free(slots[i].ucx_handle);
+						slots[i].ucx_handle = NULL;
+
+						// Copy data from temporary buffer to destination
+						memcpy((char *)buf + slots[i].final_offset_in_buf,
+						       slots[i].temp_buffer,
+						       slots[i].bytes_to_read);
+
+						total_bytes_completed += slots[i].bytes_to_read;
+						slots[i].in_use = false;
+						blocks_completed++;
+					}
+					else if (status != UCS_INPROGRESS)
+					{
+						slog_error("Async read failed for block %zu: %s", slots[i].block_id, ucs_status_string(status));
+						fprintf(stderr, "HERCULES_ERR_READ_ASYNC: Async read failed for block %zu: %s\n", slots[i].block_id, ucs_status_string(status));
+						ucp_request_free(slots[i].ucx_handle);
+						slots[i].ucx_handle = NULL;
+						slots[i].in_use = false;
+						fatal_error = 1;
+						break;
+					}
+				}
+			}
+
+			// Progress the UCX worker to advance network transfers
+			ucp_worker_progress(ucp_worker_data);
+		}
+
+		// Drain and clean up in-flight handles on failure
+		if (fatal_error)
+		{
+			for (size_t i = 0; i < num_slots; ++i)
+			{
+				if (slots[i].in_use && slots[i].ucx_handle != NULL)
+				{
+					while (ucp_request_check_status(slots[i].ucx_handle) == UCS_INPROGRESS)
+					{
+						ucp_worker_progress(ucp_worker_data);
+					}
+					ucp_request_free(slots[i].ucx_handle);
+					slots[i].ucx_handle = NULL;
+					slots[i].in_use = false;
+				}
+			}
+		}
+
+		for (size_t i = 0; i < num_slots; ++i)
+		{
+			free(slots[i].temp_buffer);
+		}
+
+		if (fatal_error)
+		{
+			return -EIO;
+		}
+
+		return total_bytes_completed;
+	}
+
 	ssize_t imss_sread(const char *path, void *buf, size_t size, off_t offset)
 	{
 		ENSURE_BACKEND();
-		int32_t length = 0;
-		int eof_found = 0;
-		const char *rpath = path; // this pointer should not be free.
 
-		size_t curr_blk, num_of_blk, end_blk, start_offset, end_offset, block_offset, i_blk;
-		size_t first = 0;
-		int ds = 0;
-		curr_blk = offset / IMSS_DATA_BSIZE + 1; // Plus one to skip the header (0) block
-		start_offset = offset % IMSS_DATA_BSIZE;
-		end_offset = (offset + size) % IMSS_DATA_BSIZE;
-		// end_blk = (offset+size) / IMSS_DATA_BSIZE + 1; //Plus one to skip the header (0) block
-		end_blk = ceil((double)(offset + size) / IMSS_DATA_BSIZE);
-		num_of_blk = end_blk - curr_blk;
-
-		// Needed variables
-		ssize_t to_read = 0;
-		ssize_t been_read = 0;
-		ssize_t byte_count = 0;
-
-		int fd = -1;
+		int ds = -1;
 		struct stat stats;
-		char *aux;
+		size_t adjusted_size = 0;
+		size_t start_blk = 0;
+		size_t end_blk = 0;
+		size_t num_blocks = 0;
 
-		struct elements elem = {};
-		fd_lookup(rpath, &fd, &elem);
-		stats = elem.stats;
-		if (fd >= 0)
-			ds = fd;
-		else if (fd == -1)
-			return -ENOENT;
-
-		if (stats.st_size < size)
+		int val_res = imss_read_validate_bounds(path, offset, size, &ds, &stats,
+							&adjusted_size, &start_blk, &end_blk, &num_blocks);
+		// error happened
+		if (val_res < 0)
 		{
-			end_blk = ceil((double)(offset + stats.st_size) / IMSS_DATA_BSIZE);
+			return val_res;
 		}
-
-		slog_debug("TotalSizeToRead=%ld (%ld kb), start_offset=%ld, curr_blk=%ld, end_blk=%ld, num_of_blks=%ld, offset=%ld, end_offset=%ld, IMSS_DATA_BSIZE=%ld, stats.st_size=%ld", size, size / 1024, start_offset, curr_blk, end_blk, num_of_blk, offset, end_offset, IMSS_DATA_BSIZE, stats.st_size);
-
-		// Check if offset is bigger than filled, return 0 because is EOF case.
-		// If the file offset is at or past the end of file,
-		// no bytes are read, and read() returns zero
-		// https://man7.org/linux/man-pages/man2/read.2.html
-		if (offset >= stats.st_size)
+		// EOF or zero bytes requested
+		if (val_res == 0)
 		{
-			slog_warn("[imss_read] returning EOF");
-			buf = (void *)'\0';
-			// memset(buf, '\0', size);
 			return 0;
 		}
 
-		if (start_offset >= stats.st_size)
+		slog_debug("TotalSizeToRead=%zu, start_blk=%zu, end_blk=%zu, num_blocks=%zu, offset=%ld, stats.st_size=%ld",
+			   adjusted_size, start_blk, end_blk, num_blocks, offset, stats.st_size);
+
+		ssize_t bytes_read = 0;
+
+		// for a single block to read, we do not run asynch at all.
+		if (num_blocks == 1)
 		{
-			slog_warn("[imss_read] returning EOF");
-			return 0;
+			size_t block_id = 0;
+			size_t offset_in_block = 0;
+			size_t to_read = 0;
+			imss_calc_block_slice(0, start_blk, offset, adjusted_size, 0,
+					      &block_id, &offset_in_block, &to_read);
+
+			bytes_read = TIMING(get_ndata((char *)path, ds, block_id, buf,
+						      to_read, offset_in_block, SYNC, NULL, INITIAL_RECURSION),
+					    "get_ndata", ssize_t, -1);
+			if (bytes_read < 0)
+			{
+				return bytes_read;
+			}
 		}
-
-		i_blk = 0;
-		while (curr_blk <= end_blk)
+		else
 		{
-			if (first == 0) // First block case
+			// for a multiple blocks to read, we run asynch pipelined.
+			bytes_read = imss_read_blocks_async(path, ds, buf, adjusted_size, offset, start_blk, num_blocks);
+			if (bytes_read < 0)
 			{
-				block_offset = start_offset;
-				if (size < (stats.st_size - start_offset) && size < IMSS_DATA_BSIZE)
-				{
-					slog_info("[imss_read] case 1");
-					to_read = size;
-				}
-				else
-				{
-					if (stats.st_size < IMSS_DATA_BSIZE)
-					{
-						slog_info("[imss_read] case 2");
-						to_read = stats.st_size - start_offset;
-					}
-					else
-					{
-						slog_info("[imss_read] case 3");
-						to_read = IMSS_DATA_BSIZE - start_offset;
-					}
-				}
-				slog_debug("[imss_read] FIRST BLOCK CASE, to_read=%ld, fd=%d, ds=%d", to_read, fd, ds);
-
-				++first;
-				// Check if offset is bigger than filled, return 0 because is EOF case
-				slog_debug("[imss_read] start_offset=%ld, to_read=%ld, stats.st_size=%ld, start_offset + to_read=%ld", start_offset, to_read, stats.st_size, start_offset + to_read);
-				// if (start_offset + to_read > stats.st_size)
-				// {
-				// 	to_read = stats.st_size - start_offset + to_read;
-				// 	slog_warn("data block overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
-				// 	// slog_warn("[imss_read] returning size 0");
-				// 	// return 0;
-				// }
-
-				// prevents to read out of the block.
-				if (block_offset + to_read > IMSS_DATA_BSIZE)
-				{
-					to_read = IMSS_DATA_BSIZE - block_offset;
-					slog_warn("data block overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
-				}
-				// prevents to read out of the EOF.
-				if (offset + to_read > stats.st_size)
-				{
-					to_read = stats.st_size - offset;
-					eof_found = 1;
-					slog_warn("EOF overflow, reducing the amount of data to read in the block #%lu to %lu", curr_blk, to_read);
-				}
-			}
-			else if (curr_blk != end_blk) // Middle block case
-			{
-				to_read = IMSS_DATA_BSIZE;
-			}
-			else // End block case
-			{
-				// Read the minimum between end_offset and filled (read_ = min(end_offset, filled))
-				to_read = size - byte_count;
-				slog_debug("END BLOCK CASE, to_read=%zd", to_read);
-			}
-			slog_debug("curr_blk=%ld, reading %ld bytes (%ld kilobytes) with an offset of %ld bytes (%ld kilobytes), byte_count=%zd bytes (%zd kilobytes)", curr_blk, to_read, to_read / 1024, block_offset, block_offset / 1024, byte_count, byte_count / 1024);
-
-			if (to_read <= 0)
-			{
-				return to_read;
-			}
-
-			// get data from the data server.
-			been_read = TIMING(get_ndata((char *)path, ds, curr_blk, (char *)buf + byte_count, to_read, block_offset, SYNC, NULL, INITIAL_RECURSION), "get_ndata", ssize_t, -1);
-			// Error handling when get_ndata does not found the request data.
-
-			if (been_read < 0)
-			{
-				return been_read;
-			}
-
-			if (been_read != to_read)
-			{
-				slog_warn("Expecting to read %ld but %ld has been read.", to_read, been_read);
-				fprintf(stdout, "Expecting to read %ld but %ld has been read for %s.\n", to_read, been_read, path);
-			}
-
-			block_offset = 0;
-
-			++curr_blk;
-			byte_count += to_read;
-			// If eof was found, we end the while bucle to avoid trying to read
-			// additional blocks.
-			if (eof_found)
-			{
-				break;
+				return bytes_read;
 			}
 		}
 
@@ -1042,181 +1163,15 @@ extern "C"
 		}
 		async_data_worker_progress(0);
 
-		// total_amount_read += byte_count;
-		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, byte_count);
+		slog_read("TotalSizeToRead=%lu B (%lu kB), offset=%lu, file size=%ld B, readed=%lu B",
+			  size, size / 1024, offset, stats.st_size, (unsigned long)bytes_read);
 
-		return byte_count;
+		return bytes_read;
 	}
 
 	ssize_t imss_read_async(const char *path, void *buf, size_t size, off_t offset)
 	{
-		ENSURE_BACKEND();
-		// Look up file metadata.
-		int fd = -1;
-		struct stat stats;
-		struct elements elem = {};
-		fd_lookup(path, &fd, &elem);
-		stats = elem.stats;
-
-		if (fd < 0)
-			return -ENOENT;
-		int ds = fd; // Use dataset handle
-
-		// Handle edge case: read request starts at or after the end of the file.
-		if (offset >= stats.st_size)
-		{
-			return 0;
-		}
-
-		// If the user requests 0 bytes, we are done.
-		if (size == 0)
-		{
-			return 0;
-		}
-
-		/*
-		No data transfer shall occur past the current end-of-file. If the starting position is at or after the end-of-file, 0 shall be returned.
-		If the file refers to a device special file, the result of subsequent read() requests is implementation-defined.
-		ref: https://linux.die.net/man/3/read
-		*/
-		if (offset + size > stats.st_size)
-		{
-			return 0;
-		}
-
-		size_t start_blk = offset / IMSS_DATA_BSIZE + 1;
-		size_t end_blk = (offset + size + IMSS_DATA_BSIZE - 1) / IMSS_DATA_BSIZE;
-		size_t num_blocks_to_read = end_blk - start_blk + 1;
-		const int MAX_CONCURRENT_REQUESTS = 100;
-
-		// Struct to manage all information for a single in-flight request.
-		struct RequestInfo
-		{
-			void *ucx_handle;
-			char *temp_buffer;
-			size_t final_offset_in_buf;
-			size_t bytes_to_read_in_req;
-			size_t current_block_id;
-			bool in_use;
-		};
-
-		RequestInfo requests[MAX_CONCURRENT_REQUESTS];
-		for (int i = 0; i < MAX_CONCURRENT_REQUESTS; ++i)
-		{
-			requests[i].in_use = false;
-			requests[i].temp_buffer = (char *)malloc(IMSS_DATA_BSIZE);
-			if (requests[i].temp_buffer == NULL)
-			{
-				// Clean up already allocated buffers on failure
-				for (int j = 0; j < i; ++j)
-					free(requests[j].temp_buffer);
-				slog_error("Failed to allocate temporary buffers for async read.");
-				return -ENOMEM;
-			}
-		}
-
-		size_t blocks_launched = 0;
-		size_t blocks_completed = 0;
-		size_t total_bytes_scheduled = 0;
-		ssize_t total_bytes_completed = 0;
-
-		// The loop continues until all required blocks have been successfully received.
-		while (blocks_completed < num_blocks_to_read)
-		{
-
-			// Issue new requests into any available slots.
-			if (blocks_launched < num_blocks_to_read)
-			{
-				for (int i = 0; i < MAX_CONCURRENT_REQUESTS; ++i)
-				{
-					if (!requests[i].in_use)
-					{
-						// Stop if we have launched all necessary blocks
-						if (blocks_launched >= num_blocks_to_read)
-							break;
-
-						size_t current_block_id = start_blk + blocks_launched;
-
-						// Calculate read size and offset for this specific block
-						size_t offset_in_block = 0;
-						if (blocks_launched == 0)
-						{ // First block has a specific offset
-							offset_in_block = offset % IMSS_DATA_BSIZE;
-						}
-
-						size_t max_read_for_block = IMSS_DATA_BSIZE - offset_in_block;
-						size_t remaining_bytes_in_request = size - total_bytes_scheduled;
-						size_t bytes_to_read_in_block = std::min(max_read_for_block, remaining_bytes_in_request);
-
-						if (bytes_to_read_in_block == 0)
-							continue;
-
-						// The final destination for this data is at the end of what's already been scheduled.
-						requests[i].final_offset_in_buf = total_bytes_scheduled;
-
-						ssize_t ret = TIMING(get_ndata((char *)path, ds, current_block_id, requests[i].temp_buffer, bytes_to_read_in_block, offset_in_block, ASYNC, &requests[i].ucx_handle, INITIAL_RECURSION), "get_ndata", ssize_t, -1);
-
-						if (ret >= 0)
-						{
-							requests[i].in_use = true;
-							requests[i].bytes_to_read_in_req = bytes_to_read_in_block;
-							requests[i].current_block_id = current_block_id;
-							slog_debug("block %lu requested", requests[i].current_block_id);
-							total_bytes_scheduled += bytes_to_read_in_block;
-							blocks_launched++;
-						}
-					}
-				}
-			}
-
-			// Check for and process completed requests.
-			for (int i = 0; i < MAX_CONCURRENT_REQUESTS; ++i)
-			{
-				if (requests[i].in_use)
-				{
-					bool is_complete = false;
-					if (requests[i].ucx_handle == NULL)
-					{ // Request completed immediately
-						slog_debug("block %d complete immediately", requests[i].current_block_id);
-						is_complete = true;
-					}
-					else
-					{ // Check status of pending request
-						ucs_status_t status = ucp_request_check_status(requests[i].ucx_handle);
-						if (status == UCS_OK)
-						{
-							is_complete = true;
-							slog_debug("block %d complete", requests[i].current_block_id);
-							ucp_request_free(requests[i].ucx_handle);
-						}
-					}
-
-					if (is_complete)
-					{
-						// Copy data from its temporary buffer to the correct final destination
-						memcpy((char *)buf + requests[i].final_offset_in_buf,
-						       requests[i].temp_buffer,
-						       requests[i].bytes_to_read_in_req);
-
-						total_bytes_completed += requests[i].bytes_to_read_in_req;
-						requests[i].in_use = false;
-						blocks_completed++;
-					}
-				}
-			}
-
-			// Progress the UCX worker to ensure communication continues
-			ucp_worker_progress(ucp_worker_data);
-		}
-
-		async_data_worker_progress(0);
-
-		for (int i = 0; i < MAX_CONCURRENT_REQUESTS; ++i)
-		{
-			free(requests[i].temp_buffer);
-		}
-
-		return total_bytes_completed;
+		return imss_sread(path, buf, size, offset);
 	}
 
 	int imss_vread_prefetch(const char *path, char *buf, size_t size, off_t offset)

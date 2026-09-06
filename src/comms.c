@@ -360,21 +360,22 @@ extern "C"
 		return request;
 	}
 
-	void *irecv_data(ucp_worker_h ucp_worker, void *allocated_buffer, size_t buffer_len, uint64_t tag, ServerRecvRequest *tracking_struct)
+	void *irecv_data(ucp_worker_h ucp_worker, void *allocated_buffer, size_t buffer_len, uint64_t tag)
 	{
 		ucp_request_param_t recv_param;
 		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-					  UCP_OP_ATTR_FIELD_USER_DATA;
+					  UCP_OP_ATTR_FIELD_DATATYPE |
+					  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
 
-		recv_param.cb.recv = server_recv_completion_callback;
-		recv_param.user_data = tracking_struct;
+		// UCP_OP_ATTR_FLAG_NO_IMM_CMPL: https://openucx.readthedocs.io/en/master/api.html
+		// Deny immediate completion, i.e NULL cannot be returned. If a completion callback
+		// is provided, it can be called before the function returns.
+		recv_param.cb.recv = recv_handler;
 		recv_param.datatype = ucp_dt_make_contig(1);
 
 		slog_debug("Posting asynchronous receive for max_len %ld, tag %lu", buffer_len, tag);
 
 		void *request = ucp_tag_recv_nbx(ucp_worker, allocated_buffer, buffer_len, tag, tag_mask, &recv_param);
-
-		// TO CHECK: if the request completes immediatly, the callback is not called.
 
 		return request;
 	}
@@ -1794,9 +1795,9 @@ extern "C"
 		{
 			char msg[PATH_MAX] = {0};
 			sprintf(msg, "open client socket %s:%" PRIu64 "", server, server_port);
-		CHKERR_ACTION(sockfd < 0,
+			CHKERR_ACTION(sockfd < 0,
 				      (server) ? msg : "open server socket",
-			      (void)sockfd /* no action */);
+				      (void)sockfd /* no action */);
 		}
 
 	out_free_res:

@@ -3820,18 +3820,18 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 		// 		read_performance,
 		// 		read_performance / MB);
 		slog_debug("key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, write_performance=%.2f (%.2f MB), read_size=%lld (%lld MB), read_time=%.2f, read_performance=%.2f (%.2f MB)",
-				pair.first.c_str(),
-				pair.second.server_id,
-				pair.second.write.total_data_size,
-				pair.second.write.total_data_size / MB,
-				pair.second.write.total_data_time,
-				write_performance,
-				write_performance / MB,
-				pair.second.read.total_data_size,
-				pair.second.read.total_data_size / MB,
-				pair.second.read.total_data_time,
-				read_performance,
-				read_performance / MB);
+			   pair.first.c_str(),
+			   pair.second.server_id,
+			   pair.second.write.total_data_size,
+			   pair.second.write.total_data_size / MB,
+			   pair.second.write.total_data_time,
+			   write_performance,
+			   write_performance / MB,
+			   pair.second.read.total_data_size,
+			   pair.second.read.total_data_size / MB,
+			   pair.second.read.total_data_time,
+			   read_performance,
+			   read_performance / MB);
 	}
 
 	// Send the struct of the performance metrics in a serialized way.
@@ -5369,7 +5369,7 @@ int GetValueFromInterval(dataset_info *curr_dataset, int data_id)
 	{
 		return -1;
 	}
-	
+
 	if (curr_dataset->num_intervals <= 0)
 	{
 		return -1;
@@ -5807,7 +5807,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			return -2;
 		}
 
-		// void *response_buffer = (void *)malloc(msg_length * sizeof(char));
 		void *response_buffer = buffer;
 		if (response_buffer == NULL)
 		{
@@ -5821,48 +5820,30 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		if (async == ASYNC)
 		{
 			slog_debug("async process");
-			fprintf(stderr, "async process\n");
 			// async get.
 			async_data_worker_progress(curr_imss_storages);
-			// ServerSendRequest *new_send = new ServerSendRequest();
-			// void *ucx_req_handle = isend_data2(ucp_worker_data, ep, buffer, size, local_data_uid, new_send);
-			// ucp_tag_recv_info_t immediate_recv_info;
-			ServerRecvRequest *new_recv = new ServerRecvRequest();
-			// new_recv->buffer_to_free = response_buffer;
-			new_recv->client_pointer = response_buffer;
-			outstanding_sends++;
-			void *ucx_req_handle = irecv_data(ucp_worker_data, response_buffer, msg_length, local_data_uid, new_recv);
-			if (UCS_PTR_IS_PTR(ucx_req_handle))
+			void *ucx_req_handle = irecv_data(ucp_worker_data, response_buffer, msg_length, local_data_uid);
+			if (buffer_request)
 			{
-				// The request is receiving asynchronously. The callback will decrement outstanding_sends.
-				size_received_data = msg_length;
+				*buffer_request = ucx_req_handle;
 			}
-			else if (UCS_PTR_IS_ERR(ucx_req_handle))
+			if (UCS_PTR_IS_ERR(ucx_req_handle))
 			{
-				slog_error("Failed to initiate async recv on server.");
-				fprintf(stderr, "Failed to initiate async recv on server.");
-				if (outstanding_sends.load(std::memory_order_relaxed) > 0)
-				{
-					outstanding_sends--;
-				}
+				ucs_status_t status = UCS_PTR_STATUS(ucx_req_handle);
+				slog_error("Failed to initiate async recv on server: %s", ucs_status_string(status));
+				fprintf(stderr, "HERCULES_ERR_GET_NDATA_INIT_ASYNC_RECV: Failed to initiate async recv on server: %s\n", ucs_status_string(status));
+				pthread_mutex_unlock(&lock_network);
+				return -2;
 			}
-			else
-			{
-				// It completed immediately. The callback is NOT called.
-				size_received_data = msg_length;
-				if (outstanding_sends.load(std::memory_order_relaxed) > 0)
-				{
-					outstanding_sends--;
-				}
-			}
+
+			// With UCP_OP_ATTR_FLAG_NO_IMM_CMPL, ucx_req_handle is always guaranteed to be a valid pointer
+			// (UCS_PTR_IS_PTR), even if the request completed immediately during initiation.
+			size_received_data = msg_length;
 		}
 		else
 		{
 			// original
-			// t = clock();
 			size_received_data = TIMING(recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async), "recv_data", size_t, process_rank);
-			// t = clock() - t;
-			// time_taken += ((double)t) / (CLOCKS_PER_SEC);
 		}
 		auto end_time_data = std::chrono::steady_clock::now();
 		time_taken_data = end_time_data - start_time_data;
@@ -5881,6 +5862,20 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			}
 			// else
 			// 	break;
+		}
+
+		// In async mode, the non-blocking receive is in flight. Return the scheduled size
+		// without inspecting response_buffer before UCX receive finishes.
+		if (async == ASYNC)
+		{
+			std::string used_hostname_server = curr_imss.info.ips[server_id];
+			backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + size_received_data);
+			backend_performance_metrics[used_hostname_server].read.total_data_time += (time_taken_req.count() + time_taken_data.count());
+			backend_performance_metrics[used_hostname_server].read.num_operations++;
+			backend_performance_metrics[used_hostname_server].server_id = server_id;
+
+			pthread_mutex_unlock(&lock_network);
+			return (ssize_t)size_received_data;
 		}
 
 		// Check if the requested key was correctly retrieved.
@@ -6095,10 +6090,10 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 			return -2;
 		}
 
-			t = clock();
-			msg_length = TIMING(recv_data(ucp_worker_data, ep, *buffer_prefetch, msg_length, local_data_uid, SYNC), "recv_data", size_t, process_rank);
-			t = clock() - t;
-			time_taken += ((double)t) / (CLOCKS_PER_SEC);
+		t = clock();
+		msg_length = TIMING(recv_data(ucp_worker_data, ep, *buffer_prefetch, msg_length, local_data_uid, SYNC), "recv_data", size_t, process_rank);
+		t = clock() - t;
+		time_taken += ((double)t) / (CLOCKS_PER_SEC);
 
 		slog_info("[IMSS] After recv_data, msg_length=%lu", msg_length);
 		if (msg_length == 0)
