@@ -3,7 +3,7 @@ FROM ubuntu:jammy
 RUN echo 'APT::Install-Suggests "0";' >> /etc/apt/apt.conf.d/00-docker
 RUN echo 'APT::Install-Recommends "0";' >> /etc/apt/apt.conf.d/00-docker
 RUN DEBIAN_FRONTEND=noninteractive \
-  apt-get update && apt-get install -y bc openssh-server wget mpich libglib2.0-dev pkg-config build-essential git vim cmake && rm -rf /var/lib/apt/lists/*
+  apt-get update && apt-get install -y bc openssh-server wget mpich libglib2.0-dev pkg-config build-essential git vim cmake openmpi-bin libopenmpi-dev && rm -rf /var/lib/apt/lists/*
 
 # Modify `sshd_config`
 RUN sed -ri 's/PermitEmptyPasswords no/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
@@ -17,9 +17,16 @@ RUN wget --no-check-certificate https://github.com/openucx/ucx/releases/download
 WORKDIR /tmp/ucx-1.15.0
 RUN mkdir build
 WORKDIR /tmp/ucx-1.15.0/build
-RUN ../configure && make -j && make install
+RUN ../configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu && make -j && make install && ldconfig
 
 RUN rm -rf /tmp/ucx-1.15.0*
+
+WORKDIR /tmp
+RUN  wget --no-check-certificate https://github.com/hpc/ior/releases/download/4.0.0/ior-4.0.0.tar.gz && tar xzf ior-4.0.0.tar.gz
+WORKDIR /tmp/ior-4.0.0
+RUN ./configure --prefix=/usr/local/
+RUN make -j && make install
+RUN rm -rf /tmp/ior-4.0.0*
 
 WORKDIR /
 RUN mkdir /hercules

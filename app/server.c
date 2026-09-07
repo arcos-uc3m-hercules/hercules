@@ -587,7 +587,7 @@ int32_t main(int32_t argc, char **argv)
 	IMSS_ROOT_LEN = strlen(IMSS_ROOT);
 	SERVER_ID = args.id;
 	BLOCK_SIZE = args.block_size * 1024;
-	
+
 	// Map tracking saved records.
 	std::shared_ptr<map_records> map(new map_records(max_storage_size));
 	global_hierarchical_map = new HierarchicalRecords(std::string(args.imss_uri));
@@ -1052,8 +1052,6 @@ int32_t main(int32_t argc, char **argv)
 
 // 	return 0;
 // }
-
-
 
 void handle_signal_server(int signal)
 {
