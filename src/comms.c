@@ -483,17 +483,6 @@ extern "C"
 		slog_info("[COMM] after ucp_tag_send_nbx");
 		// slog_info("[COMM][send_req] before ucx_wait");
 		status = ucx_wait(ucp_worker, request, "send", req); // original
-		if (request == NULL)
-		{
-			status = UCS_OK;
-		}
-		else
-		{
-			while ((status = ucp_request_check_status(request)) == UCS_INPROGRESS)
-			{
-				ucp_worker_progress(ucp_worker);
-			}
-		}
 		// slog_info("[COMM][send_req] after ucx_wait");
 
 		if (status != UCS_OK)
