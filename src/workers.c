@@ -207,7 +207,7 @@ int ReadHostfile(char *deployfile, imss_info *my_imss)
 	fprintf(stderr, "Reading hostfile %s\n", deployfile);
 	// FILE entity managing the HERCULES deployfile.
 	FILE *svr_nodes;
-	if ((svr_nodes = fopen(deployfile, "r+")) == NULL)
+	if ((svr_nodes = fopen(deployfile, "r")) == NULL)
 	{
 		char err_msg[MAX_ERR_MSG_LEN];
 		sprintf(err_msg, "HERCULES_ERR_DEPLOYFILE_OPEN:%s", deployfile);

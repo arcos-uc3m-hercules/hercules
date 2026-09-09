@@ -79,6 +79,14 @@ extern "C"
 	uint32_t GetRank();
 
 	int __fxstat(int ver, int fd, struct stat *buf);
+	int __fxstat64(int ver, int fd, struct stat64 *buf);
+	int __xstat(int ver, const char *pathname, struct stat *stat_buf);
+	int __xstat64(int ver, const char *pathname, struct stat64 *stat_buf);
+	int __lxstat(int ver, const char *pathname, struct stat *buf);
+	int __lxstat64(int ver, const char *pathname, struct stat64 *buf);
+	int __fxstatat(int ver, int dir_fd, const char *pathname, struct stat *stat_buf, int flags);
+	int __fxstatat64(int ver, int dir_fd, const char *pathname, struct stat64 *stat_buf, int flags);
+	int newfstatat(int __fd, const char *__restrict __file, struct stat *__restrict __buf, int __flag);
 
 	static off_t (*real_lseek)(int fd, off_t offset, int whence) = NULL;
 	static off64_t (*real_lseek64)(int fd, off64_t offset, int whence) = NULL;
@@ -267,8 +275,32 @@ extern "C"
 
 	static int (*real_setxattr)(const char *, const char *, const void *, size_t, int) = NULL;
 	static int (*real_lsetxattr)(const char *, const char *, const void *, size_t, int) = NULL;
+	static int (*real_fsetxattr)(int, const char *, const void *, size_t, int) = NULL;
+	static ssize_t (*real_getxattr)(const char *, const char *, void *, size_t) = NULL;
+	static ssize_t (*real_lgetxattr)(const char *, const char *, void *, size_t) = NULL;
+	static ssize_t (*real_fgetxattr)(int, const char *, void *, size_t) = NULL;
+	static ssize_t (*real_listxattr)(const char *, char *, size_t) = NULL;
+	static ssize_t (*real_llistxattr)(const char *, char *, size_t) = NULL;
+	static ssize_t (*real_flistxattr)(int, char *, size_t) = NULL;
+	static int (*real_removexattr)(const char *, const char *) = NULL;
+	static int (*real_lremovexattr)(const char *, const char *) = NULL;
+	static int (*real_fremovexattr)(int, const char *) = NULL;
+
+	int setxattr(const char *path, const char *name, const void *value, size_t size, int flags);
+	int lsetxattr(const char *path, const char *name, const void *value, size_t size, int flags);
+	int fsetxattr(int fd, const char *name, const void *value, size_t size, int flags);
+	ssize_t getxattr(const char *path, const char *name, void *value, size_t size);
+	ssize_t lgetxattr(const char *path, const char *name, void *value, size_t size);
+	ssize_t fgetxattr(int fd, const char *name, void *value, size_t size);
+	ssize_t listxattr(const char *path, char *list, size_t size);
+	ssize_t llistxattr(const char *path, char *list, size_t size);
+	ssize_t flistxattr(int fd, char *list, size_t size);
+	int removexattr(const char *path, const char *name);
+	int lremovexattr(const char *path, const char *name);
+	int fremovexattr(int fd, const char *name);
 
 #ifdef __cplusplus
 }
 #endif
 #endif // IMSS_POSIX_H
+

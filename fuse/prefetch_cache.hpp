@@ -3,6 +3,8 @@
 
 #include "imss.h"
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -71,7 +73,7 @@ class PrefetchCacheV2
 	std::condition_variable queue_cv;
 	std::queue<PrefetchTask> tasks;
 	std::set<std::pair<std::string, uint32_t>> in_flight_tasks;
-	bool stop_requested{false};
+	std::atomic<bool> stop_requested{false};
 
       public:
 	PrefetchCacheV2() : stop_requested(false) {}
@@ -158,7 +160,7 @@ class PrefetchCacheV2
 		std::string path_str(path);
 		{
 			std::unique_lock<std::mutex> lck(queue_mtx);
-			if (stop_requested)
+			if (stop_requested.load())
 			{
 				return 0;
 			}
@@ -178,23 +180,28 @@ class PrefetchCacheV2
 	{
 		{
 			std::unique_lock<std::mutex> lck(queue_mtx);
-			stop_requested = true;
+			stop_requested.store(true);
+			while (!tasks.empty())
+			{
+				tasks.pop();
+			}
+			in_flight_tasks.clear();
 		}
 		queue_cv.notify_all();
 	}
 
 	void worker_loop()
 	{
-		while (true)
+		while (!stop_requested.load())
 		{
 			PrefetchTask task;
 			{
 				std::unique_lock<std::mutex> lck(queue_mtx);
-				while (!stop_requested && tasks.empty())
+				while (!stop_requested.load() && tasks.empty())
 				{
-					queue_cv.wait(lck);
+					queue_cv.wait_for(lck, std::chrono::milliseconds(50));
 				}
-				if (stop_requested && tasks.empty())
+				if (stop_requested.load())
 				{
 					break;
 				}
@@ -207,6 +214,11 @@ class PrefetchCacheV2
 				{
 					continue;
 				}
+			}
+
+			if (stop_requested.load())
+			{
+				break;
 			}
 
 			if (!has_block(task.path.c_str(), task.start_block_id))
@@ -237,8 +249,26 @@ class PrefetchCacheV2
 		{
 			return;
 		}
+		std::string path_str(path);
+		{
+			std::unique_lock<std::mutex> lck(queue_mtx);
+			std::queue<PrefetchTask> remaining;
+			while (!tasks.empty())
+			{
+				if (tasks.front().path != path_str)
+				{
+					remaining.push(tasks.front());
+				}
+				else
+				{
+					in_flight_tasks.erase(std::make_pair(path_str, tasks.front().start_block_id));
+				}
+				tasks.pop();
+			}
+			tasks = std::move(remaining);
+		}
 		std::unique_lock<std::mutex> lck(mtx);
-		file_cache.erase(std::string(path));
+		file_cache.erase(path_str);
 	}
 
 	void clear()

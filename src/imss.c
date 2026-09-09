@@ -746,25 +746,34 @@ gboolean replace_uri_base_path_regular_file(GHashTable *hash_table, const char *
 int32_t imss_comm_cleanup()
 {
 	slog_debug("Starting imss_comm_cleanup");
-	// ep_close(ucp_worker_meta, stat_eps[0], 0);
-	ucp_worker_flush(ucp_worker_meta);
-	ucp_worker_flush(ucp_worker_data);
 
-	// ucp_mem_free(ucp_context, send_buffer);
-	// ucp_mem_free(ucp_context, recv_buffer);
-
-	ucp_worker_release_address(ucp_worker_meta, local_addr_meta);
-	ucp_worker_release_address(ucp_worker_data, local_addr_data);
-
-	// ucp_worker_flush(ucp_worker_meta);
-	// ucp_worker_flush(ucp_worker_data);
+	if (ucp_worker_meta != NULL && local_addr_meta != NULL)
+	{
+		ucp_worker_release_address(ucp_worker_meta, local_addr_meta);
+		local_addr_meta = NULL;
+	}
+	if (ucp_worker_data != NULL && local_addr_data != NULL)
+	{
+		ucp_worker_release_address(ucp_worker_data, local_addr_data);
+		local_addr_data = NULL;
+	}
 
 	// To release ucx resources.
-	// workers.
-	ucp_worker_destroy(ucp_worker_meta);
-	ucp_worker_destroy(ucp_worker_data);
-	// context.
-	ucp_cleanup(ucp_context_client);
+	if (ucp_worker_meta != NULL)
+	{
+		ucp_worker_destroy(ucp_worker_meta);
+		ucp_worker_meta = NULL;
+	}
+	if (ucp_worker_data != NULL)
+	{
+		ucp_worker_destroy(ucp_worker_data);
+		ucp_worker_data = NULL;
+	}
+	if (ucp_context_client != NULL)
+	{
+		ucp_cleanup(ucp_context_client);
+		ucp_context_client = NULL;
+	}
 	slog_debug("Ending imss_comm_cleanup");
 
 	return 0;
@@ -1140,7 +1149,7 @@ static int connect_to_metadata_servers(const char *stat_hostfile, uint64_t port,
 	char request[REQUEST_SIZE] = {0};
 
 	// Open the file containing the IMSS metadata server nodes.
-	if ((stat_nodes_struct = fopen(stat_hostfile, "r+")) == NULL)
+	if ((stat_nodes_struct = fopen(stat_hostfile, "r")) == NULL)
 	{
 		char error_msg[MAX_ERR_MSG_LEN];
 		snprintf(error_msg, sizeof(error_msg), "HERCULES_ERR_OPEN_STATFILE: %s", stat_hostfile);

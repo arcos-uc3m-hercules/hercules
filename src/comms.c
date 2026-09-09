@@ -1645,14 +1645,15 @@ extern "C"
 			status = ucp_request_check_status(request);
 			iterations++;
 
-			// Warning if too long closing
-			if (iterations == 1000000)
+			// Timeout if too long closing
+			if (iterations >= 100000)
 			{
-				slog_warn("The endpoint has been stuck in the UCS_INPROGRESS state for 1 million iterations. Is the remote server still up?");
+				slog_warn("The endpoint closure was stuck in UCS_INPROGRESS after %lu iterations, breaking.", iterations);
+				break;
 			}
 		} while (status == UCS_INPROGRESS);
 
-		slog_debug("Closure completed successfully. Releasing request.");
+		slog_debug("Closure completed. Releasing request.");
 		ucp_request_free(request);
 	}
 
@@ -1676,10 +1677,17 @@ extern "C"
 		close_req = ucp_ep_close_nbx(ep, &param);
 		if (UCS_PTR_IS_PTR(close_req))
 		{
+			unsigned long iterations = 0;
 			do
 			{
 				ucp_worker_progress(ucp_worker);
 				status = ucp_request_check_status(close_req);
+				iterations++;
+				if (iterations >= 100000)
+				{
+					slog_warn("ep_close stuck in UCS_INPROGRESS after %lu iterations, breaking.", iterations);
+					break;
+				}
 			} while (status == UCS_INPROGRESS);
 			ucp_request_free(close_req);
 		}
@@ -1713,10 +1721,17 @@ extern "C"
 		else
 		{
 			ucs_status_t status;
+			unsigned long iterations = 0;
 			do
 			{
 				ucp_worker_progress(worker);
 				status = ucp_request_check_status(request);
+				iterations++;
+				if (iterations >= 100000)
+				{
+					slog_warn("flush_ep stuck in UCS_INPROGRESS after %lu iterations, breaking.", iterations);
+					break;
+				}
 			} while (status == UCS_INPROGRESS);
 			ucp_request_free(request);
 			return status;

@@ -75,7 +75,12 @@ static pthread_mutex_t mutex_prefetch;
 #define MAX_PATH 256
 extern pthread_mutex_t lock;
 pthread_mutex_t lock_file = PTHREAD_MUTEX_INITIALIZER;
-static PrefetchCacheV2 g_prefetch_cache_v2;
+static PrefetchCacheV2 &get_prefetch_cache()
+{
+	static PrefetchCacheV2 *instance = new PrefetchCacheV2();
+	return *instance;
+}
+#define g_prefetch_cache_v2 (get_prefetch_cache())
 extern struct arguments args;
 
 void prefetch_cache_worker_loop(void)
@@ -336,6 +341,10 @@ extern "C"
 		uint32_t ds = 0;
 		int fd = -1;
 		char *imss_path = (char *)path; // this pointer should not be free.
+		if (!strcmp(imss_path, IMSS_ROOT) || !strcmp(imss_path, "imss://..") || !strcmp(imss_path, "imss://."))
+		{
+			return 0;
+		}
 		// Lookup the current file on the local front-end map.
 		slog_debug("Looking for %s", imss_path);
 		fd_lookup(imss_path, &fd, &elem);
@@ -444,7 +453,7 @@ extern "C"
 		int fd = -1;
 		struct stat stats;
 		char *aux = NULL;
-		if (!strcmp(imss_path, IMSS_ROOT))
+		if (!strcmp(imss_path, IMSS_ROOT) || !strcmp(imss_path, "imss://..") || !strcmp(imss_path, "imss://."))
 		{
 			slog_debug("root case, imss_path=%s", imss_path);
 			stbuf->st_size = 4;
