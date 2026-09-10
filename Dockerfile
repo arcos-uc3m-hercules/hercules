@@ -3,7 +3,7 @@ FROM ubuntu:jammy
 RUN echo 'APT::Install-Suggests "0";' >> /etc/apt/apt.conf.d/00-docker
 RUN echo 'APT::Install-Recommends "0";' >> /etc/apt/apt.conf.d/00-docker
 RUN DEBIAN_FRONTEND=noninteractive \
-  apt-get update && apt-get install -y bc openssh-server wget mpich libglib2.0-dev pkg-config build-essential git vim cmake openmpi-bin libopenmpi-dev && rm -rf /var/lib/apt/lists/*
+  apt-get update && apt-get install -y bc openssh-server wget mpich libglib2.0-dev pkg-config build-essential git vim cmake openmpi-bin libopenmpi-dev gdb strace && rm -rf /var/lib/apt/lists/*
 
 # Modify `sshd_config`
 RUN sed -ri 's/PermitEmptyPasswords no/PermitEmptyPasswords yes/' /etc/ssh/sshd_config

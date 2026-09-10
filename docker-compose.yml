@@ -17,7 +17,12 @@ services:
   hercules-client:
     image: hercules:latest
     container_name: hercules-client
-    hostname: hercules-client
+    hostname: hercules-client    
+    # To use strace or gdb:
+    #cap_add:
+    #  - SYS_PTRACE
+    #security_opt:
+    #  - seccomp:unconfined
     depends_on:
       - hercules-server
     volumes:
