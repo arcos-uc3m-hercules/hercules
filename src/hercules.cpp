@@ -560,6 +560,8 @@ int getConfiguration(struct arguments *args)
 			if (cfg_load(cfg, default_paths[i]) == 0)
 			{
 				ret = 0;
+				strncpy(args->configuration_file_path, default_paths[i], sizeof(args->configuration_file_path) - 1);
+				args->configuration_file_path[sizeof(args->configuration_file_path) - 1] = '\0';
 				break;
 			}
 		}
@@ -573,18 +575,20 @@ int getConfiguration(struct arguments *args)
 				if (cfg_load(cfg, conf_path) == 0)
 				{
 					ret = 0;
+					strncpy(args->configuration_file_path, conf_path, sizeof(args->configuration_file_path) - 1);
+					args->configuration_file_path[sizeof(args->configuration_file_path) - 1] = '\0';
 				}
+				free(conf_path);
+				conf_path = NULL;
 			}
 		}
 
 		if (ret)
 		{
-			fprintf(stderr, "[HERCULES CLIENT] Configuration file '%s' not found\n", conf_path);
+			fprintf(stderr, "[HERCULES CLIENT] Configuration file not found\n");
 			perror("HERCULES_ERR_CONF_NOT_FOUND");
 			return -1;
 		}
-		strcpy(args->configuration_file_path, conf_path);
-		free(conf_path);
 	}
 
 	if (getenv("HERCULES_POLICY") != NULL)
@@ -827,10 +831,12 @@ int getConfiguration(struct arguments *args)
 		args->prefetch_size *= MB;
 	}
 
-	if (getenv("HERCULES_CHECKPOINT_PATH") != NULL)
-		strcpy(args->hercules_checkpoint_path, getenv("HERCULES_CHECKPOINT_PATH"));
-	else if (cfg_get(cfg, "HERCULES_CHECKPOINT_PATH"))
-		strcpy(args->hercules_checkpoint_path, cfg_get(cfg, "HERCULES_CHECKPOINT_PATH"));
+	const char *chk_env = getenv("HERCULES_CHECKPOINT_PATH");
+	const char *chk_cfg = NULL;
+	if (chk_env != NULL)
+		snprintf(args->hercules_checkpoint_path, sizeof(args->hercules_checkpoint_path), "%s", chk_env);
+	else if ((chk_cfg = cfg_get(cfg, "CHECKPOINT_PATH")) != NULL)
+		snprintf(args->hercules_checkpoint_path, sizeof(args->hercules_checkpoint_path), "%s", chk_cfg);
 	else
 		args->hercules_checkpoint_path[0] = '\0';
 
@@ -1036,13 +1042,14 @@ void getBlockInformation(std::string key, int *block_number, std::string *data_u
 	// string block = key.substr(pos, key.length() + 1);
 	// string data_uri = key.substr(0, pos);
 
-	pos = key.find('$') + 1; // +1 to skip '$' on the block number.
+	pos = key.find('$');
 	if (pos == std::string::npos)
 	{
 		perror("HERCULES_ERR_MISSFORMAT_KEY");
 		slog_error("HERCULES_ERR_MISSFORMAT_KEY");
 		return;
 	}
+	pos += 1; // +1 to skip '$' on the block number.
 
 	std::string block = key.substr(pos, key.length() + 1); // substract the block number from the key.
 	if (block.empty())

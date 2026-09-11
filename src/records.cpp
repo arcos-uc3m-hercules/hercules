@@ -1,5 +1,6 @@
 #include "records.hpp"
 #include "directory.h"
+#include "hierarchical_records.hpp"
 #include "imss.h"
 #include "queue.h"
 #include "slog.h"
@@ -14,7 +15,6 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/types.h>
 #include <sys/utsname.h>
 #include <utility>
 #include <vector>
@@ -26,10 +26,11 @@ using std::string;
 
 // int SERVER_ID;
 extern StsHeader *mem_pool;
+extern HierarchicalRecords *global_hierarchical_map;
 
 // __thread
-extern int32_t current_dataset;		       // Dataset whose policy has been set last.
-extern thread_local dataset_info curr_dataset; // Currently managed dataset.
+extern int32_t current_dataset;			// Dataset whose policy has been set last.
+extern thread_local dataset_info *curr_dataset; // Currently managed dataset.
 extern imss curr_imss;
 
 extern std::mutex mtx;
@@ -58,7 +59,7 @@ map_records::~map_records()
 	slog_debug("Freeing memory\n");
 	// freeAllMemory();
 
-	    delete mut;
+	delete mut;
 }
 
 std::string map_records::get_head_element()
@@ -106,13 +107,13 @@ int32_t map_records::erase_broadcast_element(std::string key)
 
 int32_t map_records::erase_snapshot_element(std::string key)
 {
-
+	std::unique_lock<std::mutex> lock(*mut);
 	// Map iterator that will be searching for the key.
 	std::map<std::string, int>::iterator it;
 
-	// // Search for the address related to the key.
+	// Search for the address related to the key.
 	it = buffer_snapshot.find(key);
-	// // Check if the value did exist within the map.
+	// Check if the value did exist within the map.
 	if (it == buffer_snapshot.end())
 	{
 		return 0;
@@ -251,7 +252,7 @@ int32_t map_records::put_broadcast(std::string key, void *address, uint64_t leng
 	// Construct a pair object storing the couple of values associated to a key.
 	std::pair<void *, uint64_t> value(address, length);
 	// Block the access to the map structure.
-	std::unique_lock<std::mutex> lock(*mut);
+	std::unique_lock<std::mutex> lock(mtx);
 	// Add a new couple to the map.
 	slog_debug("Inserting key %s in the broadcast", key.c_str());
 	buffer_broadcast.insert({key, value});
@@ -1073,47 +1074,63 @@ int extractNumber(const std::string &key)
  */
 char *map_records::GetDataOfFile(string file_name, uint64_t *file_size_occupied)
 {
-	std::vector<string> vec;
+	std::vector<std::pair<int, string>> numbered_vec;
 	// uint64_t file_size_occupied = 0;
 	uint32_t extra_size = 0;
 	int block_number = 0;
 
-	for (const auto &it2 : buffer)
+	// Range lookup: all keys for this file are in the range [file_name$, file_name%).
+	// '$' is ASCII 36, '%' is ASCII 37, so this captures exactly the keys starting with file_name$.
+	std::string range_begin = file_name + "$";
+	std::string range_end = file_name + "%";
 	{
-		string partner_key = it2.first;
-
-		int found = partner_key.find("$0");
-		if (found != std::string::npos)
+		std::unique_lock<std::mutex> lock(*mut);
+		for (auto it2 = buffer.lower_bound(range_begin); it2 != buffer.end() && it2->first < range_end; ++it2)
 		{
-			// skip block 0.
-			slog_warn("Block with key %s has not been added to the collected data for file %s", partner_key.c_str(), file_name.c_str());
-			continue;
-		}
+			const string &partner_key = it2->first;
 
-		int pos_partner = partner_key.find('$');
-		string partner_path = partner_key.substr(0, pos_partner);
-		slog_debug("partner_key=%s, partner_path=%s, file_name=%s", partner_key.c_str(), partner_path.c_str(), file_name.c_str());
-		int found_partner = partner_path.compare(file_name);
-		if (found_partner == 0)
-		{
-			vec.insert(vec.begin(), partner_key);
-			*file_size_occupied = *file_size_occupied + it2.second.size;
+			int found = partner_key.find("$0");
+			if (found != std::string::npos)
+			{
+				// skip block 0.
+				slog_warn("Block with key %s has not been added to the collected data for file %s", partner_key.c_str(), file_name.c_str());
+				continue;
+			}
+
+			int blk_num = extractNumber(partner_key);
+			numbered_vec.push_back({blk_num, partner_key});
+			*file_size_occupied = *file_size_occupied + it2->second.size;
 			extra_size += sizeof(int);
+		}
+	}
+
+	// In hierarchical storage (HierarchicalRecords), blocks for files inside subdirectories
+	// are partitioned into per-directory map_records instances rather than the root map.
+	// If no blocks were found in the current map (`this`), lookup the specific map_records instance
+	// for the file's parent directory in the global hierarchical structure and retrieve the blocks from it.
+	if (numbered_vec.empty() && global_hierarchical_map != nullptr)
+	{
+		char parent_dir[PATH_MAX] = {0};
+		find_last_parent_dir(file_name.c_str(), parent_dir);
+		std::shared_ptr<map_records> dir_map = global_hierarchical_map->HierarchicalMapGetDir(parent_dir);
+		if (dir_map != nullptr && dir_map.get() != this)
+		{
+			return dir_map->GetDataOfFile(file_name, file_size_occupied);
 		}
 	}
 
 	slog_debug("file_name=%s, file_size_occupied=%lu", file_name.c_str(), *file_size_occupied);
 
-	if (*file_size_occupied <= 0)
+	if (*file_size_occupied <= 0 || numbered_vec.empty())
 	{
 		slog_debug("There is not data for file %s", file_name.c_str());
 		return NULL;
 	}
 
-	// std::sort(vec.begin(), vec.end());
-	// sort elements by the block number.
-	std::sort(vec.begin(), vec.end(), [](const std::string &a, const std::string &b)
-		  { return extractNumber(a) < extractNumber(b); });
+	// sort elements by the pre-extracted block number (no repeated string parsing).
+	std::sort(numbered_vec.begin(), numbered_vec.end(),
+		  [](const std::pair<int, string> &a, const std::pair<int, string> &b)
+		  { return a.first < b.first; });
 
 	// Sum the extra size for the block numbers represented as integers.
 	*file_size_occupied += extra_size;
@@ -1123,15 +1140,14 @@ char *map_records::GetDataOfFile(string file_name, uint64_t *file_size_occupied)
 	char *address_ = NULL;
 	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
-	std::vector<string>::iterator i;
 	uint64_t block_size_rtvd = 0;
 	off_t total_written = 0;
 	string data_uri, block_file_name;
-	for (i = vec.begin(); i != vec.end(); i++)
+	for (auto &entry : numbered_vec)
 	{
-		// std::cout << "Garbage Collector: Deleting " << *i << "\n";
-		auto item = buffer.find(*i);
-		// strncpy(aux_buf, (const char *)item->second.first, item->second.second);
+		auto item = buffer.find(entry.second);
+		if (item == buffer.end())
+			continue;
 		getBlockInformation(item->first, &block_number, &data_uri, &block_file_name);
 
 		block_size_rtvd = item->second.size;
@@ -1256,6 +1272,136 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 }
 
 /**
+ * @brief Standardizes file paths and filter patterns into a canonical relative format
+ * (stripping 'imss://' URI prefixes, mount points like '/mnt/hercules/', and leading slashes)
+ * so that configuration rules (SNAPSHOT_PATHS_LIST, IGNORE_PATHS_LIST) can be directly
+ * matched against internal dataset URIs.
+ */
+static std::string normalize_path_for_filter(const std::string &path, const char *mount_point = NULL)
+{
+	std::string p = path;
+	if (p.rfind("imss://", 0) == 0)
+	{
+		p = p.substr(7);
+	}
+	if (mount_point != NULL && *mount_point != '\0')
+	{
+		std::string mp(mount_point);
+		if (p.rfind(mp, 0) == 0)
+		{
+			p = p.substr(mp.length());
+		}
+	}
+	// Also check default mount points like /mnt/hercules/ if mount_point wasn't set or didn't match
+	if (p.rfind("/mnt/hercules/", 0) == 0)
+	{
+		p = p.substr(14);
+	}
+	else if (p.rfind("/mnt/hercules", 0) == 0)
+	{
+		p = p.substr(13);
+	}
+	// Strip leading slashes
+	size_t first = p.find_first_not_of('/');
+	if (first != std::string::npos)
+	{
+		p = p.substr(first);
+	}
+	else if (!p.empty() && p[0] == '/')
+	{
+		p.clear();
+	}
+	return p;
+}
+
+static std::vector<std::string> parse_path_list(const char *raw_list, const char *mount_point = NULL)
+{
+	std::vector<std::string> result;
+	if (raw_list == NULL || *raw_list == '\0')
+		return result;
+
+	std::string str(raw_list);
+	size_t start = 0;
+	while (start < str.length())
+	{
+		size_t end = str.find(':', start);
+		if (end == std::string::npos)
+			end = str.length();
+
+		std::string token = str.substr(start, end - start);
+		size_t first = token.find_first_not_of(" \t\r\n");
+		if (first != std::string::npos)
+		{
+			size_t last = token.find_last_not_of(" \t\r\n");
+			token = token.substr(first, (last - first + 1));
+			bool has_trailing_slash = (!token.empty() && token.back() == '/');
+			token = normalize_path_for_filter(token, mount_point);
+			if (has_trailing_slash && !token.empty() && token.back() != '/')
+			{
+				token += '/';
+			}
+			if (!token.empty())
+			{
+				result.push_back(token);
+			}
+		}
+		start = end + 1;
+	}
+	return result;
+}
+
+static bool path_matches_pattern(const std::string &path, const std::string &pattern)
+{
+	if (pattern.empty())
+		return false;
+
+	if (path == pattern)
+		return true;
+
+	// Checks if the pattern ends with "/" (directory case) and the path starts with the pattern.
+	if (pattern.back() == '/')
+	{
+		return (path.rfind(pattern, 0) == 0);
+	}
+
+	// Checks if the path starts with the pattern and the next character is "/" (file case).
+	if (path.rfind(pattern, 0) == 0)
+	{
+		if (path.length() > pattern.length() && path[pattern.length()] == '/')
+			return true;
+	}
+
+	return false;
+}
+
+static bool is_path_in_list(const std::string &file_path, const std::vector<std::string> &patterns, const char *mount_point = NULL)
+{
+	std::string norm_path = normalize_path_for_filter(file_path, mount_point);
+
+	for (const auto &pattern : patterns)
+	{
+		if (path_matches_pattern(norm_path, pattern))
+			return true;
+	}
+	return false;
+}
+
+static bool should_snapshot_file(const std::string &file_path, const std::vector<std::string> &snapshot_paths, const std::vector<std::string> &ignore_paths, const char *mount_point = NULL)
+{
+	if (!ignore_paths.empty() && is_path_in_list(file_path, ignore_paths, mount_point))
+	{
+		return false;
+	}
+
+	if (!snapshot_paths.empty())
+	{
+		return is_path_in_list(file_path, snapshot_paths, mount_point);
+	}
+
+	return true;
+}
+
+/**
  * @brief Copy all data stored in Hercules FOLLOWING a Posix format file.
  */
 int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int finish, int server_id, char *data_hostname, struct arguments args)
@@ -1278,6 +1424,9 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 	int is_shared_memory = 0;
 	__off_t file_size = 0;
 
+	std::vector<std::string> snapshot_paths = parse_path_list(args.snapshot_paths_list, args.mount_point);
+	std::vector<std::string> ignore_paths = parse_path_list(args.ignore_paths_list, args.mount_point);
+
 	char *POLICY = args.policy;
 	const int64_t number_of_data_servers = args.num_data_servers;
 	number_active_storage_servers = (u_int32_t)get_number_of_active_nodes(args.hercules_path);
@@ -1298,7 +1447,12 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 	// Server 0 find and "reduce" all its data about the file.
 	// Server 0 collects and re-structure all the data comming from others servers and write the final file.
 
-	for (const auto &it : buffer_snapshot)
+	std::vector<std::pair<std::string, int>> snapshot_entries;
+	{
+		std::unique_lock<std::mutex> lock(*mut);
+		snapshot_entries.assign(buffer_snapshot.begin(), buffer_snapshot.end());
+	}
+	for (const auto &it : snapshot_entries)
 	{
 		key = it.first;
 		if (key.empty())
@@ -1308,16 +1462,17 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 		}
 		origin_server_id = it.second;
 
-		pos = key.find('$') + 1; // +1 to skip '$' on the block number.
-		if (pos == std::string::npos)
-		{
-			perror("HERCULES_ERR_MISSFORMAT_KEY");
-			slog_error("HERCULES_ERR_MISSFORMAT_KEY");
-			continue;
-		}
-		slog_debug("key=%s, origin_server_id=%d, iteration=%d", key.c_str(), origin_server_id, iteration);
 		if (origin_server_id == -1)
 		{
+			pos = key.find('$');
+			if (pos == std::string::npos)
+			{
+				perror("HERCULES_ERR_MISSFORMAT_KEY");
+				slog_error("HERCULES_ERR_MISSFORMAT_KEY");
+				continue;
+			}
+			pos += 1; // +1 to skip '$' on the block number.
+			slog_debug("key=%s, origin_server_id=%d, iteration=%d", key.c_str(), origin_server_id, iteration);
 			block = key.substr(pos, key.length() + 1); // substract the block number from the key.
 			if (block.empty())
 			{
@@ -1330,6 +1485,13 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 			file_name = data_uri.substr(strlen("imss://"));
 			sprintf(expected_uri, "imss://%s", file_name.c_str());
 
+			if (!should_snapshot_file(data_uri, snapshot_paths, ignore_paths, args.mount_point))
+			{
+				slog_debug("Skipping snapshot for %s due to path filters", data_uri.c_str());
+				erase_snapshot_element(key);
+				continue;
+			}
+
 			// We need at least one iteartion to ensure "curr_dataset" is not
 			// empty.
 			if (iteration > 0)
@@ -1338,9 +1500,9 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 				// we are in a block of another dataset. So, we need to get the
 				// information of this dataset and to check it is ready to be
 				// copied to disk or not.
-				if (!strcmp(curr_dataset.uri_, expected_uri) && curr_dataset.n_open > 0)
+				if (curr_dataset != nullptr && !strcmp(curr_dataset->uri_, expected_uri) && curr_dataset->n_open > 0)
 				{
-					slog_debug("current_dataset.uri=%s, expecred_uri=%s, n_open=%d", curr_dataset.uri_, expected_uri, curr_dataset.n_open);
+					slog_debug("current_dataset.uri=%s, expected_uri=%s, n_open=%d", curr_dataset->uri_, expected_uri, curr_dataset->n_open);
 					// Skip all blocks of this dataset because is not ready.
 					continue;
 				}
@@ -1352,6 +1514,10 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 			{ // checks if block 0 is for regular file or directory.
 				slog_debug("Block 0 for key %s", key.c_str());
 				ret = get(key, &address_, &block_size_rtvd);
+				if (ret == 0 && global_hierarchical_map != nullptr)
+				{
+					ret = global_hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd);
+				}
 				if (ret == 0)
 				{
 					fprintf(stderr, "key %s not found for snapshot\n", key.c_str());
@@ -1372,7 +1538,11 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 				if (S_ISDIR(stats->st_mode)) // directory case.
 				{
 					fprintf(stderr, "%s is a directory\n", key.c_str());
-					Make_directory(file_name.c_str());
+					char dir_path[PATH_MAX];
+					sprintf(dir_path, "%s/%s", snapshot_dir, file_name.c_str());
+					Make_directory(dir_path);
+					erase_snapshot_element(key);
+					continue;
 				}
 				// Send a message to all servers telling this servers needs the information.
 
@@ -1388,15 +1558,15 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 				}
 				iteration++;
 
-				// Checks if there are still processes with the file opened.
-				// Also, if "hercules stop" was called, we ignore this condition to copy the remaining data.
-				// if (curr_dataset.n_open > 0 && finish != 1)
-				slog_debug("curr_dataset.n_open=%d", curr_dataset.n_open);
-				if (curr_dataset.n_open > 0)
+				if (curr_dataset != nullptr)
 				{
-					fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset.uri_, curr_dataset.n_open);
-					slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset.uri_, curr_dataset.n_open);
-					continue;
+					slog_debug("curr_dataset.n_open=%d", curr_dataset->n_open);
+					if (curr_dataset->n_open > 0)
+					{
+						fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset->uri_, curr_dataset->n_open);
+						slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset->uri_, curr_dataset->n_open);
+						continue;
+					}
 				}
 
 				// Send the message to all servers.
@@ -1440,10 +1610,10 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 				time_taken_for_merge = ((double)t) / (CLOCKS_PER_SEC);
 
 				t = clock();
-				int fd = Open_file(snapshot_dir, data_hostname);
-				slog_debug("writting %lu bytes to disk with the name %s", size_of_merge_data, data_hostname);
+				int fd = Open_file(snapshot_dir, file_name.c_str());
+				slog_debug("writting %lu bytes to disk with the name %s", size_of_merge_data, file_name.c_str());
 				ssize_t written_bytes_in_disk = Write_2_disk(fd, full_data_from_file, size_of_merge_data, 0);
-				fprintf(stderr, "Writting %lu bytes to disk from %d servers with the name %s, written_bytes_in_disk=%zd\n", size_of_merge_data, number_active_storage_servers, data_hostname, written_bytes_in_disk);
+				fprintf(stderr, "Writting %lu bytes to disk from %d servers with the name %s, written_bytes_in_disk=%zd\n", size_of_merge_data, number_active_storage_servers, file_name.c_str(), written_bytes_in_disk);
 
 				Close_file(fd, "HERCULES_ERR_SNAPSHOT_CLOSE_FILE");
 
@@ -1589,7 +1759,12 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 	// Server 0 find and "reduce" all its data about the file.
 	// Server 0 collects and re-structure all the data comming from others servers and write the final file.
 
-	for (const auto &it : buffer_snapshot)
+	std::vector<std::pair<std::string, int>> checkpoint_entries;
+	{
+		std::unique_lock<std::mutex> lock(*mut);
+		checkpoint_entries.assign(buffer_snapshot.begin(), buffer_snapshot.end());
+	}
+	for (const auto &it : checkpoint_entries)
 	{
 		key = it.first;
 		if (key.empty())
@@ -1599,16 +1774,17 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 		}
 		origin_server_id = it.second;
 
-		pos = key.find('$') + 1; // +1 to skip '$' on the block number.
-		if (pos == std::string::npos)
-		{
-			perror("HERCULES_ERR_MISSFORMAT_KEY");
-			slog_error("HERCULES_ERR_MISSFORMAT_KEY");
-			continue;
-		}
-		slog_debug("key=%s, origin_server_id=%d, iteration=%d", key.c_str(), origin_server_id, iteration);
 		if (origin_server_id == -1)
 		{
+			pos = key.find('$');
+			if (pos == std::string::npos)
+			{
+				perror("HERCULES_ERR_MISSFORMAT_KEY");
+				slog_error("HERCULES_ERR_MISSFORMAT_KEY");
+				continue;
+			}
+			pos += 1; // +1 to skip '$' on the block number.
+			slog_debug("key=%s, origin_server_id=%d, iteration=%d", key.c_str(), origin_server_id, iteration);
 			block = key.substr(pos, key.length() + 1); // substract the block number from the key.
 			if (block.empty())
 			{
@@ -1629,9 +1805,9 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 				// we are in a block of another dataset. So, we need to get the
 				// information of this dataset and to check it is ready to be
 				// copied to disk or not.
-				if (!strcmp(curr_dataset.uri_, expected_uri) && curr_dataset.n_open > 0)
+				if (curr_dataset != nullptr && !strcmp(curr_dataset->uri_, expected_uri) && curr_dataset->n_open > 0)
 				{
-					slog_debug("current_dataset.uri=%s, expecred_uri=%s, n_open=%d", curr_dataset.uri_, expected_uri, curr_dataset.n_open);
+					slog_debug("current_dataset.uri=%s, expected_uri=%s, n_open=%d", curr_dataset->uri_, expected_uri, curr_dataset->n_open);
 					// Skip all blocks of this dataset because is not ready.
 					continue;
 				}
@@ -1643,6 +1819,10 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 			{ // checks if block 0 is for regular file or directory.
 				slog_debug("Block 0 for key %s", key.c_str());
 				ret = get(key, &address_, &block_size_rtvd);
+				if (ret == 0 && global_hierarchical_map != nullptr)
+				{
+					ret = global_hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd);
+				}
 				if (ret == 0)
 				{
 					fprintf(stderr, "key %s not found for snapshot\n", key.c_str());
@@ -1679,15 +1859,15 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 				}
 				iteration++;
 
-				// Checks if there are still processes with the file opened.
-				// Also, if "hercules stop" was called, we ignore this condition to copy the remaining data.
-				// if (curr_dataset.n_open > 0 && finish != 1)
-				slog_debug("curr_dataset.n_open=%d", curr_dataset.n_open);
-				if (curr_dataset.n_open > 0)
+				if (curr_dataset != nullptr)
 				{
-					fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset.uri_, curr_dataset.n_open);
-					slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset.uri_, curr_dataset.n_open);
-					continue;
+					slog_debug("curr_dataset.n_open=%d", curr_dataset->n_open);
+					if (curr_dataset->n_open > 0)
+					{
+						fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset->uri_, curr_dataset->n_open);
+						slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset->uri_, curr_dataset->n_open);
+						continue;
+					}
 				}
 
 				// Send the message to all servers.

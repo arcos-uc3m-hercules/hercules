@@ -97,11 +97,14 @@ StopServers() {
         # echo "[+] Removing temporal files on ${node}"
         echo "[+] Stopping server ID ${REAL_ID} on ${node}"
 
-        ## TODO: adapt this to ssh when slrum is not avaiable.
         set -x 
-        # ( ssh $node "$RM" )
-        # ( ssh ${node} "pkill -SIGUSR1 hercules_server" )
-        srun --nodelist="${node}" --ntasks=1 --nodes=1 --overlap --jobid="${SLURM_JOB_ID}" bash -c "rm -f ${FILE_TO_REMOVE}; pkill -SIGUSR1 hercules_server"
+        if [[ "${SLURM}" -eq "1" ]]; then
+            srun --nodelist="${node}" --ntasks=1 --nodes=1 --overlap --jobid="${SLURM_JOB_ID}" bash -c "rm -f ${FILE_TO_REMOVE}; pkill -f -SIGUSR1 \"hercules_server ${SERVER_TYPE:0:1} ${REAL_ID}\""
+        elif [ "${node}" == "localhost" ] || [ "${node}" == "127.0.0.1" ] || [ "${node}" == "$(hostname)" ]; then
+            bash -c "rm -f ${FILE_TO_REMOVE}; pkill -f -SIGUSR1 \"hercules_server ${SERVER_TYPE:0:1} ${REAL_ID}\""
+        else
+            ssh -o StrictHostKeyChecking=no "${node}" "rm -f ${FILE_TO_REMOVE}; pkill -f -SIGUSR1 \"hercules_server ${SERVER_TYPE:0:1} ${REAL_ID}\""
+        fi
         set +x
         i=$(($i+1))
 
@@ -167,16 +170,24 @@ WakeUpServers() {
         RM="rm ${HERCULES_TEMPORAL_PATH}/d-hercules-$REAL_ID-start"
         COMMAND="${HERCULES_BUILD_PATH}/hercules_server d ${REAL_ID} ${INIT_HERCULES_NUM_DATA}"
         if [[ "${SLURM}" -eq "0" ]]; then
-            # ssh $node "$RM; cd $HERCULES_BASH_PATH &&  $COMMAND &"
-            if [[ "${VERBOSE}" -eq "1" ]]; then
-                echo "[ + ] Removing temporal files on ${node}"
+            if [ "${node}" == "localhost" ] || [ "${node}" == "127.0.0.1" ] || [ "${node}" == "$(hostname)" ]; then
+                ( rm -f "${HERCULES_TEMPORAL_PATH}/d-hercules-$REAL_ID-start" )
+                if [[ "${VERBOSE}" -eq "1" ]]; then
+                    echo "[ + ] Starting data server $REAL_ID in $node..."
+                    echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}"
+                fi
+                ( cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND} ) &
+            else
+                if [[ "${VERBOSE}" -eq "1" ]]; then
+                    echo "[ + ] Removing temporal files on ${node}"
+                fi
+                ( ssh ${node} "${RM}" )
+                if [[ "${VERBOSE}" -eq "1" ]]; then
+                    echo "[ + ] Starting data server $REAL_ID in $node..."
+                    echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}"
+                fi
+                ( ssh ${node} "cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}" ) &
             fi
-            ( ssh ${node} "${RM}" )
-            if [[ "${VERBOSE}" -eq "1" ]]; then
-                echo "[ + ] Starting data server $REAL_ID in $node..."
-                echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}"
-            fi
-            ( ssh ${node} "cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}" ) &
         else
             ## Deletes the file that we use to make sure that the server has started.
             if [[ "${VERBOSE}" -eq "1" ]]; then
@@ -227,14 +238,22 @@ WaitForServers() {
         
         # if slurm is not available.
         if [[ "$SLURM" -eq "0" ]]; then
-            if [ -z "$(ssh-keygen -F $node)" ]; then
-                ssh-keyscan -H $node >> ~/.ssh/known_hosts
+            if [ "${node}" == "localhost" ] || [ "${node}" == "127.0.0.1" ] || [ "${node}" == "$(hostname)" ]; then
+                if [[ "${VERBOSE}" -eq "1" ]]; then
+                    echo "Running locally -- $COMMAND"
+                fi
+                output=$(bash -c "$COMMAND")
+                status=$?
+            else
+                if [ -z "$(ssh-keygen -F $node)" ]; then
+                    ssh-keyscan -H $node >> ~/.ssh/known_hosts
+                fi
+                if [[ "${VERBOSE}" -eq "1" ]]; then
+                    echo "Running ssh $node -- $COMMAND"
+                fi
+                output=$(ssh $node -- "$COMMAND")
+                status=$?
             fi
-            if [[ "${VERBOSE}" -eq "1" ]]; then
-                echo "Running ssh $node -- $COMMAND"
-            fi
-            output=$(ssh $node -- "$COMMAND")
-            status=$?
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "Command Output: $output"
                 echo "Return code $status"
@@ -902,16 +921,24 @@ do
     ## If slurm is not being used, we deploy the service by connecting
     ## to the node via ssh.
     if [[ "${SLURM}" -eq "0" ]]; then
-        #{ ssh $node "$RM; cd $HERCULES_BASH_PATH && $COMMAND"; } &
-        if [[ "${VERBOSE}" -eq "1" ]]; then
-            echo "[ + ] Removing temporal files on $node"
+        if [ "${node}" == "localhost" ] || [ "${node}" == "127.0.0.1" ] || [ "${node}" == "$(hostname)" ]; then
+            ( rm -f "${HERCULES_TEMPORAL_PATH}/m-hercules-$i" )
+            if [[ "${VERBOSE}" -eq "1" ]]; then
+                echo "[ + ] Starting metadata server $i on $node..."
+                echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}"
+            fi
+            ( cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND} ) &
+        else
+            if [[ "${VERBOSE}" -eq "1" ]]; then
+                echo "[ + ] Removing temporal files on $node"
+            fi
+            ( ssh ${node} "$RM" )
+            if [[ "${VERBOSE}" -eq "1" ]]; then
+                echo "[ + ] Starting metadata server $i on $node..."
+                echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}"
+            fi
+            ( ssh ${node} "cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}" ) &
         fi
-        ( ssh ${node} "$RM" )
-        if [[ "${VERBOSE}" -eq "1" ]]; then
-            echo "[ + ] Starting metadata server $i on $node..."
-            echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE $COMMAND}"
-        fi
-        ( ssh ${node} "cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}" ) &
     else
         ## Deletes the file that we use to make sure that the server has started.
         if [[ "${VERBOSE}" -eq "1" ]]; then

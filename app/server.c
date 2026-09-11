@@ -61,6 +61,8 @@ extern pthread_cond_t global_run_checkpoint_cond;
 extern pthread_cond_t global_run_garbage_collector_cond;
 extern pthread_mutex_t global_finish_mut;
 extern pthread_mutex_t mutex_garbage;
+extern pthread_mutex_t mutex_snapshot;
+extern pthread_mutex_t mutex_checkpoint;
 extern char *IMSS_ROOT;
 extern size_t IMSS_ROOT_LEN;
 
@@ -626,7 +628,7 @@ int32_t main(int32_t argc, char **argv)
 	if (args.type == TYPE_DATA_SERVER)
 	{
 		region_locks = (pthread_mutex_t *)calloc(hercules_thread_pool_size, sizeof(pthread_mutex_t));
-		extra_threads = 3; // dispatcher + garbage collector + snapshot.
+		extra_threads = 4; // dispatcher + garbage collector + checkpoint + snapshot.
 	}
 	else
 	{
@@ -667,6 +669,14 @@ int32_t main(int32_t argc, char **argv)
 
 	// Execute all threads.
 	int32_t aux_idx = 0;
+	// Block SIGUSR1 and SIGUSR2 so child threads inherit this mask and ignore them.
+	// This ensures only the main thread receives signals (e.g., during shutdown).
+	sigset_t sigset, oldset;
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGUSR1);
+	sigaddset(&sigset, SIGUSR2);
+	pthread_sigmask(SIG_BLOCK, &sigset, &oldset);
+
 	for (int32_t i = 0; i < total_threads; i++)
 	{
 		// Add port number to thread arguments.
@@ -712,17 +722,30 @@ int32_t main(int32_t argc, char **argv)
 			}
 		}
 		else if (i == 2 && args.type == TYPE_DATA_SERVER)
-		{ // snapshot.
+		{ // checkpoint.
 			slog_debug("[SERVER] Creating checkpoint thread.");
 			// Add the reference to the map into the set of thread arguments.
 			arguments[i].map = map;
-			// if (pthread_create(&threads[i], NULL, Checkpoint, (void *)&arguments[i]) == -1)
-			if (pthread_create(&threads[i], NULL, Snapshot, (void *)&arguments[i]) == -1)
+			if (pthread_create(&threads[i], NULL, Checkpoint, (void *)&arguments[i]) == -1)
 			{
 				// Notify thread error deployment.
 				ready(tmp_file_path, "ERROR");
 				perror("HERCULES_ERR_CHECKPOINT_DEPLOY");
 				slog_error("HERCULES_ERR_CHECKPOINT_DEPLOY");
+				pthread_exit(NULL);
+			}
+		}
+		else if (i == 3 && args.type == TYPE_DATA_SERVER)
+		{ // snapshot.
+			slog_debug("[SERVER] Creating snapshot thread.");
+			// Add the reference to the map into the set of thread arguments.
+			arguments[i].map = map;
+			if (pthread_create(&threads[i], NULL, Snapshot, (void *)&arguments[i]) == -1)
+			{
+				// Notify thread error deployment.
+				ready(tmp_file_path, "ERROR");
+				perror("HERCULES_ERR_SNAPSHOT_DEPLOY");
+				slog_error("HERCULES_ERR_SNAPSHOT_DEPLOY");
 				pthread_exit(NULL);
 			}
 		}
@@ -886,6 +909,9 @@ int32_t main(int32_t argc, char **argv)
 	// 	}
 	// }
 
+	// Unblock signals in main thread so it can receive SIGUSR1 and SIGUSR2.
+	pthread_sigmask(SIG_SETMASK, &oldset, NULL);
+
 	ret = ready(tmp_file_path, "OK");
 	fprintf(stdout, ANSI_COLOR_GREEN "[%s] %c-server %d is ready, status code=%d" ANSI_COLOR_RESET "\n", args.data_hostname, args.type, args.id, ret);
 	fflush(stdout);
@@ -913,8 +939,6 @@ int32_t main(int32_t argc, char **argv)
 			fprintf(stdout, "Server %d, ending thread %d/%d\n", args.id, i + 1, total_threads);
 			slog_debug("Server %d, ending thread %d/%d", args.id, i + 1, total_threads);
 		}
-		// fprintf(stderr,"Ending %c server %d\n", args.type, args.id);
-		unlink(tmp_file_path);
 	}
 
 	if (args.type == TYPE_DATA_SERVER)
@@ -1132,7 +1156,6 @@ void handle_signal_server(int signal)
 			}
 			else
 			{
-
 				if (global_finish_garbage_collector != 1)
 				{ // Garbage collector still running.
 					fprintf(stderr, "Waiting for mutext garbage collector\n");
@@ -1143,28 +1166,23 @@ void handle_signal_server(int signal)
 					fprintf(stderr, "Send signal to mutext garbage\n");
 				}
 
-				if (global_finish_snapshot != 1)
+				if (global_finish_snapshot != SNAPSHOT_STATE_FINISHED)
 				{ // Snapshot still running.
-					global_finish_snapshot = 1;
+					pthread_mutex_lock(&global_finish_mut);
+					global_finish_snapshot = SNAPSHOT_STATE_STOP_REQUESTED;
+					pthread_mutex_unlock(&global_finish_mut);
+					pthread_mutex_lock(&mutex_snapshot);
 					pthread_cond_signal(&global_run_snapshot_cond);
-					fprintf(stderr, "Waiting for the mutex global_finish_mut\n");
-					pthread_mutex_lock(&global_finish_mut);
-					fprintf(stderr, "Waiting for global_finish_cond\n");
-					pthread_cond_wait(&global_finish_cond, &global_finish_mut);
-					fprintf(stderr, "Waiting for snapshot in server %d\n", args.id);
-					pthread_mutex_unlock(&global_finish_mut);
+					pthread_mutex_unlock(&mutex_snapshot);
 				}
-				if (global_finish_checkpoint != 1)
+				if (global_finish_checkpoint != CHECKPOINT_STATE_FINISHED)
 				{ // Checkpointing still running.
-
-					global_finish_checkpoint = 1;
-					pthread_cond_signal(&global_run_checkpoint_cond);
-					fprintf(stderr, "Waiting for the mutex global_finish_mut\n");
 					pthread_mutex_lock(&global_finish_mut);
-					fprintf(stderr, "Waiting for global_finish_cond\n");
-					pthread_cond_wait(&global_finish_cond, &global_finish_mut);
-					fprintf(stderr, "Waiting for checkpointing in server %d\n", args.id);
+					global_finish_checkpoint = CHECKPOINT_STATE_STOP_REQUESTED;
 					pthread_mutex_unlock(&global_finish_mut);
+					pthread_mutex_lock(&mutex_checkpoint);
+					pthread_cond_signal(&global_run_checkpoint_cond);
+					pthread_mutex_unlock(&mutex_checkpoint);
 				}
 
 				slog_debug("Locking mutext_malleability\n");
@@ -1173,14 +1191,9 @@ void handle_signal_server(int signal)
 				pthread_cond_broadcast(&global_run_malleability_cond); // Wake up everyone
 				pthread_mutex_unlock(&mutext_malleability);
 				slog_debug("Unlock mutext_malleability\n");
-
-				// This file is readed by the hercules script to know if this server
-				// was correctly shutting down.
-				sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, tmp_file_action);
-				ready(tmp_file_path, "LOCKED");
-				slog_debug("Server %d has been unlocked\n", args.id);
-				global_finish_threads = 1;
 			}
+
+			global_finish_threads = 1;
 
 			// Shutdown or close the socket used by the dispatcher pointed
 			// by the file descriptor "global_server_fd_thread".

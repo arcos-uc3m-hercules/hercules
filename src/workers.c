@@ -88,8 +88,8 @@ ucp_address_t **local_addr;
 size_t *local_addr_len;
 
 int global_finish_threads = 0;
-int global_finish_checkpoint = 1; // TODO: change to 0 when finish the implementation.
-int global_finish_snapshot = 1;
+int global_finish_checkpoint = CHECKPOINT_STATE_RUNNING;
+int global_finish_snapshot = SNAPSHOT_STATE_RUNNING;
 // int global_finish_malleability = 1;
 int global_finish_garbage_collector = 0;
 int global_server_fd_thread = -1;
@@ -3064,7 +3064,8 @@ int handle_write_operation(
     bool truncate,
     CommunicationMode transfer_mode,
     const void *data_from_disk,
-    bool expect_ack)
+    bool expect_ack,
+    int snapshot_enabled)
 {
 	// Local state variables for map output
 	void *address_ = nullptr;
@@ -3328,6 +3329,13 @@ int handle_write_operation(
 			{
 				// fprintf(stderr, "Inserting buffer of size %lu/%lu\n", msg_length, size_asigned_to_block);
 				insert_successful = hierarchical_map->HierarchicalMapPut(key, buffer, size_asigned_to_block, reused_memory, NULL, is_block_zero);
+				if (insert_successful == 0 && is_block_zero)
+				{
+					if (snapshot_enabled)
+					{
+						map->put_snapshot(key, -1);
+					}
+				}
 			}
 			pthread_mutex_unlock(&memory_protect);
 
@@ -3517,24 +3525,11 @@ int handle_write_operation(
 				// 	return -1;
 				// }
 			}
-			// when snapshot is enabled we saved block 0.
-			// TODO: fix this.
-			// if (!global_finish_snapshot)
-			// {
-			// 	std::size_t found = TIMING(key.find("$0"), "check if block 0", std::size_t, arguments->thread_id);
-			// 	if (found != std::string::npos) // block 0.
-			// 	{
-			// 		insert_successful = TIMING(map->put_snapshot(key, -1), "map->put_snapshot", int, arguments->thread_id);
-			// 		// Include the new record in the tracking structure.
-			// 		if (insert_successful != 0)
-			// 		{
-			// 			perror("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-			// 			slog_error("HERCULES_ERR_WORKER_SEC_MAP_PUT");
-			// 			pthread_mutex_unlock(&memory_protect);
-			// 			return -1;
-			// 		}
-			// 	}
-			// }
+			// when snapshot is enabled we save block 0.
+			if (snapshot_enabled)
+			{
+				map->put_snapshot(key, -1);
+			}
 		}
 		else
 		{ // non block 0.
@@ -3633,6 +3628,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	int is_shared_memory = 0;
 	int default_params = 1;
 	int snapshot_op = 0;
+	int snapshot_enabled = (arguments->args != NULL && (strlen(arguments->args->hercules_snapshot_path) > 0)) ? 1 : 0;
 	key_t shm_key = -1;
 	bool truncate = false;
 	CommunicationMode mode_type = CommunicationMode::MODE_UNDEFINED;
@@ -3706,7 +3702,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			{
 				key = blk.data_uri + "$" + std::to_string(blk.block_id);
 				slog_debug("Writting %s, size=%zu ", key.c_str(), blk.data.size());
-				if (handle_write_operation(arguments, key, blk.data.size(), block_offset, snapshot_op, server_n_used_in_frontend, is_shared_memory, shm_key, hierarchical_map, map.get(), mem_pool, truncate, CommunicationMode::MODE_DISK, blk.data.data(), false) < 0)
+				if (handle_write_operation(arguments, key, blk.data.size(), block_offset, snapshot_op, server_n_used_in_frontend, is_shared_memory, shm_key, hierarchical_map, map.get(), mem_pool, truncate, CommunicationMode::MODE_DISK, blk.data.data(), false, snapshot_enabled) < 0)
 				{
 					slog_error("store_block failed for uri='%s' block=%d", blk.data_uri.c_str(), blk.block_id);
 				}
@@ -3735,7 +3731,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			{
 				key = blk.data_uri + "$" + std::to_string(blk.block_id);
 				slog_debug("Writting %s, size=%zu ", key.c_str(), blk.data.size());
-				if (handle_write_operation(arguments, key, blk.data.size(), block_offset, snapshot_op, server_n_used_in_frontend, is_shared_memory, shm_key, hierarchical_map, map.get(), mem_pool, truncate, transfer_mode, blk.data.data(), false) < 0)
+				if (handle_write_operation(arguments, key, blk.data.size(), block_offset, snapshot_op, server_n_used_in_frontend, is_shared_memory, shm_key, hierarchical_map, map.get(), mem_pool, truncate, transfer_mode, blk.data.data(), false, snapshot_enabled) < 0)
 				{
 					slog_error("store_block failed for uri='%s' block=%d", blk.data_uri.c_str(), blk.block_id);
 				}
@@ -3761,7 +3757,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			    truncate,
 			    transfer_mode,
 			    NULL,
-			    expect_ack);
+			    expect_ack,
+			    snapshot_enabled);
 		}
 	}
 
@@ -3805,7 +3802,7 @@ void *GarbageCollector(void *th_argv)
 // Thread method to copy datasets from Hercules to Disk.
 void *Checkpoint(void *th_argv)
 {
-	slog_debug("Init Snapshot");
+	slog_debug("Init Checkpoint");
 
 	clock_t t;
 	double time_taken;
@@ -3815,15 +3812,18 @@ void *Checkpoint(void *th_argv)
 	BLOCK_SIZE = arguments->blocksize * 1024;
 	std::shared_ptr<map_records> map = arguments->map;
 
-	const char *checkpoint_dir = arguments->args->hercules_snapshot_path;
+	const char *checkpoint_dir = arguments->args->hercules_checkpoint_path;
 	const int server_id = arguments->args->id;
 	const char *POLICY = arguments->args->policy;
 
 	if (strlen(checkpoint_dir) == 0)
 	{
-		printf("Checkpoint path has not been provided.\tHERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/\n");
+		printf("Checkpoint path has not been provided.\tHERCULES_CHECKPOINT_PATH = /home/user/checkpoint_path/\n");
 		fflush(stdout);
-		global_finish_snapshot = 1;
+		pthread_mutex_lock(&global_finish_mut);
+		global_finish_checkpoint = CHECKPOINT_STATE_FINISHED;
+		pthread_cond_signal(&global_finish_cond);
+		pthread_mutex_unlock(&global_finish_mut);
 		pthread_exit(NULL);
 	}
 
@@ -3838,32 +3838,28 @@ void *Checkpoint(void *th_argv)
 		slog_debug("Running Checkpoint in %s", checkpoint_dir);
 
 		TIMING_NO_RETURN(
-		    ret = map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_snapshot, arguments->args->id, arguments->args->data_hostname, *arguments->args), "Checkpoint", arguments->thread_id);
+		    ret = map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_checkpoint, arguments->args->id, arguments->args->data_hostname, *arguments->args), "Checkpoint", arguments->thread_id);
 
 		if (ret != 1)
 		{
+			if (global_finish_checkpoint == CHECKPOINT_STATE_STOP_REQUESTED)
+			{
+				pthread_mutex_unlock(&mutex_checkpoint);
+				break;
+			}
 			fprintf(stderr, "Waiting for signal to unlock Checkpoint in server %d\n", server_id);
 			pthread_cond_wait(&global_run_checkpoint_cond, &mutex_checkpoint);
 			pthread_mutex_unlock(&mutex_checkpoint);
-			if (map->get_buffer_size() == 0)
-			{ // if there is no data to copy to disk, we will finish the checkpoint.
-				break;
-			}
 			continue;
 		}
 
 		pthread_mutex_unlock(&mutex_checkpoint);
-		// To stop this thread we will wait for "hercules stop".
-		if (global_finish_snapshot == 1)
-		{
-			// TODO: Call a barrier to stop all servers.
-			slog_debug("Waiting to finish Snapshot thread.");
-			global_finish_threads = 1;
-			pthread_cond_signal(&global_finish_cond);
-			fprintf(stderr, "Ending checkponting thread.\n");
-			break;
-		}
 	}
+
+	pthread_mutex_lock(&global_finish_mut);
+	global_finish_checkpoint = CHECKPOINT_STATE_FINISHED;
+	pthread_cond_signal(&global_finish_cond);
+	pthread_mutex_unlock(&global_finish_mut);
 
 	t = clock() - t;
 	time_taken = ((double)t) / (CLOCKS_PER_SEC);
@@ -3893,7 +3889,10 @@ void *Snapshot(void *th_argv)
 	{
 		printf("Snapshot path has not been provided.\tHERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/\n");
 		fflush(stdout);
-		global_finish_snapshot = 1;
+		pthread_mutex_lock(&global_finish_mut);
+		global_finish_snapshot = SNAPSHOT_STATE_FINISHED;
+		pthread_cond_signal(&global_finish_cond);
+		pthread_mutex_unlock(&global_finish_mut);
 		pthread_exit(NULL);
 	}
 
@@ -3910,27 +3909,24 @@ void *Snapshot(void *th_argv)
 
 		if (ret != 1)
 		{
+			if (global_finish_snapshot == SNAPSHOT_STATE_STOP_REQUESTED)
+			{
+				pthread_mutex_unlock(&mutex_snapshot);
+				break;
+			}
 			fprintf(stderr, "Waiting for signal to unlock snapshot in server %d\n", server_id);
 			pthread_cond_wait(&global_run_snapshot_cond, &mutex_snapshot);
 			pthread_mutex_unlock(&mutex_snapshot);
-			if (map->get_buffer_size() == 0)
-			{ // if there is no data to copy to disk, we will finish the snapshot.
-				break;
-			}
 			continue;
 		}
 
 		pthread_mutex_unlock(&mutex_snapshot);
-		// To stop this thread we will wait for "hercules stop".
-		if (global_finish_snapshot == 1)
-		{
-			slog_debug("Waiting to finish Snapshot thread.");
-			global_finish_threads = 1;
-			pthread_cond_signal(&global_finish_cond);
-			fprintf(stderr, "Ending checkponting thread.\n");
-			break;
-		}
 	}
+
+	pthread_mutex_lock(&global_finish_mut);
+	global_finish_snapshot = SNAPSHOT_STATE_FINISHED;
+	pthread_cond_signal(&global_finish_cond);
+	pthread_mutex_unlock(&global_finish_mut);
 
 	t = clock() - t;
 	time_taken = ((double)t) / (CLOCKS_PER_SEC);

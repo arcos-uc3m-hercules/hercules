@@ -36,6 +36,22 @@
 
 #define LOCAL_DATASET_UPDATE 0
 
+// Lifecycle execution state for the Checkpoint service thread.
+typedef enum
+{
+	CHECKPOINT_STATE_RUNNING        = 0, // Thread is active and executing or waiting for triggers.
+	CHECKPOINT_STATE_STOP_REQUESTED = 1, // Stop/shutdown signal received; thread should exit the loop.
+	CHECKPOINT_STATE_FINISHED       = 2  // Thread has completed cleanup and exited.
+} checkpoint_state_t;
+
+// Lifecycle execution state for the Snapshot service thread.
+typedef enum
+{
+	SNAPSHOT_STATE_RUNNING        = 0, // Thread is active and executing or waiting for triggers.
+	SNAPSHOT_STATE_STOP_REQUESTED = 1, // Stop/shutdown signal received; thread should exit the loop.
+	SNAPSHOT_STATE_FINISHED       = 2  // Thread has completed cleanup and exited.
+} snapshot_state_t;
+
 extern HierarchicalRecords *global_hierarchical_map;
 extern HierarchicalRecords *garbage_collector_map;
 

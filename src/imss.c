@@ -561,6 +561,10 @@ void print_ghashtable()
 
 int remove_dataset_entry(GHashTable *map, const char *uri)
 {
+	if (map == NULL || uri == NULL)
+	{
+		return 0;
+	}
 	pthread_mutex_lock(&pool_mutex);
 	gboolean removed = g_hash_table_remove(map, uri);
 	pthread_mutex_unlock(&pool_mutex);
@@ -3461,7 +3465,10 @@ int32_t release_dataset(const char *dataset_uri)
 int32_t clear_dataset(const char *dataset_uri)
 {
 	slog_debug("Clearing dataset %s", dataset_uri);
-	ClearIntervalsStructure(curr_dataset);
+	if (curr_dataset != NULL)
+	{
+		ClearIntervalsStructure(curr_dataset);
+	}
 	remove_dataset_entry(datasetd, dataset_uri);
 	return 0;
 }
@@ -5348,6 +5355,10 @@ int32_t imss_flush_data()
 
 void ClearIntervalsStructure(dataset_info *curr_dataset)
 {
+	if (curr_dataset == NULL)
+	{
+		return;
+	}
 	slog_debug("Clearing %d intervals of %s", curr_dataset->num_intervals, curr_dataset->original_name);
 	if (!curr_dataset->intervals || curr_dataset->num_intervals == 0)
 	{
@@ -6124,7 +6135,7 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 		if (!strncmp((const char *)*buffer_prefetch, "$ERRIMSS_NO_KEY_AVAIL$", 22))
 		{ // key not avaiable on the remote server.
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			// TO CHECK: prefetching can fail if the block of an specific file to be retrieved is deleted in parallel by another process. 
+			// TO CHECK: prefetching can fail if the block of an specific file to be retrieved is deleted in parallel by another process.
 			// sprintf(err_msg, "HERCULES_ERR_GET_NDATA_PREFETCH_NO_KEY_AVAIL, %s$%d to server %d (%s), curr_imss_storages=%d", curr_dataset->uri_, data_id, repl_servers[i], curr_imss.info.ips[i], curr_imss_storages);
 			fprintf(stderr, "%s\n", err_msg);
 			slog_error("%s", err_msg);
@@ -7725,10 +7736,17 @@ int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, c
 
 int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, const char *request)
 {
+	if (num_of_servers <= 1)
+	{
+		return 0;
+	}
 
 	pthread_mutex_lock(&lock_network);
-	// char key_[REQUEST_SIZE];
-	// int32_t curr_imss_storages = curr_imss.info.num_storages;
+	if (curr_dataset == NULL)
+	{
+		pthread_mutex_unlock(&lock_network);
+		return 0;
+	}
 	curr_imss = g_array_index(imssd, imss, curr_dataset->imss_d);
 
 	// Send the request to each server .
@@ -7744,9 +7762,6 @@ int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, c
 		// Server receiving the current data block.
 		uint32_t n_server_ = i;
 
-		// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
-		// sprintf(key_, "SNAPSET %lu %d %s$%d", size, 0, curr_dataset->uri_, from_data_server_id);
-
 		slog_info("[IMSS] num_active_storages from curr_imss=%d", curr_imss.info.num_active_storages);
 		ep = curr_imss.conns.eps[n_server_];
 		slog_info("[IMSS] Request to Server %d: %s", n_server_, request);
@@ -7757,22 +7772,11 @@ int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, c
 			perror("HERCULES_ERR_BROADCAST_SET_REQ_SEND_REQ");
 			slog_error("HERCULES_ERR_BROADCAST_SET_REQ_SEND_REQ");
 			return -1;
-			// exit(-1);
 		}
-
-		// // send the data to the data server of the current dataset.
-		// if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
-		// {
-		// 	pthread_mutex_unlock(&lock_network);
-		// 	perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
-		// 	slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
-		// 	return -1;
-		// }
-		slog_info("[IMSS][completed] Request sent to server %d: %s", n_server_, request);
 	}
 
 	pthread_mutex_unlock(&lock_network);
-	return 1;
+	return 0;
 }
 
 // Method storing a specific data element.
@@ -7936,13 +7940,39 @@ int get_number_of_active_nodes(char *hercules_path)
 }
 
 /* Pesistent storage operations. */
+/**
+ * @brief Makes directories recursively.
+ */
+static void create_parent_dirs(const char *path)
+{
+	char tmp[PATH_MAX];
+	char *p = NULL;
+	size_t len;
+
+	snprintf(tmp, sizeof(tmp), "%s", path);
+	len = strlen(tmp);
+	if (len == 0)
+		return;
+	if (tmp[len - 1] == '/')
+		tmp[len - 1] = 0;
+	for (p = tmp + 1; *p; p++)
+	{
+		if (*p == '/')
+		{
+			*p = 0;
+			mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+			*p = '/';
+		}
+	}
+}
+
 int32_t Open_file(const char *checkpoint_dir, const char *filename)
 {
 	char disk_path[PATH_MAX];
 	int fd = -1;
 	sprintf(disk_path, "%s/%s", checkpoint_dir, filename);
-	// fprintf(stderr, "disk path = %s\n", disk_path);
-	fd = open(disk_path, O_CREAT | O_WRONLY, 0600);
+	create_parent_dirs(disk_path);
+	fd = open(disk_path, O_CREAT | O_WRONLY | O_TRUNC, 0666);
 	if (fd < 0)
 	{
 		char err_msg[MAX_ERR_MSG_LEN];
@@ -8010,25 +8040,20 @@ ssize_t Write_2_disk(int fd, void *buffer, off_t size, size_t offset)
 
 int32_t Make_directory(const char *dirname)
 {
-	// char disk_path[PATH_MAX];
-	const char *disk_path = dirname;
-	int ret = 1;
-	struct stat sb;
-	// sprintf(disk_path, "/beegfs/home/javier.garciablas/hercules/bash/tests/disk/output/%s", dirname);
-	if (stat(disk_path, &sb) == 0 && S_ISDIR(sb.st_mode))
+	if (dirname == NULL || strlen(dirname) == 0)
 	{
-		fprintf(stderr, "directory %s exists\n", disk_path);
+		return 0;
 	}
-	else
+	create_parent_dirs(dirname);
+	struct stat sb;
+	if (stat(dirname, &sb) == 0 && S_ISDIR(sb.st_mode))
 	{
-		fprintf(stderr, "directory %s does not exists\n", disk_path);
-		ret = mkdir(disk_path, S_IRWXU | S_IRWXG);
-		if (ret == -1)
-		{
-			perror("HERCULES_ERR_MAKE_DIRECTORY");
-			slog_error("HERCULES_ERR_MAKE_DIRECTORY");
-			return ret;
-		}
+		return 0;
+	}
+	int ret = mkdir(dirname, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	if (ret == -1 && errno == EEXIST)
+	{
+		ret = 0;
 	}
 	return ret;
 }
