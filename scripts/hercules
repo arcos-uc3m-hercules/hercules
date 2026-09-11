@@ -98,19 +98,28 @@ StopServers() {
         echo "[+] Stopping server ID ${REAL_ID} on ${node}"
 
         set -x 
+        
+        # "trap '' USR1": Ignores SIGUSR1 in the wrapper shell to prevent self-termination under Slurm/SSH.
+        # "rm -f": Removes previous stop status file so WaitForServers detects the fresh shutdown.
+        # "pkill -f": Targets the specific server process using regex anchoring (^([^ ]*/)?hercules_server)
+        #    to avoid matching the wrapper shell, and ensures exact ID matching.
+        # "|| true": Prevents failure if the server process was already terminated.
+        KILL_CMD="trap '' USR1; rm -f ${FILE_TO_REMOVE}; pkill -SIGUSR1 -f \"^([^ ]*/)?hercules_server ${SERVER_TYPE:0:1} ${REAL_ID}( |\\$)\" || true"
         if [[ "${SLURM}" -eq "1" ]]; then
-            srun --nodelist="${node}" --ntasks=1 --nodes=1 --overlap --jobid="${SLURM_JOB_ID}" bash -c "rm -f ${FILE_TO_REMOVE}; pkill -f -SIGUSR1 \"hercules_server ${SERVER_TYPE:0:1} ${REAL_ID}\""
+            srun --nodelist="${node}" --ntasks=1 --nodes=1 --overlap --jobid="${SLURM_JOB_ID}" bash -c "${KILL_CMD}"
         elif [ "${node}" == "localhost" ] || [ "${node}" == "127.0.0.1" ] || [ "${node}" == "$(hostname)" ]; then
-            bash -c "rm -f ${FILE_TO_REMOVE}; pkill -f -SIGUSR1 \"hercules_server ${SERVER_TYPE:0:1} ${REAL_ID}\""
+            bash -c "${KILL_CMD}"
         else
-            ssh -o StrictHostKeyChecking=no "${node}" "rm -f ${FILE_TO_REMOVE}; pkill -f -SIGUSR1 \"hercules_server ${SERVER_TYPE:0:1} ${REAL_ID}\""
+            ssh -o StrictHostKeyChecking=no "${node}" "${KILL_CMD}"
         fi
         set +x
         i=$(($i+1))
 
-        # Removes the host from the hostfile.
-        # On sed, index start on 1, not 0, so we need to add 1 to REAL_ID.
-        sed -i "${REAL_ID+1}d" ${HERCULES_DATA_HOSTFILE} 
+        # Removes the host from the hostfile only when decommissioning data servers.
+        # On sed, index start on 1, not 0, so we add 1 to REAL_ID.
+        if [[ "${STATUS}" == "remove" && "${SERVER_TYPE}" == "d" ]]; then
+            sed -i "$((REAL_ID + 1))d" ${HERCULES_DATA_HOSTFILE}
+        fi
     done
     # rm "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
 }

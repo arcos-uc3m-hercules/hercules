@@ -1029,10 +1029,15 @@ int32_t main(int32_t argc, char **argv)
 
 	// Close publisher socket.
 	ucp_worker_flush(ucp_worker);
-	ucp_worker_release_address(ucp_worker, peer_addr);
-	if (args.type == TYPE_DATA_SERVER)
+	if (peer_addr != NULL)
 	{
-		ucp_worker_release_address(ucp_worker, local_addr_meta);
+		ucp_worker_release_address(ucp_worker, peer_addr);
+		peer_addr = NULL;
+	}
+	if (args.type == TYPE_DATA_SERVER && local_addr_meta != NULL)
+	{
+		ucp_worker_release_address(ucp_worker_meta, local_addr_meta);
+		local_addr_meta = NULL;
 	}
 	ucp_worker_flush(ucp_worker);
 	ucp_worker_destroy(ucp_worker);
@@ -1044,6 +1049,7 @@ int32_t main(int32_t argc, char **argv)
 	ready(tmp_file_path, "OK");
 
 	fprintf(stdout, ANSI_COLOR_GREEN "[%s] Ending %c-server %d" ANSI_COLOR_RESET "\n", args.data_hostname, args.type, args.id);
+	fflush(stdout);
 	slog_info("[%s] Ending %c-server %d", args.data_hostname, args.type, args.id);
 
 	// Free the memory buffer.
@@ -1168,6 +1174,7 @@ void handle_signal_server(int signal)
 
 				if (global_finish_snapshot != SNAPSHOT_STATE_FINISHED)
 				{ // Snapshot still running.
+					fprintf(stderr, "Waiting for mutext snapshot\n");
 					pthread_mutex_lock(&global_finish_mut);
 					global_finish_snapshot = SNAPSHOT_STATE_STOP_REQUESTED;
 					pthread_mutex_unlock(&global_finish_mut);
@@ -1177,6 +1184,7 @@ void handle_signal_server(int signal)
 				}
 				if (global_finish_checkpoint != CHECKPOINT_STATE_FINISHED)
 				{ // Checkpointing still running.
+					fprintf(stderr, "Waiting for mutext checkpointing\n");
 					pthread_mutex_lock(&global_finish_mut);
 					global_finish_checkpoint = CHECKPOINT_STATE_STOP_REQUESTED;
 					pthread_mutex_unlock(&global_finish_mut);
