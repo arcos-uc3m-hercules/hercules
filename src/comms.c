@@ -22,6 +22,7 @@ extern proccess_type_t process_type;
 // extern int32_t is_client; // used to make sure the server doesn't do map_ep stuff
 pthread_mutex_t map_ep_mutex;
 pthread_mutex_t lock_ucx_comm = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
 // void *send_buffer;
 // void *recv_buffer;

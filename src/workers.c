@@ -13,12 +13,14 @@
 #include "utils.h"
 #include <arpa/inet.h>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
 #include <linux/limits.h>
+#include <map>
 #include <mcheck.h>
 #include <net/if.h>
 #include <netinet/in.h>
@@ -90,6 +92,8 @@ size_t *local_addr_len;
 int global_finish_threads = 0;
 int global_finish_checkpoint = CHECKPOINT_STATE_RUNNING;
 int global_finish_snapshot = SNAPSHOT_STATE_RUNNING;
+bool snapshot_local_finished = false;
+bool checkpoint_local_finished = false;
 // int global_finish_malleability = 1;
 int global_finish_garbage_collector = 0;
 int global_server_fd_thread = -1;
@@ -126,6 +130,8 @@ std::atomic<ino_t> next_inode{1000000};
 size_t global_offset = 0;
 
 std::vector<PendingRequestInfo> pending_requests;
+static pthread_mutex_t stop_server_mutex = PTHREAD_MUTEX_INITIALIZER;
+static std::map<int, PendingRequestInfo> stop_server_pending_requests;
 
 // TODO: check if this variables can be moved to records.cpp
 std::mutex mtx;
@@ -538,6 +544,111 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 	imss_flush_data();
 
 	return total_data_moved;
+}
+
+int32_t ensure_inter_backend_connected(const char *imss_uri)
+{
+	static pthread_mutex_t connect_mutex = PTHREAD_MUTEX_INITIALIZER;
+	pthread_mutex_lock(&connect_mutex);
+
+	imss *local_imss_ = NULL;
+	int32_t imss_found_in = find_imss_pointer("imss://", &local_imss_);
+	if (imss_found_in != -1 && local_imss_ != NULL && local_imss_->conns.eps != NULL)
+	{
+		pthread_mutex_unlock(&connect_mutex);
+		return 0;
+	}
+
+	const char *target_uri = (imss_uri != NULL && strlen(imss_uri) > 0) ? imss_uri : "imss://";
+	slog_info("ensure_inter_backend_connected: imss structure not found, requesting on-demand open_imss for %s", target_uri);
+	uint32_t num_active_storages = 0;
+	int32_t ret_open_imss = open_imss((char *)target_uri, &num_active_storages);
+	if (ret_open_imss < 0)
+	{
+		slog_error("ensure_inter_backend_connected: open_imss failed for %s with code %d", target_uri, ret_open_imss);
+		pthread_mutex_unlock(&connect_mutex);
+		return -1;
+	}
+
+	number_active_storage_servers.store(num_active_storages);
+	slog_info("ensure_inter_backend_connected: successfully connected to %u storage servers for %s", num_active_storages, target_uri);
+
+	pthread_mutex_unlock(&connect_mutex);
+	return 0;
+}
+
+int wait_drain_data_server(int server_id)
+{
+	if (ucp_worker_meta == NULL || stat_eps == NULL || stat_eps[0] == NULL)
+	{
+		slog_warn("Metadata connection not available on data server %d, skipping wait/drain", server_id);
+		return 0;
+	}
+
+	char stop_msg[64] = {0};
+	snprintf(stop_msg, sizeof(stop_msg), "%s %d", MSG_STOP_SERVER, server_id);
+	slog_info("Sending %s to metadata server and waiting for confirmation...", stop_msg);
+	fprintf(stderr, "[Data Server %d] Sending %s to metadata server...\n", server_id, stop_msg);
+
+	pthread_mutex_lock(&lock_network);
+	if (StatACK(stop_msg, 0) != 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("Failed to send %s to metadata server", stop_msg);
+		fprintf(stderr, "[Data Server %d] Failed to send %s to metadata server\n", server_id, stop_msg);
+		return -1;
+	}
+	pthread_mutex_unlock(&lock_network);
+
+	slog_info("Waiting for STOP_SERVER confirmation from metadata server (UID %" PRIu64 ")...", local_meta_uid);
+	fprintf(stderr, "[Data Server %d] Waiting for confirmation from metadata server...\n", server_id);
+
+	// Wait with timeout (120 seconds) using ucp_worker_meta
+	const double timeout_sec = 120.0;
+	auto start_time = std::chrono::steady_clock::now();
+	ucp_tag_recv_info_t info_tag;
+	ucp_tag_message_h msg_tag = NULL;
+
+	do
+	{
+		pthread_mutex_lock(&lock_network);
+		ucp_worker_progress(ucp_worker_meta);
+		msg_tag = ucp_tag_probe_nb(ucp_worker_meta, local_meta_uid, tag_mask, 0, &info_tag);
+		if (msg_tag != NULL)
+		{
+			size_t msg_length = info_tag.length;
+			char ack_buffer[64] = {0};
+			size_t to_recv = (msg_length < sizeof(ack_buffer) - 1) ? msg_length : sizeof(ack_buffer) - 1;
+			recv_data(ucp_worker_meta, stat_eps[0], ack_buffer, msg_length, local_meta_uid, SYNC);
+			pthread_mutex_unlock(&lock_network);
+			ack_buffer[to_recv] = '\0';
+
+			if (strncmp(ack_buffer, MSG_OK_OP, strlen(MSG_OK_OP)) == 0)
+			{
+				slog_info("[Data Server %d] Confirmation received and verified from metadata server: %s", server_id, ack_buffer);
+				fprintf(stderr, "[Data Server %d] Confirmation received and verified from metadata server: %s\n", server_id, ack_buffer);
+				return 0;
+			}
+			else
+			{
+				slog_warn("[Data Server %d] Received unexpected message while waiting for STOP_SERVER confirmation: '%s' (expected '%s')", server_id, ack_buffer, MSG_OK_OP);
+				fprintf(stderr, "[Data Server %d] Received unexpected message: '%s' (expected '%s'), continuing to wait...\n", server_id, ack_buffer, MSG_OK_OP);
+			}
+		}
+		else
+		{
+			pthread_mutex_unlock(&lock_network);
+			usleep(1000);
+		}
+
+		auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
+		if (elapsed >= timeout_sec)
+		{
+			slog_warn("[Data Server %d] Timeout (%.0f s) waiting for metadata server STOP_SERVER confirmation", server_id, timeout_sec);
+			fprintf(stderr, "[Data Server %d] Timeout (%.0f s) waiting for metadata server confirmation. Proceeding with shutdown.\n", server_id, timeout_sec);
+			return -1;
+		}
+	} while (true);
 }
 
 void *move_blocks_2_server(void *th_argv)
@@ -2245,6 +2356,7 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		int sender = 0;
 		sscanf(req, "%*s %s %d", uri_, &sender);
 		slog_debug("BROADCAST condition, req=%s, mode=%s, uri_=%s, sender=%d", req, mode, uri_, sender);
+		ensure_inter_backend_connected(arguments->args->imss_uri);
 		map->put_snapshot(uri_, sender);
 		fprintf(stderr, "Sending signal to do Snapshot in server %d\n", arguments->args->id);
 		pthread_cond_signal(&global_run_snapshot_cond);
@@ -3080,7 +3192,27 @@ int handle_write_operation(
 	// Checks if it is data for the Snapshot operation or regular data.
 	if (snapshot_op)
 	{
-		// Nothing to do.
+		void *buffer = NULL;
+		size_t msg_length = block_size_recv;
+		if (msg_length > 0)
+		{
+			buffer = static_cast<void *>(malloc(msg_length));
+			if (buffer == NULL)
+			{
+				slog_error("HERCULES_ERR_MEMORY_ALLOCATION_SNAPSHOT");
+				return -1;
+			}
+			msg_length = NETWORK_TIMING(recv_data(arguments->ucp_worker, arguments->server_ep, static_cast<char *>(buffer) + block_offset, msg_length, arguments->worker_uid, 1), "[write] recv_data", size_t);
+			if (msg_length == 0)
+			{
+				free(buffer);
+				return -1;
+			}
+		}
+
+		slog_debug("Snapshot operation, origin server=%s, size=%zu", key.c_str(), msg_length);
+		insert_successful = TIMING(map->put_broadcast(key, buffer, msg_length), " new block map-put_broadcast", int, arguments->thread_id);
+		return (insert_successful == 0) ? 0 : -1;
 	}
 	else
 	{
@@ -3133,12 +3265,11 @@ int handle_write_operation(
 			}
 
 			slog_debug("[WRITE_OP] msg_length=%lu, is_block_zero=%d, snapshot_op=%d", msg_length, is_block_zero, snapshot_op);
-			if (is_block_zero || snapshot_op)
+			if (is_block_zero)
 			{
-				// Snapshot operation sends data bigger than BLOCK_SIZE, and
-				// block 0 is usually smaller than BLOCK_SIZE
+				// Block 0 is usually smaller than BLOCK_SIZE
 				buffer = static_cast<void *>(malloc(msg_length));
-				size_asigned_to_block = msg_length; // TODO: check if this follows the snapshot requirements.
+				size_asigned_to_block = msg_length;
 				reused_memory = 0;
 			}
 			else
@@ -3317,24 +3448,12 @@ int handle_write_operation(
 			// Include the new record in the tracking structure.
 			slog_debug("[WRITE_OP] ****[PUT, block_size_recv=%ld, BLOCK_SIZE=%lu, msg_length=%lu]********* key=%s", block_size_recv, BLOCK_SIZE, msg_length, key.c_str());
 
-			// TODO: should this be block_size_recv or a different size? block_size_recv might not be the full block size
-			if (snapshot_op)
+			insert_successful = hierarchical_map->HierarchicalMapPut(key, buffer, size_asigned_to_block, reused_memory, NULL, is_block_zero);
+			if (insert_successful == 0 && is_block_zero)
 			{
-				// Get the origin data server id from the received key.
-				// Fill buffer_broadcast with the data received from the other servers.
-				slog_debug("Snapshot operation, origin server=%s", key.c_str());
-				insert_successful = TIMING(map->put_broadcast(key, buffer, msg_length), " new block map-put_broadcast", int, arguments->thread_id);
-			}
-			else
-			{
-				// fprintf(stderr, "Inserting buffer of size %lu/%lu\n", msg_length, size_asigned_to_block);
-				insert_successful = hierarchical_map->HierarchicalMapPut(key, buffer, size_asigned_to_block, reused_memory, NULL, is_block_zero);
-				if (insert_successful == 0 && is_block_zero)
+				if (snapshot_enabled)
 				{
-					if (snapshot_enabled)
-					{
-						map->put_snapshot(key, -1);
-					}
+					map->put_snapshot(key, -1);
 				}
 			}
 			pthread_mutex_unlock(&memory_protect);
@@ -3837,6 +3956,8 @@ void *Checkpoint(void *th_argv)
 
 		slog_debug("Running Checkpoint in %s", checkpoint_dir);
 
+		ensure_inter_backend_connected(arguments->args->imss_uri);
+
 		TIMING_NO_RETURN(
 		    ret = map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_checkpoint, arguments->args->id, arguments->args->data_hostname, *arguments->args), "Checkpoint", arguments->thread_id);
 
@@ -3846,6 +3967,13 @@ void *Checkpoint(void *th_argv)
 			{
 				pthread_mutex_unlock(&mutex_checkpoint);
 				break;
+			}
+			if (global_finish_checkpoint == CHECKPOINT_STATE_DRAINING && !checkpoint_local_finished)
+			{
+				checkpoint_local_finished = true;
+				pthread_mutex_lock(&global_finish_mut);
+				pthread_cond_signal(&global_finish_cond);
+				pthread_mutex_unlock(&global_finish_mut);
 			}
 			fprintf(stderr, "Waiting for signal to unlock Checkpoint in server %d\n", server_id);
 			pthread_cond_wait(&global_run_checkpoint_cond, &mutex_checkpoint);
@@ -3864,6 +3992,7 @@ void *Checkpoint(void *th_argv)
 	t = clock() - t;
 	time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
+	fprintf(stderr, "Ending Checkpoint thread.\n");
 	pthread_exit(NULL);
 }
 
@@ -3887,7 +4016,7 @@ void *Snapshot(void *th_argv)
 
 	if (strlen(snapshot_dir) == 0)
 	{
-		printf("Snapshot path has not been provided.\tHERCULES_SNAPSHOT_PATH = /home/user/snapshot_path/\n");
+		printf("Snapshot path has not been provided.\tSNAPSHOT_PATH = /home/user/snapshot_path/\n");
 		fflush(stdout);
 		pthread_mutex_lock(&global_finish_mut);
 		global_finish_snapshot = SNAPSHOT_STATE_FINISHED;
@@ -3904,6 +4033,8 @@ void *Snapshot(void *th_argv)
 
 		slog_debug("Running Snapshot in %s", snapshot_dir);
 
+		ensure_inter_backend_connected(arguments->args->imss_uri);
+
 		TIMING_NO_RETURN(
 		    ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args->id, arguments->args->data_hostname, *arguments->args), "Snapshot", arguments->thread_id);
 
@@ -3913,6 +4044,13 @@ void *Snapshot(void *th_argv)
 			{
 				pthread_mutex_unlock(&mutex_snapshot);
 				break;
+			}
+			if (global_finish_snapshot == SNAPSHOT_STATE_DRAINING && !snapshot_local_finished)
+			{
+				snapshot_local_finished = true;
+				pthread_mutex_lock(&global_finish_mut);
+				pthread_cond_signal(&global_finish_cond);
+				pthread_mutex_unlock(&global_finish_mut);
 			}
 			fprintf(stderr, "Waiting for signal to unlock snapshot in server %d\n", server_id);
 			pthread_cond_wait(&global_run_snapshot_cond, &mutex_snapshot);
@@ -3931,6 +4069,7 @@ void *Snapshot(void *th_argv)
 	t = clock() - t;
 	time_taken = ((double)t) / (CLOCKS_PER_SEC);
 
+	fprintf(stderr, "Ending Snapshot thread.\n");
 	pthread_exit(NULL);
 }
 
@@ -3981,6 +4120,54 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			pthread_cond_signal(&server_ready_cond);
 			pthread_mutex_unlock(&server_ready_mutex);
 		}
+		return 0;
+	}
+	if (!strncmp(req, MSG_STOP_SERVER, strlen(MSG_STOP_SERVER)))
+	{
+		int sender_id = -1;
+		sscanf(req, "%*s %d", &sender_id);
+		slog_info("STOP_SERVER request received from server ID %d", sender_id);
+		fprintf(stderr, "STOP_SERVER request received from server ID %d\n", sender_id);
+
+		int snapshot_enabled = (arguments->args != NULL && (strlen(arguments->args->hercules_snapshot_path) > 0)) ? 1 : 0;
+		if (!snapshot_enabled)
+		{
+			slog_info("Snapshot disabled on metadata server. Confirming STOP_SERVER immediately to server %d", sender_id);
+			SendConfirmationMessage(arguments, MSG_OK_OP);
+			return 0;
+		}
+
+		pthread_mutex_lock(&stop_server_mutex);
+
+		PendingRequestInfo pending_info;
+		pending_info.ucp_worker = arguments->ucp_worker;
+		pending_info.server_ep = arguments->server_ep;
+		pending_info.worker_uid = arguments->worker_uid;
+		strncpy(pending_info.curr_req, req, sizeof(pending_info.curr_req));
+
+		stop_server_pending_requests[sender_id] = pending_info;
+
+		int expected_servers = number_active_storage_servers.load() > 0 ? number_active_storage_servers.load() : (arguments->args->num_data_servers > 0 ? arguments->args->num_data_servers : 1);
+
+		slog_info("[%zu/%d] STOP_SERVER collected (server %d)", stop_server_pending_requests.size(), expected_servers, sender_id);
+		fprintf(stderr, "[%zu/%d] STOP_SERVER collected (server %d)\n", stop_server_pending_requests.size(), expected_servers, sender_id);
+
+		if ((int)stop_server_pending_requests.size() >= expected_servers)
+		{
+			slog_info("All %zu STOP_SERVER requests collected. Responding to all data servers.", stop_server_pending_requests.size());
+			fprintf(stderr, "All %zu STOP_SERVER requests collected. Responding to all data servers.\n", stop_server_pending_requests.size());
+
+			for (const auto &entry : stop_server_pending_requests)
+			{
+				p_argv pending_argument;
+				pending_argument.ucp_worker = entry.second.ucp_worker;
+				pending_argument.server_ep = entry.second.server_ep;
+				pending_argument.worker_uid = entry.second.worker_uid;
+				SendConfirmationMessage(&pending_argument, MSG_OK_OP);
+			}
+			stop_server_pending_requests.clear();
+		}
+		pthread_mutex_unlock(&stop_server_mutex);
 		return 0;
 	}
 	// TODO: GET and SET request does not have a consistent format. Try to change it.

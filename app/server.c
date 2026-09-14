@@ -4,6 +4,7 @@
 #include "policies.h"
 #include "records.hpp"
 #include "utils.h"
+#include "workers.h"
 #include <cstdlib>
 #include <inttypes.h>
 #include <pthread.h>
@@ -222,6 +223,17 @@ int32_t main(int32_t argc, char **argv)
 		// bind port number.
 		bind_port = args.data_port;
 		init_number_of_server = atoi(argv[3]);
+		char num_nodes_path[PATH_MAX] = {0};
+		snprintf(num_nodes_path, sizeof(num_nodes_path), "%s/tmp/hercules_num_act_nodes", args.hercules_path);
+		if (access(num_nodes_path, F_OK) != 0)
+		{
+			FILE *f_nodes = fopen(num_nodes_path, "w");
+			if (f_nodes)
+			{
+				fprintf(f_nodes, "%d\n", init_number_of_server > 0 ? init_number_of_server : (int)args.num_data_servers);
+				fclose(f_nodes);
+			}
+		}
 	}
 	else
 	{
@@ -314,7 +326,7 @@ int32_t main(int32_t argc, char **argv)
 		// number of servers conforming the HERCULES deployment.
 		num_servers = args.num_data_servers;
 		// Dynamic number of servers conforming the HERCULES deployment used by malleability.
-		// number_active_storage_serversX = num_servers;
+		number_active_storage_servers.store(num_servers);
 		// HERCULES' MPI deployment file.
 		deployfile = args.data_hostfile;
 		// data block size
@@ -910,7 +922,7 @@ int32_t main(int32_t argc, char **argv)
 	// }
 
 	// Unblock signals in main thread so it can receive SIGUSR1 and SIGUSR2.
-	pthread_sigmask(SIG_SETMASK, &oldset, NULL);
+	pthread_sigmask(SIG_UNBLOCK, &sigset, NULL);
 
 	ret = ready(tmp_file_path, "OK");
 	fprintf(stdout, ANSI_COLOR_GREEN "[%s] %c-server %d is ready, status code=%d" ANSI_COLOR_RESET "\n", args.data_hostname, args.type, args.id, ret);
@@ -1101,37 +1113,32 @@ void handle_signal_server(int signal)
 		int fd = open(temporal_path, O_RDONLY);
 		if (fd == -1)
 		{
-			char err_msg[MAX_ERR_MSG_LEN];
-			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_HANDLE_SIGNAL_SERVER_OPEN_PKILL_OPERATION:%s", temporal_path);
-			perror(err_msg);
-			return;
-		}
-
-		b_read = read(fd, buf, sizeof(buf) - 1);
-
-		Close_file(fd, "HERCULES_ERR_HANDLE_SIGNAL_SERVER_CLOSE_PKILL_OPERATION");
-
-		if (b_read > 0)
-		{
-			buf[b_read] = '\0';
-			// pkill_operation = atoi(buf);
-			if (is_valid_integer(buf, &pkill_operation))
-			{
-				slog_debug("Valid integer read: %d", pkill_operation);
-			}
-			else
-			{
-				slog_error("Invalid content in pkill file. Content: '%s' is not a number", buf);
-				return;
-			}
+			slog_warn("pkill_operation file %s not found, defaulting to operation 1 (shutdown)", temporal_path);
+			pkill_operation = 1;
 		}
 		else
 		{
-			// read error or empty file.
-			fprintf(stderr, "HERCULES_ERR_HANDLE_SIGNAL_SERVER_READ_PKILL_OPERATION:%s\n", temporal_path);
-			slog_warn("HERCULES_ERR_HANDLE_SIGNAL_SERVER_READ_PKILL_OPERATION:%s", temporal_path);
-			// to prevent loss important data, we do not stop the server until a valid operation is given.
-			return;
+			b_read = read(fd, buf, sizeof(buf) - 1);
+			Close_file(fd, "HERCULES_ERR_HANDLE_SIGNAL_SERVER_CLOSE_PKILL_OPERATION");
+
+			if (b_read > 0)
+			{
+				buf[b_read] = '\0';
+				if (is_valid_integer(buf, &pkill_operation))
+				{
+					slog_debug("Valid integer read: %d", pkill_operation);
+				}
+				else
+				{
+					slog_error("Invalid content in pkill file. Content: '%s' is not a number, defaulting to 1", buf);
+					pkill_operation = 1;
+				}
+			}
+			else
+			{
+				slog_warn("pkill_operation file empty, defaulting to 1");
+				pkill_operation = 1;
+			}
 		}
 
 		slog_info("pkill_operation = %d", pkill_operation);
@@ -1173,24 +1180,38 @@ void handle_signal_server(int signal)
 				}
 
 				if (global_finish_snapshot != SNAPSHOT_STATE_FINISHED)
-				{ // Snapshot still running.
-					fprintf(stderr, "Waiting for mutext snapshot\n");
+				{ // Snapshot still running: trigger local pass and drain.
+					fprintf(stderr, "Waiting for local snapshot pass to complete in server %d\n", args.id);
 					pthread_mutex_lock(&global_finish_mut);
-					global_finish_snapshot = SNAPSHOT_STATE_STOP_REQUESTED;
+					global_finish_snapshot = SNAPSHOT_STATE_DRAINING;
 					pthread_mutex_unlock(&global_finish_mut);
 					pthread_mutex_lock(&mutex_snapshot);
 					pthread_cond_signal(&global_run_snapshot_cond);
 					pthread_mutex_unlock(&mutex_snapshot);
+
+					pthread_mutex_lock(&global_finish_mut);
+					while (!snapshot_local_finished && global_finish_snapshot != SNAPSHOT_STATE_FINISHED)
+					{
+						pthread_cond_wait(&global_finish_cond, &global_finish_mut);
+					}
+					pthread_mutex_unlock(&global_finish_mut);
 				}
 				if (global_finish_checkpoint != CHECKPOINT_STATE_FINISHED)
-				{ // Checkpointing still running.
-					fprintf(stderr, "Waiting for mutext checkpointing\n");
+				{ // Checkpointing still running: trigger local pass and drain.
+					fprintf(stderr, "Waiting for local checkpoint pass to complete in server %d\n", args.id);
 					pthread_mutex_lock(&global_finish_mut);
-					global_finish_checkpoint = CHECKPOINT_STATE_STOP_REQUESTED;
+					global_finish_checkpoint = CHECKPOINT_STATE_DRAINING;
 					pthread_mutex_unlock(&global_finish_mut);
 					pthread_mutex_lock(&mutex_checkpoint);
 					pthread_cond_signal(&global_run_checkpoint_cond);
 					pthread_mutex_unlock(&mutex_checkpoint);
+
+					pthread_mutex_lock(&global_finish_mut);
+					while (!checkpoint_local_finished && global_finish_checkpoint != CHECKPOINT_STATE_FINISHED)
+					{
+						pthread_cond_wait(&global_finish_cond, &global_finish_mut);
+					}
+					pthread_mutex_unlock(&global_finish_mut);
 				}
 
 				slog_debug("Locking mutext_malleability\n");
@@ -1199,6 +1220,44 @@ void handle_signal_server(int signal)
 				pthread_cond_broadcast(&global_run_malleability_cond); // Wake up everyone
 				pthread_mutex_unlock(&mutext_malleability);
 				slog_debug("Unlock mutext_malleability\n");
+
+				slog_info("Executing wait/drain phase on data server %d", args.id);
+				wait_drain_data_server(args.id);
+
+				if (global_finish_snapshot != SNAPSHOT_STATE_FINISHED)
+				{
+					fprintf(stderr, "Stopping snapshot thread on server %d\n", args.id);
+					pthread_mutex_lock(&global_finish_mut);
+					global_finish_snapshot = SNAPSHOT_STATE_STOP_REQUESTED;
+					pthread_mutex_unlock(&global_finish_mut);
+					pthread_mutex_lock(&mutex_snapshot);
+					pthread_cond_signal(&global_run_snapshot_cond);
+					pthread_mutex_unlock(&mutex_snapshot);
+
+					pthread_mutex_lock(&global_finish_mut);
+					while (global_finish_snapshot != SNAPSHOT_STATE_FINISHED)
+					{
+						pthread_cond_wait(&global_finish_cond, &global_finish_mut);
+					}
+					pthread_mutex_unlock(&global_finish_mut);
+				}
+				if (global_finish_checkpoint != CHECKPOINT_STATE_FINISHED)
+				{
+					fprintf(stderr, "Stopping checkpoint thread on server %d\n", args.id);
+					pthread_mutex_lock(&global_finish_mut);
+					global_finish_checkpoint = CHECKPOINT_STATE_STOP_REQUESTED;
+					pthread_mutex_unlock(&global_finish_mut);
+					pthread_mutex_lock(&mutex_checkpoint);
+					pthread_cond_signal(&global_run_checkpoint_cond);
+					pthread_mutex_unlock(&mutex_checkpoint);
+
+					pthread_mutex_lock(&global_finish_mut);
+					while (global_finish_checkpoint != CHECKPOINT_STATE_FINISHED)
+					{
+						pthread_cond_wait(&global_finish_cond, &global_finish_mut);
+					}
+					pthread_mutex_unlock(&global_finish_mut);
+				}
 			}
 
 			global_finish_threads = 1;

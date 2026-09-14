@@ -8,6 +8,7 @@
 #include "shared_memory.h"
 // #include "hercules.hpp"
 #include "utils.h"
+#include <atomic>
 #include <cstdint>
 #include <memory>
 
@@ -39,18 +40,25 @@
 // Lifecycle execution state for the Checkpoint service thread.
 typedef enum
 {
-	CHECKPOINT_STATE_RUNNING        = 0, // Thread is active and executing or waiting for triggers.
-	CHECKPOINT_STATE_STOP_REQUESTED = 1, // Stop/shutdown signal received; thread should exit the loop.
-	CHECKPOINT_STATE_FINISHED       = 2  // Thread has completed cleanup and exited.
+	CHECKPOINT_STATE_RUNNING = 0,	     // Thread is active and executing or waiting for triggers.
+	CHECKPOINT_STATE_DRAINING = 1,	     // Stop signal received; do local checkpoints, then wait for peer requests during drain.
+	CHECKPOINT_STATE_STOP_REQUESTED = 2, // All servers drained; thread should exit the loop.
+	CHECKPOINT_STATE_FINISHED = 3	     // Thread has completed cleanup and exited.
 } checkpoint_state_t;
 
 // Lifecycle execution state for the Snapshot service thread.
 typedef enum
 {
-	SNAPSHOT_STATE_RUNNING        = 0, // Thread is active and executing or waiting for triggers.
-	SNAPSHOT_STATE_STOP_REQUESTED = 1, // Stop/shutdown signal received; thread should exit the loop.
-	SNAPSHOT_STATE_FINISHED       = 2  // Thread has completed cleanup and exited.
+	SNAPSHOT_STATE_RUNNING = 0,	   // Thread is active and executing or waiting for triggers.
+	SNAPSHOT_STATE_DRAINING = 1,	   // Stop signal received; do local snapshots, then wait for peer requests during drain.
+	SNAPSHOT_STATE_STOP_REQUESTED = 2, // All servers drained; thread should exit the loop.
+	SNAPSHOT_STATE_FINISHED = 3	   // Thread has completed cleanup and exited.
 } snapshot_state_t;
+
+extern bool snapshot_local_finished;
+extern bool checkpoint_local_finished;
+
+extern std::atomic<uint32_t> number_active_storage_servers;
 
 extern HierarchicalRecords *global_hierarchical_map;
 extern HierarchicalRecords *garbage_collector_map;
@@ -64,7 +72,7 @@ typedef struct
 	imss_info *hercules_info_struct;
 	// Pointer to the corresponding type storing key-address couples.
 	std::shared_ptr<map_records> map = NULL;
-	struct arguments *args;	
+	struct arguments *args;
 	uint64_t port;
 	int64_t total_size;
 	ucp_context_h ucp_context;
@@ -120,6 +128,8 @@ void *hercules_ucx_server(void *th_argv);
 int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps);
 void *Checkpoint(void *th_argv);
 void *Snapshot(void *th_argv);
+int32_t ensure_inter_backend_connected(const char *imss_uri);
+int wait_drain_data_server(int server_id);
 
 // Thread method searching and cleaning nodes with st_nlink=0
 void *GarbageCollector(void *th_argv);

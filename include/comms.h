@@ -68,6 +68,7 @@ static char MSG_REMOVE_SERVER[] = "REMOVESERVER";
 
 static char MSG_MALLEABILITY_DATASERVERS[] = "DATASERVERS";
 static char MSG_DECOM_DATASERVERS[] = "DECOMISSIONING_COMPLETE";
+static char MSG_STOP_SERVER[] = "STOP_SERVER";
 static char MSG_EMPTY_DIRECTORY[] = "EMPTY_DIRECTORY";
 static const char MSG_ERROR_OP[] = "ERROR";
 static const char MSG_OK_OP[] = "OK";
@@ -120,7 +121,7 @@ const static int32_t DEFAULT_TOLERANCE_COMMISIONING = 100;
 const static int32_t DEFAULT_TOLERANCE_DECOMMISIONING = 300;
 
 // To synchronize network operations.
-static pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
+extern pthread_mutex_t lock_network;
 
 // Default hercules actions to handle files
 typedef enum

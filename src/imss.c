@@ -3273,19 +3273,27 @@ int32_t open_dataset(char *dataset_uri, int opened)
 	// Check if the IMSS storing the dataset exists within the clients session.
 	if ((associated_imss_indx = imss_check(dataset_uri)) == -1)
 	{
-		slog_fatal("HERCULES_ERR_OPEN_DATASET_NOT_FOUND");
+		slog_debug("HERCULES structure not found for dataset %s", dataset_uri);
 	}
 	slog_live("associated_imss_indx=%d", associated_imss_indx);
 
 	imss associated_imss;
-	associated_imss = g_array_index(imssd, imss, associated_imss_indx);
+	if (associated_imss_indx >= 0 && imssd != NULL && associated_imss_indx < (int32_t)imssd->len)
+	{
+		associated_imss = g_array_index(imssd, imss, associated_imss_indx);
+	}
+	else
+	{
+		memset(&associated_imss, 0, sizeof(imss));
+		associated_imss.conns.matching_server = -1;
+	}
 
 	dataset_info *new_dataset = NULL;
 	// Dataset metadata request.
 	int32_t stat_dataset_res = TIMING(stat_dataset(dataset_uri, &new_dataset, opened), "open_dataset,stat_dataset", int32_t, 0);
-	if (stat_dataset_res == -2)
+	if (stat_dataset_res == -2 || stat_dataset_res == -1 || new_dataset == NULL)
 	{
-		slog_warn("HERCULES_ERR_OPEN_DATASET_NOT_EXIST_1: %s, dataset does not exist", dataset_uri);
+		slog_warn("HERCULES_ERR_OPEN_DATASET_NOT_EXIST: %s, dataset does not exist", dataset_uri);
 		return -1;
 	}
 
@@ -3368,7 +3376,7 @@ int32_t open_dataset(char *dataset_uri, int opened)
 
 	// Assign the associated IMSS descriptor to the new dataset structure.
 	// fprintf(stderr, "curr_dataset->imss_d=%d\n", curr_dataset->imss_d);
-	new_dataset->imss_d = imssd_pos; //  curr_dataset->imss_d; // associated_imss_indx;
+	new_dataset->imss_d = (associated_imss_indx >= 0) ? associated_imss_indx : -1;
 	new_dataset->local_conn = associated_imss.conns.matching_server;
 
 	// Initialize dataset fields monitoring the dataset itself if it is a LOCAL one.
@@ -7687,7 +7695,21 @@ int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, c
 {
 	pthread_mutex_lock(&lock_network);
 
-	curr_imss = g_array_index(imssd, imss, curr_dataset->imss_d);
+	imss *local_imss_ = NULL;
+	if (curr_dataset != NULL && imssd != NULL && curr_dataset->imss_d >= 0 && curr_dataset->imss_d < (int32_t)imssd->len)
+	{
+		curr_imss = g_array_index(imssd, imss, curr_dataset->imss_d);
+	}
+	else if (find_imss_pointer("imss://", &local_imss_) != -1 && local_imss_ != NULL && local_imss_->conns.eps != NULL)
+	{
+		curr_imss = *local_imss_;
+	}
+	else
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_REDUCE: invalid dataset or imssd");
+		return -1;
+	}
 
 	char request[REQUEST_SIZE] = {0};
 
@@ -7695,6 +7717,13 @@ int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, c
 		ucp_ep_h ep;
 		// Server receiving the current data block.
 		uint32_t n_server_ = to_data_server_id;
+
+		if (curr_imss.conns.eps == NULL || n_server_ >= (uint32_t)curr_imss.info.num_storages || curr_imss.conns.eps[n_server_] == NULL)
+		{
+			pthread_mutex_unlock(&lock_network);
+			slog_error("HERCULES_ERR_SET_DATA_SERVER_REDUCE: invalid endpoint for server %u", n_server_);
+			return -1;
+		}
 
 		// sprintf(key_, "SET %lu %ld %s$%d", size, offset, data_uri, data_id);
 		sprintf(request, "SNAPSET %lu %d %s$%d", size, 0, key, from_data_server_id);
@@ -7709,19 +7738,21 @@ int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, c
 			pthread_mutex_unlock(&lock_network);
 			perror("HERCULES_ERR_SET_REQ_SEND_REQ");
 			slog_error("HERCULES_ERR_SET_REQ_SEND_REQ");
-			// return -1;
-			exit(-1);
-		}
-
-		// send the data to the data server of the current dataset.
-		if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
-		{
-			pthread_mutex_unlock(&lock_network);
-			perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
-			slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
 			return -1;
 		}
-		slog_info("[IMSS][completed] Request sent to server %d: %s (%d)", n_server_, request, size);
+
+		if (size > 0 && buffer != NULL)
+		{
+			// send the data to the data server of the current dataset.
+			if (send_data(ucp_worker_data, ep, buffer, size, local_data_uid) == 0)
+			{
+				pthread_mutex_unlock(&lock_network);
+				perror("HERCULES_ERR_SEND_DATA_SEND_DATA");
+				slog_error("HERCULES_ERR_SEND_DATA_SEND_DATA");
+				return -1;
+			}
+		}
+		slog_info("[IMSS][completed] Request sent to server %d: %s (%zu)", n_server_, request, size);
 		/*	gettimeofday(&end, NULL);
 			delta_us = (long) (end.tv_usec - start.tv_usec);
 			printf("[CLIENT] [SWRITE SEND_DATA] delta_us=%6.3f",(delta_us/1000.0F));*/
@@ -7742,12 +7773,27 @@ int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, c
 	}
 
 	pthread_mutex_lock(&lock_network);
-	if (curr_dataset == NULL)
+	imss *local_imss_ = NULL;
+	if (curr_dataset != NULL && imssd != NULL && curr_dataset->imss_d >= 0 && curr_dataset->imss_d < (int32_t)imssd->len)
+	{
+		curr_imss = g_array_index(imssd, imss, curr_dataset->imss_d);
+	}
+	else if (find_imss_pointer("imss://", &local_imss_) != -1 && local_imss_ != NULL && local_imss_->conns.eps != NULL)
+	{
+		curr_imss = *local_imss_;
+	}
+	else
 	{
 		pthread_mutex_unlock(&lock_network);
+		slog_warn("HERCULES_WARN_BROADCAST: invalid curr_dataset or imssd");
 		return 0;
 	}
-	curr_imss = g_array_index(imssd, imss, curr_dataset->imss_d);
+	if (curr_imss.conns.eps == NULL)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_warn("HERCULES_WARN_BROADCAST: conns.eps is NULL");
+		return 0;
+	}
 
 	// Send the request to each server .
 	for (int32_t i = 0; i < num_of_servers; i++)
@@ -7761,6 +7807,11 @@ int32_t SendBroadcastMessage(int from_data_server_id, uint32_t num_of_servers, c
 		ucp_ep_h ep;
 		// Server receiving the current data block.
 		uint32_t n_server_ = i;
+		if (n_server_ >= (uint32_t)curr_imss.info.num_storages || curr_imss.conns.eps[n_server_] == NULL)
+		{
+			slog_warn("HERCULES_WARN_BROADCAST: endpoint for server %u is NULL, skipping", n_server_);
+			continue;
+		}
 
 		slog_info("[IMSS] num_active_storages from curr_imss=%d", curr_imss.info.num_active_storages);
 		ep = curr_imss.conns.eps[n_server_];

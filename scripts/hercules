@@ -104,7 +104,7 @@ StopServers() {
         # "pkill -f": Targets the specific server process using regex anchoring (^([^ ]*/)?hercules_server)
         #    to avoid matching the wrapper shell, and ensures exact ID matching.
         # "|| true": Prevents failure if the server process was already terminated.
-        KILL_CMD="trap '' USR1; rm -f ${FILE_TO_REMOVE}; pkill -SIGUSR1 -f \"^([^ ]*/)?hercules_server ${SERVER_TYPE:0:1} ${REAL_ID}( |\\$)\" || true"
+        KILL_CMD="trap '' USR1; mkdir -p ${HERCULES_TEMPORAL_PATH}; echo ${OPERATION} > ${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation; rm -f ${FILE_TO_REMOVE}; pkill -SIGUSR1 -f \"^([^ ]*/)?hercules_server ${SERVER_TYPE:0:1} ${REAL_ID}( |\\$)\" || true"
         if [[ "${SLURM}" -eq "1" ]]; then
             srun --nodelist="${node}" --ntasks=1 --nodes=1 --overlap --jobid="${SLURM_JOB_ID}" bash -c "${KILL_CMD}"
         elif [ "${node}" == "localhost" ] || [ "${node}" == "127.0.0.1" ] || [ "${node}" == "$(hostname)" ]; then
@@ -190,7 +190,7 @@ WakeUpServers() {
                 if [[ "${VERBOSE}" -eq "1" ]]; then
                     echo "[ + ] Removing temporal files on ${node}"
                 fi
-                ( ssh ${node} "${RM}" )
+                ( ssh ${node} "mkdir -p ${HERCULES_TEMPORAL_PATH} && echo ${INIT_HERCULES_NUM_DATA} > ${HERCULES_TEMPORAL_PATH}/hercules_num_act_nodes && ${RM}" )
                 if [[ "${VERBOSE}" -eq "1" ]]; then
                     echo "[ + ] Starting data server $REAL_ID in $node..."
                     echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}"
