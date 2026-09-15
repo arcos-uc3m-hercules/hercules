@@ -551,10 +551,13 @@ int32_t ensure_inter_backend_connected(const char *imss_uri)
 	static pthread_mutex_t connect_mutex = PTHREAD_MUTEX_INITIALIZER;
 	pthread_mutex_lock(&connect_mutex);
 
+	slog_debug("Running ensure_inter_backend_connected");
+
 	imss *local_imss_ = NULL;
 	int32_t imss_found_in = find_imss_pointer("imss://", &local_imss_);
 	if (imss_found_in != -1 && local_imss_ != NULL && local_imss_->conns.eps != NULL)
 	{
+		slog_debug("Endpoints already connected");
 		pthread_mutex_unlock(&connect_mutex);
 		return 0;
 	}

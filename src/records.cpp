@@ -1430,8 +1430,8 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 	int pos = 0, ret = 0, fd = -1, block_number = 0, continue_exe = 0;
 	u_int32_t active_data_servers = 0;
 	string key, block, file_name, data_uri;
-	char expected_uri[PATH_MAX];
-	char expected_key_format[PATH_MAX + sizeof(int) + 1];
+	char expected_uri[URI_];
+	char expected_key_format[URI_ + sizeof(int) + 1];
 	void *address_ = NULL;
 	void *address_block_0 = NULL;
 	uint64_t block_size_rtvd = 0;
@@ -1480,7 +1480,10 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 			fprintf(stderr, "Key is missing\n");
 			continue;
 		}
+		slog_debug("Processing key=%s", key.c_str());
 		origin_server_id = it.second;
+
+		slog_debug("origin_server_id=%d", origin_server_id);
 
 		if (origin_server_id == -1)
 		{
@@ -1919,7 +1922,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 
 				uint64_t file_size_occupied = 0;
 				// This server add their data.
-				fprintf(stderr, "Performing Snapshopt from file %s in data server %d\n", expected_uri, args.id);
+				fprintf(stderr, "Performing Checkpoint from file %s in data server %d\n", expected_uri, args.id);
 				t = clock();
 				char *data_ = GetDataOfFile(expected_uri, &file_size_occupied);
 				sprintf(expected_key_format, "%s$%d", expected_uri, args.id);

@@ -921,11 +921,11 @@ int32_t find_imss_pointer(const char *imss_uri, imss **out_ptr)
 			{
 				*out_ptr = current_element;
 			}
-
+			slog_live("return i");
 			return i;
 		}
 	}
-
+	slog_live("return -1");
 	return -1;
 }
 

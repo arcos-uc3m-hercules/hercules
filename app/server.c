@@ -1172,16 +1172,19 @@ void handle_signal_server(int signal)
 				if (global_finish_garbage_collector != 1)
 				{ // Garbage collector still running.
 					fprintf(stderr, "Waiting for mutext garbage collector\n");
+					slog_debug("Waiting for mutext garbage collector");
 					global_finish_garbage_collector = 1;
 					pthread_mutex_lock(&mutex_garbage);
 					pthread_cond_signal(&global_run_garbage_collector_cond);
 					pthread_mutex_unlock(&mutex_garbage);
 					fprintf(stderr, "Send signal to mutext garbage\n");
+					slog_debug("Send signal to mutext garbage");
 				}
 
 				if (global_finish_snapshot != SNAPSHOT_STATE_FINISHED)
 				{ // Snapshot still running: trigger local pass and drain.
 					fprintf(stderr, "Waiting for local snapshot pass to complete in server %d\n", args.id);
+					slog_debug( "Waiting for local snapshot pass to complete in server %d", args.id);
 					pthread_mutex_lock(&global_finish_mut);
 					global_finish_snapshot = SNAPSHOT_STATE_DRAINING;
 					pthread_mutex_unlock(&global_finish_mut);
@@ -1196,6 +1199,7 @@ void handle_signal_server(int signal)
 					}
 					pthread_mutex_unlock(&global_finish_mut);
 					fprintf(stderr, "Send signal to snapshot\n");
+					slog_debug("Send signal to snapshot");
 				}
 				if (global_finish_checkpoint != CHECKPOINT_STATE_FINISHED)
 				{ // Checkpointing still running: trigger local pass and drain.
@@ -1215,12 +1219,12 @@ void handle_signal_server(int signal)
 					pthread_mutex_unlock(&global_finish_mut);
 				}
 
-				slog_debug("Locking mutext_malleability\n");
+				slog_debug("Locking mutext_malleability");
 				pthread_mutex_lock(&mutext_malleability);
 				slog_debug("Sending broadcast mutext_malleability\n");
 				pthread_cond_broadcast(&global_run_malleability_cond); // Wake up everyone
 				pthread_mutex_unlock(&mutext_malleability);
-				slog_debug("Unlock mutext_malleability\n");
+				slog_debug("Unlock mutext_malleability");
 
 				slog_info("Executing wait/drain phase on data server %d", args.id);
 				wait_drain_data_server(args.id);
