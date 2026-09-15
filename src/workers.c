@@ -3956,7 +3956,10 @@ void *Checkpoint(void *th_argv)
 
 		slog_debug("Running Checkpoint in %s", checkpoint_dir);
 
-		ensure_inter_backend_connected(arguments->args->imss_uri);
+		// Note: ensure_inter_backend_connected cannot be called here because it gets the number
+		// of data servers that have been connected from the metadata server. At this point,
+		// that generates a race condition because some data servers will ask at different times
+		// while others are still connecting.
 
 		TIMING_NO_RETURN(
 		    ret = map->Checkpoint(BLOCK_SIZE, checkpoint_dir, global_finish_checkpoint, arguments->args->id, arguments->args->data_hostname, *arguments->args), "Checkpoint", arguments->thread_id);
@@ -4032,8 +4035,11 @@ void *Snapshot(void *th_argv)
 		pthread_mutex_lock(&mutex_snapshot);
 
 		slog_debug("Running Snapshot in %s", snapshot_dir);
-
-		ensure_inter_backend_connected(arguments->args->imss_uri);
+		
+		// Note: ensure_inter_backend_connected cannot be called here because it gets the number
+		// of data servers that have been connected from the metadata server. At this point,
+		// that generates a race condition because some data servers will ask at different times
+		// while others are still connecting.
 
 		TIMING_NO_RETURN(
 		    ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args->id, arguments->args->data_hostname, *arguments->args), "Snapshot", arguments->thread_id);

@@ -1195,6 +1195,7 @@ void handle_signal_server(int signal)
 						pthread_cond_wait(&global_finish_cond, &global_finish_mut);
 					}
 					pthread_mutex_unlock(&global_finish_mut);
+					fprintf(stderr, "Send signal to snapshot\n");
 				}
 				if (global_finish_checkpoint != CHECKPOINT_STATE_FINISHED)
 				{ // Checkpointing still running: trigger local pass and drain.
