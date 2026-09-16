@@ -134,6 +134,8 @@ size_t global_offset = 0;
 std::vector<PendingRequestInfo> pending_requests;
 static pthread_mutex_t stop_server_mutex = PTHREAD_MUTEX_INITIALIZER;
 static std::map<int, PendingRequestInfo> stop_server_pending_requests;
+static struct timespec stop_server_start_ts = {0, 0};
+static clock_t stop_server_start_cpu = 0;
 
 // TODO: check if this variables can be moved to records.cpp
 std::mutex mtx;
@@ -4304,6 +4306,12 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		pthread_mutex_lock(&stop_server_mutex);
 
+		if (stop_server_pending_requests.empty())
+		{
+			clock_gettime(CLOCK_MONOTONIC, &stop_server_start_ts);
+			stop_server_start_cpu = clock();
+		}
+
 		PendingRequestInfo pending_info;
 		pending_info.ucp_worker = arguments->ucp_worker;
 		pending_info.server_ep = arguments->server_ep;
@@ -4314,13 +4322,25 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		int expected_servers = number_active_storage_servers.load() > 0 ? number_active_storage_servers.load() : (arguments->args->num_data_servers > 0 ? arguments->args->num_data_servers : 1);
 
-		slog_info("[%zu/%d] STOP_SERVER collected (server %d)", stop_server_pending_requests.size(), expected_servers, sender_id);
-		fprintf(stderr, "[%zu/%d] STOP_SERVER collected (server %d)\n", stop_server_pending_requests.size(), expected_servers, sender_id);
+		struct timespec ts_now;
+		clock_gettime(CLOCK_MONOTONIC, &ts_now);
+		double elapsed_from_first = (ts_now.tv_sec - stop_server_start_ts.tv_sec) + (ts_now.tv_nsec - stop_server_start_ts.tv_nsec) / 1e9;
+
+		slog_info("[%zu/%d] STOP_SERVER collected (server %d) (+%.6f s from first)", stop_server_pending_requests.size(), expected_servers, sender_id, elapsed_from_first);
+		fprintf(stderr, "[Metadata Server] [%zu/%d] STOP_SERVER collected from server ID %d (+%.6f s from first)\n",
+			stop_server_pending_requests.size(), expected_servers, sender_id, elapsed_from_first);
 
 		if ((int)stop_server_pending_requests.size() >= expected_servers)
 		{
-			slog_info("All %zu STOP_SERVER requests collected. Responding to all data servers.", stop_server_pending_requests.size());
-			fprintf(stderr, "All %zu STOP_SERVER requests collected. Responding to all data servers.\n", stop_server_pending_requests.size());
+			clock_t t_now_cpu = clock();
+			double total_wall = elapsed_from_first;
+			double total_cpu = ((double)(t_now_cpu - stop_server_start_cpu)) / CLOCKS_PER_SEC;
+
+			slog_info("All %zu STOP_SERVER requests collected in %.6f s (CPU: %.6f s). Responding to all data servers.",
+				  stop_server_pending_requests.size(), total_wall, total_cpu);
+			fprintf(stderr, "[Metadata Server] All %zu STOP_SERVER messages collected in %.6f seconds (CPU: %.6f seconds)\n",
+				stop_server_pending_requests.size(), total_wall, total_cpu);
+			fprintf(stderr, "[Metadata Server] Responding to all data servers to unlock shutdown drain.\n");
 
 			for (const auto &entry : stop_server_pending_requests)
 			{

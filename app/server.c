@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/signal.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 proccess_type_t process_type = proccess_type_t::BACKEND;
@@ -79,6 +81,10 @@ extern pthread_cond_t global_run_shutdown_cond;
 
 char main_err_call_arg[] = "main server";
 extern char tmp_file_action[20];
+
+struct timespec global_shutdown_start_ts;
+clock_t global_shutdown_start_cpu;
+int global_shutdown_started = 0;
 
 /**
  * @brief Comunicates data servers to metadata servers to
@@ -1064,6 +1070,17 @@ int32_t main(int32_t argc, char **argv)
 	fflush(stdout);
 	slog_info("[%s] Ending %c-server %d", args.data_hostname, args.type, args.id);
 
+	if (global_shutdown_started)
+	{
+		struct timespec ts_main_end;
+		clock_gettime(CLOCK_MONOTONIC, &ts_main_end);
+		clock_t t_main_end = clock();
+		double total_wall_sec = (ts_main_end.tv_sec - global_shutdown_start_ts.tv_sec) + (ts_main_end.tv_nsec - global_shutdown_start_ts.tv_nsec) / 1e9;
+		double total_cpu_sec = ((double)(t_main_end - global_shutdown_start_cpu)) / CLOCKS_PER_SEC;
+		const char *server_type_str = (args.type == TYPE_DATA_SERVER) ? "Data" : "Metadata";
+		fprintf(stderr, "[Shutdown] %s server %d total shutdown completed in %.6f seconds (CPU: %.6f seconds)\n", server_type_str, args.id, total_wall_sec, total_cpu_sec);
+	}
+
 	// Free the memory buffer.
 	// free(buffer);
 	return 0;
@@ -1099,6 +1116,14 @@ void handle_signal_server(int signal)
 {
 	if (signal == SIGUSR1) // suspend or shutdown this server.
 	{
+		struct timespec ts_sig_start, ts_sig_end;
+		clock_t t_sig_start = clock();
+		clock_gettime(CLOCK_MONOTONIC, &ts_sig_start);
+
+		global_shutdown_start_ts = ts_sig_start;
+		global_shutdown_start_cpu = t_sig_start;
+		global_shutdown_started = 1;
+
 		slog_info("SIGUSR1 received");
 		fprintf(stderr, "SIGUSR1 received\n");
 		int pkill_operation = 0, ret = 0;
@@ -1184,7 +1209,7 @@ void handle_signal_server(int signal)
 				if (global_finish_snapshot != SNAPSHOT_STATE_FINISHED)
 				{ // Snapshot still running: trigger local pass and drain.
 					fprintf(stderr, "Waiting for local snapshot pass to complete in server %d\n", args.id);
-					slog_debug( "Waiting for local snapshot pass to complete in server %d", args.id);
+					slog_debug("Waiting for local snapshot pass to complete in server %d", args.id);
 					pthread_mutex_lock(&global_finish_mut);
 					global_finish_snapshot = SNAPSHOT_STATE_DRAINING;
 					pthread_mutex_unlock(&global_finish_mut);
@@ -1226,8 +1251,18 @@ void handle_signal_server(int signal)
 				pthread_mutex_unlock(&mutext_malleability);
 				slog_debug("Unlock mutext_malleability");
 
+				struct timespec ts_drain_start, ts_drain_end;
+				clock_t t_drain_start = clock();
+				clock_gettime(CLOCK_MONOTONIC, &ts_drain_start);
+
 				slog_info("Executing wait/drain phase on data server %d", args.id);
 				wait_drain_data_server(args.id);
+
+				clock_gettime(CLOCK_MONOTONIC, &ts_drain_end);
+				clock_t t_drain_end = clock();
+				double drain_wall = (ts_drain_end.tv_sec - ts_drain_start.tv_sec) + (ts_drain_end.tv_nsec - ts_drain_start.tv_nsec) / 1e9;
+				double drain_cpu = ((double)(t_drain_end - t_drain_start)) / CLOCKS_PER_SEC;
+				fprintf(stderr, "[Shutdown] Data server %d wait_drain_data_server (metadata sync) completed in %.6f seconds (CPU: %.6f seconds)\n", args.id, drain_wall, drain_cpu);
 
 				if (global_finish_snapshot != SNAPSHOT_STATE_FINISHED)
 				{
@@ -1282,7 +1317,13 @@ void handle_signal_server(int signal)
 				close(global_server_fd_thread);
 			}
 
-			// global_finish_threads = 1;
+			clock_gettime(CLOCK_MONOTONIC, &ts_sig_end);
+			clock_t t_sig_end = clock();
+			double sig_wall_sec = (ts_sig_end.tv_sec - ts_sig_start.tv_sec) + (ts_sig_end.tv_nsec - ts_sig_start.tv_nsec) / 1e9;
+			double sig_cpu_sec = ((double)(t_sig_end - t_sig_start)) / CLOCKS_PER_SEC;
+
+			const char *server_type_str = (args.type == TYPE_DATA_SERVER) ? "Data" : "Metadata";
+			fprintf(stderr, "[Shutdown] %s server %d handle_signal_server shutdown phase completed in %.6f seconds (CPU: %.6f seconds)\n", server_type_str, args.id, sig_wall_sec, sig_cpu_sec);
 			break;
 		}
 		default: // suspend the data server.
