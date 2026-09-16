@@ -1303,6 +1303,7 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 		find = erase_broadcast_element(expected_key);
 		indx++;
 		// if all data servers has sent its data, we break the loop.
+		slog_debug("data collected %d/%d", indx, num_of_data_servers);
 		if (indx >= num_of_data_servers)
 		{
 			flag = 0;
@@ -1317,6 +1318,7 @@ char *map_records::MergeData(off_t *size_of_data, uint32_t num_of_data_servers, 
 			slog_debug("key %s has been deleted in broadcast", expected_key.c_str());
 		}
 	}
+	slog_debug("Ending merge data.");
 	*size_of_data = (total_written_acumulated > file_size) ? total_written_acumulated : file_size;
 	return reconstructed_data_file;
 }

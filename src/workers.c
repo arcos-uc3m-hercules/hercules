@@ -609,8 +609,8 @@ int wait_drain_data_server(int server_id)
 	fprintf(stderr, "[Data Server %d] Waiting for confirmation from metadata server...\n", server_id);
 
 	// Wait with timeout (120 seconds) using ucp_worker_meta
-	const double timeout_sec = 120.0;
-	auto start_time = std::chrono::steady_clock::now();
+	// const double timeout_sec = 120.0;
+	// auto start_time = std::chrono::steady_clock::now();
 	ucp_tag_recv_info_t info_tag;
 	ucp_tag_message_h msg_tag = NULL;
 
@@ -643,16 +643,16 @@ int wait_drain_data_server(int server_id)
 		else
 		{
 			pthread_mutex_unlock(&lock_network);
-			usleep(1000);
+			// usleep(1000);
 		}
 
-		auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
-		if (elapsed >= timeout_sec)
-		{
-			slog_warn("[Data Server %d] Timeout (%.0f s) waiting for metadata server STOP_SERVER confirmation", server_id, timeout_sec);
-			fprintf(stderr, "[Data Server %d] Timeout (%.0f s) waiting for metadata server confirmation. Proceeding with shutdown.\n", server_id, timeout_sec);
-			return -1;
-		}
+		// auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
+		// if (elapsed >= timeout_sec)
+		// {
+		// 	slog_warn("[Data Server %d] Timeout (%.0f s) waiting for metadata server STOP_SERVER confirmation", server_id, timeout_sec);
+		// 	fprintf(stderr, "[Data Server %d] Timeout (%.0f s) waiting for metadata server confirmation. Proceeding with shutdown.\n", server_id, timeout_sec);
+		// 	return -1;
+		// }
 	} while (true);
 }
 
