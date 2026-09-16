@@ -1,19 +1,19 @@
 #ifndef MAP_RECORDS
 #define MAP_RECORDS
 
-#include <map>
-#include <unordered_map>
-#include <mutex>
-#include <string>
-#include <utility>
-#include <iostream>
 #include <cassert>
-#include <stdio.h>
-#include <vector>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/utsname.h>
+#include <iostream>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <stdio.h>
+#include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/utsname.h>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 // #include <shared_mutex>
 #include "hercules.hpp"
 
@@ -44,7 +44,7 @@ struct BufferValue
 // In-memory structure storing key-address couples.
 class map_records
 {
-public:
+      public:
 	map_records(const map_records &r);
 	map_records() = delete;
 	map_records(const uint64_t nsize);
@@ -81,6 +81,8 @@ public:
 	// Method retrieving the address associated to a certain record.
 	int32_t get(std::string key, void **add_, uint64_t *size_);
 	int32_t get_snapshot(std::string key, int *to_copy);
+	int32_t get_snapshot_producer(std::string key, int *to_copy);
+	int32_t get_snapshot_consumer(std::string key, int *to_copy);
 	int32_t get_broadcast(std::string key, void **add_, uint64_t *size_);
 
 	BufferValue *find(std::string key);
@@ -108,6 +110,8 @@ public:
 	int32_t freeAllMemory();
 	int32_t erase_broadcast_element(std::string key);
 	int32_t erase_snapshot_element(std::string key);
+	int32_t erase_snapshot_producer_element(std::string key);
+	int32_t erase_snapshot_consumer_element(std::string key);
 
 	int32_t get_broadcast_size();
 	size_t get_buffer_size();
@@ -115,7 +119,10 @@ public:
 	// int32_t memory2disk(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id);
 	// int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
 	int32_t Checkpoint(uint64_t block_size, const char *checkpoint_dir, int finish, int server_id, char *data_hostname, struct arguments args);
-	int32_t Snapshot(uint64_t block_size, const char *checkpoint_dir, int finish, int, char *, struct arguments args);
+	int32_t SnapshotProducer(uint64_t block_size, const char *snapshot_dir, int finish, int server_id, char *data_hostname, struct arguments args);
+	int32_t SnapshotConsumer(int finish, int server_id, char *data_hostname, struct arguments args);
+	size_t get_snapshot_consumer_size();
+	size_t get_snapshot_producer_size();
 
 	// Method retrieving a map::begin iterator referencing the first element in the map container.
 	std::map<std::string, BufferValue>::iterator begin()
@@ -145,13 +152,14 @@ public:
 		return buffer.size();
 	}
 
-private:
+      private:
 	// Map structure tracking stored records (by default sorts keys with '<' op).
 	// <key(file uri), <data, lenght>>
 	std::map<std::string, BufferValue> buffer;
 	// std::map<std::string, std::map<std::string, BufferValue>> HierarchicalMap;
 	std::vector<std::string> buffer_garbage_collector;
-	std::map<std::string, int> buffer_snapshot;
+	std::map<std::string, int> buffer_snapshot_producer;
+	std::map<std::string, int> buffer_snapshot_consumer;
 	// std::unordered_map<std::string, int> buffer_broadcast;
 	std::map<std::string, std::pair<void *, uint64_t>> buffer_broadcast;
 	std::map<std::string, std::pair<int, __off_t>> buffer_fd;

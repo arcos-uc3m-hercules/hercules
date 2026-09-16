@@ -58,6 +58,9 @@ typedef enum
 extern bool snapshot_local_finished;
 extern bool checkpoint_local_finished;
 
+extern pthread_mutex_t mutex_snapshot_consumer;
+extern pthread_cond_t global_run_snapshot_consumer_cond;
+
 extern std::atomic<uint32_t> number_active_storage_servers;
 
 extern HierarchicalRecords *global_hierarchical_map;
@@ -128,6 +131,7 @@ void *hercules_ucx_server(void *th_argv);
 int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps);
 void *Checkpoint(void *th_argv);
 void *Snapshot(void *th_argv);
+void *SnapshotConsumerWorker(void *th_argv);
 int32_t ensure_inter_backend_connected(const char *imss_uri);
 int wait_drain_data_server(int server_id);
 

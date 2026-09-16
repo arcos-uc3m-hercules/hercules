@@ -106,24 +106,51 @@ int32_t map_records::erase_broadcast_element(std::string key)
 	return 1;
 }
 
-int32_t map_records::erase_snapshot_element(std::string key)
+int32_t map_records::erase_snapshot_producer_element(std::string key)
 {
 	std::unique_lock<std::mutex> lock(*mut);
-	// Map iterator that will be searching for the key.
-	std::map<std::string, int>::iterator it;
-
-	// Search for the address related to the key.
-	it = buffer_snapshot.find(key);
-	// Check if the value did exist within the map.
-	if (it == buffer_snapshot.end())
+	auto it_p = buffer_snapshot_producer.find(key);
+	if (it_p != buffer_snapshot_producer.end())
 	{
-		return 0;
+		buffer_snapshot_producer.erase(it_p);
+		return 1;
 	}
 
-	// Erase the element.
-	buffer_snapshot.erase(it);
+	return 0;
+}
 
-	return 1;
+int32_t map_records::erase_snapshot_consumer_element(std::string key)
+{
+	std::unique_lock<std::mutex> lock(*mut);
+	auto it_c = buffer_snapshot_consumer.find(key);
+	if (it_c != buffer_snapshot_consumer.end())
+	{
+		buffer_snapshot_consumer.erase(it_c);
+		return 1;
+	}
+
+	return 0;
+}
+
+int32_t map_records::erase_snapshot_element(std::string key)
+{
+	if (erase_snapshot_producer_element(key))
+	{
+		return 1;
+	}
+	return erase_snapshot_consumer_element(key);
+}
+
+size_t map_records::get_snapshot_consumer_size()
+{
+	std::unique_lock<std::mutex> lock(*mut);
+	return buffer_snapshot_consumer.size();
+}
+
+size_t map_records::get_snapshot_producer_size()
+{
+	std::unique_lock<std::mutex> lock(*mut);
+	return buffer_snapshot_producer.size();
 }
 
 void map_records::print_map()
@@ -236,15 +263,16 @@ int32_t map_records::put_garbage_collector(std::string key)
 // Method storing a new record.
 int32_t map_records::put_snapshot(std::string key, int value)
 {
-	// Construct a pair object storing the couple of values associated to a key.
-	// std::pair<void *, uint64_t> value(to_copy, 0); // second param is for file size.
-	// Block the access to the map structure.
 	std::unique_lock<std::mutex> lock(*mut);
-	// Add a new value to the map.
-	// fprintf(stderr, "Inserting %s with value %d\n", key.c_str(), value);
-	slog_debug("Inserting %s with value %d", key.c_str(), value);
-	buffer_snapshot.insert({key, value});
-	slog_debug("The value of %s is %d", key.c_str(), buffer_snapshot[key]);
+	slog_debug("Inserting snapshot entry %s with value %d", key.c_str(), value);
+	if (value == -1)
+	{
+		buffer_snapshot_producer[key] = value;
+	}
+	else
+	{
+		buffer_snapshot_consumer[key] = value;
+	}
 	return 0;
 }
 
@@ -331,31 +359,39 @@ int32_t map_records::get(std::string key, void **add_, uint64_t *size_)
 	return 1;
 }
 
+int32_t map_records::get_snapshot_producer(std::string key, int *to_copy)
+{
+	std::unique_lock<std::mutex> lock(*mut);
+	auto it_p = buffer_snapshot_producer.find(key);
+	if (it_p != buffer_snapshot_producer.end())
+	{
+		*(to_copy) = it_p->second;
+		return 1;
+	}
+
+	return 0;
+}
+
+int32_t map_records::get_snapshot_consumer(std::string key, int *to_copy)
+{
+	std::unique_lock<std::mutex> lock(*mut);
+	auto it_c = buffer_snapshot_consumer.find(key);
+	if (it_c != buffer_snapshot_consumer.end())
+	{
+		*(to_copy) = it_c->second;
+		return 1;
+	}
+
+	return 0;
+}
+
 int32_t map_records::get_snapshot(std::string key, int *to_copy)
 {
-
-	// Map iterator that will be searching for the key.
-	std::map<std::string, int>::iterator it;
-
-	int value = 0;
-	// Block the access to the map structure.
-	// std::unique_lock<std::mutex> lock(*mut);
-
-	if (buffer_snapshot.empty())
-		return 0;
-
-	// Search for the address related to the key.
-	it = buffer_snapshot.find(key);
-	// Check if the value did exist within the map.
-	if (it == buffer_snapshot.end())
+	if (get_snapshot_consumer(key, to_copy))
 	{
-		return 0;
+		return 1;
 	}
-	*(to_copy) = it->second;
-	// *(file_size) = it->second.second;
-
-	// Return the value.
-	return 1;
+	return get_snapshot_producer(key, to_copy);
 }
 
 int32_t map_records::get_broadcast(std::string key, void **add_, uint64_t *size_)
@@ -473,27 +509,21 @@ int32_t map_records::update(std::string key, void *add_, uint64_t length)
 
 int32_t map_records::update_simple(std::string key, int value)
 {
-	// Map iterator that will be searching for the key.
-	std::map<std::string, int>::iterator it;
-
 	std::unique_lock<std::mutex> lock(*mut);
-
-	if (buffer_snapshot.empty())
-		return 0;
-
-	// Search for the address related to the key.
-	it = buffer_snapshot.find(key);
-	// Check if the value did exist within the map.
-	if (it == buffer_snapshot.end())
+	auto it_p = buffer_snapshot_producer.find(key);
+	if (it_p != buffer_snapshot_producer.end())
 	{
-		return 0;
+		it_p->second = value;
+		return 1;
+	}
+	auto it_c = buffer_snapshot_consumer.find(key);
+	if (it_c != buffer_snapshot_consumer.end())
+	{
+		it_c->second = value;
+		return 1;
 	}
 
-	// Assign the values obtained to the provided references.
-	it->second = value;
-
-	// Return the address associated to the record.
-	return 1;
+	return 0;
 }
 
 /**
@@ -1016,7 +1046,8 @@ int64_t map_records::cleaning_specific(std::string new_key)
 		// fprintf(stderr, "Erasing element with key %s\n", i);
 		slog_debug("Erasing element with key %s", item->first.c_str());
 		buffer.erase(*i);
-		buffer_snapshot.erase(*i);
+		buffer_snapshot_producer.erase(*i);
+		buffer_snapshot_consumer.erase(*i);
 	}
 
 	return total_freed_memory;
@@ -1423,7 +1454,7 @@ static bool should_snapshot_file(const std::string &file_path, const std::vector
 /**
  * @brief Copy all data stored in Hercules FOLLOWING a Posix format file.
  */
-int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int finish, int server_id, char *data_hostname, struct arguments args)
+int32_t map_records::SnapshotProducer(uint64_t block_size, const char *snapshot_dir, int finish, int server_id, char *data_hostname, struct arguments args)
 {
 	clock_t t;
 	double parcial_time_taken = 0.0, time_taken_for_writting = 0.0, time_taken_for_merge = 0.0, time_taken_for_collecting = 0.0;
@@ -1433,9 +1464,7 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 	char expected_uri[URI_];
 	char expected_key_format[URI_ + sizeof(int) + 1];
 	void *address_ = NULL;
-	void *address_block_0 = NULL;
 	uint64_t block_size_rtvd = 0;
-	int origin_server_id = 0;
 	struct stat *stats = NULL;
 	int32_t file_desc = 0;
 	std::size_t found = 0;
@@ -1447,7 +1476,6 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 	std::vector<std::string> ignore_paths = parse_path_list(args.ignore_paths_list, args.mount_point);
 
 	char *POLICY = args.policy;
-	const int64_t number_of_data_servers = args.num_data_servers;
 	uint32_t act_nodes = number_active_storage_servers.load();
 	active_data_servers = (act_nodes > 0) ? act_nodes : (u_int32_t)args.num_data_servers;
 
@@ -1456,302 +1484,265 @@ int32_t map_records::Snapshot(uint64_t block_size, const char *snapshot_dir, int
 		is_shared_memory = 1;
 	}
 
-	char *reconstructed_data_file = NULL;
-	off_t block_offset = 0;
-
-	// in order to avoid locks and syncronizations:
-	// server 0 checks for a file to be snapshoting.
-	// server 0 sends a signal to all servers to find and "reduce" all its
-	// data about this file.
-	// all servers sends its data to server 0.
-	// Server 0 find and "reduce" all its data about the file.
-	// Server 0 collects and re-structure all the data comming from others servers and write the final file.
-
-	std::vector<std::pair<std::string, int>> snapshot_entries;
+	std::vector<std::pair<std::string, int>> producer_entries;
 	{
 		std::unique_lock<std::mutex> lock(*mut);
-		snapshot_entries.assign(buffer_snapshot.begin(), buffer_snapshot.end());
+		producer_entries.assign(buffer_snapshot_producer.begin(), buffer_snapshot_producer.end());
 	}
-	for (const auto &it : snapshot_entries)
+
+	for (const auto &it : producer_entries)
 	{
 		key = it.first;
 		if (key.empty())
 		{
-			fprintf(stderr, "Key is missing\n");
 			continue;
 		}
-		slog_debug("Processing key=%s", key.c_str());
-		origin_server_id = it.second;
 
-		slog_debug("origin_server_id=%d", origin_server_id);
+		slog_debug("[SnapshotProducer] Processing local file key=%s", key.c_str());
 
-		if (origin_server_id == -1)
+		pos = key.find('$');
+		if (pos == std::string::npos)
 		{
-			pos = key.find('$');
-			if (pos == std::string::npos)
+			slog_error("HERCULES_ERR_MISSFORMAT_KEY: %s", key.c_str());
+			continue;
+		}
+		pos += 1;
+		block = key.substr(pos, key.length() + 1);
+		if (block.empty())
+		{
+			continue;
+		}
+		block_number = stoi(block, 0, 10);
+		pos -= 1;
+		data_uri = key.substr(0, pos);
+		file_name = data_uri.substr(strlen("imss://"));
+		sprintf(expected_uri, "imss://%s", file_name.c_str());
+
+		if (!should_snapshot_file(data_uri, snapshot_paths, ignore_paths, args.mount_point))
+		{
+			slog_debug("[SnapshotProducer] Skipping snapshot for %s due to path filters", data_uri.c_str());
+			erase_snapshot_producer_element(key);
+			continue;
+		}
+
+		if (iteration > 0)
+		{
+			if (curr_dataset != nullptr && !strcmp(curr_dataset->uri_, expected_uri) && curr_dataset->n_open > 0)
 			{
-				perror("HERCULES_ERR_MISSFORMAT_KEY");
-				slog_error("HERCULES_ERR_MISSFORMAT_KEY");
+				slog_debug("[SnapshotProducer] Dataset %s not ready (n_open=%d), skipping", curr_dataset->uri_, curr_dataset->n_open);
 				continue;
-			}
-			pos += 1; // +1 to skip '$' on the block number.
-			slog_debug("key=%s, origin_server_id=%d, iteration=%d", key.c_str(), origin_server_id, iteration);
-			block = key.substr(pos, key.length() + 1); // substract the block number from the key.
-			if (block.empty())
-			{
-				fprintf(stderr, "Block number is missing in %s\n", key.c_str());
-				continue;
-			}
-			block_number = stoi(block, 0, 10); //  string to number.
-			pos -= 1;			   // -1 to skip '$' on the data uri.
-			data_uri = key.substr(0, pos);	   // substract the data uri from the key.
-			file_name = data_uri.substr(strlen("imss://"));
-			sprintf(expected_uri, "imss://%s", file_name.c_str());
-
-			if (!should_snapshot_file(data_uri, snapshot_paths, ignore_paths, args.mount_point))
-			{
-				slog_debug("Skipping snapshot for %s due to path filters", data_uri.c_str());
-				erase_snapshot_element(key);
-				continue;
-			}
-
-			// We need at least one iteartion to ensure "curr_dataset" is not
-			// empty.
-			if (iteration > 0)
-			{
-				// if the expected uri is different from the previous iteration,
-				// we are in a block of another dataset. So, we need to get the
-				// information of this dataset and to check it is ready to be
-				// copied to disk or not.
-				if (curr_dataset != nullptr && !strcmp(curr_dataset->uri_, expected_uri) && curr_dataset->n_open > 0)
-				{
-					slog_debug("current_dataset.uri=%s, expected_uri=%s, n_open=%d", curr_dataset->uri_, expected_uri, curr_dataset->n_open);
-					// Skip all blocks of this dataset because is not ready.
-					continue;
-				}
-			}
-
-			// To check if this is a block 0.
-			found = key.find("$0");
-			if (found != std::string::npos)
-			{ // checks if block 0 is for regular file or directory.
-				slog_debug("Block 0 for key %s", key.c_str());
-				ret = get(key, &address_, &block_size_rtvd);
-				if (ret == 0 && global_hierarchical_map != nullptr)
-				{
-					ret = global_hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd);
-				}
-				if (ret == 0)
-				{
-					fprintf(stderr, "key %s not found for snapshot\n", key.c_str());
-					continue;
-				}
-				if (!is_shared_memory)
-				{
-					stats = (struct stat *)address_;
-				}
-				else
-				{ // get block 0 from shared memory.
-					size_t memory_offset = 0;
-					uint32_t stored_block_size = 0;
-					sscanf((const char *)address_, "%lu %d", &memory_offset, &stored_block_size);
-					fprintf(stderr, "memory offset=%lu, stored_block_size=%u\n", memory_offset, stored_block_size);
-					stats = (struct stat *)((char *)args.pool_memory + memory_offset);
-				}
-				if (S_ISDIR(stats->st_mode)) // directory case.
-				{
-					fprintf(stderr, "%s is a directory\n", key.c_str());
-					char dir_path[PATH_MAX];
-					sprintf(dir_path, "%s/%s", snapshot_dir, file_name.c_str());
-					Make_directory(dir_path);
-					erase_snapshot_element(key);
-					continue;
-				}
-				// Send a message to all servers telling this servers needs the information.
-
-				// Deletes all information related to this uri from the local arrays. it ensures the dataset information will be updated from the remote metadata server.
-				clear_dataset(expected_uri);
-
-				// To get dataset info from the metadata server. here
-				// "curr_dataset" is filled.
-				file_desc = open_dataset(expected_uri, 0);
-				if (file_desc < 0)
-				{
-					continue;
-				}
-				iteration++;
-
-				if (curr_dataset != nullptr)
-				{
-					slog_debug("curr_dataset.n_open=%d", curr_dataset->n_open);
-					if (curr_dataset->n_open > 0)
-					{
-						fprintf(stderr, "Dataset %s is not ready, n_open=%d\n", curr_dataset->uri_, curr_dataset->n_open);
-						slog_debug("Dataset %s is not ready, n_open=%d", curr_dataset->uri_, curr_dataset->n_open);
-						continue;
-					}
-				}
-
-				ensure_inter_backend_connected(args.imss_uri);
-				// Send the message to all servers.
-				char broadcast_request[PATH_MAX + 1024];
-				sprintf(broadcast_request, "BROADCAST %s %d", expected_uri, args.id);
-				SendBroadcastMessage(args.id, active_data_servers, broadcast_request);
-
-				file_size = stats->st_size;
-
-				uint64_t file_size_occupied = 0;
-				// This server add their data.
-				fprintf(stderr, "Performing Snapshopt from file %s in data server %d\n", expected_uri, args.id);
-				t = clock();
-				char *data_ = GetDataOfFile(expected_uri, &file_size_occupied);
-				sprintf(expected_key_format, "%s$%d", expected_uri, args.id);
-				put_broadcast((string)expected_key_format, data_, (data_ != NULL) ? file_size_occupied : 0);
-				t = clock() - t;
-				time_taken_for_collecting = ((double)t) / (CLOCKS_PER_SEC);
-
-				off_t size_of_merge_data = 0;
-				slog_debug("Merge data of file %s with size %ld", file_name.c_str(), file_size);
-				t = clock();
-				// Merge the data from all servers.
-				char *full_data_from_file = MergeData(&size_of_merge_data, active_data_servers, file_size, block_size);
-				if (full_data_from_file == NULL)
-				{
-					fprintf(stderr, "Data from file %s has not been merge in server %d\n", file_name.c_str(), args.id);
-					slog_error("HERCULES_ERR_MERGE_DATA_SNAPSHOT");
-					perror("HERCULES_ERR_MERGE_DATA_SNAPSHOT");
-					if (data_ != NULL)
-					{
-						free(data_);
-					}
-					continue;
-				}
-				t = clock() - t;
-				time_taken_for_merge = ((double)t) / (CLOCKS_PER_SEC);
-
-				t = clock();
-				int fd = Open_file(snapshot_dir, file_name.c_str());
-				slog_debug("writting %lu bytes to disk with the name %s", size_of_merge_data, file_name.c_str());
-				ssize_t written_bytes_in_disk = Write_2_disk(fd, full_data_from_file, size_of_merge_data, 0);
-				fprintf(stderr, "Writting %lu bytes to disk from %d servers with the name %s, written_bytes_in_disk=%zd\n", size_of_merge_data, active_data_servers, file_name.c_str(), written_bytes_in_disk);
-
-				Close_file(fd, "HERCULES_ERR_SNAPSHOT_CLOSE_FILE");
-
-				t = clock() - t;
-				time_taken_for_writting = ((double)t) / (CLOCKS_PER_SEC);
-
-				if (full_data_from_file != NULL)
-				{
-					free(full_data_from_file);
-				}
-
-				continue_exe = 1;
-
-				slog_time("%d,%d,%s,%lu,%f,%f,%f,%f,%f,%f,%lu,%f,%f,%s",
-					  active_data_servers,
-					  server_id,
-					  data_hostname,
-					  written_bytes_in_disk,
-					  (double)written_bytes_in_disk / 1024 / 1024,
-					  (double)written_bytes_in_disk / 1024 / 1024 / 1024,
-					  time_taken_for_writting,
-					  (double)written_bytes_in_disk / time_taken_for_writting,
-					  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024,
-					  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024 / 1024,
-					  block_size,
-					  time_taken_for_collecting,
-					  time_taken_for_merge,
-					  POLICY);
-
-				int find = erase_snapshot_element(key);
-				if (find)
-				{
-					slog_debug("Element %s has been deleted", key.c_str());
-					break;
-				}
-				else
-				{
-					slog_warn("Element %s has NOT been deleted", key.c_str());
-				}
 			}
 		}
-		else
+
+		found = key.find("$0");
+		if (found != std::string::npos)
 		{
-			// Other blocks differents to 0 in this map
-			// means that there are a server waiting for
-			// the data.
-			if (!should_snapshot_file(key, snapshot_paths, ignore_paths, args.mount_point))
+			slog_debug("[SnapshotProducer] Found block 0 for key %s", key.c_str());
+			ret = get(key, &address_, &block_size_rtvd);
+			if (ret == 0 && global_hierarchical_map != nullptr)
 			{
-				slog_debug("Skipping snapshot reduce for %s due to path filters", key.c_str());
-				erase_snapshot_element(key);
+				ret = global_hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd);
+			}
+			if (ret == 0)
+			{
+				slog_warn("[SnapshotProducer] Key %s not found in maps", key.c_str());
+				continue;
+			}
+			if (!is_shared_memory)
+			{
+				stats = (struct stat *)address_;
+			}
+			else
+			{
+				size_t memory_offset = 0;
+				uint32_t stored_block_size = 0;
+				sscanf((const char *)address_, "%lu %d", &memory_offset, &stored_block_size);
+				stats = (struct stat *)((char *)args.pool_memory + memory_offset);
+			}
+			if (S_ISDIR(stats->st_mode))
+			{
+				slog_debug("[SnapshotProducer] %s is a directory", key.c_str());
+				char dir_path[PATH_MAX];
+				sprintf(dir_path, "%s/%s", snapshot_dir, file_name.c_str());
+				Make_directory(dir_path);
+				erase_snapshot_producer_element(key);
 				continue;
 			}
 
-			uint64_t file_size_occupied = 0;
-			t = clock();
-			char *data_ = GetDataOfFile(key, &file_size_occupied);
-			if (data_ == NULL)
-			{
-				file_size_occupied = 0;
-			}
-			t = clock() - t;
-			time_taken_for_collecting = ((double)t) / (CLOCKS_PER_SEC);
+			clear_dataset(expected_uri);
 
-			// char key_[REQUEST_SIZE];
-			int n_server_ = origin_server_id;
-			// Deletes all information related to this uri from the local arrays. it ensures the dataset information will be updated from the remote metadata server.
-			clear_dataset((char *)key.c_str());
+			file_desc = open_dataset(expected_uri, 0);
+			if (file_desc < 0)
+			{
+				continue;
+			}
+			iteration++;
+
+			if (curr_dataset != nullptr && curr_dataset->n_open > 0)
+			{
+				slog_debug("[SnapshotProducer] Dataset %s is not ready, n_open=%d", curr_dataset->uri_, curr_dataset->n_open);
+				continue;
+			}
 
 			ensure_inter_backend_connected(args.imss_uri);
 
-			// To get dataset info from the metadata server. here
-			// "curr_dataset" is filled.
-			file_desc = open_dataset((char *)key.c_str(), 0);
-			if (file_desc < 0)
+			char broadcast_request[PATH_MAX + 1024];
+			sprintf(broadcast_request, "BROADCAST %s %d", expected_uri, args.id);
+			SendBroadcastMessage(args.id, active_data_servers, broadcast_request);
+
+			file_size = stats->st_size;
+
+			uint64_t file_size_occupied = 0;
+			slog_debug("[SnapshotProducer] Performing Snapshot for file %s on data server %d", expected_uri, args.id);
+			t = clock();
+			char *data_ = GetDataOfFile(expected_uri, &file_size_occupied);
+			sprintf(expected_key_format, "%s$%d", expected_uri, args.id);
+			put_broadcast((string)expected_key_format, data_, (data_ != NULL) ? file_size_occupied : 0);
+			t = clock() - t;
+			time_taken_for_collecting = ((double)t) / (CLOCKS_PER_SEC);
+
+			off_t size_of_merge_data = 0;
+			slog_debug("[SnapshotProducer] Merging data of file %s with size %ld", file_name.c_str(), file_size);
+			t = clock();
+			char *full_data_from_file = MergeData(&size_of_merge_data, active_data_servers, file_size, block_size);
+			if (full_data_from_file == NULL)
 			{
+				slog_error("HERCULES_ERR_MERGE_DATA_SNAPSHOT: file %s", file_name.c_str());
 				if (data_ != NULL)
 				{
 					free(data_);
 				}
-				erase_snapshot_element(key);
 				continue;
 			}
+			t = clock() - t;
+			time_taken_for_merge = ((double)t) / (CLOCKS_PER_SEC);
 
-			// buffer_broadcast
-			if (set_data_server_reduce(server_id, n_server_, (data_ != NULL) ? data_ : "", file_size_occupied, key.c_str()) < 0)
+			t = clock();
+			int fd = Open_file(snapshot_dir, file_name.c_str());
+			ssize_t written_bytes_in_disk = Write_2_disk(fd, full_data_from_file, size_of_merge_data, 0);
+			fprintf(stderr, "Writting %lu bytes to disk from %d servers with the name %s, written_bytes_in_disk=%zd\n",
+				size_of_merge_data, active_data_servers, file_name.c_str(), written_bytes_in_disk);
+
+			Close_file(fd, "HERCULES_ERR_SNAPSHOT_CLOSE_FILE");
+			t = clock() - t;
+			time_taken_for_writting = ((double)t) / (CLOCKS_PER_SEC);
+
+			if (full_data_from_file != NULL)
 			{
-				perror("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
-				slog_error("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
-				if (data_ != NULL)
-				{
-					free(data_);
-				}
-				erase_snapshot_element(key);
-				continue;
+				free(full_data_from_file);
 			}
 
+			continue_exe = 1;
+
+			slog_time("%d,%d,%s,%lu,%f,%f,%f,%f,%f,%f,%lu,%f,%f,%s",
+				  active_data_servers,
+				  server_id,
+				  data_hostname,
+				  written_bytes_in_disk,
+				  (double)written_bytes_in_disk / 1024 / 1024,
+				  (double)written_bytes_in_disk / 1024 / 1024 / 1024,
+				  time_taken_for_writting,
+				  (double)written_bytes_in_disk / time_taken_for_writting,
+				  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024,
+				  (double)written_bytes_in_disk / time_taken_for_writting / 1024 / 1024 / 1024,
+				  block_size,
+				  time_taken_for_collecting,
+				  time_taken_for_merge,
+				  POLICY);
+
+			erase_snapshot_producer_element(key);
+			break;
+		}
+	}
+
+	return continue_exe;
+}
+
+int32_t map_records::SnapshotConsumer(int finish, int server_id, char *data_hostname, struct arguments args)
+{
+	clock_t t;
+	double time_taken_for_collecting = 0.0;
+	int continue_exe = 0;
+	string key;
+	int origin_server_id = 0;
+	int32_t file_desc = 0;
+
+	std::vector<std::string> snapshot_paths = parse_path_list(args.snapshot_paths_list, args.mount_point);
+	std::vector<std::string> ignore_paths = parse_path_list(args.ignore_paths_list, args.mount_point);
+
+	std::vector<std::pair<std::string, int>> consumer_entries;
+	{
+		std::unique_lock<std::mutex> lock(*mut);
+		consumer_entries.assign(buffer_snapshot_consumer.begin(), buffer_snapshot_consumer.end());
+	}
+
+	for (const auto &it : consumer_entries)
+	{
+		key = it.first;
+		if (key.empty())
+		{
+			continue;
+		}
+		origin_server_id = it.second;
+		slog_debug("[SnapshotConsumer] Processing broadcast request for key=%s from server=%d", key.c_str(), origin_server_id);
+
+		if (!should_snapshot_file(key, snapshot_paths, ignore_paths, args.mount_point))
+		{
+			slog_debug("[SnapshotConsumer] Skipping snapshot reduce for %s due to path filters", key.c_str());
+			erase_snapshot_consumer_element(key);
+			continue;
+		}
+
+		uint64_t file_size_occupied = 0;
+		t = clock();
+		char *data_ = GetDataOfFile(key, &file_size_occupied);
+		if (data_ == NULL)
+		{
+			file_size_occupied = 0;
+		}
+		t = clock() - t;
+		time_taken_for_collecting = ((double)t) / (CLOCKS_PER_SEC);
+
+		int n_server_ = origin_server_id;
+		clear_dataset((char *)key.c_str());
+
+		ensure_inter_backend_connected(args.imss_uri);
+
+		file_desc = open_dataset((char *)key.c_str(), 0);
+		if (file_desc < 0)
+		{
 			if (data_ != NULL)
 			{
 				free(data_);
 			}
-
-			slog_debug("Data sent to server %d", n_server_);
-
-			continue_exe = 1;
-
-			int find = erase_snapshot_element(key);
-			if (find)
-			{
-				slog_debug("Element %s has been deleted", key.c_str());
-				break;
-			}
-			else
-			{
-				slog_warn("Element %s has NOT been deleted", key.c_str());
-			}
+			erase_snapshot_consumer_element(key);
+			continue;
 		}
+
+		if (set_data_server_reduce(server_id, n_server_, (data_ != NULL) ? data_ : "", file_size_occupied, key.c_str()) < 0)
+		{
+			perror("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
+			slog_error("HERCULES_ERR_SET_DATA_SERVER_REDUCE");
+			if (data_ != NULL)
+			{
+				free(data_);
+			}
+			erase_snapshot_consumer_element(key);
+			continue;
+		}
+
+		if (data_ != NULL)
+		{
+			free(data_);
+		}
+
+		slog_debug("[SnapshotConsumer] Reduced blocks for %s sent to coordinator server %d (size=%lu)",
+			   key.c_str(), n_server_, file_size_occupied);
+
+		continue_exe = 1;
+		erase_snapshot_consumer_element(key);
+		break;
 	}
-	slog_debug("Ending Snapshot");
 
 	return continue_exe;
 }
@@ -1804,7 +1795,8 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 	std::vector<std::pair<std::string, int>> checkpoint_entries;
 	{
 		std::unique_lock<std::mutex> lock(*mut);
-		checkpoint_entries.assign(buffer_snapshot.begin(), buffer_snapshot.end());
+		checkpoint_entries.assign(buffer_snapshot_producer.begin(), buffer_snapshot_producer.end());
+		checkpoint_entries.insert(checkpoint_entries.end(), buffer_snapshot_consumer.begin(), buffer_snapshot_consumer.end());
 	}
 	for (const auto &it : checkpoint_entries)
 	{
@@ -1983,7 +1975,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 					  time_taken_for_merge,
 					  POLICY);
 
-				int find = erase_snapshot_element(key);
+				int find = erase_snapshot_producer_element(key);
 				if (find)
 				{
 					slog_debug("Element %s has been deleted", key.c_str());
@@ -2026,7 +2018,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 				{
 					free(data_);
 				}
-				erase_snapshot_element(key);
+				erase_snapshot_consumer_element(key);
 				continue;
 			}
 
@@ -2039,7 +2031,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 				{
 					free(data_);
 				}
-				erase_snapshot_element(key);
+				erase_snapshot_consumer_element(key);
 				continue;
 			}
 
@@ -2052,7 +2044,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 
 			continue_exe = 1;
 
-			int find = erase_snapshot_element(key);
+			int find = erase_snapshot_consumer_element(key);
 			if (find)
 			{
 				slog_debug("Element %s has been deleted", key.c_str());

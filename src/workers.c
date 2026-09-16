@@ -45,6 +45,7 @@ char tmp_file_action[20];
 
 // Lock dealing when cleaning blocks
 pthread_mutex_t mutex_snapshot = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_snapshot_consumer = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_checkpoint = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t memory_protect = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutext_malleability = PTHREAD_MUTEX_INITIALIZER;
@@ -101,6 +102,7 @@ int global_finish_dispatcher = 0;
 pthread_cond_t global_broadcast_cond;
 pthread_cond_t global_finish_cond;
 pthread_cond_t global_run_snapshot_cond;
+pthread_cond_t global_run_snapshot_consumer_cond = PTHREAD_COND_INITIALIZER;
 pthread_cond_t global_run_checkpoint_cond;
 pthread_mutex_t global_finish_mut = PTHREAD_MUTEX_INITIALIZER;
 
@@ -2361,8 +2363,9 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		slog_debug("BROADCAST condition, req=%s, mode=%s, uri_=%s, sender=%d", req, mode, uri_, sender);
 		ensure_inter_backend_connected(arguments->args->imss_uri);
 		map->put_snapshot(uri_, sender);
-		fprintf(stderr, "Sending signal to do Snapshot in server %d\n", arguments->args->id);
-		pthread_cond_signal(&global_run_snapshot_cond);
+		fprintf(stderr, "Sending signal to do Snapshot Consumer in server %d\n", arguments->args->id);
+		slog_debug("[BROADCAST] Signaled SnapshotConsumer for uri=%s, sender=%d", uri_, sender);
+		pthread_cond_signal(&global_run_snapshot_consumer_cond);
 		pthread_cond_signal(&global_run_checkpoint_cond);
 		return 0;
 	}
@@ -4002,10 +4005,45 @@ void *Checkpoint(void *th_argv)
 	pthread_exit(NULL);
 }
 
-// Thread method to copy datasets from Hercules to Disk.
+// Thread method attending broadcast requests from peer data servers for Snapshot reduction.
+void *SnapshotConsumerWorker(void *th_argv)
+{
+	slog_debug("[SnapshotConsumer] Starting Snapshot Consumer worker thread");
+
+	p_argv *arguments = (p_argv *)th_argv;
+	std::shared_ptr<map_records> map = arguments->map;
+	const int server_id = arguments->args->id;
+
+	for (;;)
+	{
+		pthread_mutex_lock(&mutex_snapshot_consumer);
+
+		int ret = map->SnapshotConsumer(global_finish_snapshot, server_id, arguments->args->data_hostname, *arguments->args);
+		if (ret != 1)
+		{
+			if (global_finish_snapshot == SNAPSHOT_STATE_STOP_REQUESTED)
+			{
+				slog_debug("[SnapshotConsumer] Stop requested and consumer queue empty, exiting worker");
+				pthread_mutex_unlock(&mutex_snapshot_consumer);
+				break;
+			}
+			slog_debug("[SnapshotConsumer] Consumer queue empty, waiting for broadcast signal");
+			pthread_cond_wait(&global_run_snapshot_consumer_cond, &mutex_snapshot_consumer);
+			pthread_mutex_unlock(&mutex_snapshot_consumer);
+			continue;
+		}
+
+		pthread_mutex_unlock(&mutex_snapshot_consumer);
+	}
+
+	slog_debug("[SnapshotConsumer] Ending Snapshot Consumer worker thread");
+	pthread_exit(NULL);
+}
+
+// Thread method to copy datasets from Hercules to Disk (Producer and Manager).
 void *Snapshot(void *th_argv)
 {
-	slog_debug("Init Snapshot");
+	slog_debug("Init Snapshot (Producer / Manager)");
 
 	clock_t t;
 	double time_taken;
@@ -4031,31 +4069,47 @@ void *Snapshot(void *th_argv)
 		pthread_exit(NULL);
 	}
 
+	// Spawn dedicated SnapshotConsumer companion thread (Option A)
+	pthread_t consumer_thread;
+	slog_debug("[SnapshotProducer] Spawning Snapshot Consumer worker thread");
+	if (pthread_create(&consumer_thread, NULL, SnapshotConsumerWorker, th_argv) != 0)
+	{
+		perror("HERCULES_ERR_SNAPSHOT_CONSUMER_SPAWN");
+		slog_error("HERCULES_ERR_SNAPSHOT_CONSUMER_SPAWN");
+		pthread_mutex_lock(&global_finish_mut);
+		global_finish_snapshot = SNAPSHOT_STATE_FINISHED;
+		pthread_cond_signal(&global_finish_cond);
+		pthread_mutex_unlock(&global_finish_mut);
+		pthread_exit(NULL);
+	}
+
 	fprintf(stderr, "Running Snapshot in %s\n", snapshot_dir);
 	int ret = 1;
 	for (;;)
 	{
 		pthread_mutex_lock(&mutex_snapshot);
 
-		slog_debug("Running Snapshot in %s", snapshot_dir);
-		
+		slog_debug("Running SnapshotProducer in %s", snapshot_dir);
+
 		// Note: ensure_inter_backend_connected cannot be called here because it gets the number
 		// of data servers that have been connected from the metadata server. At this point,
 		// that generates a race condition because some data servers will ask at different times
 		// while others are still connecting.
 
 		TIMING_NO_RETURN(
-		    ret = map->Snapshot(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args->id, arguments->args->data_hostname, *arguments->args), "Snapshot", arguments->thread_id);
+		    ret = map->SnapshotProducer(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args->id, arguments->args->data_hostname, *arguments->args), "SnapshotProducer", arguments->thread_id);
 
 		if (ret != 1)
 		{
 			if (global_finish_snapshot == SNAPSHOT_STATE_STOP_REQUESTED)
 			{
+				slog_debug("[SnapshotProducer] Stop requested and producer queue drained, exiting producer loop");
 				pthread_mutex_unlock(&mutex_snapshot);
 				break;
 			}
 			if (global_finish_snapshot == SNAPSHOT_STATE_DRAINING && !snapshot_local_finished)
 			{
+				slog_debug("[SnapshotProducer] Local snapshot pass completed on server %d, signaling drain barrier", server_id);
 				snapshot_local_finished = true;
 				pthread_mutex_lock(&global_finish_mut);
 				pthread_cond_signal(&global_finish_cond);
@@ -4068,6 +4122,22 @@ void *Snapshot(void *th_argv)
 		}
 
 		pthread_mutex_unlock(&mutex_snapshot);
+	}
+
+	// Producer loop finished. Signal consumer in case it is waiting, and join consumer thread.
+	slog_debug("[SnapshotProducer] Waiting for Snapshot Consumer worker to finish");
+	pthread_mutex_lock(&mutex_snapshot_consumer);
+	pthread_cond_signal(&global_run_snapshot_consumer_cond);
+	pthread_mutex_unlock(&mutex_snapshot_consumer);
+
+	if (pthread_join(consumer_thread, NULL) != 0)
+	{
+		perror("HERCULES_ERR_SNAPSHOT_CONSUMER_JOIN");
+		slog_error("HERCULES_ERR_SNAPSHOT_CONSUMER_JOIN");
+	}
+	else
+	{
+		slog_debug("[SnapshotProducer] Snapshot Consumer worker successfully joined");
 	}
 
 	pthread_mutex_lock(&global_finish_mut);
