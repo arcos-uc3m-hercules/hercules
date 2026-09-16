@@ -4014,11 +4014,33 @@ void *SnapshotConsumerWorker(void *th_argv)
 	std::shared_ptr<map_records> map = arguments->map;
 	const int server_id = arguments->args->id;
 
+	size_t consumer_ops_count = 0;
+	clock_t total_consumer_cpu_ticks = 0;
+	double total_consumer_wall_sec = 0.0;
+
 	for (;;)
 	{
 		pthread_mutex_lock(&mutex_snapshot_consumer);
 
+		struct timespec ts_cons_start, ts_cons_end;
+		clock_t t_cons_start = clock();
+		clock_gettime(CLOCK_MONOTONIC, &ts_cons_start);
+
 		int ret = map->SnapshotConsumer(global_finish_snapshot, server_id, arguments->args->data_hostname, *arguments->args);
+
+		clock_gettime(CLOCK_MONOTONIC, &ts_cons_end);
+		clock_t t_cons_end = clock();
+
+		if (ret == 1)
+		{
+			double iter_wall = (ts_cons_end.tv_sec - ts_cons_start.tv_sec) + (ts_cons_end.tv_nsec - ts_cons_start.tv_nsec) / 1e9;
+			clock_t iter_cpu = t_cons_end - t_cons_start;
+			consumer_ops_count++;
+			total_consumer_wall_sec += iter_wall;
+			total_consumer_cpu_ticks += iter_cpu;
+			fprintf(stderr, "[SnapshotConsumer] Server %d served broadcast request #%zu in %.6f s (CPU: %.6f s)\n", server_id, consumer_ops_count, iter_wall, ((double)iter_cpu) / CLOCKS_PER_SEC);
+		}
+
 		if (ret != 1)
 		{
 			if (global_finish_snapshot == SNAPSHOT_STATE_STOP_REQUESTED)
@@ -4036,6 +4058,11 @@ void *SnapshotConsumerWorker(void *th_argv)
 		pthread_mutex_unlock(&mutex_snapshot_consumer);
 	}
 
+	if (consumer_ops_count > 0)
+	{
+		fprintf(stderr, "[SnapshotConsumer] Server %d served %zu broadcast request(s) total: %.6f s (CPU: %.6f s)\n", server_id, consumer_ops_count, total_consumer_wall_sec, ((double)total_consumer_cpu_ticks) / CLOCKS_PER_SEC);
+	}
+
 	slog_debug("[SnapshotConsumer] Ending Snapshot Consumer worker thread");
 	pthread_exit(NULL);
 }
@@ -4044,10 +4071,6 @@ void *SnapshotConsumerWorker(void *th_argv)
 void *Snapshot(void *th_argv)
 {
 	slog_debug("Init Snapshot (Producer / Manager)");
-
-	clock_t t;
-	double time_taken;
-	t = clock();
 
 	p_argv *arguments = (p_argv *)th_argv;
 	BLOCK_SIZE = arguments->blocksize * 1024;
@@ -4069,7 +4092,16 @@ void *Snapshot(void *th_argv)
 		pthread_exit(NULL);
 	}
 
-	// Spawn dedicated SnapshotConsumer companion thread (Option A)
+	// Timing variables to measure snapshot operations
+	size_t snapshot_ops_count = 0;
+	clock_t total_producer_cpu_ticks = 0;
+	double total_producer_wall_sec = 0.0;
+
+	struct timespec ts_session_start = {0, 0};
+	clock_t cpu_session_start = 0;
+	int session_started = 0;
+
+	// Spawn dedicated SnapshotConsumer companion thread
 	pthread_t consumer_thread;
 	slog_debug("[SnapshotProducer] Spawning Snapshot Consumer worker thread");
 	if (pthread_create(&consumer_thread, NULL, SnapshotConsumerWorker, th_argv) != 0)
@@ -4096,8 +4128,31 @@ void *Snapshot(void *th_argv)
 		// that generates a race condition because some data servers will ask at different times
 		// while others are still connecting.
 
+		struct timespec ts_prod_start, ts_prod_end;
+		clock_t t_prod_start = clock();
+		clock_gettime(CLOCK_MONOTONIC, &ts_prod_start);
+
 		TIMING_NO_RETURN(
 		    ret = map->SnapshotProducer(BLOCK_SIZE, snapshot_dir, global_finish_snapshot, arguments->args->id, arguments->args->data_hostname, *arguments->args), "SnapshotProducer", arguments->thread_id);
+
+		clock_gettime(CLOCK_MONOTONIC, &ts_prod_end);
+		clock_t t_prod_end = clock();
+
+		if (ret == 1)
+		{
+			double iter_wall = (ts_prod_end.tv_sec - ts_prod_start.tv_sec) + (ts_prod_end.tv_nsec - ts_prod_start.tv_nsec) / 1e9;
+			clock_t iter_cpu = t_prod_end - t_prod_start;
+			if (!session_started)
+			{
+				clock_gettime(CLOCK_MONOTONIC, &ts_session_start);
+				cpu_session_start = t_prod_start;
+				session_started = 1;
+			}
+			snapshot_ops_count++;
+			total_producer_wall_sec += iter_wall;
+			total_producer_cpu_ticks += iter_cpu;
+			fprintf(stderr, "[Snapshot] Server %d snapshotted file #%zu in %.6f s (CPU: %.6f s)\n", server_id, snapshot_ops_count, iter_wall, ((double)iter_cpu) / CLOCKS_PER_SEC);
+		}
 
 		if (ret != 1)
 		{
@@ -4117,6 +4172,12 @@ void *Snapshot(void *th_argv)
 			}
 			fprintf(stderr, "Waiting for signal to unlock snapshot in server %d\n", server_id);
 			pthread_cond_wait(&global_run_snapshot_cond, &mutex_snapshot);
+			if (!session_started)
+			{
+				clock_gettime(CLOCK_MONOTONIC, &ts_session_start);
+				cpu_session_start = clock();
+				session_started = 1;
+			}
 			pthread_mutex_unlock(&mutex_snapshot);
 			continue;
 		}
@@ -4130,6 +4191,10 @@ void *Snapshot(void *th_argv)
 	pthread_cond_signal(&global_run_snapshot_consumer_cond);
 	pthread_mutex_unlock(&mutex_snapshot_consumer);
 
+	struct timespec ts_join_start, ts_join_end;
+	clock_t t_join_start = clock();
+	clock_gettime(CLOCK_MONOTONIC, &ts_join_start);
+
 	if (pthread_join(consumer_thread, NULL) != 0)
 	{
 		perror("HERCULES_ERR_SNAPSHOT_CONSUMER_JOIN");
@@ -4140,15 +4205,36 @@ void *Snapshot(void *th_argv)
 		slog_debug("[SnapshotProducer] Snapshot Consumer worker successfully joined");
 	}
 
+	clock_gettime(CLOCK_MONOTONIC, &ts_join_end);
+	clock_t t_join_end = clock();
+	double join_wall_sec = (ts_join_end.tv_sec - ts_join_start.tv_sec) + (ts_join_end.tv_nsec - ts_join_start.tv_nsec) / 1e9;
+	clock_t join_cpu_ticks = t_join_end - t_join_start;
+
 	pthread_mutex_lock(&global_finish_mut);
 	global_finish_snapshot = SNAPSHOT_STATE_FINISHED;
 	pthread_cond_signal(&global_finish_cond);
 	pthread_mutex_unlock(&global_finish_mut);
 
-	t = clock() - t;
-	time_taken = ((double)t) / (CLOCKS_PER_SEC);
+	double total_effective_wall_sec = total_producer_wall_sec + join_wall_sec;
+	double total_effective_cpu_sec = ((double)(total_producer_cpu_ticks + join_cpu_ticks)) / CLOCKS_PER_SEC;
 
-	fprintf(stderr, "Ending Snapshot thread.\n");
+	fprintf(stderr, "[Snapshot] Snapshot Timing Report (Server %d) \n", server_id);
+	fprintf(stderr, "[Snapshot] Files snapshotted: %zu\n", snapshot_ops_count);
+	fprintf(stderr, "[Snapshot] Total effective snapshot time: %.6f seconds (CPU time: %.6f seconds)\n", total_effective_wall_sec, total_effective_cpu_sec);
+	fprintf(stderr, "[Snapshot]   - Producer write/merge time: %.6f seconds (CPU: %.6f seconds)\n", total_producer_wall_sec, ((double)total_producer_cpu_ticks) / CLOCKS_PER_SEC);
+	fprintf(stderr, "[Snapshot]   - Consumer synchronization time: %.6f seconds (CPU: %.6f seconds)\n",
+		join_wall_sec, ((double)join_cpu_ticks) / CLOCKS_PER_SEC);
+
+	if (session_started)
+	{
+		struct timespec ts_session_end;
+		clock_gettime(CLOCK_MONOTONIC, &ts_session_end);
+		double session_wall_sec = (ts_session_end.tv_sec - ts_session_start.tv_sec) + (ts_session_end.tv_nsec - ts_session_start.tv_nsec) / 1e9;
+		double session_cpu_sec = ((double)(clock() - cpu_session_start)) / CLOCKS_PER_SEC;
+		fprintf(stderr, "[Snapshot] Active snapshot session duration: %.6f seconds (CPU: %.6f seconds)\n", session_wall_sec, session_cpu_sec);
+	}
+	fprintf(stderr, "[Snapshot] Snapshot Timing Report (Server %d) \n", server_id);
+
 	pthread_exit(NULL);
 }
 
