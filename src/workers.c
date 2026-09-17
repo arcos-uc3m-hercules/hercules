@@ -134,6 +134,7 @@ size_t global_offset = 0;
 std::vector<PendingRequestInfo> pending_requests;
 static pthread_mutex_t stop_server_mutex = PTHREAD_MUTEX_INITIALIZER;
 static std::map<int, PendingRequestInfo> stop_server_pending_requests;
+static std::map<int, struct timespec> stop_server_signal_timestamps;
 static struct timespec stop_server_start_ts = {0, 0};
 static clock_t stop_server_start_cpu = 0;
 
@@ -584,7 +585,7 @@ int32_t ensure_inter_backend_connected(const char *imss_uri)
 	return 0;
 }
 
-int wait_drain_data_server(int server_id)
+int wait_drain_data_server(int server_id, struct timespec stop_signal_ts)
 {
 	if (ucp_worker_meta == NULL || stat_eps == NULL || stat_eps[0] == NULL)
 	{
@@ -592,8 +593,8 @@ int wait_drain_data_server(int server_id)
 		return 0;
 	}
 
-	char stop_msg[64] = {0};
-	snprintf(stop_msg, sizeof(stop_msg), "%s %d", MSG_STOP_SERVER, server_id);
+	char stop_msg[128] = {0};
+	snprintf(stop_msg, sizeof(stop_msg), "%s %d %ld %ld", MSG_STOP_SERVER, server_id, (long)stop_signal_ts.tv_sec, (long)stop_signal_ts.tv_nsec);
 	slog_info("Sending %s to metadata server and waiting for confirmation...", stop_msg);
 	fprintf(stderr, "[Data Server %d] Sending %s to metadata server...\n", server_id, stop_msg);
 
@@ -4292,8 +4293,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	if (!strncmp(req, MSG_STOP_SERVER, strlen(MSG_STOP_SERVER)))
 	{
 		int sender_id = -1;
-		sscanf(req, "%*s %d", &sender_id);
-		slog_info("STOP_SERVER request received from server ID %d", sender_id);
+		long sig_sec = 0, sig_nsec = 0;
+		int parsed = sscanf(req, "%*s %d %ld %ld", &sender_id, &sig_sec, &sig_nsec);
+		if (parsed < 3)
+		{
+			sig_sec = 0;
+			sig_nsec = 0;
+			fprintf(stderr, "Unable to get STOP_SERVER timestamps.\n");
+		}
+		slog_info("STOP_SERVER request received from server ID %d (signal ts: %ld.%09ld)", sender_id, sig_sec, sig_nsec);
 		fprintf(stderr, "STOP_SERVER request received from server ID %d\n", sender_id);
 
 		int snapshot_enabled = (arguments->args != NULL && (strlen(arguments->args->hercules_snapshot_path) > 0)) ? 1 : 0;
@@ -4305,6 +4313,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		}
 
 		pthread_mutex_lock(&stop_server_mutex);
+
+		struct timespec ts_now_realtime;
+		clock_gettime(CLOCK_REALTIME, &ts_now_realtime);
 
 		if (stop_server_pending_requests.empty())
 		{
@@ -4320,15 +4331,29 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		stop_server_pending_requests[sender_id] = pending_info;
 
+		if (sig_sec > 0)
+		{
+			struct timespec sig_ts = {sig_sec, sig_nsec};
+			stop_server_signal_timestamps[sender_id] = sig_ts;
+		}
+
 		int expected_servers = number_active_storage_servers.load() > 0 ? number_active_storage_servers.load() : (arguments->args->num_data_servers > 0 ? arguments->args->num_data_servers : 1);
 
-		struct timespec ts_now;
-		clock_gettime(CLOCK_MONOTONIC, &ts_now);
-		double elapsed_from_first = (ts_now.tv_sec - stop_server_start_ts.tv_sec) + (ts_now.tv_nsec - stop_server_start_ts.tv_nsec) / 1e9;
+		struct timespec ts_now_mono;
+		clock_gettime(CLOCK_MONOTONIC, &ts_now_mono);
+		double elapsed_from_first = (ts_now_mono.tv_sec - stop_server_start_ts.tv_sec) + (ts_now_mono.tv_nsec - stop_server_start_ts.tv_nsec) / 1e9;
 
-		slog_info("[%zu/%d] STOP_SERVER collected (server %d) (+%.6f s from first)", stop_server_pending_requests.size(), expected_servers, sender_id, elapsed_from_first);
-		fprintf(stderr, "[Metadata Server] [%zu/%d] STOP_SERVER collected from server ID %d (+%.6f s from first)\n",
-			stop_server_pending_requests.size(), expected_servers, sender_id, elapsed_from_first);
+		if (sig_sec > 0)
+		{
+			double elapsed_from_server_sig = (ts_now_realtime.tv_sec - sig_sec) + (ts_now_realtime.tv_nsec - sig_nsec) / 1e9;
+			slog_info("[%zu/%d] STOP_SERVER collected from server ID %d (+%.6f s from first, %.6f s from its stop signal)", stop_server_pending_requests.size(), expected_servers, sender_id, elapsed_from_first, elapsed_from_server_sig);
+			fprintf(stderr, "[Metadata Server] [%zu/%d] STOP_SERVER collected from server ID %d (+%.6f s from first, %.6f s from its stop signal)\n", stop_server_pending_requests.size(), expected_servers, sender_id, elapsed_from_first, elapsed_from_server_sig);
+		}
+		else
+		{
+			slog_info("[%zu/%d] STOP_SERVER collected (server %d) (+%.6f s from first)", stop_server_pending_requests.size(), expected_servers, sender_id, elapsed_from_first);
+			fprintf(stderr, "[Metadata Server] [%zu/%d] STOP_SERVER collected from server ID %d (+%.6f s from first)\n", stop_server_pending_requests.size(), expected_servers, sender_id, elapsed_from_first);
+		}
 
 		if ((int)stop_server_pending_requests.size() >= expected_servers)
 		{
@@ -4336,10 +4361,35 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			double total_wall = elapsed_from_first;
 			double total_cpu = ((double)(t_now_cpu - stop_server_start_cpu)) / CLOCKS_PER_SEC;
 
-			slog_info("All %zu STOP_SERVER requests collected in %.6f s (CPU: %.6f s). Responding to all data servers.",
-				  stop_server_pending_requests.size(), total_wall, total_cpu);
-			fprintf(stderr, "[Metadata Server] All %zu STOP_SERVER messages collected in %.6f seconds (CPU: %.6f seconds)\n",
-				stop_server_pending_requests.size(), total_wall, total_cpu);
+			slog_info("All %zu STOP_SERVER requests collected in %.6f s (CPU: %.6f s). Responding to all data servers.", stop_server_pending_requests.size(), total_wall, total_cpu);
+			fprintf(stderr, "[Metadata Server] All %zu STOP_SERVER messages collected in %.6f seconds (CPU: %.6f seconds)\n", stop_server_pending_requests.size(), total_wall, total_cpu);
+
+			if (!stop_server_signal_timestamps.empty())
+			{
+				struct timespec earliest_sig = stop_server_signal_timestamps.begin()->second;
+				struct timespec latest_sig = stop_server_signal_timestamps.begin()->second;
+
+				for (const auto &kv : stop_server_signal_timestamps)
+				{
+					if ((kv.second.tv_sec < earliest_sig.tv_sec) || (kv.second.tv_sec == earliest_sig.tv_sec && kv.second.tv_nsec < earliest_sig.tv_nsec))
+					{
+						earliest_sig = kv.second;
+					}
+					if ((kv.second.tv_sec > latest_sig.tv_sec) || (kv.second.tv_sec == latest_sig.tv_sec && kv.second.tv_nsec > latest_sig.tv_nsec))
+					{
+						latest_sig = kv.second;
+					}
+				}
+
+				double real_stop_wall_sec = (ts_now_realtime.tv_sec - earliest_sig.tv_sec) + (ts_now_realtime.tv_nsec - earliest_sig.tv_nsec) / 1e9;
+				double signal_skew_sec = (latest_sig.tv_sec - earliest_sig.tv_sec) + (latest_sig.tv_nsec - earliest_sig.tv_nsec) / 1e9;
+
+				slog_info("[Metadata Server] Real stop process duration: %.6f seconds (earliest stop signal to all stopped)", real_stop_wall_sec);
+				slog_info("[Metadata Server] Stop signal delivery spread: %.6f seconds across data servers", signal_skew_sec);
+				fprintf(stderr, "[Metadata Server] Real stop process duration: %.6f seconds (earliest stop signal to all stopped)\n", real_stop_wall_sec);
+				fprintf(stderr, "[Metadata Server] Stop signal delivery spread: %.6f seconds across data servers\n", signal_skew_sec);
+			}
+
 			fprintf(stderr, "[Metadata Server] Responding to all data servers to unlock shutdown drain.\n");
 
 			for (const auto &entry : stop_server_pending_requests)
@@ -4351,6 +4401,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				SendConfirmationMessage(&pending_argument, MSG_OK_OP);
 			}
 			stop_server_pending_requests.clear();
+			stop_server_signal_timestamps.clear();
 		}
 		pthread_mutex_unlock(&stop_server_mutex);
 		return 0;

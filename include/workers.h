@@ -133,7 +133,7 @@ void *Checkpoint(void *th_argv);
 void *Snapshot(void *th_argv);
 void *SnapshotConsumerWorker(void *th_argv);
 int32_t ensure_inter_backend_connected(const char *imss_uri);
-int wait_drain_data_server(int server_id);
+int wait_drain_data_server(int server_id, struct timespec stop_signal_ts);
 
 // Thread method searching and cleaning nodes with st_nlink=0
 void *GarbageCollector(void *th_argv);

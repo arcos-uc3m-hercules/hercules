@@ -83,6 +83,7 @@ char main_err_call_arg[] = "main server";
 extern char tmp_file_action[20];
 
 struct timespec global_shutdown_start_ts;
+struct timespec global_shutdown_start_realtime;
 clock_t global_shutdown_start_cpu;
 int global_shutdown_started = 0;
 
@@ -1116,11 +1117,13 @@ void handle_signal_server(int signal)
 {
 	if (signal == SIGUSR1) // suspend or shutdown this server.
 	{
-		struct timespec ts_sig_start, ts_sig_end;
+		struct timespec ts_sig_start, ts_sig_end, ts_sig_realtime;
 		clock_t t_sig_start = clock();
 		clock_gettime(CLOCK_MONOTONIC, &ts_sig_start);
+		clock_gettime(CLOCK_REALTIME, &ts_sig_realtime);
 
 		global_shutdown_start_ts = ts_sig_start;
+		global_shutdown_start_realtime = ts_sig_realtime;
 		global_shutdown_start_cpu = t_sig_start;
 		global_shutdown_started = 1;
 
@@ -1256,7 +1259,7 @@ void handle_signal_server(int signal)
 				clock_gettime(CLOCK_MONOTONIC, &ts_drain_start);
 
 				slog_info("Executing wait/drain phase on data server %d", args.id);
-				wait_drain_data_server(args.id);
+				wait_drain_data_server(args.id, ts_sig_realtime);
 
 				clock_gettime(CLOCK_MONOTONIC, &ts_drain_end);
 				clock_t t_drain_end = clock();
