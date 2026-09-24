@@ -1048,8 +1048,8 @@ void *run_malleability(void *th_argv)
 
 	free(arguments);
 	arguments = NULL;
-	slog_debug("Ending run_malleability.")
-	    pthread_exit(NULL);
+	slog_debug("Ending run_malleability.");
+	pthread_exit(NULL);
 }
 
 void *comissioning_stage(MalleabilityArgs *arguments)
@@ -1191,22 +1191,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			pthread_mutex_unlock(&server_ready_mutex);
 
 			// Send the request to all servers telling they have to updated the list of aviable nodes.
-			char request[REQUEST_SIZE] = {0};
-			int ret = 0;
-			for (size_t i = 0; i < number_active_storage_servers.load(); i++)
-			{
-				sprintf(request, "ADDSERVER %s %" PRId32 " %" PRId32 "", node_to_use, number_active_storage_servers.load(), id_server_to_modify);
-				slog_debug("Sending %s to server ID %ld (%s), number of active storage servers=%d", request, i, curr_global_imss_info->ips[i], number_active_storage_servers.load());
-				slog_debug("Thread id %d", arguments->thread_id);
-				ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
-				if (ret == 0)
-				{
-					perror("HERCULES_ERR_COMISSIONING_STAGE_SEND_REQ_SETSERVER");
-					slog_fatal("HERCULES_ERR_COMISSIONING_STAGE_SEND_REQ_SETSERVER");
-					// TODO: if it fails we continue the loop. We need to ensure consistency between servers so this operation should succeed.
-					// return;
-				}
-			}
+			send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, node_to_use, number_active_storage_servers.load(), id_server_to_modify);
 
 			if (consecutive_commissioning_signals > 0)
 				consecutive_commissioning_signals = 0;
@@ -1245,6 +1230,26 @@ double calculate_trend_slope(const std::vector<double> &y)
 	}
 
 	return numerator / denominator;
+}
+
+int send_add_server_to_all_data_servers(ucp_worker_h ucp_worker, uint32_t thread_id, const char *node_to_use, uint32_t num_active_servers, int32_t id_server_to_modify)
+{
+	char request[REQUEST_SIZE] = {0};
+	int ret = 0;
+	for (size_t i = 0; i < num_active_servers; i++)
+	{
+		sprintf(request, "ADDSERVER %s %" PRIu32 " %" PRId32 "", node_to_use, num_active_servers, id_server_to_modify);
+		slog_debug("Sending %s to server ID %zu (%s), number of active storage servers=%" PRIu32, request, i, (curr_global_imss_info && curr_global_imss_info->ips) ? curr_global_imss_info->ips[i] : "unknown", num_active_servers);
+		slog_debug("Thread id %u", thread_id);
+		ret = send_req(ucp_worker, data_endpoints[i], local_addr[thread_id], local_addr_len[thread_id], request);
+		if (ret == 0)
+		{
+			perror("HERCULES_ERR_COMISSIONING_STAGE_SEND_REQ_SETSERVER");
+			slog_fatal("HERCULES_ERR_COMISSIONING_STAGE_SEND_REQ_SETSERVER");
+			// TODO: if it fails we continue the loop. We need to ensure consistency between servers so this operation should succeed.
+		}
+	}
+	return 0;
 }
 
 int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_used_in_frontend)
@@ -4529,6 +4534,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, time_taken_comm.count());
 		slog_debug("Server %d connected in %.4f seconds", server_id_request, time_taken_comm.count());
+
+		id_server_to_modify = server_id_request;
+		send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, added_hostname, number_active_storage_servers.load(), id_server_to_modify);
 
 		// signal to the Comissioning thread.
 		pthread_mutex_lock(&server_ready_mutex);

@@ -179,6 +179,7 @@ int ShutdownServer();
 void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift);
 size_t update_ips_list(int id_server_to_remove);
 int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_used_in_frontend);
+int send_add_server_to_all_data_servers(ucp_worker_h ucp_worker, uint32_t thread_id, const char *node_to_use, uint32_t num_active_servers, int32_t id_server_to_modify);
 
 /**
  * @brief Re-distribute the blocks of this server to another servers
