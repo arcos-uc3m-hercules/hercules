@@ -834,7 +834,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 	// Check if malleability is enable from the configuration file and if malleability is not running.
 	// Setting MALLEABILITY_INPROGRESS helps to avoid requests until malleability is done.
 	int expected_status = MALLEABILITY_OFF;
-	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && malleability_status.compare_exchange_strong(expected_status, MALLEABILITY_INPROGRESS, std::memory_order_acq_rel))
+	if (malleability_status.compare_exchange_strong(expected_status, MALLEABILITY_INPROGRESS, std::memory_order_acq_rel))
 	{
 		int old_num_servers = number_active_storage_servers.load();
 		int32_t new_number_of_servers = (int32_t)(old_num_servers - 1);

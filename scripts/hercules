@@ -731,12 +731,6 @@ fi
 if [[ "${STATUS}" = "add" ]];
 then
 
-    if [[ ! "$MALLEABILITY" -eq "1" ]]; then
-        echo "Malleability must be enabled on the configuration file to use this option."
-        echo "MALLEABILITY = 1"
-        exit 1
-    fi
-
     if [ ! -f "${HERCULES_ALLOC_DATA_HOSTFILE}" ]; then
         echo "## [add] Error: Allocated data hostfile '${HERCULES_ALLOC_DATA_HOSTFILE}' not found."
         exit 1
@@ -946,30 +940,24 @@ then
         echo "Making metadata hostfile in ${HERCULES_METADATA_HOSTFILE}"
         head -n "${HERCULES_NUM_METADATA}" "${FULL_HOSTFILE}" > "${HERCULES_METADATA_HOSTFILE}"
 
-        if [[ "$MALLEABILITY" -eq 1 ]]; then
-            if [[ -z "${HERCULES_ALLOC_DATA_HOSTFILE}" ]]; then
-                echo "## Error: ALLOC_DATA_HOSTFILE was not defined and it is required when MALLEABILITY=1."
-                echo "## Be sure you defined ALLOC_DATA_HOSTFILE on the configuration file: ${FILE}"
-                STATUS="stop"
-                # StopAllMetadata
-                exit 1
-            fi
-            ## makes the data hostfile containing all the allocated nodes for data servers, this
-            ## nodes can be used on malleability extending operations.
+        if [[ -n "${HERCULES_ALLOC_DATA_HOSTFILE}" ]]; then
             echo "Making file ${HERCULES_ALLOC_DATA_HOSTFILE}"
-            if [[ ${UPPER_BOUND_MALLEABILITY} -lt ${HERCULES_NUM_DATA} ]]; then
-                echo "## Error: UPPER_BOUND_MALLEABILITY (${UPPER_BOUND_MALLEABILITY}) can not be less than HERCULES_NUM_DATA (${HERCULES_NUM_DATA})"
-                STATUS="stop"
-                # StopAllMetadata
-                exit 1
+            if [[ -n "${UPPER_BOUND_MALLEABILITY}" && "${UPPER_BOUND_MALLEABILITY}" -ne "0" ]]; then
+                if [[ ${UPPER_BOUND_MALLEABILITY} -lt ${HERCULES_NUM_DATA} ]]; then
+                    echo "## Error: UPPER_BOUND_MALLEABILITY (${UPPER_BOUND_MALLEABILITY}) can not be less than HERCULES_NUM_DATA (${HERCULES_NUM_DATA})"
+                    STATUS="stop"
+                    exit 1
+                fi
+                tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${UPPER_BOUND_MALLEABILITY}" > "${HERCULES_ALLOC_DATA_HOSTFILE}"
+            else
+                avail_data_nodes=$(tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | wc -l)
+                tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${avail_data_nodes}" > "${HERCULES_ALLOC_DATA_HOSTFILE}"
             fi
-            tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${UPPER_BOUND_MALLEABILITY}" > "${HERCULES_ALLOC_DATA_HOSTFILE}"
             if [[ $? -ne 0 ]]; then
                 echo "Error: Failed to create ${HERCULES_ALLOC_DATA_HOSTFILE}"
                 STATUS="stop"
-                # StopAllMetadata
                 exit 1
-            fi  
+            fi
         fi
     fi
     ## To create an array with the meta nodes.
