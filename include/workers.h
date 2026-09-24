@@ -178,7 +178,7 @@ int ShutdownServer();
 // void Decomissioning_stage(p_argv *arguments, int id_server_to_remove);
 void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift);
 size_t update_ips_list(int id_server_to_remove);
-int send_node_list_2_frontend(p_argv temp_p_argv_for_calls);
+int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_used_in_frontend);
 
 /**
  * @brief Re-distribute the blocks of this server to another servers
