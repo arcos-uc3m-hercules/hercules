@@ -1130,8 +1130,8 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		char *workdir = getenv("PWD");
 
 		sprintf(command_to_exec,
-			"cd %s && LD_LIBRARY_PATH=\"/opt/ohpc/pub/compiler/gcc/12.2.0/lib64:/usr/lib64:/lib64:$LD_LIBRARY_PATH\" "
-			"UCX_NET_DEVICES=ib0 HERCULES_THREAD_POOL=1 HERCULES_CONF=%s %s/build/hercules_server d %d %d "
+			"cd %s && "
+			"HERCULES_THREAD_POOL=1 HERCULES_CONF=%s %s/build/hercules_server d %d %d "
 			"> %s/tmp/hercules_server_%d_log.txt 2>&1",
 			workdir,
 			arguments->args->configuration_file_path,
@@ -4510,7 +4510,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		free(new_imss.conns.peer_addr[0]);
 		free(new_imss.conns.peer_addr);
 
-		pthread_mutex_lock(&mutext_malleability);
+		// pthread_mutex_lock(&mutext_malleability);
 		imss_info *imss_info_struct = curr_global_imss_info;
 		// num_storages is increased inside AddIPS.
 		fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
@@ -4518,7 +4518,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
 		number_active_storage_servers.store(imss_info_struct->num_storages);
 		slog_debug("number_active_storage_servers=%d\n", number_active_storage_servers.load());
-		pthread_mutex_unlock(&mutext_malleability);
+		// pthread_mutex_unlock(&mutext_malleability);
 
 		fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, time_taken_comm.count());
 		slog_debug("Server %d connected in %.4f seconds", server_id_request, time_taken_comm.count());
