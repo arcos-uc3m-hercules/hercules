@@ -31,7 +31,7 @@ SERVER_TYPE=$1
 SERVER_NUMBER=$2
 ACTION=$3 # expected string action, e.g., down when servers are stopped.
 HERCULES_PATH=$4
-ATTEMPS=300
+ATTEMPS=10000
 i=1
 
 ## To check if the temporal directory exists.
