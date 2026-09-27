@@ -1,0 +1,79 @@
+services:
+  hercules-server:
+    build:
+      context: .
+      dockerfile: hercules-dockerfile
+    image: arcosuc3m/hercules:escience2026
+    container_name: hercules-server
+    hostname: hercules-server
+    shm_size: '2gb'
+    depends_on:
+      - hercules-server-2
+    volumes:
+      - hercules-conf:/hercules/conf
+      - /tmp/hercules_snapshot_test:/tmp/hercules_snapshot_test
+    ports:
+      - "7500:7500"
+      - "8500:8500"
+    stdin_open: true
+    tty: true
+
+  hercules-server-2:
+    image: arcosuc3m/hercules:escience2026
+    container_name: hercules-server-2
+    hostname: hercules-server-2
+    shm_size: '2gb'
+    volumes:
+      - hercules-conf:/hercules/conf
+      - /tmp/hercules_snapshot_test:/tmp/hercules_snapshot_test
+    #entrypoint: ["/bin/bash", "-c"]
+    # command: >
+    #   "service ssh restart &&
+    #    echo '===================================================' &&
+    #    echo '  Hercules Server 2 Container is Ready (SSH Active)' &&
+    #    echo '===================================================' &&
+    #    exec bash"
+    stdin_open: true
+    tty: true
+
+  hercules-client:
+    image: arcosuc3m/hercules:escience2026
+    container_name: hercules-client
+    hostname: hercules-client    
+    shm_size: '2gb'
+    working_dir: /dagonstar
+    depends_on:
+      - hercules-server
+      - hercules-server-2
+    volumes:
+      - hercules-conf:/hercules/conf
+    entrypoint: ["/bin/bash", "-c"]
+    command: >
+      "if [ -f /hercules/conf/data_hostfile ]; then
+         cp /hercules/conf/data_hostfile /hercules/data;
+       else
+         echo 'hercules-server' > /hercules/data;
+         if grep -q '/hercules/conf/data_hostfile' /hercules/conf/hercules.conf 2>/dev/null; then
+           echo 'hercules-server' > /hercules/conf/data_hostfile;
+         fi;
+       fi &&
+       if [ -f /hercules/conf/metadata_hostfile ]; then
+         cp /hercules/conf/metadata_hostfile /hercules/metadata;
+       else
+         echo 'hercules-server' > /hercules/metadata;
+         if grep -q '/hercules/conf/metadata_hostfile' /hercules/conf/hercules.conf 2>/dev/null; then
+           echo 'hercules-server' > /hercules/conf/metadata_hostfile;
+         fi;
+       fi &&
+       echo '===================================================' &&
+       echo '  Hercules Client Container is Ready' &&
+       echo '  DagOn* Engine and Tutorial Examples Initialized' &&
+       echo '  Use: python lesson_01_hercules_task.py' &&
+       echo '  Example: hrun ls -la /mnt/hercules/' &&
+       echo '===================================================' &&
+       exec bash"
+    stdin_open: true
+    tty: true
+
+volumes:
+  hercules-conf:
