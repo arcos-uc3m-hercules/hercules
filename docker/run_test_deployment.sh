@@ -1,40 +1,54 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="${SCRIPT_DIR}/hercules-docker-compose.yml"
+IMAGE_NAME="${1:-arcosuc3m/hercules:escience2026}"
+CONTAINER_NAME="hercules-test"
 
 cleanup() {
-    echo "=== Stopping Hercules Deployment with Docker Compose ==="
-    docker compose -f "${COMPOSE_FILE}" down --remove-orphans 2>/dev/null || true
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+        echo "FAILED (Exit Code: $EXIT_CODE) - Dumping Debug Logs:"
+        echo "--- Container Logs ---"
+        docker logs "${CONTAINER_NAME}" 2>&1 || true
+        echo "--- Status Files in /hercules/code/tmp ---"
+        docker exec -i "${CONTAINER_NAME}" ls -la /hercules/code/tmp 2>/dev/null || true
+        docker exec -i "${CONTAINER_NAME}" head -n 20 /hercules/code/tmp/* 2>/dev/null || true
+    fi
+    echo "Stopping and Removing Hercules Container"
+    docker stop "${CONTAINER_NAME}" 2>/dev/null || true
+    docker rm "${CONTAINER_NAME}" 2>/dev/null || true
 }
 trap cleanup EXIT
 
-echo "=== Starting Hercules Deployment with Docker Compose ==="
-docker compose -f "${COMPOSE_FILE}" down --remove-orphans 2>/dev/null || true
-docker compose -f "${COMPOSE_FILE}" up -d
+echo "Starting Hercules Deployment"
+docker stop "${CONTAINER_NAME}" 2>/dev/null || true
+docker rm "${CONTAINER_NAME}" 2>/dev/null || true
 
-echo "=== Waiting for Hercules Servers to Initialize (via check-servers.sh) ==="
-docker exec -i hercules-server /hercules/code/scripts/check-servers.sh m 0 start /hercules/code
-docker exec -i hercules-server /hercules/code/scripts/check-servers.sh d 0 start /hercules/code
-docker exec -i hercules-server /hercules/code/scripts/check-servers.sh d 1 start /hercules/code
-echo "=== Hercules Storage Cluster is Ready (2 Data Servers Active) ==="
+docker run -d -t \
+  --name "${CONTAINER_NAME}" \
+  --hostname localhost \
+  --shm-size=2gb \
+  -p 7500:7500 \
+  -p 8500:8500 \
+  "${IMAGE_NAME}"
 
-echo "=== Checking Server Logs ==="
-echo "--- Server 0 (hercules-server) Logs ---"
-docker logs hercules-server | tail -n 20
-echo "--- Server 1 (hercules-server-2) Logs ---"
-docker logs hercules-server-2 | tail -n 20
+echo "Waiting for Hercules Server to Initialize"
+docker exec -i "${CONTAINER_NAME}" /hercules/code/scripts/check-servers.sh m 0 start /hercules/code
+docker exec -i "${CONTAINER_NAME}" /hercules/code/scripts/check-servers.sh d 0 start /hercules/code
+echo "Hercules Storage is Ready"
 
-echo "=== Checking Client Mount Access ==="
-docker exec -i hercules-client bash -c "
-export HERCULES_CONF=/hercules/conf/hercules.conf
+echo "Checking Server Logs"
+docker logs "${CONTAINER_NAME}" | tail -n 20
+
+echo "Checking Client Mount Access"
+docker exec -i "${CONTAINER_NAME}" bash -c "
+export HERCULES_CONF=/etc/hercules.conf
 export LD_PRELOAD=/hercules/code/build/tools/libhercules_posix.so
 ls -la /mnt/hercules/ || true
 "
 
-echo "=== Running Write and Readback Data Integrity Verification ==="
-docker exec -i hercules-client bash -c '
+echo "Running Write and Readback Data Integrity Verification"
+docker exec -i "${CONTAINER_NAME}" bash -c '
 set -euo pipefail
 
 TEST_SIZE="2M"
@@ -48,7 +62,7 @@ SRC_MD5=$(md5sum "${SRC_FILE}" | awk "{print \$1}")
 echo "[Client] Source MD5: ${SRC_MD5}"
 
 echo "[Client] Writing to Hercules mount (${HERCULES_TARGET})..."
-export HERCULES_CONF=/hercules/conf/hercules.conf
+export HERCULES_CONF=/etc/hercules.conf
 export LD_PRELOAD=/hercules/code/build/tools/libhercules_posix.so
 dd if="${SRC_FILE}" of="${HERCULES_TARGET}" bs=64k count=32 2>/dev/null
 
@@ -60,18 +74,12 @@ DST_MD5=$(md5sum "${DST_FILE}" | awk "{print \$1}")
 echo "[Client] Readback MD5: ${DST_MD5}"
 
 if [ "${SRC_MD5}" = "${DST_MD5}" ]; then
-    echo "==================================================="
-    echo "  SUCCESS: MD5 Checksums Match 100%!"
-    echo "==================================================="
+    echo "SUCCESS: MD5 Checksums Match 100%!"
     exit 0
 else
-    echo "==================================================="
-    echo "  ERROR: Checksum mismatch between write and read!"
-    echo "==================================================="
+    echo "ERROR: Checksum mismatch between write and read!"
     exit 1
 fi
 '
 
-echo "=== Verification Finished Successfully ==="
-
-docker compose -f "${COMPOSE_FILE}" down
+echo "Verification Finished"
