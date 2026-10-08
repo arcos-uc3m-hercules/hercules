@@ -834,7 +834,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 	// Check if malleability is enable from the configuration file and if malleability is not running.
 	// Setting MALLEABILITY_INPROGRESS helps to avoid requests until malleability is done.
 	int expected_status = MALLEABILITY_OFF;
-	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && malleability_status.compare_exchange_strong(expected_status, MALLEABILITY_INPROGRESS, std::memory_order_acq_rel))
+	if (malleability_status.compare_exchange_strong(expected_status, MALLEABILITY_INPROGRESS, std::memory_order_acq_rel))
 	{
 		int old_num_servers = number_active_storage_servers.load();
 		int32_t new_number_of_servers = (int32_t)(old_num_servers - 1);
@@ -1041,15 +1041,15 @@ void *run_malleability(void *th_argv)
 	strncpy(temp_p_argv_for_calls.my_uri, arguments->args->imss_uri, URI_);
 
 	// send to the frontend the updated list of data server nodes.
-	send_node_list_2_frontend(temp_p_argv_for_calls);
+	send_node_list_2_frontend(temp_p_argv_for_calls, -1);
 
 	comissioning_on.store(false, std::memory_order_release);
 	pthread_mutex_unlock(&mutext_malleability);
 
 	free(arguments);
 	arguments = NULL;
-	slog_debug("Ending run_malleability.")
-	    pthread_exit(NULL);
+	slog_debug("Ending run_malleability.");
+	pthread_exit(NULL);
 }
 
 void *comissioning_stage(MalleabilityArgs *arguments)
@@ -1191,22 +1191,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			pthread_mutex_unlock(&server_ready_mutex);
 
 			// Send the request to all servers telling they have to updated the list of aviable nodes.
-			char request[REQUEST_SIZE] = {0};
-			int ret = 0;
-			for (size_t i = 0; i < number_active_storage_servers.load(); i++)
-			{
-				sprintf(request, "ADDSERVER %s %" PRId32 " %" PRId32 "", node_to_use, number_active_storage_servers.load(), id_server_to_modify);
-				slog_debug("Sending %s to server ID %ld (%s), number of active storage servers=%d", request, i, curr_global_imss_info->ips[i], number_active_storage_servers.load());
-				slog_debug("Thread id %d", arguments->thread_id);
-				ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
-				if (ret == 0)
-				{
-					perror("HERCULES_ERR_COMISSIONING_STAGE_SEND_REQ_SETSERVER");
-					slog_fatal("HERCULES_ERR_COMISSIONING_STAGE_SEND_REQ_SETSERVER");
-					// TODO: if it fails we continue the loop. We need to ensure consistency between servers so this operation should succeed.
-					// return;
-				}
-			}
+			send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, node_to_use, number_active_storage_servers.load(), id_server_to_modify);
 
 			if (consecutive_commissioning_signals > 0)
 				consecutive_commissioning_signals = 0;
@@ -1247,7 +1232,27 @@ double calculate_trend_slope(const std::vector<double> &y)
 	return numerator / denominator;
 }
 
-int send_node_list_2_frontend(p_argv temp_p_argv_for_calls)
+int send_add_server_to_all_data_servers(ucp_worker_h ucp_worker, uint32_t thread_id, const char *node_to_use, uint32_t num_active_servers, int32_t id_server_to_modify)
+{
+	char request[REQUEST_SIZE] = {0};
+	int ret = 0;
+	for (size_t i = 0; i < num_active_servers; i++)
+	{
+		sprintf(request, "ADDSERVER %s %" PRIu32 " %" PRId32 "", node_to_use, num_active_servers, id_server_to_modify);
+		slog_debug("Sending %s to server ID %zu (%s), number of active storage servers=%" PRIu32, request, i, (curr_global_imss_info && curr_global_imss_info->ips) ? curr_global_imss_info->ips[i] : "unknown", num_active_servers);
+		slog_debug("Thread id %u", thread_id);
+		ret = send_req(ucp_worker, data_endpoints[i], local_addr[thread_id], local_addr_len[thread_id], request);
+		if (ret == 0)
+		{
+			perror("HERCULES_ERR_COMISSIONING_STAGE_SEND_REQ_SETSERVER");
+			slog_fatal("HERCULES_ERR_COMISSIONING_STAGE_SEND_REQ_SETSERVER");
+			// TODO: if it fails we continue the loop. We need to ensure consistency between servers so this operation should succeed.
+		}
+	}
+	return 0;
+}
+
+int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_used_in_frontend)
 {
 	// send an ACK to the client to continue.
 	char response[PATH_MAX] = {'\0'};
@@ -1267,10 +1272,16 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls)
 			if (open_ret < 0)
 			{
 				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+				fprintf(stderr, "Error creating HERCULES's resources, the process cannot be started\n");
 				return -1;
 			}
 			number_active_storage_servers.store(num_servers);
-			fprintf(stderr, "[send_node_list_2_frontend] number_active_storage_servers=%" PRIu32, number_active_storage_servers.load());
+			fprintf(stderr, "[send_node_list_2_frontend] number_active_storage_servers=%" PRIu32 "\n", number_active_storage_servers.load());
+			if (server_n_used_in_frontend == number_active_storage_servers.load())
+			{
+				slog_debug("Client is right, aborting sending list.");
+				return 2;
+			}
 		}
 
 		curr_global_imss_info = &curr_imss.info;
@@ -3230,14 +3241,15 @@ int handle_write_operation(
 		if (!(server_n_used_in_frontend == number_active_storage_servers.load() || server_n_used_in_frontend == MALLEABILITY_SET_BYPASS))
 		{
 			slog_warn("HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers, number_active_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32, number_active_storage_servers.load(), server_n_used_in_frontend);
+			fprintf(stderr, "HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers, number_active_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32, number_active_storage_servers.load(), server_n_used_in_frontend);
 			// TODO: client does not know at this moment that the block does not corresponding to this server.
 			// We will receive the data but we will not store it, just to progress and then we will tell the
 			// client the new configuration if this deployment.
 
 			p_argv temp_p_argv_for_calls;
 			fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
-			send_node_list_2_frontend(temp_p_argv_for_calls); // Update the server list in the frontend.
-			return -1;
+			if (send_node_list_2_frontend(temp_p_argv_for_calls, server_n_used_in_frontend) != 2) // Update the server list in the frontend.
+				return -1;
 		}
 		if (transfer_mode == CommunicationMode::MODE_NETWORK && expect_ack)
 			SendConfirmationMessage(arguments, MSG_OK_OP); // OK ack.
@@ -4427,7 +4439,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		}
 		p_argv temp_p_argv_for_calls;
 		fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
-		send_node_list_2_frontend(temp_p_argv_for_calls);
+		send_node_list_2_frontend(temp_p_argv_for_calls, -1);
 		return 1;
 	}
 	else if (!strcmp(mode, "SETPERFORMANCE"))
@@ -4522,6 +4534,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, time_taken_comm.count());
 		slog_debug("Server %d connected in %.4f seconds", server_id_request, time_taken_comm.count());
+
+		id_server_to_modify = server_id_request;
+		send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, added_hostname, number_active_storage_servers.load(), id_server_to_modify);
 
 		// signal to the Comissioning thread.
 		pthread_mutex_lock(&server_ready_mutex);

@@ -1796,6 +1796,7 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 
 	// fprintf(stderr, "Connecting to %d servers\n", new_imss.info.num_storages);
 	slog_debug("Connecting to %d servers", new_imss.info.num_storages);
+	// fprintf(stderr, "Connecting to %d servers\n", new_imss.info.num_storages);
 	for (int32_t i = 0; i < new_imss.info.num_storages; i++)
 	{
 		// fprintf(stderr, "node=%s, status=%d, new_imss.info.num_storages=%d\n", new_imss.info.ips[i], new_imss.info.status[i], new_imss.info.num_storages);
@@ -5673,6 +5674,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		}
 	}
 	slog_debug("curr_imss_storages=%d", curr_imss_storages);
+	// fprintf(stderr, "Using %d servers\n", curr_imss_storages);
 
 	if (replication_factor < 0 || curr_imss_storages < 0)
 	{

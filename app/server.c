@@ -252,7 +252,7 @@ int32_t main(int32_t argc, char **argv)
 		bind_port = args.stat_port;
 
 		imss_copy.num_storages = 0;
-		if (strlen(args.alloc_data_hostfile) != 0 && args.malleability == MALLEABILITY_CONF_ENABLED)
+		if (strlen(args.alloc_data_hostfile) != 0)
 		{
 			number_of_hosts = ReadHostfile(args.alloc_data_hostfile, &imss_copy);
 			fprintf(stderr, "Number of hosts in %s are %d\n", args.alloc_data_hostfile, number_of_hosts);
@@ -1335,9 +1335,9 @@ void handle_signal_server(int signal)
 			// the future. On shrink process, this server won't be used,
 			// but backend processes will be still running.
 
-			// Data servers performs malleability operations if it is enabled.
+			// Data servers performs malleability operations if it is enabled or triggered manually.
 			// Malleability is performed only when remove option is used.
-			if (args.type == TYPE_DATA_SERVER && args.malleability == 1)
+			if (args.type == TYPE_DATA_SERVER)
 			{
 				char formated_uri[REQUEST_SIZE] = {0};
 				sprintf(formated_uri, "%" PRIu32 " %s %d", DECOMISSIONING_OP, MSG_REMOVE_SERVER, args.id);
