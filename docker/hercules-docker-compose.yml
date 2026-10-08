@@ -26,13 +26,13 @@ services:
     volumes:
       - hercules-conf:/hercules/conf
       - /tmp/hercules_snapshot_test:/tmp/hercules_snapshot_test
-    #entrypoint: ["/bin/bash", "-c"]
-    # command: >
-    #   "service ssh restart &&
-    #    echo '===================================================' &&
-    #    echo '  Hercules Server 2 Container is Ready (SSH Active)' &&
-    #    echo '===================================================' &&
-    #    exec bash"
+    entrypoint: ["/bin/bash", "-c"]
+    command: >
+      "service ssh restart &&
+       echo '===================================================' &&
+       echo '  Hercules Server 2 Container is Ready (SSH Active)' &&
+       echo '===================================================' &&
+       exec bash"
     stdin_open: true
     tty: true
 

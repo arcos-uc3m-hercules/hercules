@@ -1,0 +1,109 @@
+FROM rockylinux:8
+
+LABEL maintainer="ARCOS Research Group"
+LABEL description="HERCULES Distributed In-Memory File System"
+
+# Install EPEL, PowerTools/CRB, and build dependencies
+RUN dnf install -y epel-release dnf-plugins-core && \
+    dnf config-manager --set-enabled powertools && \
+    dnf install -y \
+      bc \
+      diffutils \
+      openssh-server \
+      openssh-clients \
+      wget \
+      curl \
+      glib2-devel \
+      pkgconfig \
+      gcc \
+      gcc-c++ \
+      make \
+      git \
+      vim \
+      cmake \
+      openmpi \
+      openmpi-devel \
+      gdb \
+      strace \
+    && dnf clean all
+
+# OpenMPI environment on Rocky Linux 8
+ENV PATH="/usr/lib64/openmpi/bin:$PATH" \
+    LD_LIBRARY_PATH="/usr/lib64/openmpi/lib"
+RUN echo "/usr/lib64/openmpi/lib" > /etc/ld.so.conf.d/openmpi.conf && ldconfig
+
+# Generate SSH Host Keys & configure sshd
+RUN ssh-keygen -A && \
+    sed -ri 's/PermitEmptyPasswords no/PermitEmptyPasswords yes/' /etc/ssh/sshd_config && \
+    sed -ri 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -ri 's/^UsePAM yes/UsePAM no/' /etc/ssh/sshd_config && \
+    sed -ri 's/^#?StrictModes.*/StrictModes no/' /etc/ssh/sshd_config && \
+    echo "    StrictHostKeyChecking no" > /etc/ssh/ssh_config
+
+WORKDIR /tmp
+
+# Build and install UCX 1.15.0
+RUN wget --no-check-certificate https://github.com/openucx/ucx/releases/download/v1.15.0/ucx-1.15.0.tar.gz && tar xzf ucx-1.15.0.tar.gz
+WORKDIR /tmp/ucx-1.15.0
+RUN mkdir build
+WORKDIR /tmp/ucx-1.15.0/build
+RUN ../configure --prefix=/usr --libdir=/usr/lib64 && make -j$(nproc) && make install && ldconfig
+RUN rm -rf /tmp/ucx-1.15.0*
+
+# Build and install IOR benchmark
+WORKDIR /tmp
+RUN wget --no-check-certificate https://github.com/hpc/ior/releases/download/4.0.0/ior-4.0.0.tar.gz && tar xzf ior-4.0.0.tar.gz
+WORKDIR /tmp/ior-4.0.0
+RUN ./configure --prefix=/usr/local/
+RUN make -j$(nproc) && make install
+RUN rm -rf /tmp/ior-4.0.0*
+
+# Clone and build HERCULES
+WORKDIR /
+RUN mkdir /hercules
+
+ENV GIT_SSL_NO_VERIFY=1
+WORKDIR /hercules
+ARG REPO_URL=https://github.com/arcos-uc3m-hercules/hercules.git
+ARG BRANCH=dagon
+ARG CACHEBUST=1
+RUN git clone --depth 1 --branch ${BRANCH} ${REPO_URL} code || git clone --depth 1 ${REPO_URL} code
+WORKDIR /hercules/code
+RUN cmake --preset default
+RUN cmake --build --preset default --target install 
+
+WORKDIR /hercules
+RUN echo "localhost" > /hercules/data
+RUN echo "localhost" > /hercules/metadata
+RUN mkdir conf
+RUN cp /hercules/code/conf/hercules-template.conf /hercules/conf/hercules.conf
+RUN sed -ri 's|DATA_HOSTFILE = /home/data_hostfile|DATA_HOSTFILE = /hercules/data|g' /hercules/conf/hercules.conf
+RUN sed -ri 's|METADATA_HOSTFILE = /home/meta_hostfile|METADATA_HOSTFILE = /hercules/metadata|g' /hercules/conf/hercules.conf
+RUN sed -ri 's|/home/hercules|/hercules/code|g' /hercules/conf/hercules.conf
+RUN cp /hercules/conf/hercules.conf /etc/
+ENV H_PATH=/hercules/code
+ENV H_BUILD_PATH=/hercules/code/build
+ENV H_BASH_PATH=/hercules/code/bash
+
+ENV PATH="$PATH:/hercules/code/install/bin:/hercules/code/bash"
+
+RUN ssh-keygen -t rsa -q -f "/root/.ssh/id_rsa" -N ""
+RUN cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys && \
+    chmod 700 /root/.ssh && \
+    chmod 600 /root/.ssh/*
+RUN mkdir -p /var/run/sshd /var/empty/sshd && \
+    chmod 0755 /var/run/sshd && \
+    chmod 0711 /var/empty/sshd
+
+EXPOSE 22 7500 8500
+RUN echo 'alias hrun="HERCULES_CONF=/hercules/conf/hercules.conf LD_PRELOAD=/hercules/code/build/tools/libhercules_posix.so"' >> /root/.bashrc && \
+    echo 'alias hrun="HERCULES_CONF=/hercules/conf/hercules.conf LD_PRELOAD=/hercules/code/build/tools/libhercules_posix.so"' >> /etc/bashrc && \
+    printf '#!/bin/bash\nHERCULES_CONF=/hercules/conf/hercules.conf LD_PRELOAD=/hercules/code/build/tools/libhercules_posix.so exec "$@"\n' > /usr/local/bin/hrun && \
+    chmod +x /usr/local/bin/hrun
+
+COPY entrypoint.sh /hercules/entrypoint.sh
+RUN chmod +x /hercules/entrypoint.sh
+
+WORKDIR /hercules
+
+ENTRYPOINT ["/hercules/entrypoint.sh"]
