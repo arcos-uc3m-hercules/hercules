@@ -733,6 +733,22 @@ int getConfiguration(struct arguments *args)
 	// fprintf(stderr, "ASYNC IO %d\n", ASYNC_IO);
 	// End of Sync or Async I/O.
 
+	// UCX Peer Error Handling mode (0: UCP_ERR_HANDLING_MODE_NONE, 1: UCP_ERR_HANDLING_MODE_PEER).
+	int parsed_ucx_err_peer = 0;
+	if (getenv("HERCULES_UCX_ERR_PEER") != NULL && is_valid_integer(getenv("HERCULES_UCX_ERR_PEER"), &parsed_ucx_err_peer))
+	{
+		args->ucx_err_peer = parsed_ucx_err_peer;
+	}
+	else if (cfg_get(cfg, "UCX_ERR_PEER") && is_valid_integer(cfg_get(cfg, "UCX_ERR_PEER"), &parsed_ucx_err_peer))
+	{
+		args->ucx_err_peer = parsed_ucx_err_peer;
+	}
+	else
+	{
+		args->ucx_err_peer = 0;
+	}
+	hercules_ucx_err_peer = args->ucx_err_peer;
+
 	if (getenv("HERCULES_BUFF_SIZE") != NULL)
 		args->bufsize = atol(getenv("HERCULES_BUFF_SIZE"));
 

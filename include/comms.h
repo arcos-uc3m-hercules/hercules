@@ -201,6 +201,8 @@ struct ucx_context
 	int completed;
 };
 
+extern int hercules_ucx_err_peer;
+
 /**
  * @brief Manages the state of a single asynchronous send operation on the server.
  */

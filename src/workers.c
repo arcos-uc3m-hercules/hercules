@@ -3241,7 +3241,7 @@ int handle_write_operation(
 		if (!(server_n_used_in_frontend == number_active_storage_servers.load() || server_n_used_in_frontend == MALLEABILITY_SET_BYPASS))
 		{
 			slog_warn("HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers, number_active_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32, number_active_storage_servers.load(), server_n_used_in_frontend);
-			fprintf(stderr, "HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers, number_active_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32, number_active_storage_servers.load(), server_n_used_in_frontend);
+			fprintf(stderr, "HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers, number_active_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32 "\n", number_active_storage_servers.load(), server_n_used_in_frontend);
 			// TODO: client does not know at this moment that the block does not corresponding to this server.
 			// We will receive the data but we will not store it, just to progress and then we will tell the
 			// client the new configuration if this deployment.

@@ -29,10 +29,17 @@ pthread_mutex_t lock_network = PTHREAD_MUTEX_INITIALIZER;
 
 // int ep_err_detected = 0;
 
+int hercules_ucx_err_peer = 0;
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+	static ucp_err_handling_mode_t get_ucp_err_mode(void)
+	{
+		return (hercules_ucx_err_peer == 1) ? UCP_ERR_HANDLING_MODE_PEER : UCP_ERR_HANDLING_MODE_NONE;
+	}
 
 	ucs_status_t ucp_mem_alloc(ucp_context_h ucp_context, size_t length, void **address_p)
 	{
@@ -1056,8 +1063,7 @@ extern "C"
 				       UCP_EP_PARAM_FIELD_ERR_HANDLER |
 				       UCP_EP_PARAM_FIELD_USER_DATA;
 		ep_params.address = peer_addr;
-		ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-		// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+		ep_params.err_mode = get_ucp_err_mode();
 		ep_params.err_handler.cb = err_cb_client;
 		ep_params.err_handler.arg = (void *)user_data_args;
 		// ep_params.err_handler.arg = &server_status;
@@ -1112,8 +1118,7 @@ extern "C"
 				       UCP_EP_PARAM_FIELD_ERR_HANDLER |
 				       UCP_EP_PARAM_FIELD_USER_DATA;
 		ep_params.address = peer_addr;
-		ep_params.err_mode = UCP_ERR_HANDLING_MODE_PEER;
-		// ep_params.err_mode = UCP_ERR_HANDLING_MODE_NONE;
+		ep_params.err_mode = get_ucp_err_mode();
 		ep_params.err_handler.cb = err_cb_client;
 		ep_params.err_handler.arg = (void *)user_data_args_aux;
 		// ep_params.err_handler.arg = &server_status;
@@ -1623,7 +1628,7 @@ extern "C"
 			return;
 
 		slog_debug("Starting ucp_ep_close_nb...");
-		void *request = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
+		void *request = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
 
 		if (UCS_PTR_IS_ERR(request))
 		{
