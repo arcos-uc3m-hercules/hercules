@@ -268,6 +268,7 @@ extern "C"
 	void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int right_interval);
 	void ClearIntervalsStructure(dataset_info *curr_dataset);
 	int compare_intervals(const void *a, const void *b);
+	void RecordBlockInterval(dataset_info *ds, int32_t data_id, int32_t num_storages);
 
 	/****************************************************************************************************************************/
 	/****************************************** METADATA SERVICE MANAGEMENT FUNCTIONS  ******************************************/

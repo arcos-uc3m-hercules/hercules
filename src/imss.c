@@ -5362,6 +5362,10 @@ int32_t imss_flush_data()
 	return 1;
 }
 
+/**
+ * @brief Releases all allocated IntervalEntry nodes and the top-level pointer array.
+ * Clears the pointer and resets num_intervals to 0 to prevent dangling references.
+ */
 void ClearIntervalsStructure(dataset_info *curr_dataset)
 {
 	if (curr_dataset == NULL)
@@ -5389,9 +5393,16 @@ void ClearIntervalsStructure(dataset_info *curr_dataset)
 		free(curr_dataset->intervals);
 		curr_dataset->intervals = NULL;
 	}
+	slog_info("[ClearIntervalsStructure] Cleared %d intervals of %s", curr_dataset->num_intervals, curr_dataset->uri_);
 	curr_dataset->num_intervals = 0;
 }
 
+/**
+ * @brief Looks up the active data server count ('value') for a specific block ID.
+ * Used by get_data_location() to calculate the target server node.
+ * @return Returns the server count, or -1 if malleability is disabled or if the block is not
+ * found (signaling the caller to fall back to the default/global server count).
+ */
 int GetValueFromInterval(dataset_info *curr_dataset, int data_id)
 {
 	if (CONF_MALLEABILITY_STATUS != MALLEABILITY_CONF_ENABLED)
@@ -5414,9 +5425,13 @@ int GetValueFromInterval(dataset_info *curr_dataset, int data_id)
 			return curr_interval->value;
 		}
 	}
+	slog_debug("[GetValueFromInterval] Block %d not found in any interval for %s (num_intervals=%d)", data_id, curr_dataset->uri_, curr_dataset->num_intervals);
 	return -1;
 }
 
+/**
+ * @brief Debug helper that logs all intervals, their block counts, and server values.
+ */
 void PrintIntervals(dataset_info *curr_dataset)
 {
 	slog_debug("Printing %d intervals, address=%p", curr_dataset->num_intervals, curr_dataset);
@@ -5427,6 +5442,10 @@ void PrintIntervals(dataset_info *curr_dataset)
 	}
 }
 
+/**
+ * @brief Searches for the first interval overlapping with [left_interval, right_interval].
+ * Allocates the dataset intervals array (with MAX_NUM_INTERVALS capacity) if uninitialized.
+ */
 IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval, int right_interval)
 {
 	if (curr_dataset->intervals == NULL)
@@ -5473,6 +5492,14 @@ IntervalEntry *GetIntervalPointer(dataset_info *curr_dataset, int left_interval,
 	return NULL;
 }
 
+/**
+ * @brief Inserts [left_interval, right_interval] with 'value' active data servers,
+ * handling arbitrary overwrites, fragmentation, and joinings.
+ * @param curr_dataset dataset_info pointer.
+ * @param value number of active data servers.
+ * @param left_interval left interval of the dataset.
+ * @param right_interval right interval of the dataset.
+ */
 void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int right_interval)
 {
 	if (curr_dataset == NULL)
@@ -5481,6 +5508,9 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 		slog_error("Current dataset is NULL");
 		return;
 	}
+
+	slog_debug("[SetInterval] dataset=%s, setting interval [%d, %d]=%d (current num_intervals=%zu)",
+		   curr_dataset->uri_, left_interval, right_interval, value, (size_t)curr_dataset->num_intervals);
 
 	if (left_interval > right_interval)
 	{
@@ -5522,7 +5552,11 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 		curr_dataset->intervals = temp;
 	}
 
-	// overlap resolution
+	// Overlap Resolution: Checks existing intervals against the new range:
+	//   - Total eclipse: Existing interval is invalidated (left > right).
+	//   - Partial overlap: Truncates the left or right edge of the existing interval.
+	//   - Internal split: New range is inside an existing interval, dividing it
+	//     into left and right fragments that retain the original server value.
 	// Cache initial count to avoid evaluating newly appended fragments
 	size_t initial_count = curr_dataset->num_intervals;
 	for (size_t i = 0; i < initial_count; i++)
@@ -5595,7 +5629,7 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 		slog_debug("Added new interval [%d, %d]=%d", left_interval, right_interval, value);
 	}
 
-	// remove invalidated intervals and compact the array
+	// Frees invalidated entries and compacts the array.
 	size_t valid_count = 0;
 	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
 	{
@@ -5613,13 +5647,42 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 	curr_dataset->num_intervals = valid_count;
 	slog_debug("curr_dataset->num_intervals=%zu, curr_dataset->capacity=%d", curr_dataset->num_intervals, curr_dataset->capacity);
 
-	// keep array sorted.
+	// Sorts remaining intervals ascending by left_interval.
 	if (curr_dataset->num_intervals > 1)
 	{
 		qsort(curr_dataset->intervals, curr_dataset->num_intervals, sizeof(IntervalEntry *), compare_intervals);
+
+		// Joins adjacent intervals with identical server counts.
+		// Metadata block 0 (left == 0) is excluded from joining with data blocks.
+		size_t write_idx = 0;
+		for (size_t read_idx = 1; read_idx < curr_dataset->num_intervals; read_idx++)
+		{
+			IntervalEntry *prev = curr_dataset->intervals[write_idx];
+			IntervalEntry *next = curr_dataset->intervals[read_idx];
+
+			if (prev->left_interval > 0 && prev->value == next->value && prev->right_interval + 1 >= next->left_interval)
+			{
+				slog_debug("[SetInterval] Joining adjacent intervals [%d, %d] and [%d, %d] (value=%d) for %s",
+					   prev->left_interval, prev->right_interval, next->left_interval, next->right_interval, prev->value, curr_dataset->uri_);
+				if (next->right_interval > prev->right_interval)
+				{
+					prev->right_interval = next->right_interval;
+				}
+				free(next);
+			}
+			else
+			{
+				curr_dataset->intervals[++write_idx] = next;
+			}
+		}
+		curr_dataset->num_intervals = write_idx + 1;
+		slog_info("[SetInterval] Finalized intervals for %s (total intervals=%zu)", curr_dataset->uri_, (size_t)curr_dataset->num_intervals);
 	}
 }
 
+/**
+ * @brief qsort comparator ordering intervals strictly ascending by left_interval.
+ */
 int compare_intervals(const void *a, const void *b)
 {
 	// a and b are of type 'IntervalEntry **'
@@ -5631,6 +5694,48 @@ int compare_intervals(const void *a, const void *b)
 	if (intervalA->left_interval > intervalB->left_interval)
 		return 1;
 	return 0;
+}
+
+/**
+ * @brief Records a data block into the dataset intervals during write operations.
+ * If the write is contiguous and the server count hasn't changed, it extends
+ * the existing interval. Otherwise, it delegates to SetInterval.
+ * @param ds dataset_info pointer.
+ * @param data_id block identifier to record (ignores metadata block 0).
+ * @param num_storages current number of active data servers.
+ *
+ */
+void RecordBlockInterval(dataset_info *ds, int32_t data_id, int32_t num_storages)
+{
+	if (!ds || data_id <= 0)
+	{
+		return;
+	}
+
+	// Extend the most recent interval.
+	if (ds->num_intervals > 0 && ds->intervals != NULL)
+	{
+		IntervalEntry *last = ds->intervals[ds->num_intervals - 1];
+		if (last != NULL && last->left_interval > 0 && last->value == num_storages)
+		{
+			if (last->right_interval + 1 == data_id)
+			{
+				last->right_interval = data_id;
+				slog_debug("[RecordBlockInterval] Extended interval right to [%d, %d]=%d for %s", last->left_interval, last->right_interval, last->value, ds->uri_);
+				return;
+			}
+			else if (last->left_interval - 1 == data_id)
+			{
+				last->left_interval = data_id;
+				slog_debug("[RecordBlockInterval] Extended interval left to [%d, %d]=%d for %s", last->left_interval, last->right_interval, last->value, ds->uri_);
+				return;
+			}
+		}
+	}
+
+	// add new interval.
+	slog_info("[RecordBlockInterval] Creating interval for %s block %d with %d storages", ds->uri_, data_id, num_storages);
+	SetInterval(ds, num_storages, data_id, data_id);
 }
 
 ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request, int deep)
@@ -5920,7 +6025,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			}
 			else
 			{
-				int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
+				int changes_found = get_malleability_changes((char *)dataset_uri, NULL);
 				if (changes_found == 1)
 				{
 					return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
@@ -5943,7 +6048,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 				fprintf(stderr, "[get_ndata] max tries reached. Giving up with error.\n");
 				return -1;
 			}
-			int32_t changes_found = parse_malleability_message(response_buffer, node_hostname);
+			int32_t changes_found = parse_malleability_message(response_buffer, NULL);
 			slog_debug("changes_found=%d", changes_found);
 			return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep);
 		}
@@ -6406,19 +6511,23 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 	slog_debug("dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", dataset_uri, first_parent_dir, first_parent_offset);
 	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
 
-	// check if there are any interval.
-	// if # intervals is zero, no malleability operations was launched.
-	// the interval for block 0 could exist [0:0].
-	if (curr_dataset->num_intervals <= 1 && CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
+	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
 	{
-		// fprintf(stderr, "[update_dataset] num_intervals=%d\n", curr_dataset->num_intervals);
-		slog_debug("num_intervals=%d", curr_dataset->num_intervals);
-		// makes an interval for the zero block.
-		SetInterval(curr_dataset, curr_imss.info.num_storages, 0, 0);
-		// makes an interval for the rest of the blocks.
-		slog_debug("curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_dataset->first_block_id, curr_dataset->last_block_id);
-		SetInterval(curr_dataset, curr_imss.info.num_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
+		// makes an interval for the zero block if not already present.
+		if (GetValueFromInterval(curr_dataset, 0) == -1)
+		{
+			slog_info("[update_dataset] Setting metadata block 0 interval [0, 0]=%d for %s", curr_imss.info.num_storages, curr_dataset->uri_);
+			SetInterval(curr_dataset, curr_imss.info.num_storages, 0, 0);
+		}
+
+		// set the interval for other blocks if not already present.
+		if (curr_dataset->num_intervals <= 1 && curr_dataset->first_block_id != -1 && curr_dataset->last_block_id != -1)
+		{
+			slog_debug("curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_dataset->first_block_id, curr_dataset->last_block_id);
+			SetInterval(curr_dataset, curr_imss.info.num_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
+		}
 	}
+	slog_info("[update_dataset] Synchronizing dataset %s with %d interval(s) to metadata server", curr_dataset->uri_, curr_dataset->num_intervals);
 	// print current intervals.
 	PrintIntervals(curr_dataset);
 	// send the dataset structure to be updated on the metadata server.
@@ -6778,7 +6887,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 						fprintf(stderr, "[set_data] max tries reached. Giving up with error.\n");
 						return -ECANCELED;
 					}
-					int32_t changes_found = parse_malleability_message(response_buffer, node_hostname);
+					int32_t changes_found = parse_malleability_message(response_buffer, NULL);
 					free(response_buffer);
 					response_buffer = NULL;
 					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep, op_type);
@@ -6809,6 +6918,16 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			}
 		}
 	}
+
+	// Recording other blocks if not already present.
+	// For consecutive blocks it extends the interval, for not consecutive blocks it
+	// creates a new interval.
+	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED && data_id > 0 && !value_from_interval)
+	{
+		slog_debug("[set_data] Recording block %d (num_storages=%d) in dataset %s", data_id, curr_imss_storages, curr_dataset->uri_);
+		RecordBlockInterval(curr_dataset, data_id, curr_imss_storages);
+	}
+
 	pthread_mutex_unlock(&lock_network);
 	return 1;
 }

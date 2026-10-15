@@ -1191,7 +1191,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			pthread_mutex_unlock(&server_ready_mutex);
 
 			// Send the request to all servers telling they have to updated the list of aviable nodes.
-			send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, node_to_use, number_active_storage_servers.load(), id_server_to_modify);
+			// send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, node_to_use, number_active_storage_servers.load(), id_server_to_modify);
 
 			if (consecutive_commissioning_signals > 0)
 				consecutive_commissioning_signals = 0;
@@ -4536,6 +4536,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		slog_debug("Server %d connected in %.4f seconds", server_id_request, time_taken_comm.count());
 
 		id_server_to_modify = server_id_request;
+		// Send the request to all servers telling they have to updated the list of aviable nodes.
 		send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, added_hostname, number_active_storage_servers.load(), id_server_to_modify);
 
 		// signal to the Comissioning thread.
