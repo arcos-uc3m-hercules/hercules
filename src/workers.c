@@ -273,9 +273,9 @@ int SendConfirmationMessage(const p_argv *arguments, const char *msg)
 {
 	int ret = 0;
 	slog_debug("Sending msg \"%s\" (%lu) to %" PRIu32, msg, strlen(msg) + 1, arguments->worker_uid);
-	pthread_mutex_lock(&lock_network);
+	// pthread_mutex_lock(&lock_network);
 	ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, (const void *)msg, strlen(msg) + 1, arguments->worker_uid), "Send data", int);
-	pthread_mutex_unlock(&lock_network);
+	// pthread_mutex_unlock(&lock_network);
 	slog_debug("Msg sent: %s", msg);
 	return ret;
 }

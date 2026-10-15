@@ -7462,7 +7462,7 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const char *data_hostname, int number_of_servers)
 {
 
-	if (srv_buf.data.empty())
+	if (srv_buf.offset == 0 || srv_buf.block_count == 0)
 		return 1; // nothing to do
 
 	const unsigned char *buffer = srv_buf.data.data();
