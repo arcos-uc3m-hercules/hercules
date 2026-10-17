@@ -5373,28 +5373,24 @@ void ClearIntervalsStructure(dataset_info *curr_dataset)
 		return;
 	}
 	slog_debug("Clearing %d intervals of %s", curr_dataset->num_intervals, curr_dataset->original_name);
-	if (!curr_dataset->intervals || curr_dataset->num_intervals == 0)
-	{
-		return;
-	}
-
-	IntervalEntry *curr_interval = NULL;
-	for (size_t i = 0; i < curr_dataset->num_intervals; i++)
-	{
-		curr_interval = curr_dataset->intervals[i];
-		if (curr_interval != NULL)
-		{
-			free(curr_interval);
-			curr_interval = NULL;
-		}
-	}
 	if (curr_dataset->intervals != NULL)
 	{
+		IntervalEntry *curr_interval = NULL;
+		for (size_t i = 0; i < curr_dataset->num_intervals; i++)
+		{
+			curr_interval = curr_dataset->intervals[i];
+			if (curr_interval != NULL)
+			{
+				free(curr_interval);
+				curr_interval = NULL;
+			}
+		}
 		free(curr_dataset->intervals);
 		curr_dataset->intervals = NULL;
 	}
 	slog_info("[ClearIntervalsStructure] Cleared %d intervals of %s", curr_dataset->num_intervals, curr_dataset->uri_);
 	curr_dataset->num_intervals = 0;
+	curr_dataset->capacity = 0;
 }
 
 /**
@@ -5531,7 +5527,21 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 		return;
 	}
 
-	if (curr_dataset->intervals == NULL || curr_dataset->num_intervals + 2 > curr_dataset->capacity)
+	if (curr_dataset->intervals == NULL)
+	{
+		if (curr_dataset->capacity <= 0)
+		{
+			curr_dataset->capacity = MAX_NUM_INTERVALS;
+		}
+		slog_debug("Alloc memory for %d intervals\n", curr_dataset->capacity);
+		curr_dataset->intervals = (IntervalEntry **)calloc(curr_dataset->capacity, sizeof(IntervalEntry *));
+		if (!curr_dataset->intervals)
+		{
+			slog_error("HERCULES_ERR_SET_INTERVAL: Memory allocation failed");
+			return;
+		}
+	}
+	else if (curr_dataset->num_intervals + 2 > curr_dataset->capacity)
 	{
 		if (curr_dataset->capacity <= 0)
 		{
@@ -5542,7 +5552,7 @@ void SetInterval(dataset_info *curr_dataset, int value, int left_interval, int r
 			curr_dataset->capacity *= 2;
 		}
 
-		slog_debug("Alloc/Realloc memory for %d intervals\n", curr_dataset->capacity);
+		slog_debug("Realloc memory for %d intervals\n", curr_dataset->capacity);
 		IntervalEntry **temp = (IntervalEntry **)realloc(curr_dataset->intervals, curr_dataset->capacity * sizeof(IntervalEntry *));
 		if (!temp)
 		{
@@ -7365,6 +7375,27 @@ char get_type(const char *uri)
 		dataset_info *aux_dataset = (dataset_info *)malloc(sizeof(dataset_info));
 
 		memcpy(aux_dataset, dataset, sizeof(dataset_info));
+
+		char *msg_data = (char *)result + sizeof(dataset_info);
+		if (aux_dataset->num_intervals > 0 && length >= sizeof(dataset_info) + sizeof(IntervalEntry) * aux_dataset->num_intervals)
+		{
+			aux_dataset->intervals = (IntervalEntry **)malloc(aux_dataset->num_intervals * sizeof(IntervalEntry *));
+			aux_dataset->capacity = aux_dataset->num_intervals;
+			size_t memsize = sizeof(IntervalEntry);
+			for (size_t i = 0; i < aux_dataset->num_intervals; i++)
+			{
+				aux_dataset->intervals[i] = (IntervalEntry *)malloc(memsize);
+				memcpy(aux_dataset->intervals[i], msg_data, memsize);
+				msg_data += memsize;
+				slog_debug("Interval retrieved in get_type [%d,%d]=%d", aux_dataset->intervals[i]->left_interval, aux_dataset->intervals[i]->right_interval, aux_dataset->intervals[i]->value);
+			}
+		}
+		else
+		{
+			aux_dataset->intervals = NULL;
+			aux_dataset->num_intervals = 0;
+			aux_dataset->capacity = 0;
+		}
 
 		// add_dataset_entry(&datasetd, dataset->uri_, aux_dataset);
 		add_dataset_entry_in_pool(uri, aux_dataset);

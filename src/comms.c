@@ -1398,6 +1398,7 @@ extern "C"
 			if (struct_->num_intervals > 0)
 			{
 				struct_->intervals = (IntervalEntry **)malloc(struct_->num_intervals * sizeof(IntervalEntry *));
+				struct_->capacity = struct_->num_intervals;
 				memsize = sizeof(IntervalEntry);
 				for (size_t i = 0; i < struct_->num_intervals; i++)
 				{
@@ -1406,6 +1407,12 @@ extern "C"
 					msg_data += memsize;
 					slog_debug("Interval retrieved [%d,%d]=%d", struct_->intervals[i]->left_interval, struct_->intervals[i]->right_interval, struct_->intervals[i]->value);
 				}
+			}
+			else
+			{
+				struct_->intervals = NULL;
+				struct_->num_intervals = 0;
+				struct_->capacity = 0;
 			}
 			break;
 		}
@@ -1527,17 +1534,28 @@ extern "C"
 
 			// Copy the actual structure into the one provided through reference.
 			memcpy(struct_, msg_data, sizeof(dataset_info));
+			msg_data += sizeof(dataset_info);
 
-			// If the size of the message received was bigger than sizeof(dataset_info), something more came with it.
-
-			/*if (zmq_msg_size(&msg_struct) > sizeof(dataset_info)) MIRAR
-			  {
-			  msg_data += sizeof(dataset_info);
-
-			//Copy the remaining 'data_locations' field into the structure.
-			struct_->data_locations = (uint16_t *) malloc(struct_->num_data_elem * sizeof(uint16_t));
-			memcpy(struct_->data_locations, msg_data, (struct_->num_data_elem * sizeof(uint16_t)));
-			}*/
+			int memsize = 0;
+			if (struct_->num_intervals > 0)
+			{
+				struct_->intervals = (IntervalEntry **)malloc(struct_->num_intervals * sizeof(IntervalEntry *));
+				struct_->capacity = struct_->num_intervals;
+				memsize = sizeof(IntervalEntry);
+				for (size_t i = 0; i < struct_->num_intervals; i++)
+				{
+					struct_->intervals[i] = (IntervalEntry *)malloc(memsize);
+					memcpy(struct_->intervals[i], msg_data, memsize);
+					msg_data += memsize;
+					slog_debug("Interval retrieved [%d,%d]=%d", struct_->intervals[i]->left_interval, struct_->intervals[i]->right_interval, struct_->intervals[i]->value);
+				}
+			}
+			else
+			{
+				struct_->intervals = NULL;
+				struct_->num_intervals = 0;
+				struct_->capacity = 0;
+			}
 			break;
 		}
 		case STRING:
