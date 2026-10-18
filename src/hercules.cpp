@@ -769,6 +769,24 @@ int getConfiguration(struct arguments *args)
 	else
 		args->alloc_data_hostfile[0] = '\0';
 
+	if (getenv("HERCULES_SLURM_PARTITION") != NULL)
+		strncpy(args->slurm_partition, getenv("HERCULES_SLURM_PARTITION"), sizeof(args->slurm_partition) - 1);
+	else if (getenv("SLURM_JOB_PARTITION") != NULL)
+		strncpy(args->slurm_partition, getenv("SLURM_JOB_PARTITION"), sizeof(args->slurm_partition) - 1);
+	else if (cfg_get(cfg, "SLURM_JOB_PARTITION"))
+		strncpy(args->slurm_partition, cfg_get(cfg, "SLURM_JOB_PARTITION"), sizeof(args->slurm_partition) - 1);
+	else
+		args->slurm_partition[0] = '\0';
+
+	if (getenv("HERCULES_SLURM_ACCOUNT") != NULL)
+		strncpy(args->slurm_account, getenv("HERCULES_SLURM_ACCOUNT"), sizeof(args->slurm_account) - 1);
+	else if (getenv("SLURM_ACCOUNT") != NULL)
+		strncpy(args->slurm_account, getenv("SLURM_ACCOUNT"), sizeof(args->slurm_account) - 1);
+	else if (cfg_get(cfg, "SLURM_ACCOUNT"))
+		strncpy(args->slurm_account, cfg_get(cfg, "SLURM_ACCOUNT"), sizeof(args->slurm_account) - 1);
+	else
+		args->slurm_account[0] = '\0';
+
 	if (getenv("HERCULES_THREAD_POOL") != NULL)
 		args->thread_pool = atol(getenv("HERCULES_THREAD_POOL"));
 	else if (cfg_get(cfg, "THREAD_POOL"))

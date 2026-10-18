@@ -143,6 +143,8 @@ int parse_args(int argc, char **argv, struct arguments *args)
     args->num_data_servers = 0;
     args->block_size = 64;  // In KB
     args->storage_size = 8; // In GB
+    args->slurm_partition[0] = '\0';
+    args->slurm_account[0] = '\0';
 
     /* Parse arguments; every option seen by parse_opt will be
         reflected in arguments */

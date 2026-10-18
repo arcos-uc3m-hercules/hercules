@@ -1093,6 +1093,23 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			return NULL;
 		}
 
+		const char *partition = (arguments->args && arguments->args->slurm_partition[0] != '\0')
+					     ? arguments->args->slurm_partition
+					     : getenv("HERCULES_SLURM_PARTITION");
+		if (!partition) partition = getenv("SLURM_JOB_PARTITION");
+
+		const char *account = (arguments->args && arguments->args->slurm_account[0] != '\0')
+					   ? arguments->args->slurm_account
+					   : getenv("HERCULES_SLURM_ACCOUNT");
+		if (!account) account = getenv("SLURM_ACCOUNT");
+
+		if (!partition || partition[0] == '\0' || !account || account[0] == '\0')
+		{
+			slog_error("HERCULES_ERR_COMISSIONING_STAGE_NO_SLURM_PARAMS: Slurm partition and account must be defined in configuration or environment.");
+			fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_NO_SLURM_PARAMS: Slurm partition and account must be defined in configuration or environment.\n");
+			return NULL;
+		}
+
 		char script_path[PATH_MAX];
 		snprintf(script_path, sizeof(script_path), "%s/scripts/slurm_data_server.sh", hercules_dir);
 
@@ -1114,8 +1131,8 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		else if (pid == 0)
 		{
 			// Child process: execute slurm_data_server.sh
-			execl(script_path, script_path, str_server_id, str_num_active, conf_file, hercules_dir, log_dir, (char *)NULL);
-			execlp("bash", "bash", script_path, str_server_id, str_num_active, conf_file, hercules_dir, log_dir, (char *)NULL);
+			execl(script_path, script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, (char *)NULL);
+			execlp("bash", "bash", script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, (char *)NULL);
 			slog_error("HERCULES_ERR_EXECL_SLURM_SCRIPT: failed to exec %s", script_path);
 			exit(-1);
 		}

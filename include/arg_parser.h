@@ -55,6 +55,8 @@ struct arguments
     char ignore_paths_list[PATH_MAX];
     char data_hostname[HOST_NAME_MAX];
     char configuration_file_path[PATH_MAX];
+    char slurm_partition[PATH_MAX];
+    char slurm_account[PATH_MAX];
     // char *stat_host;                /* Metadata server hostname arg to '-H' */
     void *pool_memory;
     uint64_t data_port;                  /* port arg to '-p' */
