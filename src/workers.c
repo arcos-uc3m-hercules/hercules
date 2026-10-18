@@ -1033,16 +1033,6 @@ void *run_malleability(void *th_argv)
 		slog_malleability("SCALE_DOWN: Waiting for more consecutive strakes. consecutive_decommissioning_signals=%d, CONSECUTIVE_SIGNALS_THRESHOLD=%" PRId32, consecutive_decommissioning_signals, arguments->args->malleability_tolerance_decommissioning);
 	}
 
-	p_argv temp_p_argv_for_calls;
-	temp_p_argv_for_calls.ucp_worker = arguments->ucp_worker;
-	temp_p_argv_for_calls.server_ep = arguments->server_ep;
-	temp_p_argv_for_calls.worker_uid = arguments->worker_uid;
-	strncpy(temp_p_argv_for_calls.curr_req, arguments->curr_req, PATH_MAX);
-	strncpy(temp_p_argv_for_calls.my_uri, arguments->args->imss_uri, URI_);
-
-	// send to the frontend the updated list of data server nodes.
-	send_node_list_2_frontend(temp_p_argv_for_calls, -1);
-
 	comissioning_on.store(false, std::memory_order_release);
 	pthread_mutex_unlock(&mutext_malleability);
 
@@ -1064,67 +1054,132 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		return NULL;
 	}
 
-	if (imss_copy.num_storages == -1)
+	if (arguments->args && arguments->args->upper_bound_servers > 0 &&
+	    (int32_t)imss_info_struct->num_storages >= arguments->args->upper_bound_servers)
 	{
-		fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_INVALID_HERCULES_STRUCT_COPY\n");
-		slog_error("HERCULES_ERR_COMISSIONING_STAGE_INVALID_HERCULES_STRUCT_COPY");
+		slog_malleability("Commissioning skipped: current storages (%d) reached upper bound (%d)", imss_info_struct->num_storages, arguments->args->upper_bound_servers);
+		fprintf(stderr, "Commissioning skipped: current storages (%d) reached upper bound (%d)\n", imss_info_struct->num_storages, arguments->args->upper_bound_servers);
 		return NULL;
 	}
 
-	int num_server_to_increase = 1;
-	fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
-	slog_debug("number_of_hosts=%d\n", number_of_hosts);
-	int found = 0;
-	node_to_use = NULL;
-	// Iterates over all hosts defined on the "hostfile" in order to find a
-	// hostname that is not already under use.
-	for (size_t j = 0; j < number_of_hosts; ++j)
-	{
-		found = 0;
-		// slog_debug("eps[%d] hostname=%s", j, imss_copy.ips[j]);
-		// fprintf(stderr, "eps[%d] hostname=%s\n", j, imss_copy.ips[j]);
-		for (size_t i = 0; i < imss_info_struct->num_storages; ++i)
-		{
-			// check if the host is already on the struct.
-			if (!strcmp(imss_info_struct->ips[i], imss_copy.ips[j]))
-			{
-				// this host is in the struct, so we have to skip it.
-				found = 1;
-				break;
-			}
-		}
-		if (!found)
-		{
-			// if we have not found this host on the curren imss_info_struct, we break the loop.
-			node_to_use = imss_copy.ips[j];
-			break;
-		}
-	}
+	int is_slurm = (getenv("SLURM_JOB_ID") != NULL || getenv("HERCULES_SLURM_DYNAMIC") != NULL);
 
-	if (node_to_use == NULL)
+	int32_t new_server_id = imss_info_struct->num_storages;
+	int32_t new_num_active = imss_info_struct->num_storages + 1;
+	id_server_to_modify = new_server_id;
+
+	start_time_commissioning = std::chrono::steady_clock::now();
+	is_new_server_ready = false;
+
+	if (is_slurm)
 	{
-		fprintf(stderr, "No avaiable nodes to launch more back-end data servers.\n");
-		slog_debug("No avaiable nodes to launch more back-end data servers.");
+		slog_malleability("Using Slurm on-demand dynamic node allocation (salloc) for data server %d", new_server_id);
+		fprintf(stderr, "[Hercules] Requesting Slurm on-demand node for data server %d (target active: %d)...\n",
+			new_server_id, new_num_active);
+
+		const char *hercules_dir = (arguments->args && arguments->args->hercules_path[0] != '\0')
+					       ? arguments->args->hercules_path
+					       : getenv("HERCULES_PATH");
+		if (!hercules_dir || hercules_dir[0] == '\0')
+			hercules_dir = ".";
+
+		const char *conf_file = (arguments->args && arguments->args->configuration_file_path[0] != '\0')
+					    ? arguments->args->configuration_file_path
+					    : getenv("HERCULES_CONF");
+		if (!conf_file || conf_file[0] == '\0')
+		{
+			slog_error("HERCULES_ERR_COMISSIONING_STAGE_NO_CONF_FILE: Configuration file path is not defined.");
+			fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_NO_CONF_FILE: Configuration file path is not defined.\n");
+			return NULL;
+		}
+
+		char script_path[PATH_MAX];
+		snprintf(script_path, sizeof(script_path), "%s/scripts/slurm_data_server.sh", hercules_dir);
+
+		char str_server_id[16];
+		char str_num_active[16];
+		snprintf(str_server_id, sizeof(str_server_id), "%d", new_server_id);
+		snprintf(str_num_active, sizeof(str_num_active), "%d", new_num_active);
+
+		char log_dir[PATH_MAX];
+		snprintf(log_dir, sizeof(log_dir), "%s/tmp/", hercules_dir);
+
+		pid_t pid = fork();
+		if (pid == -1)
+		{
+			slog_error("HERCULES_ERR_FORK_SLURM_COMISSIONING: failed to fork for server %d", new_server_id);
+			perror("HERCULES_ERR_FORK_SLURM_COMISSIONING");
+			return NULL;
+		}
+		else if (pid == 0)
+		{
+			// Child process: execute slurm_data_server.sh
+			execl(script_path, script_path, str_server_id, str_num_active, conf_file, hercules_dir, log_dir, (char *)NULL);
+			execlp("bash", "bash", script_path, str_server_id, str_num_active, conf_file, hercules_dir, log_dir, (char *)NULL);
+			slog_error("HERCULES_ERR_EXECL_SLURM_SCRIPT: failed to exec %s", script_path);
+			exit(-1);
+		}
+		else
+		{
+			slog_malleability("Slurm data server script spawned with PID %d for server ID %d", pid, new_server_id);
+			// Do NOT call blocking waitpid here; salloc runs in foreground to keep allocation active.
+		}
 	}
 	else
 	{
-		// start timer to know how much time it takes the commissioning malleability.
-		start_time_commissioning = std::chrono::steady_clock::now();
-		// global_malleability_t = clock();
-		is_new_server_ready = false;
+		// Fallback to static hostfile search.
+		if (imss_copy.num_storages == -1)
+		{
+			fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_INVALID_HERCULES_STRUCT_COPY\n");
+			slog_error("HERCULES_ERR_COMISSIONING_STAGE_INVALID_HERCULES_STRUCT_COPY");
+			return NULL;
+		}
 
-		// Update the variables.
-		// Here we incresae imss_info_struct->num_storages + 1.
-		// AddIPS(imss_info_struct, node_to_use, strlen(node_to_use));
+		fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
+		slog_debug("number_of_hosts=%d\n", number_of_hosts);
+		int found = 0;
+		node_to_use = NULL;
+		// Iterates over all hosts defined on the "hostfile" in order to find a
+		// hostname that is not already under use.
+		for (size_t j = 0; j < number_of_hosts; ++j)
+		{
+			found = 0;
+			// slog_debug("eps[%d] hostname=%s", j, imss_copy.ips[j]);
+			// fprintf(stderr, "eps[%d] hostname=%s\n", j, imss_copy.ips[j]);
+			for (size_t i = 0; i < imss_info_struct->num_storages; ++i)
+			{
+				// check if the host is already on the struct.
+				if (!strcmp(imss_info_struct->ips[i], imss_copy.ips[j]))
+				{
+					// this host is in the struct, so we have to skip it.
+					found = 1;
+					break;
+				}
+			}
+			if (!found)
+			{
+				// if we have not found this host on the curren imss_info_struct, we break the loop.
+				node_to_use = imss_copy.ips[j];
+				break;
+			}
+		}
 
-		// new_number_data_servers = imss_info_struct->num_storages;
-		number_active_storage_servers.store(imss_info_struct->num_storages + 1);
-		imss_info_struct->num_active_storages = number_active_storage_servers.load();
-		arguments->args->num_data_servers = number_active_storage_servers.load();
+		if (node_to_use == NULL)
+		{
+			fprintf(stderr, "No avaiable nodes to launch more back-end data servers.\n");
+			slog_debug("No avaiable nodes to launch more back-end data servers.");
+			return NULL;
+		}
 
-		id_server_to_modify = number_active_storage_servers.load() - 1;
-
-		slog_debug("number_active_storage_servers=%d", number_active_storage_servers.load());
+		const char *conf_file_static = (arguments->args && arguments->args->configuration_file_path[0] != '\0')
+						   ? arguments->args->configuration_file_path
+						   : getenv("HERCULES_CONF");
+		if (!conf_file_static || conf_file_static[0] == '\0')
+		{
+			slog_error("HERCULES_ERR_COMISSIONING_STAGE_NO_CONF_FILE: Configuration file path is not defined.");
+			fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_NO_CONF_FILE: Configuration file path is not defined.\n");
+			return NULL;
+		}
 
 		char command_to_exec[PATH_MAX * 2] = {0};
 		char *workdir = getenv("PWD");
@@ -1134,17 +1189,18 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			"HERCULES_THREAD_POOL=1 HERCULES_CONF=%s %s/build/hercules_server d %d %d "
 			"> %s/tmp/hercules_server_%d_log.txt 2>&1",
 			workdir,
-			arguments->args->configuration_file_path,
+			conf_file_static,
 			arguments->args->hercules_path,
-			id_server_to_modify,
-			imss_info_struct->num_active_storages,
+			new_server_id,
+			new_num_active,
 			arguments->args->hercules_path,
-			id_server_to_modify);
+			new_server_id);
 
 		char msg[PATH_MAX * 2] = {'\0'};
-		sprintf(msg, "Running command: %s, id server=%d, in node_to_use=%s\n", command_to_exec, id_server_to_modify, node_to_use);
+		sprintf(msg, "Running command: %s, id server=%d, in node_to_use=%s\n", command_to_exec, new_server_id, node_to_use);
 		fprintf(stderr, "%s", msg);
 		slog_debug(msg);
+
 		// Deploy the new hercules instance on the avaiable node.
 		// system(command_to_exec);
 		// clone the process to run the command.
@@ -1156,6 +1212,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			sprintf(msg_err, "HERCULES_ERR_FORK_COMISSIONING_STAGE: %s", node_to_use);
 			perror(msg_err);
 			slog_error("%s", msg_err);
+			return NULL;
 		}
 		else if (pid == 0)
 		{ // child
@@ -1175,31 +1232,45 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			// the child process terminates immediately after fork, preventing zombie states.
 			int status;
 			waitpid(pid, &status, 0);
-
-			slog_debug("Waiting for the signal from the main thread (SETSERVER).");
-
-			// block waiting for the "SETSERVER" message on the main thread.
-			pthread_mutex_lock(&server_ready_mutex);
-			slog_debug("Mutex has been locked.");
-
-			while (!is_new_server_ready)
-			{
-				pthread_cond_wait(&server_ready_cond, &server_ready_mutex);
-			}
-			is_new_server_ready = false;
-			slog_debug("Signal received.");
-			pthread_mutex_unlock(&server_ready_mutex);
-
-			// Send the request to all servers telling they have to updated the list of aviable nodes.
-			// send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, node_to_use, number_active_storage_servers.load(), id_server_to_modify);
-
-			if (consecutive_commissioning_signals > 0)
-				consecutive_commissioning_signals = 0;
-
-			if (consecutive_decommissioning_signals > 0)
-				consecutive_decommissioning_signals = 0;
 		}
 	}
+
+	slog_debug("Waiting for the signal from the main thread (SETSERVER).");
+
+	// block waiting for the "SETSERVER" message on the main thread.
+	pthread_mutex_lock(&server_ready_mutex);
+	slog_debug("Mutex has been locked.");
+
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_sec += 600; // 10-minute timeout for Slurm allocation or node boot
+
+	int wait_rc = 0;
+	while (!is_new_server_ready && wait_rc == 0)
+	{
+		wait_rc = pthread_cond_timedwait(&server_ready_cond, &server_ready_mutex, &ts);
+	}
+
+	if (wait_rc == ETIMEDOUT && !is_new_server_ready)
+	{
+		slog_error("Timed out waiting for new server %d to connect via SETSERVER", new_server_id);
+		fprintf(stderr, "Timed out waiting for new server %d to connect via SETSERVER\n", new_server_id);
+		pthread_mutex_unlock(&server_ready_mutex);
+		return NULL;
+	}
+
+	is_new_server_ready = false;
+	slog_malleability("Signal received: server %d is ready and active.", new_server_id);
+	pthread_mutex_unlock(&server_ready_mutex);
+
+	// Send the request to all servers telling they have to updated the list of aviable nodes.
+	// send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, node_to_use, number_active_storage_servers.load(), id_server_to_modify);
+
+	if (consecutive_commissioning_signals > 0)
+		consecutive_commissioning_signals = 0;
+
+	if (consecutive_decommissioning_signals > 0)
+		consecutive_decommissioning_signals = 0;
 
 	return NULL;
 }
@@ -4529,6 +4600,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname), -1);
 		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
 		number_active_storage_servers.store(imss_info_struct->num_storages);
+		imss_info_struct->num_active_storages = number_active_storage_servers.load();
+		if (arguments->args)
+		{
+			arguments->args->num_data_servers = number_active_storage_servers.load();
+		}
 		slog_debug("number_active_storage_servers=%d\n", number_active_storage_servers.load());
 		// pthread_mutex_unlock(&mutext_malleability);
 

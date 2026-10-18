@@ -3871,12 +3871,6 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 
 	wait_ack(ucp_worker_meta, local_meta_uid, ep, SYNC);
 
-	// MALLEABILITY_CONF_PERF configuration does not apply malleability changes.
-	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
-	{
-		wait_malleability_changes(ucp_worker_meta, local_meta_uid, ep, NULL);
-	}
-
 	auto end_send_performance_t = std::chrono::steady_clock::now();
 	std::chrono::duration<double> send_performance_time_taken = end_send_performance_t - init_malleability_t;
 	slog_debug("Send performance time %f seconds", send_performance_time_taken.count());
