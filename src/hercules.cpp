@@ -986,10 +986,25 @@ void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 	{
 		uint32_t temp_val = 0;
 
-		// Parse to a temporary integer, then verify if it matches a valid enum value
-		if (is_valid_uint32(raw_mode_str, &temp_val) != 0 && (temp_val == MODE_NETWORK || temp_val == MODE_DISK || temp_val == MODE_SHM || temp_val == MODE_BUFF_NETWORK))
+		if (is_valid_uint32(raw_mode_str, &temp_val) != 0)
 		{
-			args->malleability_reorder_mode = (enum CommunicationMode)temp_val;
+			if (temp_val == 0)
+			{
+				args->malleability_reorder_mode = MODE_NETWORK;
+			}
+			else if (temp_val == 1)
+			{
+				args->malleability_reorder_mode = MODE_DISK;
+			}
+			else if (temp_val == 2 || temp_val == MODE_BUFF_NETWORK)
+			{
+				args->malleability_reorder_mode = MODE_BUFF_NETWORK;
+			}
+			else
+			{
+				fprintf(stderr, "WARNING: Invalid malleability reorder mode: %s, setting to %d\n", raw_mode_str, (int)default_reorder_mode);
+				args->malleability_reorder_mode = default_reorder_mode;
+			}
 		}
 		else
 		{
