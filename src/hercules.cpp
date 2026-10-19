@@ -42,6 +42,7 @@ typedef struct
 ****************************  GLOBAL VARIABLES  ****************************
 ***************************************************************************/
 u_int16_t CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_DISABLED;
+u_int16_t TO_RECORD_INTERVALS = 0;
 u_int16_t ASYNC_IO;
 
 // IMSS server thread.
@@ -659,16 +660,27 @@ int getConfiguration(struct arguments *args)
 	switch (args->malleability)
 	{
 	case MALLEABILITY_CONF_DISABLED:
+		CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_DISABLED;
+		TO_RECORD_INTERVALS = 0;
 		break;
 	case MALLEABILITY_CONF_ENABLED:
 	{
 		CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_ENABLED;
+		TO_RECORD_INTERVALS = 1;
 		fill_malleability_params(args, cfg);
 	}
 	break;
 	case MALLEABILITY_CONF_PERF:
 	{
 		CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_PERF;
+		TO_RECORD_INTERVALS = 0;
+		fill_malleability_params(args, cfg);
+	}
+	break;
+	case MALLEABILITY_CONF_MANUAL:
+	{
+		CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_MANUAL;
+		TO_RECORD_INTERVALS = 1;
 		fill_malleability_params(args, cfg);
 	}
 	break;

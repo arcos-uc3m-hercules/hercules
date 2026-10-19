@@ -880,7 +880,7 @@ extern "C"
 			}
 		}
 
-		if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
+		if (TO_RECORD_INTERVALS)
 		{
 			update_dataset((char *)path, ds);
 		}
@@ -1191,7 +1191,7 @@ extern "C"
 			}
 		}
 
-		if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
+		if (TO_RECORD_INTERVALS)
 		{
 			update_dataset((char *)path, ds);
 		}
@@ -1954,7 +1954,7 @@ extern "C"
 		}
 
 		// updates intervals on the back-end.
-		if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
+		if (TO_RECORD_INTERVALS)
 		{
 			update_dataset((char *)path, ds);
 		}

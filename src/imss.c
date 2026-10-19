@@ -3693,7 +3693,7 @@ int32_t wait_malleability_changes(ucp_worker_h ucp_worker, uint64_t local_data_u
 
 int32_t get_malleability_changes(const char *dataset_uri, const char *failed_hostname)
 {
-	if (CONF_MALLEABILITY_STATUS != MALLEABILITY_CONF_ENABLED)
+	if (!TO_RECORD_INTERVALS)
 	{
 		return -1;
 	}
@@ -5395,7 +5395,7 @@ void ClearIntervalsStructure(dataset_info *curr_dataset)
  */
 int GetValueFromInterval(dataset_info *curr_dataset, int data_id)
 {
-	if (CONF_MALLEABILITY_STATUS != MALLEABILITY_CONF_ENABLED)
+	if (!TO_RECORD_INTERVALS)
 	{
 		return -1;
 	}
@@ -6515,7 +6515,7 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 	slog_debug("dataset_uri=%s, first_parent_dir=%s, first_parent_offset=%d", dataset_uri, first_parent_dir, first_parent_offset);
 	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
 
-	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
+	if (TO_RECORD_INTERVALS)
 	{
 		// makes an interval for the zero block if not already present.
 		if (GetValueFromInterval(curr_dataset, 0) == -1)
@@ -6669,13 +6669,13 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	slog_debug("curr_imss_storages=%d, curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_imss_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
 
 	// keep the last block id.
-	if (data_id > curr_dataset->last_block_id && data_id != 0 && CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
+	if (data_id > curr_dataset->last_block_id && data_id != 0 && TO_RECORD_INTERVALS)
 	{
 		slog_debug("setting %d as last block id", data_id);
 		curr_dataset->last_block_id = data_id;
 	}
 
-	if (curr_dataset->first_block_id == -1 && data_id != 0 && CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED)
+	if (curr_dataset->first_block_id == -1 && data_id != 0 && TO_RECORD_INTERVALS)
 	{
 		slog_debug("setting %d as first block id", data_id);
 		curr_dataset->first_block_id = data_id;
@@ -6926,7 +6926,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	// Recording other blocks if not already present.
 	// For consecutive blocks it extends the interval, for not consecutive blocks it
 	// creates a new interval.
-	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED && data_id > 0 && !value_from_interval)
+	if (TO_RECORD_INTERVALS && data_id > 0 && !value_from_interval)
 	{
 		slog_debug("[set_data] Recording block %d (num_storages=%d) in dataset %s", data_id, curr_imss_storages, curr_dataset->uri_);
 		RecordBlockInterval(curr_dataset, data_id, curr_imss_storages);
