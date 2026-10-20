@@ -167,6 +167,7 @@ extern "C"
 		}
 
 		backend_init_status = 1;
+		// fprintf(stderr, "\033[0;31m The number of active servers is %d \033[0m \n", num_active_storages);
 	}
 
 	int connect_backend(void)

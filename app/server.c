@@ -1079,7 +1079,7 @@ int32_t main(int32_t argc, char **argv)
 		double total_wall_sec = (ts_main_end.tv_sec - global_shutdown_start_ts.tv_sec) + (ts_main_end.tv_nsec - global_shutdown_start_ts.tv_nsec) / 1e9;
 		double total_cpu_sec = ((double)(t_main_end - global_shutdown_start_cpu)) / CLOCKS_PER_SEC;
 		const char *server_type_str = (args.type == TYPE_DATA_SERVER) ? "Data" : "Metadata";
-		fprintf(stderr, "[Shutdown] %s server %d total shutdown completed in %.6f seconds (CPU: %.6f seconds)\n", server_type_str, args.id, total_wall_sec, total_cpu_sec);
+		fprintf(stdout, "[Shutdown] %s server %d total shutdown completed in %.6f seconds (CPU: %.6f seconds)\n", server_type_str, args.id, total_wall_sec, total_cpu_sec);
 	}
 
 	// Free the memory buffer.
