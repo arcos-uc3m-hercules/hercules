@@ -44,6 +44,8 @@ typedef struct
 u_int16_t CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_DISABLED;
 u_int16_t TO_RECORD_INTERVALS = 0;
 u_int16_t ASYNC_IO;
+u_int32_t ASYNC_GET_CONCURRENCY = 0;
+u_int32_t ASYNC_SET_CONCURRENCY = 0;
 
 // IMSS server thread.
 pthread_t server_th;
@@ -743,6 +745,74 @@ int getConfiguration(struct arguments *args)
 
 	ASYNC_IO = args->async_io;
 	// fprintf(stderr, "ASYNC IO %d\n", ASYNC_IO);
+
+	// Asynchronous GET concurrency.
+	const char *env_get_conc = getenv("HERCULES_ASYNC_GET_CONCURRENCY");
+	const char *cfg_get_conc = cfg_get(cfg, "ASYNC_GET_CONCURRENCY");
+	int parsed_get_conc = 0;
+	if (env_get_conc != NULL)
+	{
+		if (is_valid_integer(env_get_conc, &parsed_get_conc) && parsed_get_conc >= 0)
+		{
+			args->async_get_concurrency = parsed_get_conc;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid HERCULES_ASYNC_GET_CONCURRENCY value: '%s', setting to 0 (dynamic)\n", env_get_conc);
+			args->async_get_concurrency = 0;
+		}
+	}
+	else if (cfg_get_conc != NULL)
+	{
+		if (is_valid_integer(cfg_get_conc, &parsed_get_conc) && parsed_get_conc >= 0)
+		{
+			args->async_get_concurrency = parsed_get_conc;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid ASYNC_GET_CONCURRENCY value in configuration: '%s', setting to 0 (dynamic)\n", cfg_get_conc);
+			args->async_get_concurrency = 0;
+		}
+	}
+	else
+	{
+		args->async_get_concurrency = 0;
+	}
+	ASYNC_GET_CONCURRENCY = (args->async_get_concurrency > 0) ? (u_int32_t)args->async_get_concurrency : 0;
+
+	// Asynchronous SET concurrency.
+	const char *env_set_conc = getenv("HERCULES_ASYNC_SET_CONCURRENCY");
+	const char *cfg_set_conc = cfg_get(cfg, "ASYNC_SET_CONCURRENCY");
+	int parsed_set_conc = 0;
+	if (env_set_conc != NULL)
+	{
+		if (is_valid_integer(env_set_conc, &parsed_set_conc) && parsed_set_conc >= 0)
+		{
+			args->async_set_concurrency = parsed_set_conc;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid HERCULES_ASYNC_SET_CONCURRENCY value: '%s', setting to 0 (dynamic)\n", env_set_conc);
+			args->async_set_concurrency = 0;
+		}
+	}
+	else if (cfg_set_conc != NULL)
+	{
+		if (is_valid_integer(cfg_set_conc, &parsed_set_conc) && parsed_set_conc >= 0)
+		{
+			args->async_set_concurrency = parsed_set_conc;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid ASYNC_SET_CONCURRENCY value in configuration: '%s', setting to 0 (dynamic)\n", cfg_set_conc);
+			args->async_set_concurrency = 0;
+		}
+	}
+	else
+	{
+		args->async_set_concurrency = 0;
+	}
+	ASYNC_SET_CONCURRENCY = (args->async_set_concurrency > 0) ? (u_int32_t)args->async_set_concurrency : 0;
 	// End of Sync or Async I/O.
 
 	// UCX Peer Error Handling mode (0: UCP_ERR_HANDLING_MODE_NONE, 1: UCP_ERR_HANDLING_MODE_PEER).

@@ -86,7 +86,7 @@ StopServers() {
     do
         # get the real id from the index array.
         REAL_ID=$((server_index_arr[$i]-1))
-        FILE_TO_REMOVE="${HERCULES_TEMPORAL_PATH}/${SERVER_TYPE}-hercules-${REAL_ID}-stop"
+        FILE_TO_REMOVE="${HERCULES_TEMPORAL_PATH}/${SERVER_TYPE}-hercules-${REAL_ID}-${ACTION}"
         # RM="rm ${HERCULES_TEMPORAL_PATH}/${SERVER_TYPE}-hercules-${i}-stop"
         # Set the action to be doing by the servers when they received the pkill signal.
         # ( ssh $node  "echo $OPERATION > ./tmp/hercules_pkill_operation" )
@@ -111,12 +111,6 @@ StopServers() {
         fi
         set +x
         i=$(($i+1))
-
-        # Removes the host from the hostfile only when decommissioning data servers.
-        # On sed, index start on 1, not 0, so we add 1 to REAL_ID.
-        if [[ "${STATUS}" == "remove" && "${SERVER_TYPE}" == "d" ]]; then
-            sed -i "$((REAL_ID + 1))d" ${HERCULES_DATA_HOSTFILE}
-        fi
     done
     # rm "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
 }

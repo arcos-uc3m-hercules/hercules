@@ -15,6 +15,8 @@ static u_int16_t HERCULES_THREAD_POOL_SIZE = 1;
 extern u_int16_t CONF_MALLEABILITY_STATUS;
 extern u_int16_t TO_RECORD_INTERVALS;
 extern u_int16_t ASYNC_IO;
+extern u_int32_t ASYNC_GET_CONCURRENCY;
+extern u_int32_t ASYNC_SET_CONCURRENCY;
 
 static inline const char *get_protocol_command(hercules_modes_t op, int async = 0)
 {

@@ -49,6 +49,8 @@ extern int32_t MALLEABILITY;
 // extern int32_t MALLEABILITY_TYPE;
 extern int32_t UPPER_BOUND_SERVERS;
 extern int32_t LOWER_BOUND_SERVERS;
+extern u_int32_t ASYNC_GET_CONCURRENCY;
+extern u_int32_t ASYNC_SET_CONCURRENCY;
 
 uint16_t PREFETCH = 6;
 
@@ -707,6 +709,8 @@ __attribute__((constructor)) void imss_posix_init(void)
 	slog_live(" -- REPL_TYPE: %d", REPL_TYPE);
 	slog_live(" -- POLICY: %s", POLICY);
 	slog_live(" -- SYNC: %d", ASYNC_IO);
+	slog_live(" -- ASYNC_GET_CONCURRENCY: %u", ASYNC_GET_CONCURRENCY);
+	slog_live(" -- ASYNC_SET_CONCURRENCY: %u", ASYNC_SET_CONCURRENCY);
 	// fprintf(stderr, "ASYNC IO %d\n", ASYNC_IO);
 
 	// map_prefetch = map_create_prefetch();

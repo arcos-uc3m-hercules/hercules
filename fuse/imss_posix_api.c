@@ -954,13 +954,15 @@ extern "C"
 					      size_t total_size, off_t offset,
 					      size_t start_blk, size_t num_blocks_to_read)
 	{
-		const size_t MAX_CONCURRENT_REQUESTS = 32;
-		size_t num_slots = std::min(num_blocks_to_read, MAX_CONCURRENT_REQUESTS);
+		size_t max_concurrent = (ASYNC_GET_CONCURRENCY > 0)
+					    ? (size_t)ASYNC_GET_CONCURRENCY
+					    : ((N_SERVERS > 0) ? (size_t)N_SERVERS : 2);
+		size_t num_slots = std::min(num_blocks_to_read, max_concurrent);
+		slog_debug("[ASYNC READ] Using max_concurrent=%zu (ASYNC_GET_CONCURRENCY=%u, N_SERVERS=%d), num_slots=%zu for %zu blocks", max_concurrent, ASYNC_GET_CONCURRENCY, N_SERVERS, num_slots, num_blocks_to_read);
 
 		struct AsyncReadSlot
 		{
 			void *ucx_handle;
-			char *temp_buffer;
 			size_t final_offset_in_buf;
 			size_t bytes_to_read;
 			size_t block_id;
@@ -972,17 +974,6 @@ extern "C"
 		{
 			slots[i].in_use = false;
 			slots[i].ucx_handle = NULL;
-			slots[i].temp_buffer = (char *)malloc(IMSS_DATA_BSIZE);
-			if (slots[i].temp_buffer == NULL)
-			{
-				for (size_t j = 0; j < i; ++j)
-				{
-					free(slots[j].temp_buffer);
-				}
-				slog_error("Failed to allocate temporary buffer for async read.");
-				fprintf(stderr, "HERCULES_ERR_READ_ASYNC: Failed to allocate temporary buffer for async read.\n");
-				return -ENOMEM;
-			}
 		}
 
 		size_t blocks_launched = 0;
@@ -1020,8 +1011,10 @@ extern "C"
 						slots[i].block_id = block_id;
 						slots[i].ucx_handle = NULL;
 
+						char *target_dest = (char *)buf + total_bytes_scheduled;
+
 						ssize_t ret = TIMING(get_ndata((char *)path, ds, block_id,
-									       slots[i].temp_buffer, bytes_to_read,
+									       target_dest, bytes_to_read,
 									       offset_in_blk, ASYNC,
 									       &slots[i].ucx_handle, INITIAL_RECURSION),
 								     "get_ndata", ssize_t, -1);
@@ -1052,11 +1045,6 @@ extern "C"
 						slog_debug("block %zu complete", slots[i].block_id);
 						ucp_request_free(slots[i].ucx_handle);
 						slots[i].ucx_handle = NULL;
-
-						// Copy data from temporary buffer to destination
-						memcpy((char *)buf + slots[i].final_offset_in_buf,
-						       slots[i].temp_buffer,
-						       slots[i].bytes_to_read);
 
 						total_bytes_completed += slots[i].bytes_to_read;
 						slots[i].in_use = false;
@@ -1095,11 +1083,6 @@ extern "C"
 					slots[i].in_use = false;
 				}
 			}
-		}
-
-		for (size_t i = 0; i < num_slots; ++i)
-		{
-			free(slots[i].temp_buffer);
 		}
 
 		if (fatal_error)
@@ -2626,11 +2609,6 @@ extern "C"
 		return 0;
 	}
 
-	// int set_num_servers()
-	// {
-	// 	int n_servers = N_SERVERS;
-	// }
-
 	// Does nothing
 	int imss_opendir(const char *path)
 	{
@@ -2823,7 +2801,6 @@ extern "C"
 		struct stat stats;
 		char *aux;
 		int res = 0;
-		// int32_t n_servers = 0;
 
 		switch (_case)
 		{

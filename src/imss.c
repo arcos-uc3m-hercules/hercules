@@ -54,8 +54,9 @@ uint32_t n_stat_servers = 1; // Number of metadata servers available.
 uint32_t *stat_ids = NULL;
 // void *stat_mon; // Metadata monitoring socket.
 
-// uint32_t NUM_DATA_SERVERS;
 int32_t N_SERVERS = -1; // Default
+extern u_int32_t ASYNC_GET_CONCURRENCY;
+extern u_int32_t ASYNC_SET_CONCURRENCY;
 const int32_t MAX_SERVERS = 100;
 const int MAX_RETRIES = 10;
 
@@ -85,8 +86,6 @@ imss empty_imss;
 int32_t found_in; // Variable storing the position where a certain structure was stored in a certain vector.
 
 extern uint16_t connection_port; // FIXME
-
-// char att_deployment[URI_] = {0};
 
 uint64_t BLOCK_SIZE = 0;
 // int32_t IMSS_DEBUG = 0;
@@ -1906,16 +1905,9 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 		}
 	}
 
-	// new_imss.info.num_storages -= num_down_storages;
-	// NUM_DATA_SERVERS = new_imss.info.num_storages;
 	N_SERVERS = new_imss.info.num_storages;
 	*num_active_storages = new_imss.info.num_storages;
-	// NUM_DATA_SERVERS = new_imss.info.num_active_storages;
 
-	// char str_NUM_DATA_SERVERS[10] = {0};
-	// sprintf(str_NUM_DATA_SERVERS, "%d", new_imss.info.num_active_storages);
-	// // TO CHECK: do we already need this?
-	// setenv("HERCULES_CURR_ACTIVE_DATA_NODES", str_NUM_DATA_SERVERS, 1);
 	new_imss.info.session_plcy = get_policy_number(POLICY);
 	curr_imss = new_imss;
 
@@ -3552,11 +3544,6 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 			int remaining = (int)local_imss_->info.num_storages - 1;
 			ReleaseSpecificDataServerNetworkResources(local_imss_, 1, i, remaining);
 			PrintIntervals(curr_dataset);
-			// if (remaining > 0)
-			// {
-			// 	SetInterval(curr_dataset, remaining, 0, 0);
-			// 	SetInterval(curr_dataset, remaining, curr_dataset->first_block_id, curr_dataset->last_block_id);
-			// }
 			ClearIntervalsStructure(curr_dataset);
 			changes_found = 1;
 		}
@@ -5960,7 +5947,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		{
 			slog_debug("async process");
 			// async get.
-			async_data_worker_progress(curr_imss_storages);
+			int get_concurrency = (ASYNC_GET_CONCURRENCY > 0) ? (int)ASYNC_GET_CONCURRENCY : curr_imss_storages;
+			async_data_worker_progress(get_concurrency);
 			void *ucx_req_handle = irecv_data(ucp_worker_data, response_buffer, msg_length, local_data_uid);
 			if (buffer_request)
 			{
@@ -6815,7 +6803,8 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			size_t size_sent_data = 0;
 			if (async == ASYNC)
 			{
-				async_data_worker_progress(curr_imss_storages);
+				int set_concurrency = (ASYNC_SET_CONCURRENCY > 0) ? (int)ASYNC_SET_CONCURRENCY : curr_imss_storages;
+				async_data_worker_progress(set_concurrency);
 				ServerSendRequest *new_send = new ServerSendRequest();
 				outstanding_sends++;
 				void *ucx_req_handle = isend_data2(ucp_worker_data, ep, (void *)buffer, size, local_data_uid, new_send);
