@@ -655,12 +655,10 @@ fi
 ## Checks if the user wants to remove data servers.
 if [[ "${STATUS}" = "remove" ]];
 then
-    ## Remove data and metadata servers.
     if [[ "${VERBOSE}" -eq "1" ]]; then
         echo "Starting decommissioning state."
     fi
 
-    hosts=()
     index_file="${HERCULES_TEMPORAL_PATH}/data2${STATUS}_index_$SLURM_JOB_ID"
 
     if [ ! -f "${HERCULES_DATA_HOSTFILE}" ]; then
@@ -668,56 +666,108 @@ then
         exit 1
     fi
 
+    active_count=$(wc -l < "${HERCULES_DATA_HOSTFILE}")
+    hosts_to_remove=()
+
     # Checks if number of servers was passed (-n).
     if [ ! -z "${NUM_SERVERS_ARG}" ]; then
         if ! [[ "${NUM_SERVERS_ARG}" =~ ^[0-9]+$ ]] || [ "${NUM_SERVERS_ARG}" -le 0 ]; then
             echo "## [remove] Error: Invalid number of servers: '${NUM_SERVERS_ARG}'"
             exit 1
         fi
-        active_count=$(wc -l < "${HERCULES_DATA_HOSTFILE}")
         if [ "${NUM_SERVERS_ARG}" -ge "${active_count}" ]; then
             echo "## [remove] Error: Cannot remove ${NUM_SERVERS_ARG} servers. Currently active: ${active_count}. At least 1 data server must remain."
             exit 1
         fi
-        readarray -t hosts < <(tail -n "${NUM_SERVERS_ARG}" "${HERCULES_DATA_HOSTFILE}")
-        awk 'FNR==NR{a[$1]=NR;next}{if($1 in a) print a[$1]}' "${HERCULES_DATA_HOSTFILE}" <(printf "%s\n" "${hosts[@]}") > "${index_file}"
+        # Select the last NUM_SERVERS_ARG servers in REVERSE order (tail-first: highest index down to lowest)
+        readarray -t hosts_to_remove < <(tail -n "${NUM_SERVERS_ARG}" "${HERCULES_DATA_HOSTFILE}" | awk '{a[NR]=$0} END{for(i=NR;i>=1;i--) print a[i]}')
+
     # Checks if a list of data servers was passed by the user (-d).
     elif [ ! -z "${DATA_SERVER_FILE}" ]; then
         if [ ! -f "${DATA_SERVER_FILE}" ]; then
             echo "Data server file ${DATA_SERVER_FILE} does not exist"
             exit 1
         fi
-        # to read the file passed by the user.
-        readarray -t hosts < "${DATA_SERVER_FILE}"
-        awk 'FNR==NR{a[$1]=NR;next}{if($1 in a) print a[$1]}' "${HERCULES_DATA_HOSTFILE}" "${DATA_SERVER_FILE}" > "${index_file}"
+        readarray -t req_hosts < <(grep -v '^[[:space:]]*$' "${DATA_SERVER_FILE}")
+        if [ "${#req_hosts[@]}" -eq 0 ]; then
+            echo "## [remove] Error: Data server file ${DATA_SERVER_FILE} is empty."
+            exit 1
+        fi
+        if [ "${#req_hosts[@]}" -ge "${active_count}" ]; then
+            echo "## [remove] Error: Cannot remove ${#req_hosts[@]} servers. Currently active: ${active_count}. At least 1 data server must remain."
+            exit 1
+        fi
+        # Verify that all requested hosts are present in the active hostfile
+        for h in "${req_hosts[@]}"; do
+            if ! grep -q "^${h}$" "${HERCULES_DATA_HOSTFILE}"; then
+                echo "## [remove] Error: Host '${h}' in ${DATA_SERVER_FILE} is not currently an active data server in ${HERCULES_DATA_HOSTFILE}."
+                exit 1
+            fi
+        done
+        # Order hosts in DESCENDING order of their line number in HERCULES_DATA_HOSTFILE
+        readarray -t hosts_to_remove < <(awk '
+            FNR==NR { req[$1]=1; next }
+            ($1 in req) { print FNR, $1 }
+        ' "${DATA_SERVER_FILE}" "${HERCULES_DATA_HOSTFILE}" | sort -k1,1nr | awk '{print $2}')
+
     ## Checks if the user pass a single remote hostname as string (-r).
     elif [[ ! -z "${REMOTE_HOSTNAME}" ]]; then
-        hosts+=("${REMOTE_HOSTNAME}")
-        # verifies that the remote hostname is on the data hostfile.
+        if [ "${active_count}" -le 1 ]; then
+            echo "## [remove] Error: Cannot remove server '${REMOTE_HOSTNAME}'. Only ${active_count} data server active. At least 1 data server must remain."
+            exit 1
+        fi
         if ! grep -q "^${REMOTE_HOSTNAME}$" "${HERCULES_DATA_HOSTFILE}"; then
              echo "## [remove] Error: Hostname '${REMOTE_HOSTNAME}' not found in the hostfile ${HERCULES_DATA_HOSTFILE}."
              exit 1
         fi
-
-        grep -n "^${REMOTE_HOSTNAME}$" "${HERCULES_DATA_HOSTFILE}" | cut -d: -f1 > "${index_file}"
+        hosts_to_remove=("${REMOTE_HOSTNAME}")
     else    
         echo "## Error: Number of servers (-n <num_servers>), data server file (-d <data_server_file_path>), or remote server hostname (-r <hostname>) is needed."
         PrintUsage
         exit 1
     fi
 
-    # 1 = Stops some servers synchronously.
-    # 0 = Do not kill the process.
-    StopServers "data" 0 "${STATUS}" "${hosts[@]}"
+    echo "## [remove] Removing ${#hosts_to_remove[@]} data server(s) sequentially: ${hosts_to_remove[*]}"
 
-    # For "remove" operations we always wait for selected servers to be removed.
-    WaitForServers "data" "d" "${STATUS}" "${hosts[@]}"
+    # Decommission servers sequentially, one at a time.
+    # Metadata server and data migration can only decommission one server per iteration.
+    # Processing in descending order ensures remaining target server IDs stay stable during each step.
+    removed_count=0
+    for node in "${hosts_to_remove[@]}"; do
+        # Locate current line number in HERCULES_DATA_HOSTFILE
+        line_num=$(grep -n "^${node}$" "${HERCULES_DATA_HOSTFILE}" | tail -n 1 | cut -d: -f1)
+        if [ -z "${line_num}" ]; then
+            echo "## [remove] Warning: Node '${node}' is no longer in ${HERCULES_DATA_HOSTFILE}, skipping."
+            continue
+        fi
 
-    # Remove decommissioned hosts from the data hostfile
-    for h in "${hosts[@]}"; do
-        sed -i "/^${h}$/d" "${HERCULES_DATA_HOSTFILE}"
+        real_id=$((line_num - 1))
+        echo "## [remove] Decommissioning data server ID ${real_id} on ${node}..."
+
+        # Write this single server index to index_file
+        echo "${line_num}" > "${index_file}"
+
+        # 0 = Decommissioning signal
+        StopServers "data" 0 "${STATUS}" "${node}"
+
+        # Wait for this specific server to complete data migration and terminate
+        WaitForServers "data" "d" "${STATUS}" "${node}"
+        wait_status=$?
+
+        if [ "${wait_status}" -ne 0 ]; then
+            echo "## [remove] Error: Failed waiting for data server ID ${real_id} on ${node} to decommission."
+            exit 1
+        fi
+
+        # Remove the decommissioned host from HERCULES_DATA_HOSTFILE
+        sed -i "${line_num}d" "${HERCULES_DATA_HOSTFILE}"
+
+        removed_count=$((removed_count + 1))
+        echo "[+] Successfully decommissioned data server ID ${real_id} on ${node}."
     done
-   
+
+    echo "[+] Decommissioning complete. Successfully removed ${removed_count} data server(s)."
+    echo "[+] Remaining active data servers: $(wc -l < "${HERCULES_DATA_HOSTFILE}")"
     exit 0
 fi
 
