@@ -86,7 +86,7 @@ StopServers() {
     do
         # get the real id from the index array.
         REAL_ID=$((server_index_arr[$i]-1))
-        FILE_TO_REMOVE="${HERCULES_TEMPORAL_PATH}/${SERVER_TYPE}-hercules-${REAL_ID}-${ACTION}"
+        FILE_TO_REMOVE="${HERCULES_TEMPORAL_PATH}/${SERVER_TYPE}-hercules-${REAL_ID}-${ACTION} ${HERCULES_TEMPORAL_PATH}/${SERVER_TYPE}-hercules-${REAL_ID}-start"
         # RM="rm ${HERCULES_TEMPORAL_PATH}/${SERVER_TYPE}-hercules-${i}-stop"
         # Set the action to be doing by the servers when they received the pkill signal.
         # ( ssh $node  "echo $OPERATION > ./tmp/hercules_pkill_operation" )
@@ -790,7 +790,7 @@ then
         echo "Starting commissioning state."
     fi
     hosts=()
-    index_file="${HERCULES_TEMPORAL_PATH}/data2${STATUS}_index_$SLURM_JOB_ID"
+    index_file="${HERCULES_TEMPORAL_PATH}/data2start_index_$SLURM_JOB_ID"
 
     # Checks if number of servers to add was passed (-n).
     if [ ! -z "${NUM_SERVERS_ARG}" ]; then
