@@ -117,6 +117,7 @@ pthread_cond_t global_free_space_cond;
 pthread_mutex_t server_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t server_ready_cond = PTHREAD_COND_INITIALIZER;
 bool is_new_server_ready = false;
+std::atomic<pid_t> active_commissioning_pid{0};
 
 // Preloaded metadata server hostnames.
 std::set<std::string> preloaded_metadata_servers;
@@ -1016,7 +1017,7 @@ void *run_malleability(void *th_argv)
 	{
 		slog_error("HERCULES_ERR_RUN_MALLEABILITY_NULL_ARGS");
 		// changes comissioning_on to false.
-		// comissioning_on.store(false, std::memory_order_release);
+		comissioning_on.store(false, std::memory_order_release);
 		pthread_exit(NULL);
 	}
 
@@ -1127,6 +1128,12 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 	{
 		slog_malleability("Commissioning skipped: current storages (%d) reached upper bound (%d)", imss_info_struct->num_storages, arguments->args->upper_bound_servers);
 		fprintf(stderr, "Commissioning skipped: current storages (%d) reached upper bound (%d)\n", imss_info_struct->num_storages, arguments->args->upper_bound_servers);
+		return NULL;
+	}
+
+	if (active_commissioning_pid.load() > 0)
+	{
+		slog_malleability("Commissioning skipped: an active commissioning child process (PID %d) is already pending.", active_commissioning_pid.load());
 		return NULL;
 	}
 
@@ -1953,23 +1960,39 @@ void *get_performance_metrics(void *th_argv)
 	}
 	// pthread_mutex_unlock(&mutext_performance_metrics);
 
-	pthread_t malleability_stage_thread;
-	MalleabilityArgs *malleability_args = fill_malleability_args(arguments);
-	if (malleability_args == NULL)
-	{
-		slog_error("Malleability args is NULL");
-		return NULL; // TODO: check if get_performance_metrics will be a thread.
-	}
-
-	// We check that the malleability has not been activated before by another thread.
-	// if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
+	// Check that malleability has not been activated before by another thread.
 	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED)
 	{
+		// Avoid running malleability while another malleability task is still pending or in progress
+		if (active_commissioning_pid.load() > 0 || comissioning_on.load(std::memory_order_acquire))
+		{
+			slog_debug("Malleability skipped: another malleability task is already active (commissioning_on=%d, active_pid=%d).",
+				   comissioning_on.load(std::memory_order_relaxed), active_commissioning_pid.load());
+			return NULL;
+		}
+
+		bool expected = false;
+		if (!comissioning_on.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+		{
+			slog_debug("Malleability skipped: another thread claimed malleability evaluation.");
+			return NULL;
+		}
+
+		pthread_t malleability_stage_thread;
+		MalleabilityArgs *malleability_args = fill_malleability_args(arguments);
+		if (malleability_args == NULL)
+		{
+			slog_error("Malleability args is NULL");
+			comissioning_on.store(false, std::memory_order_release);
+			return NULL; // TODO: check if get_performance_metrics will be a thread.
+		}
+
 		slog_debug("Malleability is enabled and is NOT in progress by another thread.");
 		if (pthread_create(&malleability_stage_thread, NULL, run_malleability, (void *)malleability_args) != 0)
 		{
 			perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
 			slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
+			comissioning_on.store(false, std::memory_order_release);
 			free(malleability_args);
 			return (void *)-1;
 		}
