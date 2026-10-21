@@ -198,6 +198,20 @@ int preload_metadata_servers(const char *meta_hostfile)
 	return 0;
 }
 
+void abort_active_commissioning()
+{
+	pid_t cpid = active_commissioning_pid.exchange(0);
+	if (cpid > 0)
+	{
+		slog_malleability("Aborting active commissioning process PID %d", cpid);
+		kill(cpid, SIGTERM);
+		waitpid(cpid, NULL, WNOHANG);
+	}
+	pthread_mutex_lock(&server_ready_mutex);
+	pthread_cond_signal(&server_ready_cond);
+	pthread_mutex_unlock(&server_ready_mutex);
+}
+
 void fill_temp_p_argv(const p_argv *src, p_argv *dest)
 {
 
@@ -1237,6 +1251,9 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 
 		slog_malleability("Slurm commissioning exclude nodes list: %s", exclude_nodes_str.c_str());
 
+		char str_meta_pid[16];
+		snprintf(str_meta_pid, sizeof(str_meta_pid), "%d", getpid());
+
 		// Fork child process to run slurm_data_server.sh with the exclude list in the background
 		pid_t pid = fork();
 		if (pid == -1)
@@ -1248,8 +1265,8 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		else if (pid == 0)
 		{
 			// Child process: execute slurm_data_server.sh
-			execl(script_path, script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, exclude_nodes_str.c_str(), (char *)NULL);
-			execlp("bash", "bash", script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, exclude_nodes_str.c_str(), (char *)NULL);
+			execl(script_path, script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, exclude_nodes_str.c_str(), str_meta_pid, (char *)NULL);
+			execlp("bash", "bash", script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, exclude_nodes_str.c_str(), str_meta_pid, (char *)NULL);
 			char error_msg[256] = {'\0'};
 			sprintf(error_msg, "HERCULES_ERR_EXECL_SLURM_SCRIPT: failed to exec %s", script_path);
 			slog_error("%s", error_msg);
@@ -1258,7 +1275,8 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		}
 		else
 		{
-			slog_malleability("Slurm data server script spawned with PID %d for server ID %d (excluded: %s)", pid, new_server_id, exclude_nodes_str.c_str());
+			active_commissioning_pid.store(pid);
+			slog_malleability("Slurm data server script spawned with PID %d for server ID %d (excluded: %s, meta PID: %s)", pid, new_server_id, exclude_nodes_str.c_str(), str_meta_pid);
 			// Do NOT call blocking waitpid here; salloc runs in foreground to keep allocation active.
 		}
 	}
@@ -1383,20 +1401,29 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 	ts.tv_sec += 600; // 10-minute timeout for Slurm allocation or node boot
 
 	int wait_rc = 0;
-	while (!is_new_server_ready && wait_rc == 0)
+	while (!is_new_server_ready && wait_rc == 0 && !global_finish_threads)
 	{
 		wait_rc = pthread_cond_timedwait(&server_ready_cond, &server_ready_mutex, &ts);
 	}
 
-	if (wait_rc == ETIMEDOUT && !is_new_server_ready)
+	if ((wait_rc == ETIMEDOUT && !is_new_server_ready) || global_finish_threads)
 	{
-		slog_error("Timed out waiting for new server %d to connect via SETSERVER", new_server_id);
-		fprintf(stderr, "Timed out waiting for new server %d to connect via SETSERVER\n", new_server_id);
+		if (global_finish_threads)
+		{
+			slog_malleability("Server shutdown in progress. Aborting commissioning of server %d", new_server_id);
+		}
+		else
+		{
+			slog_error("Timed out waiting for new server %d to connect via SETSERVER", new_server_id);
+			fprintf(stderr, "Timed out waiting for new server %d to connect via SETSERVER\n", new_server_id);
+		}
 		pthread_mutex_unlock(&server_ready_mutex);
+		abort_active_commissioning();
 		return NULL;
 	}
 
 	is_new_server_ready = false;
+	active_commissioning_pid.store(0);
 	slog_malleability("Signal received: server %d is ready and active.", new_server_id);
 	pthread_mutex_unlock(&server_ready_mutex);
 

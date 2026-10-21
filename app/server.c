@@ -1190,6 +1190,7 @@ void handle_signal_server(int signal)
 			if (args.type == TYPE_METADATA_SERVER)
 			{
 				global_finish_threads = 1;
+				abort_active_commissioning();
 
 				if (global_finish_garbage_collector != 1)
 				{ // Garbage collector still running.

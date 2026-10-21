@@ -1,6 +1,68 @@
 #!/usr/bin/env bash
 # Slurm on-demand data server launcher for Hercules malleability
-# Usage: ./slurm_data_server.sh <server_id> <num_active> <conf_path> <hercules_path> <partition> <account> [log_dir] [exclude_nodes]
+# Usage: ./slurm_data_server.sh <server_id> <num_active> <conf_path> <hercules_path> <partition> <account> [log_dir] [exclude_nodes] [meta_pid]
+# Internal worker mode: ./slurm_data_server.sh --worker <server_id> <num_active> <conf_path> <hercules_path> <server_bin> <log_file> <log_dir> [meta_pid]
+
+if [[ "$1" == "--worker" ]]; then
+    SERVER_ID="$2"
+    NUM_ACTIVE="$3"
+    CONF_PATH="$4"
+    HERCULES_PATH="$5"
+    SERVER_BIN="$6"
+    LOG_FILE="$7"
+    LOG_DIR="$8"
+    META_PID="$9"
+
+    # Clear any binding variables inside the new allocation shell
+    unset SLURM_CPU_BIND SLURM_CPU_BIND_LIST SLURM_CPU_BIND_TYPE SLURM_CPU_BIND_VERBOSE SLURM_MEM_BIND SLURM_MEM_BIND_TYPE SLURM_MEM_BIND_LIST
+
+    # Record allocated Slurm Job ID
+    JOB_FILE="${LOG_DIR}/hercules_slurm_ds_${SERVER_ID}.jobid"
+    if [[ -n "${SLURM_JOB_ID}" ]]; then
+        echo "${SLURM_JOB_ID}" > "${JOB_FILE}"
+    fi
+    # Register trap to clean up this file when the process exits
+    trap 'rm -f "${JOB_FILE}"' EXIT INT TERM
+
+    # Check if parent Hercules metadata server process is still alive
+    if [[ -n "${META_PID}" ]] && ! kill -0 "${META_PID}" 2>/dev/null; then
+        echo "[Slurm] Parent Hercules server (PID ${META_PID}) is no longer active. Aborting data server launch for ID ${SERVER_ID}." >> "${LOG_FILE}"
+        exit 0
+    fi
+
+    # Check if Hercules cluster shutdown has already been initiated
+    IS_SHUTDOWN=0
+    if [[ -f "${LOG_DIR}/m-hercules-0-stop" ]]; then
+        IS_SHUTDOWN=1
+    elif [[ -f "${LOG_DIR}/hercules_pkill_operation" ]]; then
+        PKILL_OP=$(tr -d '[:space:]' < "${LOG_DIR}/hercules_pkill_operation" 2>/dev/null)
+        if [[ "${PKILL_OP}" == "1" ]]; then
+            IS_SHUTDOWN=1
+        fi
+    fi
+
+    if [[ "${IS_SHUTDOWN}" -eq 1 ]]; then
+        echo "[Slurm] Hercules cluster shutdown detected. Aborting data server launch for ID ${SERVER_ID}." >> "${LOG_FILE}"
+        exit 0
+    fi
+
+    TARGET_NODE=$(scontrol show hostnames "$SLURM_NODELIST" 2>/dev/null | head -n 1)
+    if [[ -z "${TARGET_NODE}" ]]; then
+        TARGET_NODE=$(hostname -s)
+    fi
+    echo "[Slurm] Allocated node: ${TARGET_NODE} for data server ID ${SERVER_ID}" >> "${LOG_FILE}"
+
+    # Launch server with --cpu-bind=none so srun does not attempt to bind
+    # task 0 to CPU 0 when the step is assigned a different core on the allocated node.
+    cd "${HERCULES_PATH}"
+    srun --cpu-bind=none -N 1 -n 1 -w "${TARGET_NODE}" --overlap \
+        env HERCULES_CONF="${CONF_PATH}" \
+            HERCULES_THREAD_POOL=1 \
+            HERCULES_DATA_HOSTNAME="${TARGET_NODE}" \
+        "${SERVER_BIN}" d "${SERVER_ID}" "${NUM_ACTIVE}" >> "${LOG_FILE}" 2>&1
+    SRUN_RC=$?
+    exit ${SRUN_RC}
+fi
 
 SERVER_ID="$1"
 NUM_ACTIVE="$2"
@@ -10,10 +72,11 @@ PARTITION="$5"
 ACCOUNT="$6"
 LOG_DIR="${7:-${HERCULES_PATH}/tmp/}"
 EXCLUDE_ARG="${8:-${HERCULES_EXCLUDE_NODES}}"
+META_PID="${9:-${HERCULES_META_PID}}"
 TIME_LIMIT="${HERCULES_SLURM_TIME:-01:00:00}"
 
 if [[ -z "${SERVER_ID}" || -z "${NUM_ACTIVE}" || -z "${CONF_PATH}" || -z "${HERCULES_PATH}" || -z "${PARTITION}" || -z "${ACCOUNT}" ]]; then
-    echo "Usage: $0 <server_id> <num_active> <conf_path> <hercules_path> <partition> <account> [log_dir] [exclude_nodes]" >&2
+    echo "Usage: $0 <server_id> <num_active> <conf_path> <hercules_path> <partition> <account> [log_dir] [exclude_nodes] [meta_pid]" >&2
     exit 1
 fi
 
@@ -54,6 +117,9 @@ if [[ -n "${HERCULES_BUILD_TYPE}" && -x "${HERCULES_PATH}/build-${HERCULES_BUILD
     SERVER_BIN="${HERCULES_PATH}/build-${HERCULES_BUILD_TYPE}/hercules_server"
 fi
 
+# Preserve the parent job ID for targeted child job tracking and cancellation
+PARENT_SLURM_JOB_ID="${SLURM_JOB_ID}"
+
 # Clean up all inherited Slurm environment variables from the parent job/step
 # (e.g. SLURM_JOB_ID, SLURM_STEP_ID, SLURM_CPU_BIND, SLURM_NODELIST) to ensure
 # child salloc and srun create a clean, independent allocation without inheriting
@@ -64,27 +130,20 @@ for var in $(compgen -v | grep '^SLURM_'); do
     fi
 done
 
+# Build job name with parent job ID when available for targeted cancellation
+if [[ -n "${PARENT_SLURM_JOB_ID}" ]]; then
+    CHILD_JOB_NAME="hercules-ds-${PARENT_SLURM_JOB_ID}-${SERVER_ID}"
+else
+    CHILD_JOB_NAME="hercules-ds-${SERVER_ID}"
+fi
+
 exec salloc -N 1 \
     "${SALLOC_EXCLUDE[@]}" \
     --partition="${PARTITION}" \
     -A "${ACCOUNT}" \
-    --job-name="hercules-ds-${SERVER_ID}" \
+    --job-name="${CHILD_JOB_NAME}" \
     --time="${TIME_LIMIT}" \
     --cpus-per-task=1 \
-    bash -c "
-        # Clear any binding variables inside the new allocation shell
-        unset SLURM_CPU_BIND SLURM_CPU_BIND_LIST SLURM_CPU_BIND_TYPE SLURM_CPU_BIND_VERBOSE SLURM_MEM_BIND SLURM_MEM_BIND_TYPE SLURM_MEM_BIND_LIST
-
-        TARGET_NODE=\$(scontrol show hostnames \"\$SLURM_NODELIST\" | head -n 1)
-        echo \"[Slurm] Allocated node: \${TARGET_NODE} for data server ID ${SERVER_ID}\" >> '${LOG_FILE}'
-
-        # Launch server with --cpu-bind=none so srun does not attempt to bind
-        # task 0 to CPU 0 when the step is assigned a different core on the allocated node.
-        srun --cpu-bind=none -N 1 -n 1 -w \"\${TARGET_NODE}\" --overlap bash -c \"
-            export HERCULES_CONF='${CONF_PATH}'
-            export HERCULES_THREAD_POOL=1
-            export HERCULES_DATA_HOSTNAME='\${TARGET_NODE}'
-            cd '${HERCULES_PATH}'
-            exec '${SERVER_BIN}' d '${SERVER_ID}' '${NUM_ACTIVE}'
-        \" >> '${LOG_FILE}' 2>&1
-    "
+    "${HERCULES_PATH}/scripts/slurm_data_server.sh" --worker \
+        "${SERVER_ID}" "${NUM_ACTIVE}" "${CONF_PATH}" "${HERCULES_PATH}" \
+        "${SERVER_BIN}" "${LOG_FILE}" "${LOG_DIR}" "${META_PID}"

@@ -523,6 +523,19 @@ fi
 export HERCULES_PATH=$HERCULES_PATH
 export HERCULES_TEMPORAL_PATH="$HERCULES_PATH/tmp/"
 
+# Purge stale signals and stop markers from previous runs when starting
+if [[ "${STATUS}" = "start" ]]; then
+    mkdir -p "${HERCULES_TEMPORAL_PATH}"
+    if [[ -f "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation" ]]; then
+        rm "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
+    fi
+    for stop_file in "${HERCULES_TEMPORAL_PATH}"/*-stop; do
+        if [[ -f "${stop_file}" ]]; then
+            rm "${stop_file}"
+        fi
+    done
+fi
+
 if [[ "${VERBOSE}" -eq "1" ]]; then
     echo "Hercules path - $HERCULES_PATH"
 fi
@@ -649,6 +662,31 @@ then
     fi
     # Stop metadata servers.
     StopAllMetadata
+
+    # Cancel any on-demand Slurm data server jobs
+    if command -v scancel >/dev/null 2>&1; then
+        echo "# Hercules: Cancelling dynamic Slurm data server allocations..."
+        if [[ -n "${SLURM_JOB_ID}" ]]; then
+            scancel --jobname="hercules-ds-${SLURM_JOB_ID}-*" --user="${USER}" 2>/dev/null || true
+        else
+            scancel --jobname="hercules-ds-*" --user="${USER}" 2>/dev/null || true
+        fi
+        for jf in "${HERCULES_TEMPORAL_PATH}"/hercules_slurm_ds_*.jobid; do
+            if [[ -f "${jf}" ]]; then
+                c_jid=$(cat "${jf}" 2>/dev/null)
+                if [[ -n "${c_jid}" ]]; then
+                    scancel "${c_jid}" 2>/dev/null || true
+                fi
+                rm -f "${jf}"
+            fi
+        done
+    fi
+
+    # Clean up pkill operation file after stopping cluster
+    if [[ -f "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation" ]]; then
+        rm "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
+    fi
+
     exit 0
 fi
 
@@ -765,6 +803,11 @@ then
         removed_count=$((removed_count + 1))
         echo "[+] Successfully decommissioned data server ID ${real_id} on ${node}."
     done
+
+    # Clean up pkill operation file after decommissioning completes
+    if [[ -f "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation" ]]; then
+        rm "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation"
+    fi
 
     echo "[+] Decommissioning complete. Successfully removed ${removed_count} data server(s)."
     echo "[+] Remaining active data servers: $(wc -l < "${HERCULES_DATA_HOSTFILE}")"
