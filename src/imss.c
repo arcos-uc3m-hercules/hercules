@@ -1151,6 +1151,12 @@ static int connect_to_metadata_servers(const char *stat_hostfile, uint64_t port,
 	size_t l_size = 0; // LINE_LENGTH;
 	char request[REQUEST_SIZE] = {0};
 
+	// Pre-load metadata server hostnames
+	if (stat_hostfile && stat_hostfile[0] != '\0')
+	{
+		preload_metadata_servers(stat_hostfile);
+	}
+
 	// Open the file containing the IMSS metadata server nodes.
 	if ((stat_nodes_struct = fopen(stat_hostfile, "r")) == NULL)
 	{

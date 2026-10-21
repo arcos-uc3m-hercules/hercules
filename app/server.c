@@ -194,6 +194,12 @@ int32_t main(int32_t argc, char **argv)
 		return 0;
 	}
 
+	// Pre-load metadata server hostnames into memory to eliminate disk I/O during commissioning.
+	if (args.meta_hostfile[0] != '\0')
+	{
+		preload_metadata_servers(args.meta_hostfile);
+	}
+
 	if (args.async_io == ASYNC)
 	{
 		fprintf(stderr, "Asynchronous IO: %" PRIu32 "\n", args.async_io);

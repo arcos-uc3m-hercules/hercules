@@ -26,8 +26,10 @@
 #include <netinet/in.h>
 #include <numeric>
 #include <pthread.h>
+#include <set>
 #include <stdio.h>
 #include <string.h>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/sysinfo.h>
@@ -116,6 +118,10 @@ pthread_mutex_t server_ready_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t server_ready_cond = PTHREAD_COND_INITIALIZER;
 bool is_new_server_ready = false;
 
+// Preloaded metadata server hostnames.
+std::set<std::string> preloaded_metadata_servers;
+pthread_mutex_t mutex_preloaded_metadata_servers = PTHREAD_MUTEX_INITIALIZER;
+
 // Malleability decomissioning.
 int waiting_clients = 0;
 pthread_mutex_t mutex_malleability = PTHREAD_MUTEX_INITIALIZER;
@@ -148,6 +154,50 @@ int data_ready = 0;
 #define GARBAGE_COLLECTOR_PERIOD 10
 #define CKECKPOINT_PERIOD 10
 
+int preload_metadata_servers(const char *meta_hostfile)
+{
+	if (!meta_hostfile || meta_hostfile[0] == '\0')
+	{
+		return 0;
+	}
+
+	pthread_mutex_lock(&mutex_preloaded_metadata_servers);
+	if (!preloaded_metadata_servers.empty())
+	{
+		pthread_mutex_unlock(&mutex_preloaded_metadata_servers);
+		return 0;
+	}
+
+	FILE *mf = fopen(meta_hostfile, "r");
+	if (!mf)
+	{
+		pthread_mutex_unlock(&mutex_preloaded_metadata_servers);
+		slog_warn("preload_metadata_servers: could not open %s", meta_hostfile);
+		return -1;
+	}
+
+	char line_buf[256];
+	while (fgets(line_buf, sizeof(line_buf), mf) != NULL)
+	{
+		std::string mh = line_buf;
+		while (!mh.empty() && (mh.back() == '\n' || mh.back() == '\r' || mh.back() == ' '))
+		{
+			mh.pop_back();
+		}
+
+		if (!mh.empty() && mh[0] != '#')
+		{
+			// Normalize to short hostname matching Slurm NodeName format
+			size_t dot = mh.find('.');
+			preloaded_metadata_servers.insert(dot != std::string::npos ? mh.substr(0, dot) : mh);
+		}
+	}
+	fclose(mf);
+	slog_debug("Preloaded %zu metadata server host(s) into memory from %s", preloaded_metadata_servers.size(), meta_hostfile);
+	pthread_mutex_unlock(&mutex_preloaded_metadata_servers);
+	return 0;
+}
+
 void fill_temp_p_argv(const p_argv *src, p_argv *dest)
 {
 
@@ -178,7 +228,7 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars, int at_position)
 {
 	int count = my_imss->num_storages;
 	slog_malleability("Adding %s (%d), count=%d, at_position=%d, my_imss->num_storages add=%p",
-		   line, n_chars, count, at_position, &(my_imss)->num_storages);
+			  line, n_chars, count, at_position, &(my_imss)->num_storages);
 
 	// -1 means append to the end
 	if (at_position < 0 || at_position >= count)
@@ -398,7 +448,7 @@ int Shutdown_server()
 
 uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool server_status, CommunicationMode mode, char *malleability_checkpoint_path)
 {
-	slog_malleability("Calling first garbage collector.")
+	slog_malleability("Calling first garbage collector.");
 	global_hierarchical_map->HierarchicalMapCleanGarbageCollector();
 	// Get all the keys of this server.
 	std::vector<std::string> block_keys = global_hierarchical_map->HierarchicalMapGetAllDirectories();
@@ -541,15 +591,15 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 			}
 		}
 	}
-	slog_malleability("Calling second garbage collector.")
+	slog_malleability("Calling second garbage collector.");
 	global_hierarchical_map->HierarchicalMapCleanGarbageCollector();
 
 	// fprintf(stderr, "++ number_of_blocks_sent=%d\n", number_of_blocks_sent);
 	slog_debug("++ number_of_blocks_sent=%d", number_of_blocks_sent);
 
-	slog_malleability("Flushing data endpoints.")
+	slog_malleability("Flushing data endpoints.");
 	imss_flush_data();
-	slog_malleability("Data endpoints flushed.")
+	slog_malleability("Data endpoints flushed.");
 
 	return total_data_moved;
 }
@@ -1069,10 +1119,10 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 	char *slurm_job_id = getenv("SLURM_JOB_ID");
 	char *hercules_slurm_dynamic = getenv("HERCULES_SLURM_DYNAMIC");
 	int is_slurm = (slurm_job_id != NULL || hercules_slurm_dynamic != NULL);
-	slog_malleability("%s slurm, SLURM_JOB_ID=%s, HERCULES_SLURM_DYNAMIC=%s", 
-		is_slurm == 1 ? "USING":"NOT using", 
-		slurm_job_id != NULL ? slurm_job_id: "not defined", 
-		hercules_slurm_dynamic != NULL ? hercules_slurm_dynamic : "not defined");
+	slog_malleability("%s slurm, SLURM_JOB_ID=%s, HERCULES_SLURM_DYNAMIC=%s",
+			  is_slurm == 1 ? "USING" : "NOT using",
+			  slurm_job_id != NULL ? slurm_job_id : "not defined",
+			  hercules_slurm_dynamic != NULL ? hercules_slurm_dynamic : "not defined");
 
 	int32_t new_server_id = imss_info_struct->num_storages;
 	int32_t new_num_active = imss_info_struct->num_storages + 1;
@@ -1104,14 +1154,16 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		}
 
 		const char *partition = (arguments->args && arguments->args->slurm_partition[0] != '\0')
-					     ? arguments->args->slurm_partition
-					     : getenv("HERCULES_SLURM_PARTITION");
-		if (!partition) partition = getenv("SLURM_JOB_PARTITION");
+					    ? arguments->args->slurm_partition
+					    : getenv("HERCULES_SLURM_PARTITION");
+		if (!partition)
+			partition = getenv("SLURM_JOB_PARTITION");
 
 		const char *account = (arguments->args && arguments->args->slurm_account[0] != '\0')
-					   ? arguments->args->slurm_account
-					   : getenv("HERCULES_SLURM_ACCOUNT");
-		if (!account) account = getenv("SLURM_ACCOUNT");
+					  ? arguments->args->slurm_account
+					  : getenv("HERCULES_SLURM_ACCOUNT");
+		if (!account)
+			account = getenv("SLURM_ACCOUNT");
 
 		if (!partition || partition[0] == '\0' || !account || account[0] == '\0')
 		{
@@ -1131,6 +1183,61 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		char log_dir[PATH_MAX];
 		snprintf(log_dir, sizeof(log_dir), "%s/tmp/", hercules_dir);
 
+		// Collect active nodes to exclude from Slurm allocation so Slurm does not assign
+		// a node already running a Hercules data server or metadata server.
+		std::set<std::string> exclude_set;
+
+		// Collect all active data server hostnames from curr_global_imss_info
+		for (int32_t i = 0; i < imss_info_struct->num_storages; ++i)
+		{
+			if (imss_info_struct->ips && imss_info_struct->ips[i] && imss_info_struct->ips[i][0] != '\0')
+			{
+				std::string host = imss_info_struct->ips[i];
+				while (!host.empty() && (host.back() == '\n' || host.back() == '\r' || host.back() == ' '))
+					host.pop_back();
+				if (!host.empty())
+				{
+					// Normalize to short hostname matching Slurm NodeName format
+					size_t dot = host.find('.');
+					exclude_set.insert(dot != std::string::npos ? host.substr(0, dot) : host);
+				}
+			}
+		}
+
+		// Collect local metadata server hostname from data_hostname
+		if (arguments->args && arguments->args->data_hostname[0] != '\0')
+		{
+			std::string meta_host = arguments->args->data_hostname;
+			while (!meta_host.empty() && (meta_host.back() == '\n' || meta_host.back() == '\r' || meta_host.back() == ' '))
+				meta_host.pop_back();
+			if (!meta_host.empty())
+			{
+				size_t dot = meta_host.find('.');
+				exclude_set.insert(dot != std::string::npos ? meta_host.substr(0, dot) : meta_host);
+			}
+		}
+
+		// Collect any additional metadata servers
+		if (arguments->args && arguments->args->meta_hostfile[0] != '\0')
+		{
+			preload_metadata_servers(arguments->args->meta_hostfile);
+		}
+		pthread_mutex_lock(&mutex_preloaded_metadata_servers);
+		exclude_set.insert(preloaded_metadata_servers.begin(), preloaded_metadata_servers.end());
+		pthread_mutex_unlock(&mutex_preloaded_metadata_servers);
+
+		// Format unique short hostnames into a comma-separated list for Slurm's --exclude flag
+		std::string exclude_nodes_str;
+		for (const auto &node : exclude_set)
+		{
+			if (!exclude_nodes_str.empty())
+				exclude_nodes_str += ",";
+			exclude_nodes_str += node;
+		}
+
+		slog_malleability("Slurm commissioning exclude nodes list: %s", exclude_nodes_str.c_str());
+
+		// Fork child process to run slurm_data_server.sh with the exclude list in the background
 		pid_t pid = fork();
 		if (pid == -1)
 		{
@@ -1141,8 +1248,8 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		else if (pid == 0)
 		{
 			// Child process: execute slurm_data_server.sh
-			execl(script_path, script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, (char *)NULL);
-			execlp("bash", "bash", script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, (char *)NULL);
+			execl(script_path, script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, exclude_nodes_str.c_str(), (char *)NULL);
+			execlp("bash", "bash", script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, exclude_nodes_str.c_str(), (char *)NULL);
 			char error_msg[256] = {'\0'};
 			sprintf(error_msg, "HERCULES_ERR_EXECL_SLURM_SCRIPT: failed to exec %s", script_path);
 			slog_error("%s", error_msg);
@@ -1151,7 +1258,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		}
 		else
 		{
-			slog_malleability("Slurm data server script spawned with PID %d for server ID %d", pid, new_server_id);
+			slog_malleability("Slurm data server script spawned with PID %d for server ID %d (excluded: %s)", pid, new_server_id, exclude_nodes_str.c_str());
 			// Do NOT call blocking waitpid here; salloc runs in foreground to keep allocation active.
 		}
 	}
@@ -4395,8 +4502,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
 			acks_received = 0;
 			slog_malleability("All acks received, waking up the malleability thread.");
-			//fprintf(stderr, "All acks received, waking up the malleability thread.\n");
-			// signal to the deomissioning thread.
+			// fprintf(stderr, "All acks received, waking up the malleability thread.\n");
+			//  signal to the deomissioning thread.
 			pthread_mutex_lock(&server_ready_mutex);
 			is_new_server_ready = true;
 			pthread_cond_signal(&server_ready_cond);

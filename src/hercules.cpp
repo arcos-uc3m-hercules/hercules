@@ -961,7 +961,16 @@ int getConfiguration(struct arguments *args)
 
 	cfg_free(cfg);
 
-	get_hostname(args->data_hostname, HOST_NAME_MAX);
+	char *env_hostname = getenv("HERCULES_DATA_HOSTNAME");
+	if (env_hostname && env_hostname[0] != '\0')
+	{
+		strncpy(args->data_hostname, env_hostname, HOST_NAME_MAX - 1);
+		args->data_hostname[HOST_NAME_MAX - 1] = '\0';
+	}
+	else
+	{
+		get_hostname(args->data_hostname, HOST_NAME_MAX);
+	}
 
 	return 1;
 }

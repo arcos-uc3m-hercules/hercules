@@ -188,4 +188,6 @@ int send_add_server_to_all_data_servers(ucp_worker_h ucp_worker, uint32_t thread
  */
 void *move_blocks_2_server(void *th_argv);
 
+int preload_metadata_servers(const char *meta_hostfile);
+
 #endif
