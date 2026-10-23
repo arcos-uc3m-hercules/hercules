@@ -300,6 +300,10 @@ extern "C"
 		}
 
 		// Free the request handle and the tracking struct.
+		if (request != NULL && !UCS_PTR_IS_ERR(request))
+		{
+			((struct ucx_context *)request)->completed = 0;
+		}
 		ucp_request_free(request);
 
 		delete completed_req;
@@ -334,6 +338,10 @@ extern "C"
 		// }
 
 		// free the UCX handle.
+		if (request != NULL && !UCS_PTR_IS_ERR(request))
+		{
+			((struct ucx_context *)request)->completed = 0;
+		}
 		ucp_request_free(request);
 
 		size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
@@ -378,6 +386,8 @@ extern "C"
 		// UCP_OP_ATTR_FLAG_NO_IMM_CMPL: https://openucx.readthedocs.io/en/master/api.html
 		// Deny immediate completion, i.e NULL cannot be returned. If a completion callback
 		// is provided, it can be called before the function returns.
+		// If UCP_OP_ATTR_FLAG_NO_IMM_CMPL flag is set in the op_attr_mask field of param,
+		// then the operation will return a request handle, even if it completes immediately.
 		recv_param.cb.recv = recv_handler;
 		recv_param.datatype = ucp_dt_make_contig(1);
 
@@ -854,6 +864,10 @@ extern "C"
 		}
 		status = ucp_request_check_status(request);
 
+		if (request != NULL && !UCS_PTR_IS_ERR(request))
+		{
+			((struct ucx_context *)request)->completed = 0;
+		}
 		ucp_request_free(request);
 
 		return status;
@@ -871,6 +885,10 @@ extern "C"
 		send_req_t *data = (send_req_t *)ctx;
 
 		context->completed = 1;
+		if (data != NULL)
+		{
+			data->complete = 1;
+		}
 
 		// slog_info("[COMM] send_handler req");
 		// slog_info("[COMM][send_handler_req][0x%x] send handler called with status %d (%s)\n", (unsigned int)pthread_self(), status, ucs_status_string(status));
@@ -883,6 +901,10 @@ extern "C"
 		context->completed = 1;
 
 		send_req_t *data = (send_req_t *)ctx;
+		if (data != NULL)
+		{
+			data->complete = 1;
+		}
 		// free(data->buffer);
 		// ucp_request_free(request);
 
@@ -1838,48 +1860,6 @@ extern "C"
 		goto out_free_res;
 	}
 
-	// ucs_status_t ucx_wait(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str)
-	// {
-	// 	ucs_status_t status;
-
-	// 	/* if operation was completed immediately */
-	// 	if (request == NULL)
-	// 	{
-	// 		return UCS_OK;
-	// 	}
-
-	// 	if (UCS_PTR_IS_ERR(request))
-	// 	{
-	// 		status = UCS_PTR_STATUS(request);
-	// 	}
-	// 	else if (UCS_PTR_IS_PTR(request))
-	// 	{
-	// 		while (!request->completed)
-	// 		{
-	// 			// fprintf(stderr,"Waiting for completed\n");
-	// 			ucp_worker_progress(ucp_worker);
-	// 		}
-
-	// 		request->completed = 0;
-	// 		status = ucp_request_check_status(request);
-	// 		// fprintf(stderr,"Final status = %s\n", ucs_status_string(status));
-	// 		ucp_request_free(request);
-	// 	}
-	// 	else
-	// 	{
-	// 		status = UCS_OK;
-	// 	}
-
-	// 	if (status != UCS_OK)
-	// 	{
-	// 		fprintf(stderr, "unable to %s %s (%s)\n", op_str, data_str,
-	// 				ucs_status_string(status));
-	// 		slog_error("[COMM][ucx_wait] unable to %s %s (%s)", op_str, data_str, ucs_status_string(status));
-	// 	}
-
-	// 	return status;
-	// }
-
 	ucs_status_t ucx_wait(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str)
 	{
 		ucs_status_t status;
@@ -1889,13 +1869,14 @@ extern "C"
 		}
 		else if (UCS_PTR_IS_PTR(request))
 		{
-			while (!request->completed)
+			do
 			{
 				ucp_worker_progress(ucp_worker);
-			}
+				status = ucp_request_check_status(request);
+			} while (status == UCS_INPROGRESS);
+
 			request->completed = 0;
 			// ep_err_detected = 0;
-			status = ucp_request_check_status(request);
 			ucp_request_free(request);
 		}
 		else

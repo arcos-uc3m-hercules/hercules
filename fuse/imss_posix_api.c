@@ -1044,6 +1044,7 @@ extern "C"
 					if (status == UCS_OK)
 					{
 						slog_debug("block %zu complete", slots[i].block_id);
+						((struct ucx_context *)slots[i].ucx_handle)->completed = 0;
 						ucp_request_free(slots[i].ucx_handle);
 						slots[i].ucx_handle = NULL;
 
@@ -1055,6 +1056,7 @@ extern "C"
 					{
 						slog_error("Async read failed for block %zu: %s", slots[i].block_id, ucs_status_string(status));
 						fprintf(stderr, "HERCULES_ERR_READ_ASYNC: Async read failed for block %zu: %s\n", slots[i].block_id, ucs_status_string(status));
+						((struct ucx_context *)slots[i].ucx_handle)->completed = 0;
 						ucp_request_free(slots[i].ucx_handle);
 						slots[i].ucx_handle = NULL;
 						slots[i].in_use = false;
@@ -1079,6 +1081,7 @@ extern "C"
 					{
 						ucp_worker_progress(ucp_worker_data);
 					}
+					((struct ucx_context *)slots[i].ucx_handle)->completed = 0;
 					ucp_request_free(slots[i].ucx_handle);
 					slots[i].ucx_handle = NULL;
 					slots[i].in_use = false;

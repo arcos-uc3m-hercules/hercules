@@ -1117,12 +1117,12 @@ void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 		args->malleability_reorder_mode = default_reorder_mode;
 	}
 
-	fprintf(stdout, "Malleability is enabled.\n HERCULES_MALLEABILITY_DECOMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_COMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f, HERCULES_MALLEABILITY_REORDER_MODE=%d\n",
-		args->malleability_tolerance_decommissioning,
-		args->malleability_tolerance_commissioning,
-		args->malleability_windows_size,
-		args->malleability_performance_threshold,
-		(int)args->malleability_reorder_mode);
+	// fprintf(stdout, "Malleability is enabled.\n HERCULES_MALLEABILITY_DECOMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_COMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f, HERCULES_MALLEABILITY_REORDER_MODE=%d\n",
+	// 	args->malleability_tolerance_decommissioning,
+	// 	args->malleability_tolerance_commissioning,
+	// 	args->malleability_windows_size,
+	// 	args->malleability_performance_threshold,
+	// 	(int)args->malleability_reorder_mode);
 }
 
 void fill_snapshot_params(struct arguments *args, struct cfg_struct *cfg)

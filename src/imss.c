@@ -6660,12 +6660,22 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			}
 			slog_debug("Sending request '%s' to server %d (%s)", key_, server_id, node_hostname);
 
+			if (async == ASYNC)
+			{
+				int set_concurrency = (ASYNC_SET_CONCURRENCY > 0) ? (int)ASYNC_SET_CONCURRENCY : curr_imss_storages;
+				async_data_worker_progress(set_concurrency);
+			}
+
 			// clock_t t = clock();
 			auto start_time_req = std::chrono::steady_clock::now();
 			size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), key_, size_t, process_rank);
 			if (size_sent_req == 0)
 			{
 				slog_error("HERCULES_ERR_SET_REQ_SEND_REQ");
+				if (async == ASYNC)
+				{
+					async_data_worker_progress(0);
+				}
 				pthread_mutex_unlock(&lock_network);
 				if (deep > MAX_RETRIES)
 				{
@@ -6685,8 +6695,6 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 			size_t size_sent_data = 0;
 			if (async == ASYNC)
 			{
-				int set_concurrency = (ASYNC_SET_CONCURRENCY > 0) ? (int)ASYNC_SET_CONCURRENCY : curr_imss_storages;
-				async_data_worker_progress(set_concurrency);
 				ServerSendRequest *new_send = new ServerSendRequest();
 				outstanding_sends++;
 				void *ucx_req_handle = isend_data2(ucp_worker_data, ep, (void *)buffer, size, local_data_uid, new_send);

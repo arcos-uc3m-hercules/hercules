@@ -2175,17 +2175,43 @@ void *hercules_ucx_server(void *th_argv)
 			continue;
 		}
 
+		if (info_tag.length <= sizeof(msg_req_t) ||
+		    msg->addr_len == 0 ||
+		    msg->addr_len != (info_tag.length - sizeof(msg_req_t)) ||
+		    msg->addr_len > MAX_PEER_ADDR_LEN)
+		{
+			char req_preview[33] = {0};
+			if (info_tag.length > sizeof(uint64_t))
+			{
+				size_t preview_len = (info_tag.length - sizeof(uint64_t) < 32) ? (info_tag.length - sizeof(uint64_t)) : 32;
+				memcpy(req_preview, msg->request, preview_len);
+				for (size_t p = 0; p < preview_len; p++)
+				{
+					if (req_preview[p] < 32 || req_preview[p] >= 127)
+					{
+						req_preview[p] = '.';
+					}
+				}
+			}
+			slog_error("HERCULES_ERR_INVALID_MSG_REQ: info_length=%zu addr_len=%" PRIu64 " (0x%" PRIx64 ") sender_tag=%" PRIu64 " preview='%.32s'", (size_t)info_tag.length, (uint64_t)msg->addr_len, (uint64_t)msg->addr_len, info_tag.sender_tag, req_preview);
+			fprintf(stderr, "HERCULES_ERR_INVALID_MSG_REQ: info_length=%zu addr_len=%" PRIu64 " (0x%" PRIx64 ") sender_tag=%" PRIu64 " preview='%.32s'\n", (size_t)info_tag.length, (uint64_t)msg->addr_len, (uint64_t)msg->addr_len, info_tag.sender_tag, req_preview);
+			free(msg);
+			continue;
+		}
+
 		peer_addr_len = msg->addr_len;
 		peer_addr = (ucp_address *)malloc(peer_addr_len);
 		if (peer_addr == NULL)
 		{
 			// unable to allocate memory for peer address
 			perror("HERCULES_ERR_UCX_SERVER_MEMORY_ALLOC");
-			slog_error("HERCULES_ERR_UCX_SERVER_MEMORY_ALLOC");
+			slog_error("HERCULES_ERR_UCX_SERVER_MEMORY_ALLOC: failed to allocate %zu bytes", peer_addr_len);
 			free(msg);
 			continue;
 		}
 
+		// Ensure request string is properly null-terminated
+		msg->request[REQUEST_SIZE - 1] = '\0';
 		req = msg->request;
 
 		memcpy(peer_addr, msg + 1, peer_addr_len);
@@ -2480,7 +2506,7 @@ int process_add_server(p_argv *arguments, const char *req)
 
 		imss_info *imss_info_struct = &imss_->info;
 		// num_storages is increased inside AddIPS.
-		fprintf(stderr, "Adding %s on the data server %d.\n", added_hostname, arguments->thread_id);
+		fprintf(stderr, "Adding %s on the data server %d (%s).\n", added_hostname, arguments->args->id, arguments->args->data_hostname);
 		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname), -1);
 		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
 		number_active_storage_servers.store(imss_info_struct->num_storages);
@@ -3506,6 +3532,21 @@ int handle_write_operation(
 
 			p_argv temp_p_argv_for_calls;
 			fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
+			if (!expect_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
+			{
+				// consumes the incoming data to avoid network corruption.
+				// TODO: check for optimizations here.
+				size_t drain_len = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+				if (drain_len > 0)
+				{
+					void *drain_buf = malloc(drain_len);
+					if (drain_buf != NULL)
+					{
+						recv_data(arguments->ucp_worker, arguments->server_ep, drain_buf, drain_len, arguments->worker_uid, 0);
+						free(drain_buf);
+					}
+				}
+			}
 			if (send_node_list_2_frontend(temp_p_argv_for_calls, server_n_used_in_frontend) != 2) // Update the server list in the frontend.
 				return -1;
 		}
@@ -3578,6 +3619,17 @@ int handle_write_operation(
 			{
 				perror("HERCULES_ERR_MEMORY_ALLOCATION");
 				slog_error("HERCULES_ERR_MEMORY_ALLOCATION");
+				if (!expect_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
+				{
+					// consumes the incoming data to avoid network corruption.
+					// TODO: check for optimizations here.
+					void *drain_buf = malloc(msg_length);
+					if (drain_buf != NULL)
+					{
+						recv_data(arguments->ucp_worker, arguments->server_ep, drain_buf, msg_length, arguments->worker_uid, 0);
+						free(drain_buf);
+					}
+				}
 				SendConfirmationMessage(arguments, MSG_ERROR_OP);
 				return -1;
 			}
