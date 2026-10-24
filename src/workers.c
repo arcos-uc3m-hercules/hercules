@@ -245,11 +245,36 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars, int at_position)
 	slog_malleability("Adding %s (%d), count=%d, at_position=%d, my_imss->num_storages add=%p",
 			  line, n_chars, count, at_position, &(my_imss)->num_storages);
 
+	char clean_line[LINE_LENGTH] = {0};
+	int32_t clean_len = n_chars;
+	if (clean_len >= LINE_LENGTH)
+		clean_len = LINE_LENGTH - 1;
+	if (line && clean_len > 0)
+	{
+		strncpy(clean_line, line, clean_len);
+		clean_line[clean_len] = '\0';
+		if (clean_line[clean_len - 1] == '\n')
+		{
+			clean_line[clean_len - 1] = '\0';
+			clean_len--;
+		}
+	}
+	// Checks if the host is already in the ips map.
+	for (int i = 0; i < count; i++)
+	{
+		if (my_imss->ips && my_imss->ips[i] && strcmp(my_imss->ips[i], clean_line) == 0)
+		{
+			slog_warn("AddIPS: host '%s' already exists at index %d in my_imss->ips", clean_line, i);
+			fprintf(stderr, "AddIPS: host '%s' already exists at index %d in my_imss->ips\n", clean_line, i);
+			return 0;
+		}
+	}
+
 	// -1 means append to the end
 	if (at_position < 0 || at_position >= count)
 		at_position = count;
 
-	char **new_ips = (char **)realloc(my_imss->ips, (count + 1) * sizeof(char *));
+	char **new_ips = (my_imss->ips == NULL) ? (char **)malloc((count + 1) * sizeof(char *)) : (char **)realloc(my_imss->ips, (count + 1) * sizeof(char *));
 	if (!new_ips)
 	{
 		perror("HERCULES_ERR_WORKER_ADD_IPS_MEM_ERR");
@@ -269,9 +294,8 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars, int at_position)
 		slog_fatal("HERCULES_ERR_WORKER_ADD_IPS_CALLOC_ERR");
 		return -1;
 	}
-	strncpy(my_imss->ips[at_position], line, n_chars);
-	if (((my_imss->ips)[at_position])[n_chars - 1] == '\n')
-		((my_imss->ips)[at_position])[n_chars - 1] = '\0';
+	strncpy(my_imss->ips[at_position], clean_line, clean_len);
+	my_imss->ips[at_position][clean_len] = '\0';
 
 	my_imss->num_storages++;
 	slog_malleability("new num_storages=%d", my_imss->num_storages);
@@ -1595,7 +1619,7 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 
 	if (num_records < analysis_window_size)
 	{
-		fprintf(stderr, "Not enough data to make a decision. Need %d records, have %zu.\n", analysis_window_size, num_records);
+		// fprintf(stderr, "Not enough data to make a decision. Need %d records, have %zu.\n", analysis_window_size, num_records);
 		slog_debug("Not enough data to make a decision. Need %d records, have %zu.", analysis_window_size, num_records);
 
 		// if (overall_moving_average > 0.0)
@@ -2372,7 +2396,25 @@ int process_add_server(p_argv *arguments, const char *req)
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
 			pthread_exit(NULL);
 		}
+		// updates the variables related to the number of storages servers.
 		number_active_storage_servers.store(num_servers);
+		if (find_imss_pointer(imss_uri, &imss_) != -1 && imss_)
+		{
+			imss_->info.num_active_storages = num_servers;
+			imss_->info.num_storages = num_servers;
+			for (uint32_t i = 0; i < num_servers; i++)
+			{
+				if (imss_->conns.eps)
+				{
+					data_endpoints[i] = imss_->conns.eps[i];
+				}
+			}
+			curr_imss = *imss_;
+		}
+		if (arguments->args)
+		{
+			arguments->args->num_data_servers = num_servers;
+		}
 	}
 	else
 	{ // update current struct.
@@ -2396,6 +2438,43 @@ int process_add_server(p_argv *arguments, const char *req)
 		}
 
 		slog_debug("mode=%s, added_hostname=%s, num_servers=%" PRIu32 ", id_server_to_modify=%" PRIu32, mode, added_hostname, num_servers, id_server_to_modify);
+		// Checks if "added_hostname" is already in the ips map.
+		imss_info *imss_info_struct = &imss_->info;
+		int already_present = 0;
+		for (uint32_t i = 0; i < (uint32_t)imss_info_struct->num_storages; i++)
+		{
+			if (imss_info_struct->ips && imss_info_struct->ips[i] && strcmp(imss_info_struct->ips[i], added_hostname) == 0)
+			{
+				already_present = 1;
+				slog_debug("process_add_server: %s already present at index %" PRIu32 " in imss_->info.ips", added_hostname, i);
+				break;
+			}
+		}
+
+		if (already_present)
+		{
+			slog_debug("process_add_server: server %s is already configured, skipping duplicate connection", added_hostname);
+			if (id_server_to_modify < (uint32_t)imss_info_struct->num_storages && imss_->conns.eps && imss_->conns.eps[id_server_to_modify])
+			{
+				data_endpoints[id_server_to_modify] = imss_->conns.eps[id_server_to_modify];
+			}
+			if ((uint32_t)imss_info_struct->num_storages != num_servers)
+			{
+				fprintf(stderr, "[%s] HERCULES_WARN_ADDSERVER_COUNT_MISMATCH: local server count (%d) does not match metadata server count (%" PRIu32 "), synchronizing.\n", arguments->args->data_hostfile, imss_info_struct->num_storages, num_servers);
+				slog_warn("[%s] HERCULES_STRUCT_ADDSERVER_COUNT_MISMATCH: local server count (%d) does not match metadata server count (%" PRIu32 "), synchronizing.", arguments->args->data_hostfile, imss_info_struct->num_storages, num_servers);
+			}
+			// updates the variables related to the number of storages servers with the value received from the metadata server.
+			number_active_storage_servers.store(num_servers);
+			imss_info_struct->num_active_storages = num_servers;
+			imss_info_struct->num_storages = num_servers;
+			if (arguments->args)
+			{
+				arguments->args->num_data_servers = num_servers;
+			}
+			curr_imss = *imss_;
+			slog_debug("number_active_storage_servers=%d, curr_imss.info.num_storages=%d\n", number_active_storage_servers.load(), curr_imss.info.num_storages);
+			return 1;
+		}
 
 		// Ensure capacity for the new server index within global tracking arrays
 		uint32_t required_capacity = id_server_to_modify + 1;
@@ -2504,12 +2583,23 @@ int process_add_server(p_argv *arguments, const char *req)
 		global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
 		slog_debug("Server %" PRIu32 " connected in %.4f seconds", id_server_to_modify, global_malleability_time_taken);
 
-		imss_info *imss_info_struct = &imss_->info;
 		// num_storages is increased inside AddIPS.
 		fprintf(stderr, "Adding %s on the data server %d (%s).\n", added_hostname, arguments->args->id, arguments->args->data_hostname);
 		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname), -1);
 		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
-		number_active_storage_servers.store(imss_info_struct->num_storages);
+		// checks if the local count of number of servers matches the remote metadata count.
+		if ((uint32_t)imss_info_struct->num_storages != num_servers)
+		{
+			fprintf(stderr, "[%s] HERCULES_WARN_ADDSERVER_ADDIPS_COUNT_MISMATCH: local server count (%d) does not match metadata server count (%" PRIu32 "), synchronizing.\n", arguments->args->data_hostfile, imss_info_struct->num_storages, num_servers);
+			slog_warn("[%s] HERCULES_WARN_ADDSERVER_ADDIPS_COUNT_MISMATCH: local server count (%d) does not match metadata server count (%" PRIu32 "), synchronizing.", arguments->args->data_hostfile, imss_info_struct->num_storages, num_servers);
+		}
+		number_active_storage_servers.store(num_servers);
+		imss_info_struct->num_active_storages = num_servers;
+		imss_info_struct->num_storages = num_servers;
+		if (arguments->args)
+		{
+			arguments->args->num_data_servers = num_servers;
+		}
 		curr_imss = *imss_;
 		slog_debug("number_active_storage_servers=%d, curr_imss.info.num_storages=%d\n", number_active_storage_servers.load(), curr_imss.info.num_storages);
 	}
@@ -3524,8 +3614,8 @@ int handle_write_operation(
 		// if not, we need to tell it the new configuration.
 		if (!(server_n_used_in_frontend == number_active_storage_servers.load() || server_n_used_in_frontend == MALLEABILITY_SET_BYPASS))
 		{
-			slog_warn("HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers, number_active_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32, number_active_storage_servers.load(), server_n_used_in_frontend);
-			fprintf(stderr, "HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers, number_active_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32 "\n", number_active_storage_servers.load(), server_n_used_in_frontend);
+			slog_warn("[%s] HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers,  arguments->args->data_hostname, number_active_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32, number_active_storage_servers.load(), server_n_used_in_frontend);
+			fprintf(stderr, "[%s] HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers, number_active_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32 "\n", arguments->args->data_hostname, number_active_storage_servers.load(), server_n_used_in_frontend);
 			// TODO: client does not know at this moment that the block does not corresponding to this server.
 			// We will receive the data but we will not store it, just to progress and then we will tell the
 			// client the new configuration if this deployment.
