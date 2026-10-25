@@ -413,7 +413,7 @@ void Attend_pending_requests()
 
 	sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers.load(), id_server_to_modify, list_of_active_nodes);
 	int ret = -1;
-	// fprintf(stdout, "[AttendingPendingRequests] There are %zu pending requests\n", pending_requests.size());
+	fprintf(stdout, "[AttendingPendingRequests] There are %zu pending requests\n", pending_requests.size());
 	// slog_malleability("There are %d pending requests", pending_requests.size());
 	slog_malleability("There are %d pending requests", requests_to_attend.size());
 	p_argv pending_argument;
@@ -828,29 +828,26 @@ void *move_blocks_2_server(void *th_argv)
 	std::chrono::duration<double> time_taken_req = end_time_req - start_time_req;
 
 	// fprintf(stderr, "[%s] Sending ACK to metadata server\n", arguments->args->data_hostname);
-	slog_debug("Sending ACK to metadata server");
+	slog_malleability("Sending ACK to metadata server");
 	// Send the request.
 	char ack_msg_to_send[PATH_MAX] = {0};
 	sprintf(ack_msg_to_send, "%s %s %" PRIu64 " %f, %" PRIu64, MSG_DECOM_DATASERVERS, arguments->args->data_hostname, total_data_moved, time_taken_req.count(), global_hierarchical_map->GetStorageUsage());
 	StatACK(ack_msg_to_send, 0);
 
 	// fprintf(stderr, "ACK to metadata server sent.\n");
-	slog_debug("ACK to metadata server sent, id_server_to_modify=%d", id_server_to_modify);
-
-	// Check for pending requests.
-	Attend_pending_requests();
-
-	pthread_mutex_lock(&mutex_malleability);
+	slog_malleability("ACK to metadata server sent, id_server_to_modify=%d", id_server_to_modify);
 	if (global_finish_dispatcher == FINISH_SERVER_STATUS)
 	{
+		
+		Attend_pending_requests();
+		pthread_mutex_lock(&mutex_malleability);
 		malleability_status.store(MALLEABILITY_COMPLETE, std::memory_order_release);
+		pthread_cond_signal(&global_run_malleability_cond);
+		pthread_mutex_unlock(&mutex_malleability);
 	}
-	if (global_finish_dispatcher == RUNNING_SERVER_STATUS)
-	{
-		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
-	}
-	pthread_cond_signal(&global_run_malleability_cond);
-	pthread_mutex_unlock(&mutex_malleability);
+	// For active remaining servers in RUNNING_SERVER_STATUS, malleability_status remains
+	// MALLEABILITY_INPROGRESS so incoming client requests stay queued in pending_requests
+	// until the metadata server broadcasts ENDDECOMMISSION across the cluster.
 
 	slog_debug("Ending move_blocks_2_server\n");
 	slog_malleability("Ending request: %s\n", arguments->curr_req);
@@ -1014,7 +1011,20 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		is_new_server_ready = false;
 		pthread_mutex_unlock(&server_ready_mutex);
 
-		slog_malleability("Signal received.");
+		slog_malleability("Signal received. Notifying remaining data servers that decommissioning is complete.");
+		char end_decom_req[REQUEST_SIZE] = {0};
+		snprintf(end_decom_req, sizeof(end_decom_req), "%s", MSG_END_DECOMMISSION);
+		for (size_t i = 0; i < arguments->args->num_data_servers; i++)
+		{
+			slog_malleability("Sending %s to remaining server ID %zu (%s)", end_decom_req, i, curr_global_imss_info->ips[i]);
+			fprintf(stderr, "Sending %s to remaining server ID %zu (%s)\n", end_decom_req, i, curr_global_imss_info->ips[i]);
+			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], end_decom_req);
+			if (ret == 0)
+			{
+				perror("HERCULES_ERR_SEND_REQ_ENDDECOMMISSION");
+				slog_fatal("HERCULES_ERR_SEND_REQ_ENDDECOMMISSION");
+			}
+		}
 		if (consecutive_commissioning_signals > 0)
 			consecutive_commissioning_signals = 0;
 
@@ -1107,7 +1117,7 @@ void *run_malleability(void *th_argv)
 
 				if (erased_elements > 0)
 				{
-					slog_debug("Server %s has been deleted from the elasticity records history.", key_to_remove.c_str());
+					slog_malleability("Server %s has been deleted from the elasticity records history.", key_to_remove.c_str());
 				}
 				else
 				{
@@ -2729,7 +2739,8 @@ int is_admin_or_malleability_mode(const char *mode)
 	return (!strcmp(mode, "BROADCAST") ||
 		!strcmp(mode, "STOPSERVER") ||
 		!strcmp(mode, "REORDERSERVER") ||
-		!strcmp(mode, "ADDSERVER"));
+		!strcmp(mode, "ADDSERVER") ||
+		!strcmp(mode, MSG_END_DECOMMISSION));
 }
 
 /**
@@ -2868,6 +2879,18 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 	if (!strcmp(mode, "ADDSERVER"))
 	{
 		return process_add_server(arguments, req);
+	}
+
+	if (!strcmp(mode, MSG_END_DECOMMISSION))
+	{
+		slog_malleability("ENDDECOMMISSION received. Decommissioning complete across cluster.");
+		fprintf(stderr, "[%s] Decommissioning complete across cluster, attending pending requests.\n", arguments->args->data_hostname);
+		Attend_pending_requests();
+		pthread_mutex_lock(&mutex_malleability);
+		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+		pthread_cond_signal(&global_run_malleability_cond);
+		pthread_mutex_unlock(&mutex_malleability);
+		return 1;
 	}
 
 	return 0;
@@ -4690,8 +4713,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		slog_malleability("[%d/%d] ACK received: %s", acks_received.load(), expected_acks, req);
 		if (acks_received >= expected_acks)
 		{
-			Attend_pending_requests();
 			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+			Attend_pending_requests();
 			acks_received = 0;
 			slog_malleability("All acks received, waking up the malleability thread.");
 			// fprintf(stderr, "All acks received, waking up the malleability thread.\n");

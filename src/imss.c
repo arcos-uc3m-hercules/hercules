@@ -8,7 +8,6 @@
 #include "slog.h"
 #include "ucs/type/status.h"
 #include "workers.h"
-#include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <chrono>
@@ -3601,9 +3600,9 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 
 	pthread_mutex_lock(&lock_network);
 
-	slog_malleability("[IMSS] Sending request to metadata server='%s'", formated_uri);
+	slog_debug("[IMSS] Sending request to metadata server='%s'", formated_uri);
 	msg_length = send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri);
-	slog_malleability("[IMSS] after send_req, ret=%lu", msg_length);
+	slog_debug("[IMSS] after send_req, ret=%lu", msg_length);
 	if (msg_length == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -3616,7 +3615,7 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 	// We use a reference to the first element to get the correct types.
 	double write_performance = 0.0, read_performance = 0.0; // to store the performance of each server.
 	uint64_t num_entries = static_cast<uint64_t>(backend_performance_metrics.size());
-	slog_malleability("Sending metrics of %llu server(s).", num_entries);
+	slog_debug("Sending metrics of %llu server(s).", num_entries);
 	// memory for the buffer to store serializated data.
 	size_t total_size = sizeof(num_entries);
 	for (const auto &pair : backend_performance_metrics)
@@ -3691,7 +3690,7 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 		// 		pair.second.read.total_data_time,
 		// 		read_performance,
 		// 		read_performance / MB);
-		slog_malleability("key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, write_performance=%.2f (%.2f MB), read_size=%lld (%lld MB), read_time=%.2f, read_performance=%.2f (%.2f MB)",
+		slog_debug("key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, write_performance=%.2f (%.2f MB), read_size=%lld (%lld MB), read_time=%.2f, read_performance=%.2f (%.2f MB)",
 				  pair.first.c_str(),
 				  pair.second.server_id,
 				  pair.second.write.total_data_size,
@@ -3707,7 +3706,7 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 	}
 
 	// Send the struct of the performance metrics in a serialized way.
-	slog_malleability("Sending %lu bytes", total_size);
+	slog_debug("Sending %lu bytes", total_size);
 	if (send_data(ucp_worker_meta, ep, buffer_metrics_ser.data(), total_size, local_meta_uid) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -3720,7 +3719,7 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 
 	auto end_send_performance_t = std::chrono::steady_clock::now();
 	std::chrono::duration<double> send_performance_time_taken = end_send_performance_t - init_malleability_t;
-	slog_malleability("Send performance time %f seconds", send_performance_time_taken.count());
+	slog_debug("Send performance time %f seconds", send_performance_time_taken.count());
 
 	// clean the map after sending the metrics to the backend.
 	backend_performance_metrics.clear();
@@ -5748,9 +5747,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		std::chrono::duration<double> time_taken_req = end_time_req - start_time_req;
 
 		// TODO: change this to get just the confirmation from the server.
-		// clock_t t;
-		// double time_taken = 0.0;
-		// t = clock();
 		client_ep_context_t *this_context = curr_imss.conns.ep_contexts[server_id];
 		if (this_context != NULL)
 		{
@@ -5761,8 +5757,6 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		auto start_time_data = std::chrono::steady_clock::now();
 		msg_length = TIMING(get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context), "get_recv_data_length", size_t, process_rank);
 
-		// t = clock() - t;
-		// time_taken = ((double)t) / (CLOCKS_PER_SEC);
 		// ucp_tag_recv_info_t info_tag;
 		// ucp_tag_message_h msg_tag;
 		// msg_length = TIMING(get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t, process_rank);
@@ -6659,6 +6653,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				snprintf(key_, REQUEST_SIZE, "%s %lu %ld %s$%d %" PRIu32, op_mode, size, offset, curr_dataset->uri_, data_id, curr_imss_storages);
 			}
 			slog_debug("Sending request '%s' to server %d (%s)", key_, server_id, node_hostname);
+			slog_malleability("Sending request '%s' to server %d (%s)", key_, server_id, node_hostname);
 
 			if (async == ASYNC)
 			{
@@ -6762,7 +6757,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				}
 				else if (!strncmp(MSG_MALLEABILITY_DATASERVERS, (const char *)response_buffer, strlen(MSG_MALLEABILITY_DATASERVERS)))
 				{
-					slog_debug(" result=%s, msg_length=%d", response_buffer, msg_length);
+					slog_malleability(" result=%s, msg_length=%d", response_buffer, msg_length);
 					pthread_mutex_unlock(&lock_network);
 					if (deep > MAX_RETRIES + 1)
 					{
