@@ -165,7 +165,7 @@ int32_t main(int32_t argc, char **argv)
 	if (argc < 3)
 	{
 		print_usage("Too few arguments");
-		return 0;
+		return -1;
 	}
 
 	args.type = argv[1][0];
@@ -177,21 +177,21 @@ int32_t main(int32_t argc, char **argv)
 		char usage_msg[64] = {0};
 		sprintf(usage_msg, "%c is not a valid server type", args.type);
 		print_usage((const char *)usage_msg);
-		return 0;
+		return -1;
 	}
 
 	// Checks arguments for metadata and data servers.
 	if ((argc != 3 && args.type == TYPE_METADATA_SERVER) || (argc != 4 && args.type == TYPE_DATA_SERVER))
 	{
 		print_usage("Wrong number of arguments");
-		return 0;
+		return -1;
 	}
 
 	// Fill the args struct with the enviroment variables or config file values.
 	ret = getConfiguration(&args);
 	if (ret == -1)
 	{
-		return 0;
+		return -1;
 	}
 
 	// Pre-load metadata server hostnames into memory to eliminate disk I/O during commissioning.

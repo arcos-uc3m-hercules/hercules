@@ -1,58 +1,103 @@
 #!/bin/bash
 
+SERVER_TYPE=$1
+SERVER_NUMBER=$2
+ACTION=$3 # expected string action, e.g., down when servers are stopped.
+HERCULES_PATH=$4
+
+if [ -z "$SERVER_TYPE" ] || [ -z "$SERVER_NUMBER" ] || [ -z "$ACTION" ] || [ -z "$HERCULES_PATH" ]; then
+    echo "[ERROR] Usage: $0 <server_type (m|d)> <server_number> <action (start|stop|remove)> <hercules_path>" >&2
+    exit 1
+fi
+
+## Check if temporal directory exists.
+if [ ! -d "${HERCULES_PATH}/tmp" ]; then
+    echo "[ERROR] Temporal path ${HERCULES_PATH}/tmp does not exist. Please create it or set HERCULES_PATH." >&2
+    exit 1
+fi
+
+## Set up output redirection to log file in temporal directory
+LOG_FILE="${HERCULES_PATH}/tmp/check-servers-${SERVER_TYPE}-${SERVER_NUMBER}-${ACTION}.log"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+ATTEMPTS="${HERCULES_CHECK_ATTEMPTS:-360}"
+i=1
+
+check_server_alive() {
+    pgrep -f "^([^ ]*/)?hercules_server ${SERVER_TYPE:0:1} ${SERVER_NUMBER}( |$)" >/dev/null 2>&1
+    return $?
+}
+
 CheckForStatusFile() {
     FILE="${HERCULES_PATH}/tmp/$SERVER_TYPE-hercules-$SERVER_NUMBER-$ACTION"
-    echo "Waiting for file ${FILE}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')][${HOSTNAME}] Waiting for file ${FILE}"
     #rm ${FILE} 2> /dev/null
+    local was_running=0
     ## Checks if the file exists.
     until [ -f "$FILE" ]; do
-        echo "Waiting for $FILE, attemp $i" > ${HERCULES_PATH}/tmp/waiting-$SERVER_TYPE-$SERVER_NUMBER-$ACTION
-        i=$(($i + 1))
-        ## Waits "attemps" times, then an error is return.
-        if [ $i -gt $ATTEMPS ]; then
-            exit 1
+        echo "Waiting for $FILE, attempt $i" > "${HERCULES_PATH}/tmp/waiting-$SERVER_TYPE-$SERVER_NUMBER-$ACTION"
+        
+        # Check if the server process is still alive on this node
+        if check_server_alive; then
+            was_running=1
+            local pid
+            pid=$(pgrep -f "^([^ ]*/)?hercules_server ${SERVER_TYPE:0:1} ${SERVER_NUMBER}( |$)" 2>/dev/null | head -n 1)
+            if [ $((i % 5)) -eq 0 ]; then
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')][${HOSTNAME}] Waiting for server ${SERVER_NUMBER} (attempt ${i}/${ATTEMPTS}, PID ${pid} active)"
+            fi
+        else
+            if [ "$ACTION" == "start" ]; then
+                # If the process was seen running and then terminated without writing $FILE, it crashed.
+                if [ $was_running -eq 1 ]; then
+                    echo "[ERROR][${HOSTNAME}] Server process ${SERVER_TYPE} ${SERVER_NUMBER} crashed during initialization without writing ${FILE}." >&2
+                    exit 1
+                fi
+            elif [ "$ACTION" == "stop" ] || [ "$ACTION" == "remove" ]; then
+                # Process already stopped; wait 1 second for filesystem flush then check again
+                sleep 1
+                if [ -f "$FILE" ]; then
+                    break
+                fi
+                echo "[ERROR][${HOSTNAME}] Server process ${SERVER_TYPE} ${SERVER_NUMBER} terminated without creating ${FILE}!" >&2
+                exit 1
+            fi
         fi
-        t=$(($i % 5))
-        if [ $t -eq 0 ]; then
-            echo "[+][$HOSTNAME] Waiting for server $SERVER_NUMBER"
+
+        i=$((i + 1))
+        ## Waits "attempts" times, then an error is returned.
+        if [ $i -gt $ATTEMPTS ]; then
+            echo "[ERROR][${HOSTNAME}] Timeout waiting for ${FILE} after ${ATTEMPTS} attempts." >&2
+            exit 1
         fi
         sleep 1
     done
-    ## Checks if the server was deploy correctly.
-    STATUS=$(cat -- "$FILE" | grep "STATUS" | awk '{print $3}')
+    ## Checks if the server deployed or stopped correctly.
+    STATUS=$(cat -- "$FILE" 2>/dev/null | grep "STATUS" | awk '{print $3}')
+    if [ -z "$STATUS" ]; then
+        STATUS=$(cat -- "$FILE" 2>/dev/null | grep -oE "OK|LOCKED|ERROR[A-Z0-9_]*" | head -n 1)
+    fi
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')][${HOSTNAME}] Status file found: ${FILE}, STATUS=${STATUS}"
     ## Removes the file.
     # set -x
     # rm ${FILE}
     # set +x
 }
 
-
-SERVER_TYPE=$1
-SERVER_NUMBER=$2
-ACTION=$3 # expected string action, e.g., down when servers are stopped.
-HERCULES_PATH=$4
-ATTEMPS=10000
-i=1
-
-## To check if the temporal directory exists.
-if [ ! -d "${HERCULES_PATH}/tmp" ]; then
-    echo "[ERROR] Temporal path ${HERCULES_PATH}/tmp does not exist. Please, create it, or set the "HERCULES_PATH" option in the configuration file to overwrite it."
-    exit 1
-fi
-
-echo "Running check servers script"
-echo ${HERCULES_PATH}
+echo "=== [$(date '+%Y-%m-%d %H:%M:%S')][${HOSTNAME}] Running check-servers script: type=${SERVER_TYPE} id=${SERVER_NUMBER} action=${ACTION} ==="
+echo "HERCULES_PATH: ${HERCULES_PATH}"
 CheckForStatusFile
 # echo $STATUS > file-status.out
 #echo "STATUS=$STATUS" >> ${HERCULES_PATH}/tmp/$SERVER_TYPE-hercules-$SERVER_NUMBER-$ACTION
 # If the server is locked we will wait until it is unlocked.
 until [ "$STATUS" != "LOCKED" ]; do
-    echo "[+][$HOSTNAME] Server $SERVER_NUMBER is locked, $STATUS"
+    echo "[+][$HOSTNAME] Server $SERVER_NUMBER is locked, $STATUS, waiting before re-checking..."
+    sleep 1
+    rm -f "${FILE}" 2>/dev/null
     CheckForStatusFile
 done
 
-
 if [ "$STATUS" != "OK" ]; then
-    # echo "[X] Error deploying server $SERVER_NUMBER."
+    echo "[ERROR][${HOSTNAME}] Expected STATUS 'OK', got '${STATUS}' for server ${SERVER_NUMBER} action ${ACTION}." >&2
     exit 1
 fi
+echo "[OK][${HOSTNAME}] Server ${SERVER_NUMBER} ${ACTION} verified with STATUS=OK"

@@ -351,6 +351,42 @@ int ReadHostfile(char *deployfile, imss_info *my_imss)
 	return count;
 }
 
+/**
+ * @brief Synchronizes the active data server hostnames to the data hostfile on disk.
+ *
+ * Rewrites the data hostfile with the current list of active data storage servers
+ * when malleability dynamically scales out (commissioning) or scales in (decommissioning).
+ *
+ * @param hostfile_path Path to the data hostfile to update.
+ * @param info Pointer to metadata information structure containing active server IPs.
+ * @param active_count Number of currently active storage servers to write.
+ */
+static void sync_data_hostfile(const char *hostfile_path, imss_info *info, int32_t active_count)
+{
+	const char *target_path = hostfile_path;
+	if (!target_path || target_path[0] == '\0' || !info)
+	{
+		return;
+	}
+	FILE *f = fopen(target_path, "w");
+	if (!f)
+	{
+		slog_warn("HERCULES_ERR_SYNC_DATA_HOSTFILE: Failed to update data hostfile %s: %s", target_path, strerror(errno));
+		fprintf(stderr, "HERCULES_ERR_SYNC_DATA_HOSTFILE: Failed to update data hostfile %s: %s\n", target_path, strerror(errno));
+		return;
+	}
+	for (int32_t i = 0; i < active_count && i < info->num_storages; i++)
+	{
+		if (info->ips[i] && info->ips[i][0] != '\0')
+		{
+			fprintf(f, "%s\n", info->ips[i]);
+		}
+	}
+	fflush(f);
+	fclose(f);
+	slog_malleability("Synchronized data hostfile %s with %d active servers", target_path, active_count);
+}
+
 int ready(char *tmp_file_path, const char *msg);
 
 /**
@@ -838,7 +874,7 @@ void *move_blocks_2_server(void *th_argv)
 	slog_malleability("ACK to metadata server sent, id_server_to_modify=%d", id_server_to_modify);
 	if (global_finish_dispatcher == FINISH_SERVER_STATUS)
 	{
-		
+
 		Attend_pending_requests();
 		pthread_mutex_lock(&mutex_malleability);
 		malleability_status.store(MALLEABILITY_COMPLETE, std::memory_order_release);
@@ -1024,6 +1060,15 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 				perror("HERCULES_ERR_SEND_REQ_ENDDECOMMISSION");
 				slog_fatal("HERCULES_ERR_SEND_REQ_ENDDECOMMISSION");
 			}
+		}
+		if (arguments && arguments->args)
+		{
+			sync_data_hostfile(arguments->args->data_hostfile, curr_global_imss_info, arguments->args->num_data_servers);
+		}
+		else
+		{
+			slog_error("HERCULES_ERR_DECOMISSIONING_NULL_ARGS: Thread arguments or args structure is NULL");
+			fprintf(stderr, "HERCULES_ERR_DECOMISSIONING_NULL_ARGS: Thread arguments or args structure is NULL\n");
 		}
 		if (consecutive_commissioning_signals > 0)
 			consecutive_commissioning_signals = 0;
@@ -2879,6 +2924,18 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 	if (!strcmp(mode, "ADDSERVER"))
 	{
 		return process_add_server(arguments, req);
+	}
+
+	if (!strcmp(mode, MSG_END_DECOMMISSION))
+	{
+		slog_malleability("ENDDECOMMISSION received. Decommissioning complete across cluster.");
+		fprintf(stderr, "[%s] Decommissioning complete across cluster, attending pending requests.\n", arguments->args->data_hostname);
+		Attend_pending_requests();
+		pthread_mutex_lock(&mutex_malleability);
+		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+		pthread_cond_signal(&global_run_malleability_cond);
+		pthread_mutex_unlock(&mutex_malleability);
+		return 1;
 	}
 
 	if (!strcmp(mode, MSG_END_DECOMMISSION))
@@ -4954,9 +5011,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
 		number_active_storage_servers.store(imss_info_struct->num_storages);
 		imss_info_struct->num_active_storages = number_active_storage_servers.load();
-		if (arguments->args)
+		if (arguments && arguments->args)
 		{
 			arguments->args->num_data_servers = number_active_storage_servers.load();
+			sync_data_hostfile(arguments->args->data_hostfile, imss_info_struct, number_active_storage_servers.load());
+		}
+		else
+		{
+			slog_error("HERCULES_ERR_STAT_WORKER_NULL_ARGS: Thread arguments or args structure is NULL");
+			fprintf(stderr, "HERCULES_ERR_STAT_WORKER_NULL_ARGS: Thread arguments or args structure is NULL\n");
 		}
 		slog_debug("number_active_storage_servers=%d\n", number_active_storage_servers.load());
 		// pthread_mutex_unlock(&mutext_malleability);
