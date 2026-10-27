@@ -98,10 +98,8 @@ StopServers() {
         
         # "trap '' USR1": Ignores SIGUSR1 in the wrapper shell to prevent self-termination under Slurm/SSH.
         # "rm -f": Removes previous stop status file so WaitForServers detects the fresh shutdown.
-        # "pkill -f": Targets the specific server process using regex anchoring (^([^ ]*/)?hercules_server)
-        #    to avoid matching the wrapper shell, and ensures exact ID matching.
-        # "|| true": Prevents failure if the server process was already terminated.
-        KILL_CMD="trap '' USR1; mkdir -p ${HERCULES_TEMPORAL_PATH}; echo ${OPERATION} > ${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation; rm -f ${FILE_TO_REMOVE}; pkill -SIGUSR1 -f \"^([^ ]*/)?hercules_server ${SERVER_TYPE:0:1} ${REAL_ID}( |\\$)\" || true"
+        # "pkill -f": Targets the server process of SERVER_TYPE    
+        KILL_CMD="trap '' USR1; mkdir -p ${HERCULES_TEMPORAL_PATH}; echo ${OPERATION} > ${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation; rm -f ${FILE_TO_REMOVE}; pkill -SIGUSR1 -f \"^([^ ]*/)?hercules_server ${SERVER_TYPE:0:1}( |\\$)\" || true"
         if [[ "${SLURM}" -eq "1" ]]; then
             srun --nodelist="${node}" --ntasks=1 --nodes=1 --overlap --jobid="${SLURM_JOB_ID}" bash -c "${KILL_CMD}"
         elif [ "${node}" == "localhost" ] || [ "${node}" == "127.0.0.1" ] || [ "${node}" == "$(hostname)" ]; then
@@ -280,11 +278,44 @@ WaitForServers() {
     done
 }
 
+CancelDynamicSlurmJobs() {
+    # If SLURM_JOB_ID is not set, this execution is not running inside a Slurm allocation.
+    # Do not cancel any Slurm jobs to avoid terminating tasks belonging to other concurrent Hercules runs.
+    if [[ -z "${SLURM_JOB_ID}" ]]; then
+        return 0
+    fi
+
+    if command -v squeue >/dev/null 2>&1 && command -v scancel >/dev/null 2>&1; then
+        local pattern="^hercules-ds-${SLURM_JOB_ID}-"
+        local child_jids
+        child_jids=$(squeue -h -u "${USER}" -o "%i %j" 2>/dev/null | awk -v p="${pattern}" '$2 ~ p {print $1}')
+        if [[ -n "${child_jids}" ]]; then
+            echo "# Hercules: Cancelling dynamic Slurm child jobs: ${child_jids}"
+            echo "${child_jids}" | xargs scancel 2>/dev/null || true
+        fi
+    fi
+
+    # Also clean up from recorded .jobid files
+    for jf in "${HERCULES_TEMPORAL_PATH}"/hercules_slurm_ds_*.jobid; do
+        if [[ -f "${jf}" ]]; then
+            local c_jid
+            c_jid=$(cat "${jf}" 2>/dev/null)
+            if [[ -n "${c_jid}" ]]; then
+                scancel "${c_jid}" 2>/dev/null || true
+            fi
+            rm -f "${jf}"
+        fi
+    done
+}
+
 ## Kills all background child processes in this session.
 KillAllChildProcesses() {
     local main_pid=$$
 
     echo "[!] Terminating child processes..."
+
+    # Cancel any on-demand Slurm data server jobs before killing wrapper processes
+    CancelDynamicSlurmJobs
     
     # send SIGTERM to all child processes of this PID
     pkill -TERM -P "$main_pid" 2>/dev/null
@@ -680,23 +711,7 @@ then
     StopAllMetadata
 
     # Cancel any on-demand Slurm data server jobs
-    if command -v scancel >/dev/null 2>&1; then
-        echo "# Hercules: Cancelling dynamic Slurm data server allocations..."
-        if [[ -n "${SLURM_JOB_ID}" ]]; then
-            scancel --jobname="hercules-ds-${SLURM_JOB_ID}-*" --user="${USER}" 2>/dev/null || true
-        else
-            scancel --jobname="hercules-ds-*" --user="${USER}" 2>/dev/null || true
-        fi
-        for jf in "${HERCULES_TEMPORAL_PATH}"/hercules_slurm_ds_*.jobid; do
-            if [[ -f "${jf}" ]]; then
-                c_jid=$(cat "${jf}" 2>/dev/null)
-                if [[ -n "${c_jid}" ]]; then
-                    scancel "${c_jid}" 2>/dev/null || true
-                fi
-                rm -f "${jf}"
-            fi
-        done
-    fi
+    CancelDynamicSlurmJobs
 
     # Clean up pkill operation file after stopping cluster
     if [[ -f "${HERCULES_TEMPORAL_PATH}/hercules_pkill_operation" ]]; then
@@ -1276,6 +1291,7 @@ export "HERCULES_DATA_HOSTFILE=${HERCULES_DATA_HOSTFILE}"
 export "HERCULES_ALLOC_DATA_HOSTFILE=${HERCULES_ALLOC_DATA_HOSTFILE}"
 export "HERCULES_MPI_HOSTFILE_NAME=${HERCULES_MPI_HOSTFILE_NAME}"
 export "HERCULES_FULL_HOSTFILE=${FULL_HOSTFILE}"
+export "HERCULES_ATTACHED=${ATTACHED}"
 
 unset META_PORT
 unset DATA_PORT
