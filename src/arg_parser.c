@@ -53,8 +53,16 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
     switch (key)
     {
     case PORT_OPT:
-        args->data_port = (uint16_t)atoi(arg);
+    {
+        char *endptr = NULL;
+        long p = strtol(arg, &endptr, 10);
+        if (endptr == arg || *endptr != '\0' || p < 1 || p > 65535)
+        {
+            argp_failure(state, 1, 0, "Invalid value for '--port' / '-p': '%s'. Port must be between 1 and 65535.", arg);
+        }
+        args->data_port = (uint64_t)p;
         break;
+    }
     case BUFSIZE_OPT:
         args->bufsize = atoi(arg);
         break;
@@ -68,8 +76,16 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         strncpy(args->meta_hostfile, arg, PATH_MAX);
         break;
     case STAT_PORT_OPT:
-        args->stat_port = atoi(arg);
+    {
+        char *endptr = NULL;
+        long p = strtol(arg, &endptr, 10);
+        if (endptr == arg || *endptr != '\0' || p < 1 || p > 65535)
+        {
+            argp_failure(state, 1, 0, "Invalid value for '--stat-port' / '-P': '%s'. Port must be between 1 and 65535.", arg);
+        }
+        args->stat_port = p;
         break;
+    }
     case NUM_SERVERS_OPT:
         args->num_data_servers = atoi(arg);
         break;

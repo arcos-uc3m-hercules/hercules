@@ -6,6 +6,7 @@
 #include "records.hpp"
 #include "utils.h"
 #include "workers.h"
+#include <errno.h>
 #include <cinttypes>
 #include <pthread.h>
 #include <stdio.h>
@@ -630,15 +631,41 @@ int getConfiguration(struct arguments *args)
 	else if (cfg_get(cfg, "HERCULES_PATH"))
 		strcpy(args->hercules_path, cfg_get(cfg, "HERCULES_PATH"));
 
-	if (getenv("HERCULES_DATA_PORT") != NULL)
-		args->data_port = atoi(getenv("HERCULES_DATA_PORT"));
-	else if (cfg_get(cfg, "DATA_PORT"))
-		args->data_port = atoi(cfg_get(cfg, "DATA_PORT"));
+	const char *data_port_str = getenv("HERCULES_DATA_PORT");
+	if (data_port_str == NULL)
+		data_port_str = cfg_get(cfg, "DATA_PORT");
+	if (data_port_str != NULL && data_port_str[0] != '\0')
+	{
+		char *endptr = NULL;
+		errno = 0;
+		long parsed_port = strtol(data_port_str, &endptr, 10);
+		if (errno != 0 || endptr == data_port_str || *endptr != '\0' || parsed_port < 1 || parsed_port > 65535)
+		{
+			fprintf(stderr, "[HERCULES ERROR] Invalid DATA_PORT '%s'. Port must be between 1 and 65535.\n", data_port_str);
+			slog_error("Invalid DATA_PORT '%s'. Port must be between 1 and 65535.", data_port_str);
+			perror("HERCULES_ERR_INVALID_DATA_PORT");
+			return -1;
+		}
+		args->data_port = (uint64_t)parsed_port;
+	}
 
-	if (getenv("HERCULES_METADATA_PORT") != NULL)
-		args->stat_port = atoi(getenv("HERCULES_METADATA_PORT"));
-	else if (cfg_get(cfg, "METADATA_PORT"))
-		args->stat_port = atoi(cfg_get(cfg, "METADATA_PORT"));
+	const char *meta_port_str = getenv("HERCULES_METADATA_PORT");
+	if (meta_port_str == NULL)
+		meta_port_str = cfg_get(cfg, "METADATA_PORT");
+	if (meta_port_str != NULL && meta_port_str[0] != '\0')
+	{
+		char *endptr = NULL;
+		errno = 0;
+		long parsed_port = strtol(meta_port_str, &endptr, 10);
+		if (errno != 0 || endptr == meta_port_str || *endptr != '\0' || parsed_port < 1 || parsed_port > 65535)
+		{
+			fprintf(stderr, "[HERCULES ERROR] Invalid METADATA_PORT '%s'. Port must be between 1 and 65535.\n", meta_port_str);
+			slog_error("Invalid METADATA_PORT '%s'. Port must be between 1 and 65535.", meta_port_str);
+			perror("HERCULES_ERR_INVALID_METADATA_PORT");
+			return -1;
+		}
+		args->stat_port = parsed_port;
+	}
 
 	if (getenv("HERCULES_NUM_DATA_SERVERS") != NULL)
 		args->num_data_servers = atoi(getenv("HERCULES_NUM_DATA_SERVERS"));

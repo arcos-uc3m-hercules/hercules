@@ -545,6 +545,21 @@ fi
 export HERCULES_MOUNT_POINT=$(grep "^[[:space:]]*MOUNT_POINT[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | head -1 | awk '{print $3}')
 META_PORT=$(grep "^[[:space:]]*METADATA_PORT[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
 DATA_PORT=$(grep "^[[:space:]]*DATA_PORT[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
+
+# Validate METADATA_PORT and DATA_PORT within the valid TCP port range (1-65535)
+if [ -n "${META_PORT}" ]; then
+    if ! [[ "${META_PORT}" =~ ^[0-9]+$ ]] || [ "${META_PORT}" -lt 1 ] || [ "${META_PORT}" -gt 65535 ]; then
+        echo "[Error] Invalid METADATA_PORT '${META_PORT}' in configuration file '${CURR_HERCULES_CONF_FILE}'. Port must be between 1 and 65535." >&2
+        exit 1
+    fi
+fi
+
+if [ -n "${DATA_PORT}" ]; then
+    if ! [[ "${DATA_PORT}" =~ ^[0-9]+$ ]] || [ "${DATA_PORT}" -lt 1 ] || [ "${DATA_PORT}" -gt 65535 ]; then
+        echo "[Error] Invalid DATA_PORT '${DATA_PORT}' in configuration file '${CURR_HERCULES_CONF_FILE}'. Port must be between 1 and 65535." >&2
+        exit 1
+    fi
+fi
 MALLEABILITY=$(grep "^[[:space:]]*MALLEABILITY[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
 export HERCULES_NUM_METADATA=$(grep "^[[:space:]]*NUM_META_SERVERS[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
 export HERCULES_NUM_DATA=$(grep "^[[:space:]]*NUM_DATA_SERVERS[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
