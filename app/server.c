@@ -1,3 +1,4 @@
+#include "arg_parser.h"
 #include "map_ep.hpp"
 #include "memalloc.h"
 #include "metadata_stat.h"
@@ -1093,32 +1094,6 @@ int32_t main(int32_t argc, char **argv)
 	return 0;
 }
 
-// int stop_server()
-// {
-// 	// Get the current number of active nodes.
-// 	number_active_storage_serversX = get_number_of_active_nodes(args.hercules_path);
-
-// 	if (number_active_storage_serversX < 0)
-// 	{
-// 		return -1;
-// 	}
-
-// 	// Tell metadata server to reduce number of servers.
-// 	char key_plus_size[REQUEST_SIZE] = {0};
-// 	// Send the created structure to the metadata server.
-// 	// last "0" is the server status to be set.
-// 	sprintf(key_plus_size, "%d SET %lu %s %d", args.id, number_active_storage_serversX, args.imss_uri, 0);
-// 	slog_debug("[main] Request - %s", key_plus_size);
-// 	// TODO: locate the metadata server.
-// 	if (send_req(ucp_worker, metadata_endpoints[0], req_addr, req_addr_len, key_plus_size) == 0)
-// 	{
-// 		perror("HERCULES_ERR_STOP_SERVER_SEND_REQ");
-// 		return -1;
-// 	}
-
-// 	return 0;
-// }
-
 void handle_signal_server(int signal)
 {
 	if (signal == SIGUSR1) // suspend or shutdown this server.
@@ -1133,8 +1108,8 @@ void handle_signal_server(int signal)
 		global_shutdown_start_cpu = t_sig_start;
 		global_shutdown_started = 1;
 
-		slog_info("SIGUSR1 received");
-		fprintf(stderr, "SIGUSR1 received\n");
+		slog_malleability("SIGUSR1 received");
+		fprintf(stderr, "[%s] SIGUSR1 received\n", args.data_hostfile);
 		int pkill_operation = 0, ret = 0;
 		ssize_t b_read = 0;
 		char buf[16] = {0}, temporal_path[PATH_MAX];

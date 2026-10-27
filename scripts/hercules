@@ -1110,9 +1110,9 @@ do
             ( rm -f "${START_FILE}" )
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "[ + ] Starting metadata server $i on $node..."
-                echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}"
+                echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND}"
             fi
-            ( cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${FILE} ${COMMAND} || echo "STATUS = ERROR_LAUNCH_FAILED" > "${START_FILE}" ) ) &
+            ( cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND} || echo "STATUS = ERROR_LAUNCH_FAILED" > "${START_FILE}" ) ) &
         else
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "[ + ] Removing temporal files on $node"
@@ -1120,9 +1120,9 @@ do
             ( ssh ${node} "$RM" )
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "[ + ] Starting metadata server $i on $node..."
-                echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${FILE} ${COMMAND}"
+                echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND}"
             fi
-            ( ssh ${node} "cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${FILE} ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE} )" ) &
+            ( ssh ${node} "cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE} )" ) &
         fi
     else
         ## Deletes the file that we use to make sure that the server has started.
@@ -1139,7 +1139,7 @@ do
         # For example, if the header on the deployment script is "#SBATCH --cpus-per-task=36",
         # a valid entry here is "--cpus-per-task =18". This allows the execution of the next step 
         # "WaitForServers", which is being executed on the same node as the server task.
-        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- bash -c "export HERCULES_CONF=${FILE}; ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE}" &
+        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- bash -c "export HERCULES_CONF=${CURR_HERCULES_CONF_FILE}; ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE}" &
         set +x 
     fi
     i=$((i+1))
