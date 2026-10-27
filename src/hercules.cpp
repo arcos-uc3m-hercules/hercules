@@ -6,8 +6,8 @@
 #include "records.hpp"
 #include "utils.h"
 #include "workers.h"
-#include <errno.h>
 #include <cinttypes>
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -877,6 +877,50 @@ int getConfiguration(struct arguments *args)
 		strcpy(args->alloc_data_hostfile, cfg_get(cfg, "ALLOC_DATA_HOSTFILE"));
 	else
 		args->alloc_data_hostfile[0] = '\0';
+
+	// Attached mode (0: HERCULES_DETACHED, 1: HERCULES_ATTACHED).
+	const char *env_attached = getenv("HERCULES_ATTACHED");
+	const char *cfg_attached = cfg_get(cfg, "ATTACHED");
+	int parsed_attached = 0;
+	if (env_attached != NULL)
+	{
+		if (is_valid_integer(env_attached, &parsed_attached) && (parsed_attached == HERCULES_DETACHED || parsed_attached == HERCULES_ATTACHED))
+		{
+			args->attached = (AttachedMode)parsed_attached;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid HERCULES_ATTACHED value: '%s', setting to 0 (HERCULES_DETACHED)\n", env_attached);
+			args->attached = HERCULES_DETACHED;
+		}
+	}
+	else if (cfg_attached != NULL)
+	{
+		if (is_valid_integer(cfg_attached, &parsed_attached) && (parsed_attached == HERCULES_DETACHED || parsed_attached == HERCULES_ATTACHED))
+		{
+			args->attached = (AttachedMode)parsed_attached;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid ATTACHED value in configuration: '%s', setting to 0 (HERCULES_DETACHED)\n", cfg_attached);
+			args->attached = HERCULES_DETACHED;
+		}
+	}
+	else
+	{
+		args->attached = HERCULES_DETACHED;
+	}
+
+	// Gets the path to the mpi_hostfile.
+	if (getenv("HERCULES_MPI_HOSTFILE_NAME") != NULL)
+		strncpy(args->client_hostfile, getenv("HERCULES_MPI_HOSTFILE_NAME"), sizeof(args->client_hostfile) - 1);
+	else if (getenv("HERCULES_CLIENT_HOSTFILE") != NULL)
+		strncpy(args->client_hostfile, getenv("HERCULES_CLIENT_HOSTFILE"), sizeof(args->client_hostfile) - 1);
+	else if (cfg_get(cfg, "CLIENT_HOSTFILE"))
+		strncpy(args->client_hostfile, cfg_get(cfg, "CLIENT_HOSTFILE"), sizeof(args->client_hostfile) - 1);
+	else
+		args->client_hostfile[0] = '\0';
+	args->client_hostfile[sizeof(args->client_hostfile) - 1] = '\0';
 
 	if (getenv("HERCULES_SLURM_PARTITION") != NULL)
 		strncpy(args->slurm_partition, getenv("HERCULES_SLURM_PARTITION"), sizeof(args->slurm_partition) - 1);

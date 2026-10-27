@@ -1,11 +1,11 @@
 #ifndef ARG_PARSER_H
 #define ARG_PARSER_H
 
-#include <stdint.h>
-#include <argp.h>
-#include <limits.h>
 #include "comms.h"
 #include "imss.h"
+#include <argp.h>
+#include <limits.h>
+#include <stdint.h>
 
 /********** argp options **********/
 /* common options */
@@ -26,67 +26,69 @@
 /* metadata server options */
 #define STAT_LOGFILE_OPT 'l'
 
-
-
-
 struct logging_opts
 {
-    uint32_t hercules_debug_file;
-    uint32_t hercules_debug_screen;
-    uint32_t hercules_debug_level;
+	uint32_t hercules_debug_file;
+	uint32_t hercules_debug_screen;
+	uint32_t hercules_debug_level;
 };
+
+typedef enum
+{
+	HERCULES_DETACHED = 0,
+	HERCULES_ATTACHED = 1
+} AttachedMode;
 
 struct arguments
 {
-    char type;                      /* type of server (TYPE_DATA_SERVER or TYPE_METADATA_SERVER) */
-    char data_hostfile[PATH_MAX]; /* deploy hostfile arg to '-d' */
-    char alloc_data_hostfile[PATH_MAX]; /* deploy hostfile arg to '-d' */
-    char stat_logfile[PATH_MAX];    /* metadata logfile arg to '-l' */
-    char imss_uri[URI_];        /* IMSS URI arg to '-i' */
-    char hercules_path[PATH_MAX-100];   /* hercules path */
-    char policy[MAX_POLICY_LEN];
-    char meta_hostfile[PATH_MAX];
-    char debug_level[PATH_MAX];
-    char mount_point[PATH_MAX];
-    char hercules_checkpoint_path[PATH_MAX];
-    char hercules_snapshot_path[PATH_MAX];
-    char hercules_malleability_checkpoint_path[PATH_MAX];
-    char snapshot_paths_list[PATH_MAX];
-    char ignore_paths_list[PATH_MAX];
-    char data_hostname[HOST_NAME_MAX];
-    char configuration_file_path[PATH_MAX];
-    char slurm_partition[PATH_MAX];
-    char slurm_account[PATH_MAX];
-    // char *stat_host;                /* Metadata server hostname arg to '-H' */
-    void *pool_memory;
-    uint64_t data_port;                  /* port arg to '-p' */
-    uint64_t storage_size;          /* total storage size in GB to -s */
-    uint64_t thread_pool;           /* thread pool size '-t' */
-    uint64_t prefetch_size;         /* prefetch size, 0 means no prefetch */
-    int64_t bufsize;                /* buffer size arg to '-b' */
-    int64_t stat_port;              /* Metadata server port number arg to '-P' */
-    int64_t num_data_servers;       /* number of data servers arg to '-n' */
-    int64_t num_metadata_servers;   /* number of metada servers */
-    int32_t malleability;
-    int32_t malleability_tolerance_commissioning; /* tolerance for performing a malleability commissioning operation. */
-    int32_t malleability_tolerance_decommissioning; /* tolerance for performing a malleability decommissioning operation. */
-    int32_t malleability_windows_size; /* how many records are used to check the performance status. */
-    CommunicationMode malleability_reorder_mode; /* how blocks will be moved between servers, 0: network (network), 1: disk (checkpoint) */
-    double malleability_performance_threshold; /* performance threshold in MB/s */
-    // int32_t malleability_type;
-    int32_t upper_bound_servers;
-    int32_t lower_bound_servers;
-    int32_t repl_factor;
-    int32_t repl_type;
-    int32_t async_io;              /* flag control to enable asynchronous IO. */
-    int32_t async_get_concurrency; /* Concurrency for async GET operations (0 = dynamic) */
-    int32_t async_set_concurrency; /* Concurrency for async SET operations (0 = dynamic) */
-    int32_t ucx_err_peer;          /* UCX error handling mode (0: NONE, 1: PEER) */
-    size_t block_size;            /* block size in KB arg to -B */
-    int id;                         /* server ID arg to -r */
-    struct logging_opts logging;
+	char type;			    /* type of server (TYPE_DATA_SERVER or TYPE_METADATA_SERVER) */
+	char data_hostfile[PATH_MAX];	    /* deploy hostfile arg to '-d' */
+	char alloc_data_hostfile[PATH_MAX]; /* deploy hostfile arg to '-d' */
+	char client_hostfile[PATH_MAX];	    /* hostfile where the clients are running */
+	char stat_logfile[PATH_MAX];	    /* metadata logfile arg to '-l' */
+	char imss_uri[URI_];		    /* IMSS URI arg to '-i' */
+	char hercules_path[PATH_MAX - 100]; /* hercules path */
+	char policy[MAX_POLICY_LEN];
+	char meta_hostfile[PATH_MAX];
+	char debug_level[PATH_MAX];
+	char mount_point[PATH_MAX];
+	char hercules_checkpoint_path[PATH_MAX];
+	char hercules_snapshot_path[PATH_MAX];
+	char hercules_malleability_checkpoint_path[PATH_MAX];
+	char snapshot_paths_list[PATH_MAX];
+	char ignore_paths_list[PATH_MAX];
+	char data_hostname[HOST_NAME_MAX];
+	char configuration_file_path[PATH_MAX];
+	char slurm_partition[PATH_MAX];
+	char slurm_account[PATH_MAX];
+	void *pool_memory;
+	uint64_t data_port;	      /* port arg to '-p' */
+	uint64_t storage_size;	      /* total storage size in GB to -s */
+	uint64_t thread_pool;	      /* thread pool size '-t' */
+	uint64_t prefetch_size;	      /* prefetch size, 0 means no prefetch */
+	int64_t bufsize;	      /* buffer size arg to '-b' */
+	int64_t stat_port;	      /* Metadata server port number arg to '-P' */
+	int64_t num_data_servers;     /* number of data servers arg to '-n' */
+	int64_t num_metadata_servers; /* number of metada servers */
+	int32_t malleability;
+	AttachedMode attached;
+	int32_t malleability_tolerance_commissioning;	/* tolerance for performing a malleability commissioning operation. */
+	int32_t malleability_tolerance_decommissioning; /* tolerance for performing a malleability decommissioning operation. */
+	int32_t malleability_windows_size;		/* how many records are used to check the performance status. */
+	CommunicationMode malleability_reorder_mode;	/* how blocks will be moved between servers, 0: network (network), 1: disk (checkpoint) */
+	double malleability_performance_threshold;	/* performance threshold in MB/s */
+	int32_t upper_bound_servers;
+	int32_t lower_bound_servers;
+	int32_t repl_factor;
+	int32_t repl_type;
+	int32_t async_io;	       /* flag control to enable asynchronous IO. */
+	int32_t async_get_concurrency; /* Concurrency for async GET operations (0 = dynamic) */
+	int32_t async_set_concurrency; /* Concurrency for async SET operations (0 = dynamic) */
+	int32_t ucx_err_peer;	       /* UCX error handling mode (0: NONE, 1: PEER) */
+	size_t block_size;	       /* block size in KB arg to -B */
+	int id;			       /* server ID arg to -r */
+	struct logging_opts logging;
 };
-
 
 int parse_args(int argc, char **argv, struct arguments *args);
 

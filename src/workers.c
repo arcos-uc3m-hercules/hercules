@@ -1326,6 +1326,33 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		exclude_set.insert(preloaded_metadata_servers.begin(), preloaded_metadata_servers.end());
 		pthread_mutex_unlock(&mutex_preloaded_metadata_servers);
 
+		// Collect client nodes to exclude from Slurm allocation so Slurm does not assign
+		// a node running client processes (when running in detached mode: attached == 0).
+		// In attached mode (attached == 1), clients share nodes with servers, so do not exclude.
+		if (arguments->args && arguments->args->attached == HERCULES_DETACHED && arguments->args->client_hostfile[0] != '\0')
+		{
+			// TODO: consider moving this to memory. For now we keep this here
+			// because some applications with malleabiliy could change the nodes where
+			// they are running.
+			FILE *cf = fopen(arguments->args->client_hostfile, "r");
+			if (cf)
+			{
+				char chost[256];
+				while (fgets(chost, sizeof(chost), cf))
+				{
+					std::string h = chost;
+					while (!h.empty() && (h.back() == '\n' || h.back() == '\r' || h.back() == ' ' || h.back() == '\t'))
+						h.pop_back();
+					if (!h.empty() && h[0] != '#')
+					{
+						size_t dot = h.find('.');
+						exclude_set.insert(dot != std::string::npos ? h.substr(0, dot) : h);
+					}
+				}
+				fclose(cf);
+			}
+		}
+
 		// Format unique short hostnames into a comma-separated list for Slurm's --exclude flag
 		std::string exclude_nodes_str;
 		for (const auto &node : exclude_set)

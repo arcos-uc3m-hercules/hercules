@@ -161,6 +161,8 @@ int parse_args(int argc, char **argv, struct arguments *args)
     args->storage_size = 8; // In GB
     args->slurm_partition[0] = '\0';
     args->slurm_account[0] = '\0';
+    args->client_hostfile[0] = '\0';
+    args->attached = HERCULES_DETACHED;
 
     /* Parse arguments; every option seen by parse_opt will be
         reflected in arguments */
