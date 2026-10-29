@@ -3358,10 +3358,16 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 	int32_t id_modified_server = 0;
 	char list_of_active_nodes[PATH_MAX] = {'\0'};
 
-	sscanf((const char *)result, "%s %" PRId32 " %" PRId32 " %s",
-	       message, &new_number_of_data_servers, &id_modified_server, list_of_active_nodes);
+	int32_t action_type = MALLEABILITY_ACTION_DECOMMISSION;
+	int items_read = sscanf((const char *)result, "%s %" PRId32 " %" PRId32 " %d %s", message, &new_number_of_data_servers, &id_modified_server, &action_type, list_of_active_nodes);
 
-	slog_malleability("message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 ", list_of_active_nodes=%s, failed_hostname=%s", message, new_number_of_data_servers, id_modified_server, list_of_active_nodes, (failed_hostname == NULL) ? "not defined" : failed_hostname);
+	if (items_read < 5)
+	{
+		slog_error("parse_malleability_message: malformed message (expected 5 items, read %d): %s", items_read, (const char *)result);
+		return 0;
+	}
+
+	slog_malleability("message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 ", action_type=%d, list_of_active_nodes=%s, failed_hostname=%s", message, new_number_of_data_servers, id_modified_server, action_type, list_of_active_nodes, (failed_hostname == NULL) ? "not defined" : failed_hostname);
 
 	// parse the expected ordered list from the metadata server
 	char *expected_server_list[MAX_SERVERS] = {NULL};
@@ -3384,6 +3390,40 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 		return 0;
 	}
 
+	if (action_type == MALLEABILITY_ACTION_READ_UPDATE)
+	{
+		if (id_modified_server >= 0 && id_modified_server < MAX_SERVERS_PER_VIEW)
+		{
+			local_imss_->info.server_states[id_modified_server] = SERVER_READ_UPDATE;
+			slog_malleability("Server %d marked as SERVER_READ_UPDATE.", id_modified_server);
+		}
+
+		int32_t active_ids[MAX_SERVERS_PER_VIEW];
+		int32_t active_count = 0;
+		for (int i = 0; i < (int)local_imss_->info.num_storages && active_count < MAX_SERVERS_PER_VIEW; i++)
+		{
+			if (local_imss_->info.server_states[i] == SERVER_ACTIVE_RW)
+			{
+				active_ids[active_count++] = i;
+			}
+		}
+		if (active_count > 0)
+		{
+			AddTopologyView(&local_imss_->info, active_count, active_ids);
+			local_imss_->info.num_active_storages = active_count;
+		}
+		else
+		{
+			local_imss_->info.num_active_storages = 0;
+			slog_warn("All servers marked as SERVER_READ_UPDATE, active_storages=0.");
+			fprintf(stderr, "All servers marked as SERVER_READ_UPDATE, active_storages=0.\n");
+		}
+		changes_found = 1;
+		curr_imss = *local_imss_;
+		print_ips(&curr_imss);
+		return changes_found;
+	}
+
 	// remove servers no longer in the expected list (decommission)
 	int initial_count = (int)local_imss_->info.num_storages;
 	for (int i = initial_count - 1; i >= 0; i--)
@@ -3402,6 +3442,7 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 			slog_malleability("Server %s (id=%d) decommissioned, releasing.", local_imss_->info.ips[i], i);
 			int remaining = (int)local_imss_->info.num_storages - 1;
 			ReleaseSpecificDataServerNetworkResources(local_imss_, 1, i, remaining);
+			local_imss_->info.server_states[i] = SERVER_DECOMMISSIONED;
 			PrintIntervals(curr_dataset);
 			ClearIntervalsStructure(curr_dataset);
 			changes_found = 1;
@@ -3473,6 +3514,20 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 				changes_found = 1;
 			}
 		}
+	}
+
+	int32_t active_ids[MAX_SERVERS_PER_VIEW];
+	int32_t active_count = 0;
+	for (int i = 0; i < (int)local_imss_->info.num_storages && active_count < MAX_SERVERS_PER_VIEW; i++)
+	{
+		if (local_imss_->info.server_states[i] == SERVER_ACTIVE_RW)
+		{
+			active_ids[active_count++] = i;
+		}
+	}
+	if (active_count > 0)
+	{
+		AddTopologyView(&local_imss_->info, active_count, active_ids);
 	}
 
 	slog_malleability("parse_malleability_message done, changes_found=%d, final num_storages=%d",
@@ -3691,18 +3746,18 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 		// 		read_performance,
 		// 		read_performance / MB);
 		slog_debug("key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, write_performance=%.2f (%.2f MB), read_size=%lld (%lld MB), read_time=%.2f, read_performance=%.2f (%.2f MB)",
-				  pair.first.c_str(),
-				  pair.second.server_id,
-				  pair.second.write.total_data_size,
-				  pair.second.write.total_data_size / MB,
-				  pair.second.write.total_data_time,
-				  write_performance,
-				  write_performance / MB,
-				  pair.second.read.total_data_size,
-				  pair.second.read.total_data_size / MB,
-				  pair.second.read.total_data_time,
-				  read_performance,
-				  read_performance / MB);
+			   pair.first.c_str(),
+			   pair.second.server_id,
+			   pair.second.write.total_data_size,
+			   pair.second.write.total_data_size / MB,
+			   pair.second.write.total_data_time,
+			   write_performance,
+			   write_performance / MB,
+			   pair.second.read.total_data_size,
+			   pair.second.read.total_data_size / MB,
+			   pair.second.read.total_data_time,
+			   read_performance,
+			   read_performance / MB);
 	}
 
 	// Send the struct of the performance metrics in a serialized way.
@@ -4547,33 +4602,34 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 	// slog_debug("curr_dataset->uri_=%s", curr_dataset->uri_);
 
 	int entry_value = GetValueFromInterval(curr_dataset, data_id);
-	int num_storages = 0;
+	int32_t target_view_id = -1;
 	if (entry_value == -1)
 	{
-		slog_warn("Entry from intervals is NULL, setting num_storages=%d (from curr_imss.info.num_storages) for data_id=%d", curr_imss.info.num_storages, data_id);
-		num_storages = curr_imss.info.num_storages;
+		slog_warn("Entry from intervals is NULL, using curren view id=%d", curr_imss.info.current_view_id);
+		target_view_id = curr_imss.info.current_view_id;
 	}
 	else
 	{
-		num_storages = entry_value; // entry->value;
+		target_view_id = entry_value;
 	}
-	slog_debug("num_storages to find server=%d", num_storages);
 
-	// if (curr_imss.info.num_active_storages > 1)
+	TopologyView *view = GetTopologyView(&curr_imss.info, target_view_id);
+	if (view == NULL || view->num_servers <= 0)
 	{
-		// int num_storages = curr_dataset->n_servers_when_created; //  curr_imss.info.num_active_storages;
-		// int num_storages = curr_imss.info.num_active_storages;
-		if ((server = find_server(num_storages, data_id, curr_dataset->original_name, op_type, TYPE_DATA_SERVER, curr_dataset->session_plcy)) < 0)
-		{
-			perror("HERCULES_ERR_FIND_SERVER");
-			slog_fatal("HERCULES_ERR_FIND_SERVER");
-			return -1;
-		}
+		slog_fatal("HERCULES_ERR_FIND_SERVER_VIEW: No valid topology view found (target_view_id=%d, num_views=%d)", target_view_id, curr_imss.info.num_views);
+		fprintf(stderr, "HERCULES_ERR_FIND_SERVER_VIEW: No valid topology view found (target_view_id=%d, num_views=%d)\n", target_view_id, curr_imss.info.num_views);
+		return -1;
 	}
-	// else
-	// {
-	// 	server = 0;
-	// }
+
+	int32_t logical_server = find_server(view->num_servers, data_id, curr_dataset->original_name, op_type, TYPE_DATA_SERVER, curr_dataset->session_plcy);
+	if (logical_server < 0)
+	{
+		perror("HERCULES_ERR_FIND_SERVER_VIEW");
+		slog_fatal("HERCULES_ERR_FIND_SERVER_VIEW");
+		return -1;
+	}
+	server = view->server_ids[logical_server];
+	slog_debug("[get_data_location] view_id=%d, num_servers=%d, logical=%d, physical=%d for data_id=%d", view->view_id, view->num_servers, logical_server, server, data_id);
 	slog_debug("next_server=%d", server);
 
 	// if (data_id == 0 && !strcmp(dataset_uri, "imss://test-dir.0-0/mdtest_tree.0.0/file.mdtest.0.0"))
@@ -5590,6 +5646,76 @@ void RecordBlockInterval(dataset_info *ds, int32_t data_id, int32_t num_storages
 	SetInterval(ds, num_storages, data_id, data_id);
 }
 
+TopologyView *GetTopologyView(imss_info *info, int32_t view_id)
+{
+	if (info == NULL || view_id < 0 || view_id >= info->num_views)
+	{
+		return NULL;
+	}
+
+	return &info->views[view_id];
+}
+
+int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *server_ids)
+{
+	if (info == NULL || num_servers <= 0 || server_ids == NULL)
+	{
+		return -1;
+	}
+
+	if (num_servers > MAX_SERVERS_PER_VIEW)
+	{
+		slog_error("HERCULES_ERR_ADD_TOPOLOGY_VIEW_MAX_SERVERS_EXCEEDED: num_servers=%d > MAX_SERVERS_PER_VIEW=%d", num_servers, MAX_SERVERS_PER_VIEW);
+		fprintf(stderr, "HERCULES_ERR_ADD_TOPOLOGY_VIEW_MAX_SERVERS_EXCEEDED: num_servers=%d exceeds MAX_SERVERS_PER_VIEW=%d\n", num_servers, MAX_SERVERS_PER_VIEW);
+		return -1;
+	}
+
+	if (info->num_views >= MAX_TOPOLOGY_VIEWS)
+	{
+		slog_error("HERCULES_ERR_ADD_TOPOLOGY_VIEW_MAX_EXCEEDED: num_views=%d", info->num_views);
+		fprintf(stderr, "HERCULES_ERR_ADD_TOPOLOGY_VIEW_MAX_EXCEEDED: num_views=%d\n", info->num_views);
+		return -1;
+	}
+
+	int32_t new_view_id = info->num_views;
+	TopologyView *view = &info->views[new_view_id];
+	view->view_id = new_view_id;
+	view->num_servers = num_servers;
+
+	for (int32_t i = 0; i < view->num_servers; i++)
+	{
+		view->server_ids[i] = server_ids[i];
+	}
+
+	info->num_views++;
+	info->current_view_id = new_view_id;
+	slog_debug("[AddTopologyView] Created view_id=%d with %d servers", new_view_id, view->num_servers);
+	return new_view_id;
+}
+
+void InitDefaultTopologyView(imss_info *info)
+{
+	if (info == NULL)
+	{
+		return;
+	}
+
+	if (info->num_views == 0 && info->num_storages > 0)
+	{
+		int32_t initial_servers[MAX_SERVERS_PER_VIEW];
+		int32_t count = (info->num_storages > MAX_SERVERS_PER_VIEW) ? MAX_SERVERS_PER_VIEW : info->num_storages;
+
+		for (int32_t i = 0; i < count; i++)
+		{
+			initial_servers[i] = i;
+			info->server_states[i] = SERVER_ACTIVE_RW;
+		}
+
+		AddTopologyView(info, count, initial_servers);
+		slog_debug("[InitDefaultTopologyView] Initialized View 0 with %d storages", count);
+	}
+}
+
 ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request, int deep)
 {
 	slog_debug("dataset_uri=%s, dataset_id=%d, data_id=%d", dataset_uri, dataset_id, data_id);
@@ -6384,15 +6510,15 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 		// makes an interval for the zero block if not already present.
 		if (GetValueFromInterval(curr_dataset, 0) == -1)
 		{
-			slog_info("[update_dataset] Setting metadata block 0 interval [0, 0]=%d for %s", curr_imss.info.num_storages, curr_dataset->uri_);
-			SetInterval(curr_dataset, curr_imss.info.num_storages, 0, 0);
+			slog_info("[update_dataset] Setting metadata block 0 interval [0, 0]=%d for %s", curr_imss.info.current_view_id, curr_dataset->uri_);
+			SetInterval(curr_dataset, curr_imss.info.current_view_id, 0, 0);
 		}
 
 		// set the interval for other blocks if not already present.
 		if (curr_dataset->num_intervals <= 1 && curr_dataset->first_block_id != -1 && curr_dataset->last_block_id != -1)
 		{
 			slog_debug("curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_dataset->first_block_id, curr_dataset->last_block_id);
-			SetInterval(curr_dataset, curr_imss.info.num_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
+			SetInterval(curr_dataset, curr_imss.info.current_view_id, curr_dataset->first_block_id, curr_dataset->last_block_id);
 		}
 	}
 	slog_info("[update_dataset] Synchronizing dataset %s with %d interval(s) to metadata server", curr_dataset->uri_, curr_dataset->num_intervals);
@@ -6509,26 +6635,21 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 
 	int entry_value = GetValueFromInterval(curr_dataset, data_id);
 	bool value_from_interval = false;
-	if (entry_value == -1)
+	if (entry_value != -1)
 	{
-		slog_warn("Entry from intervals is NULL, setting curr_imss_storages=%d (from curr_imss.info.num_storages)", curr_imss.info.num_storages);
-		curr_imss_storages = curr_imss.info.num_storages;
+		value_from_interval = true;
 	}
-	else
+	bool is_overwrite = value_from_interval || (data_id == 0);
+
+	// If all data servers are in READ_UPDATE mode, reject new block writes with no space left -ENOSPC
+	if (!is_overwrite && curr_imss.info.num_active_storages == 0 && curr_imss.info.num_storages > 0)
 	{
-		curr_imss_storages = entry_value;
-		if (curr_imss_storages > curr_imss.info.num_storages)
-		{
-			// Old datasets could have an invalid number of data storages nodes.
-			// During decommissiong all data is moved to the new number of storages nodes (curr_imss.info.num_storages).
-			slog_debug("Entry value is bigger than curr_imss.info.num_storages (%" PRId32 " > %" PRId32 "), using curr_imss.info.num_storages=%" PRId32 ".", curr_imss_storages, curr_imss.info.num_storages, curr_imss.info.num_storages);
-			curr_imss_storages = curr_imss.info.num_storages;
-		}
-		else
-		{
-			value_from_interval = true;
-		}
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_SET_DATA_NO_ACTIVE_SERVERS: Cannot write new block %d: all data servers are in READ_UPDATE mode. No space left on device.", data_id);
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_NO_ACTIVE_SERVERS: Cannot write new block %d: all data servers are in READ_UPDATE mode. No space left on device.\n", data_id);
+		return -ENOSPC;
 	}
+
 	slog_debug("curr_imss_storages=%d", curr_imss_storages);
 	slog_debug("curr_imss_storages=%d, curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_imss_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
 
@@ -6557,6 +6678,14 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		// Server receiving the current data block.
 		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
 		server_id = n_server_;
+
+		if (!is_overwrite && server_id >= 0 && server_id < MAX_SERVERS_PER_VIEW && curr_imss.info.server_states[server_id] == SERVER_READ_UPDATE)
+		{
+			slog_error("HERCULES_ERR_SET_DATA_SERVER_READ_UPDATE: Target data server %d is in READ_UPDATE mode. No space left on device.", server_id);
+			fprintf(stderr, "HERCULES_ERR_SET_DATA_SERVER_READ_UPDATE: Target data server %d is in READ_UPDATE mode. No space left on device.\n", server_id);
+			pthread_mutex_unlock(&lock_network);
+			return -ENOSPC;
+		}
 		use_local = ((session_policy == LOCAL_ || session_policy == ZCOPY_) && server_id == matching_server_id);
 		const char *op_mode = get_protocol_command(op_type, async);
 
@@ -6802,8 +6931,8 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	// creates a new interval.
 	if (TO_RECORD_INTERVALS && data_id > 0 && !value_from_interval)
 	{
-		slog_debug("[set_data] Recording block %d (num_storages=%d) in dataset %s", data_id, curr_imss_storages, curr_dataset->uri_);
-		RecordBlockInterval(curr_dataset, data_id, curr_imss_storages);
+		slog_debug("[set_data] Recording block %d (view_id=%d) in dataset %s", data_id, curr_imss.info.current_view_id, curr_dataset->uri_);
+		RecordBlockInterval(curr_dataset, data_id, curr_imss.info.current_view_id);
 	}
 
 	pthread_mutex_unlock(&lock_network);

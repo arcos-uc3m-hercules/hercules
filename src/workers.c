@@ -62,6 +62,7 @@ std::atomic<bool> comissioning_on(false);
 std::atomic<uint32_t> number_active_storage_servers{0};
 std::atomic<uint32_t> prev_number_active_storage_servers{0};
 int32_t id_server_to_modify = -1;
+int32_t last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
 char *node_to_use = NULL;
 std::atomic<int32_t> acks_received{0};
 // malleability time measure.
@@ -447,7 +448,7 @@ void Attend_pending_requests()
 	}
 	slog_malleability("List to send: %s", list_of_active_nodes);
 
-	sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers.load(), id_server_to_modify, list_of_active_nodes);
+	sprintf(response, "%s %" PRIu32 " %" PRId32 " %d %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers.load(), id_server_to_modify, last_malleability_action, list_of_active_nodes);
 	int ret = -1;
 	fprintf(stdout, "[AttendingPendingRequests] There are %zu pending requests\n", pending_requests.size());
 	// slog_malleability("There are %d pending requests", pending_requests.size());
@@ -948,6 +949,117 @@ void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_s
 	return;
 }
 
+int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
+{
+	if (saturated_server_id < 0)
+	{
+		slog_error("HERCULES_ERR_HANDLE_MEM_SATURATION_INVALID_ID: %d", saturated_server_id);
+		return -1;
+	}
+
+	imss_info *imss_info_struct = curr_global_imss_info;
+	if (imss_info_struct == NULL)
+	{
+		slog_error("HERCULES_ERR_HANDLE_MEM_SATURATION_NULL_IMSS");
+		return -1;
+	}
+
+	pthread_mutex_lock(&mutex_malleability);
+
+	imss_info_struct->server_states[saturated_server_id] = SERVER_READ_UPDATE;
+	slog_warn("Server %d transitioned to SERVER_READ_UPDATE (read-update mode).", saturated_server_id);
+	fprintf(stderr, "[Metadata Server] Server %d transitioned to SERVER_READ_UPDATE (read-update mode).\n", saturated_server_id);
+
+	if (data_endpoints[saturated_server_id] != NULL)
+	{
+		char set_ro_req[REQUEST_SIZE] = {0};
+		snprintf(set_ro_req, sizeof(set_ro_req), "%s", MSG_SET_READ_UPDATE);
+		int ret = send_req(arguments->ucp_worker, data_endpoints[saturated_server_id],
+				   local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], set_ro_req);
+		if (ret == 0)
+		{
+			slog_error("HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %d", saturated_server_id);
+			fprintf(stderr, "HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %d\n", saturated_server_id);
+		}
+	}
+
+	int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
+	int32_t active_count = 0;
+	for (int32_t i = 0; i < imss_info_struct->num_storages && active_count < MAX_SERVERS_PER_VIEW; i++)
+	{
+		if (imss_info_struct->server_states[i] == SERVER_ACTIVE_RW)
+		{
+			active_server_ids[active_count++] = i;
+		}
+	}
+
+	if (active_count > 0)
+	{
+		AddTopologyView(imss_info_struct, active_count, active_server_ids);
+		number_active_storage_servers.store(active_count);
+		imss_info_struct->num_active_storages = active_count;
+		slog_info("New TopologyView created: view_id=%d, active_servers=%d", imss_info_struct->current_view_id, active_count);
+	}
+	else
+	{
+		number_active_storage_servers.store(0);
+		imss_info_struct->num_active_storages = 0;
+		slog_warn("All servers are in READ_UPDATE mode, no active RW servers remaining.");
+		fprintf(stderr, "[Metadata Server] WARNING: All servers in READ_UPDATE mode.\n");
+	}
+
+	id_server_to_modify = saturated_server_id;
+	last_malleability_action = MALLEABILITY_ACTION_READ_UPDATE;
+
+	pthread_mutex_unlock(&mutex_malleability);
+
+	Attend_pending_requests();
+
+	struct arguments *cfg = arguments ? arguments->args : NULL;
+	if (cfg != NULL && cfg->malleability == MALLEABILITY_CONF_ENABLED && cfg->malleability_metric != MALLEABILITY_METRIC_BANDWIDTH)
+	{ // for memory and hybrid metrics we can commission a new server to compensate the
+		// server in read-only state.
+		if (!comissioning_on.load(std::memory_order_acquire))
+		{
+			int total_current_servers = imss_info_struct->num_storages;
+			if (cfg->upper_bound_servers == 0 || total_current_servers < cfg->upper_bound_servers)
+			{
+				slog_info("Triggering commissioning of new data server due to memory saturation (current=%d, upper=%d).", total_current_servers, cfg->upper_bound_servers);
+				fprintf(stderr, "[Metadata Server] Triggering commissioning of new data server due to memory saturation.\n");
+
+				pthread_t comm_thread;
+				MalleabilityArgs *th_args = fill_malleability_args(arguments);
+				if (th_args == NULL)
+				{
+					slog_error("Malleability args is NULL");
+					fprintf(stderr, "Malleability args is NULL\n");
+					return -1;
+				}
+
+				if (pthread_create(&comm_thread, NULL, (void *(*)(void *))comissioning_stage, (void *)th_args) != 0)
+				{
+					perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
+					slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
+					free(th_args);
+					return -1;
+				}
+				if (pthread_detach(comm_thread) != 0)
+				{
+					perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
+					slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
+					return -1;
+				}
+			}
+			else
+			{
+				slog_warn("[Metadata Server] Cannot commission new server: reached upper_bound_servers (%d).", cfg->upper_bound_servers);
+			}
+		}
+	}
+
+	return 0;
+}
+
 /**
  * @brief Decrease the number of servers.
  *
@@ -1031,7 +1143,22 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		// pero para nuevos datasets debería funcionar.
 
 		id_server_to_modify = id_server_to_remove;
-		slog_malleability("Set: id_server_to_modify=%" PRId32, id_server_to_modify);
+		last_malleability_action = MALLEABILITY_ACTION_DECOMMISSION;
+		if (curr_global_imss_info != NULL)
+		{
+			curr_global_imss_info->server_states[id_server_to_remove] = SERVER_DECOMMISSIONED;
+			int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
+			int32_t active_count = 0;
+			for (int32_t i = 0; i < new_number_of_servers && active_count < MAX_SERVERS_PER_VIEW; i++)
+			{
+				active_server_ids[active_count++] = i;
+			}
+			if (active_count > 0)
+			{
+				AddTopologyView(curr_global_imss_info, active_count, active_server_ids);
+			}
+		}
+		slog_malleability("Set: id_server_to_modify=%" PRId32 ", action=DECOMMISSION", id_server_to_modify);
 		// set the global id, used when attending pending requests.
 
 		slog_malleability("Waiting for the signal from the main thread (ACK).");
@@ -1646,7 +1773,7 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_use
 	}
 	slog_debug("List to send: %s", list_of_active_nodes);
 
-	sprintf(response, "%s %" PRIu32 " %" PRId32 " %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers.load(), id_server_to_modify, list_of_active_nodes);
+	sprintf(response, "%s %" PRIu32 " %" PRId32 " %d %s", MSG_MALLEABILITY_DATASERVERS, number_active_storage_servers.load(), id_server_to_modify, last_malleability_action, list_of_active_nodes);
 	int ret = -1;
 	ret = SendConfirmationMessage(&temp_p_argv_for_calls, response);
 	if (ret == 0)
@@ -2812,6 +2939,7 @@ int is_admin_or_malleability_mode(const char *mode)
 		!strcmp(mode, "STOPSERVER") ||
 		!strcmp(mode, "REORDERSERVER") ||
 		!strcmp(mode, "ADDSERVER") ||
+		!strcmp(mode, MSG_SET_READ_UPDATE) ||
 		!strcmp(mode, MSG_END_DECOMMISSION));
 }
 
@@ -2953,16 +3081,12 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		return process_add_server(arguments, req);
 	}
 
-	if (!strcmp(mode, MSG_END_DECOMMISSION))
+	if (!strcmp(mode, MSG_SET_READ_UPDATE))
 	{
-		slog_malleability("ENDDECOMMISSION received. Decommissioning complete across cluster.");
-		fprintf(stderr, "[%s] Decommissioning complete across cluster, attending pending requests.\n", arguments->args->data_hostname);
-		Attend_pending_requests();
-		pthread_mutex_lock(&mutex_malleability);
-		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
-		pthread_cond_signal(&global_run_malleability_cond);
-		pthread_mutex_unlock(&mutex_malleability);
-		return 1;
+		slog_warn("MSG_SET_READ_UPDATE received on server %d. Setting server to READ_UPDATE mode.", arguments->args->id);
+		fprintf(stderr, "MSG_SET_READ_UPDATE received on server %d. Setting server to READ_UPDATE mode.\n", arguments->args->id);
+		set_server_read_update(1);
+		return 0;
 	}
 
 	if (!strcmp(mode, MSG_END_DECOMMISSION))
@@ -3761,6 +3885,31 @@ int handle_write_operation(
 	// if the block was not already stored:
 	if (ret == 0)
 	{
+		if (is_server_read_update)
+		{
+			slog_warn("[%s] New block write %s rejected: server %d is in READ_UPDATE mode.", arguments->args->data_hostname, key.c_str(), arguments->args->id);
+			fprintf(stderr, "[%s] New block write %s rejected: server %d is in READ_UPDATE mode.\n", arguments->args->data_hostname, key.c_str(), arguments->args->id);
+			if (!expect_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
+			{
+				// Consumes the petition to keep UCX consistency.
+				size_t drain_len = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+				if (drain_len > 0)
+				{
+					void *drain_buf = malloc(drain_len);
+					if (drain_buf != NULL)
+					{
+						recv_data(arguments->ucp_worker, arguments->server_ep, drain_buf, drain_len, arguments->worker_uid, 0);
+						free(drain_buf);
+					}
+				}
+			}
+			p_argv temp_p_argv_for_calls;
+			fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
+			// send the update list of nodes to the client.
+			send_node_list_2_frontend(temp_p_argv_for_calls, server_n_used_in_frontend);
+			return -1;
+		}
+
 		slog_debug("[WRITE_OP] NO key find %s", key.c_str());
 		void *buffer = NULL;
 		size_t msg_length = 0;
@@ -4789,6 +4938,26 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// Save the request to be served.
 	slog_info("Request - '%s'", req);
 	// fprintf(stderr, "Request=%s\n", req);
+	if (!strncmp(req, MSG_MEMORY_SATURATION, strlen(MSG_MEMORY_SATURATION)))
+	{
+		int saturated_server_id = -1;
+		float usage_pct = 0.0f;
+		int parsed = sscanf(req, "%*s %d %f", &saturated_server_id, &usage_pct);
+		if (parsed < 2)
+		{
+			slog_error("HERCULES_ERR_MEMORY_SATURATION_PARSE: Malformed request: %s", req);
+			fprintf(stderr, "HERCULES_ERR_MEMORY_SATURATION_PARSE: Malformed request: %s\n", req);
+			return -1;
+		}
+
+		slog_warn("Saturated data server notification: ID %d (%.2f%% memory used).", saturated_server_id, usage_pct);
+		fprintf(stderr, "Saturated data server notification: ID %d (%.2f%% memory used).\n", saturated_server_id, usage_pct);
+
+		SendConfirmationMessage(arguments, MSG_OK_OP);
+		handle_memory_saturation(arguments, saturated_server_id);
+		return 0;
+	}
+
 	if (!strncmp(req, MSG_DECOM_DATASERVERS, strlen(MSG_DECOM_DATASERVERS)))
 	{
 		acks_received++;
@@ -5055,6 +5224,24 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		slog_debug("Server %d connected in %.4f seconds", server_id_request, time_taken_comm.count());
 
 		id_server_to_modify = server_id_request;
+		last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
+		if (curr_global_imss_info != NULL)
+		{
+			curr_global_imss_info->server_states[server_id_request] = SERVER_ACTIVE_RW;
+			int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
+			int32_t active_count = 0;
+			for (int32_t i = 0; i < curr_global_imss_info->num_storages && active_count < MAX_SERVERS_PER_VIEW; i++)
+			{
+				if (curr_global_imss_info->server_states[i] == SERVER_ACTIVE_RW)
+				{
+					active_server_ids[active_count++] = i;
+				}
+			}
+			if (active_count > 0)
+			{
+				AddTopologyView(curr_global_imss_info, active_count, active_server_ids);
+			}
+		}
 		// Send the request to all servers telling they have to updated the list of aviable nodes.
 		send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, added_hostname, number_active_storage_servers.load(), id_server_to_modify);
 

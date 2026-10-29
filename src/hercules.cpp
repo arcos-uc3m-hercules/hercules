@@ -1188,6 +1188,102 @@ void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 		args->malleability_reorder_mode = default_reorder_mode;
 	}
 
+	// Malleability metric (0: BANDWIDTH, 1: MEMORY, 2: HYBRID)
+	const char *metric_str = getenv("HERCULES_MALLEABILITY_METRIC");
+	if (metric_str == NULL)
+	{
+		metric_str = cfg_get(cfg, "MALLEABILITY_METRIC");
+	}
+
+	args->malleability_metric = MALLEABILITY_METRIC_BANDWIDTH;
+	if (metric_str != NULL)
+	{
+		int temp_metric = 0;
+		if (is_valid_integer(metric_str, &temp_metric) && temp_metric >= 0 && temp_metric <= 2)
+		{
+			args->malleability_metric = temp_metric;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid MALLEABILITY_METRIC: '%s' (valid values: 0, 1, 2). Fallback to 0.\n", metric_str);
+			args->malleability_metric = MALLEABILITY_METRIC_BANDWIDTH;
+		}
+	}
+
+	// Memory saturation high threshold percentage (default: 80, bounds: 0 < up < 100)
+	const char *mem_up_str = getenv("HERCULES_MALLEABILITY_MEM_THRESHOLD_UP");
+	if (mem_up_str == NULL)
+	{
+		mem_up_str = cfg_get(cfg, "MALLEABILITY_MEM_THRESHOLD_UP");
+	}
+
+	args->malleability_mem_threshold_up = 80;
+	if (mem_up_str != NULL)
+	{
+		int temp_mem_up = 0;
+		if (is_valid_integer(mem_up_str, &temp_mem_up) && temp_mem_up > 0 && temp_mem_up < 100)
+		{
+			args->malleability_mem_threshold_up = temp_mem_up;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid MALLEABILITY_MEM_THRESHOLD_UP: '%s' (valid range: 1-99). Fallback to 80.\n", mem_up_str);
+			args->malleability_mem_threshold_up = 80;
+		}
+	}
+
+	// Memory saturation low threshold percentage (default: 30, bounds: 0 < down < 100)
+	const char *mem_down_str = getenv("HERCULES_MALLEABILITY_MEM_THRESHOLD_DOWN");
+	if (mem_down_str == NULL)
+	{
+		mem_down_str = cfg_get(cfg, "MALLEABILITY_MEM_THRESHOLD_DOWN");
+	}
+
+	args->malleability_mem_threshold_down = 30;
+	if (mem_down_str != NULL)
+	{
+		int temp_mem_down = 0;
+		if (is_valid_integer(mem_down_str, &temp_mem_down) && temp_mem_down > 0 && temp_mem_down < 100)
+		{
+			args->malleability_mem_threshold_down = temp_mem_down;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid MALLEABILITY_MEM_THRESHOLD_DOWN: '%s' (valid range: 1-99). Fallback to 30.\n", mem_down_str);
+			args->malleability_mem_threshold_down = 30;
+		}
+	}
+
+	// High threshold must be strictly greater than low threshold
+	if (args->malleability_mem_threshold_up <= args->malleability_mem_threshold_down)
+	{
+		fprintf(stderr, "WARNING: MALLEABILITY_MEM_THRESHOLD_UP (%d) must be greater than MALLEABILITY_MEM_THRESHOLD_DOWN (%d). Fallback to defaults (UP=80, DOWN=30).\n", args->malleability_mem_threshold_up, args->malleability_mem_threshold_down);
+		args->malleability_mem_threshold_up = 80;
+		args->malleability_mem_threshold_down = 30;
+	}
+
+	/* Read-update mode (0: disabled, 1: enabled, default: 1) */
+	const char *ru_mode_str = getenv("HERCULES_MALLEABILITY_READ_UPDATE_MODE");
+	if (ru_mode_str == NULL)
+	{
+		ru_mode_str = cfg_get(cfg, "MALLEABILITY_READ_UPDATE_MODE");
+	}
+
+	args->malleability_read_update_mode = 1;
+	if (ru_mode_str != NULL)
+	{
+		int temp_ru = 0;
+		if (is_valid_integer(ru_mode_str, &temp_ru) && (temp_ru == 0 || temp_ru == 1))
+		{
+			args->malleability_read_update_mode = temp_ru;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid MALLEABILITY_READ_UPDATE_MODE: '%s' (valid values: 0, 1). Fallback to 1.\n", ru_mode_str);
+			args->malleability_read_update_mode = 1;
+		}
+	}
+
 	// fprintf(stdout, "Malleability is enabled.\n HERCULES_MALLEABILITY_DECOMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_COMMISSIONING_TOLERANCE=%" PRId32 "\n HERCULES_MALLEABILITY_WSIZE=%" PRId32 "\n HERCULES_MALLEABILITY_THRESHOLD=%.f, HERCULES_MALLEABILITY_REORDER_MODE=%d\n",
 	// 	args->malleability_tolerance_decommissioning,
 	// 	args->malleability_tolerance_commissioning,

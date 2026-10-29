@@ -129,6 +129,37 @@ int32_t get_data_location(char *, int32_t, int32_t, int32_t);
 //     CLIENT_SERVER_SEND_RECV_DEFAULT = CLIENT_SERVER_SEND_RECV_STREAM
 // } send_type_t;
 
+#define MAX_SERVERS_PER_VIEW 100
+#define MAX_TOPOLOGY_VIEWS   32
+
+typedef enum
+{
+	SERVER_ACTIVE_RW      = 0,
+	SERVER_READ_UPDATE    = 1,
+	SERVER_DECOMMISSIONED = 2
+} ServerStorageState;
+
+typedef enum
+{
+	MALLEABILITY_ACTION_COMMISSION   = 0,
+	MALLEABILITY_ACTION_DECOMMISSION = 1,
+	MALLEABILITY_ACTION_READ_UPDATE  = 2
+} MalleabilityActionType;
+
+typedef enum
+{
+	MALLEABILITY_METRIC_BANDWIDTH = 0,
+	MALLEABILITY_METRIC_MEMORY    = 1,
+	MALLEABILITY_METRIC_HYBRID    = 2
+} MalleabilityMetricType;
+
+typedef struct
+{
+	int32_t view_id;
+	int32_t num_servers;
+	int32_t server_ids[MAX_SERVERS_PER_VIEW];
+} TopologyView;
+
 // Structure storing all information related to a certain IMSS.
 // Note: if you add more elements to the imss_info struct, you should
 // modify the serialization in stat_worker_helper > SET_OP > else > default case,
@@ -154,6 +185,14 @@ typedef struct
 	int32_t session_plcy;
 	// Server's dispatcher thread connection port.
 	uint16_t conn_port;
+	// Active view ID for new writes.
+	int32_t current_view_id;
+	// Total number of recorded topology views.
+	int32_t num_views;
+	// Historical registry of topology views.
+	TopologyView views[MAX_TOPOLOGY_VIEWS];
+	// State of each physical server ID.
+	uint8_t server_states[MAX_SERVERS_PER_VIEW];
 } imss_info;
 
 // Structure storing the required connection resources to the IMSS in the client side.
@@ -269,6 +308,10 @@ extern "C"
 	void ClearIntervalsStructure(dataset_info *curr_dataset);
 	int compare_intervals(const void *a, const void *b);
 	void RecordBlockInterval(dataset_info *ds, int32_t data_id, int32_t num_storages);
+
+	TopologyView *GetTopologyView(imss_info *info, int32_t view_id);
+	int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *server_ids);
+	void InitDefaultTopologyView(imss_info *info);
 
 	/****************************************************************************************************************************/
 	/****************************************** METADATA SERVICE MANAGEMENT FUNCTIONS  ******************************************/

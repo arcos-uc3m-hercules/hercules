@@ -1,4 +1,5 @@
 #include "arg_parser.h"
+#include "hierarchical_records.hpp"
 #include "map_ep.hpp"
 #include "memalloc.h"
 #include "metadata_stat.h"
@@ -302,6 +303,16 @@ int32_t main(int32_t argc, char **argv)
 	if (max_storage_size > max_system_ram_allowed || max_storage_size == 0)
 	{
 		max_storage_size = max_system_ram_allowed;
+	}
+
+	// set memory thresholds for malleability
+	if (args.malleability_mem_threshold_up > 0)
+	{
+		memory_threshold_high = args.malleability_mem_threshold_up;
+	}
+	if (args.malleability_mem_threshold_down > 0)
+	{
+		memory_threshold_low = args.malleability_mem_threshold_down;
 	}
 
 	// init memory pool

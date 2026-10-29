@@ -126,6 +126,8 @@ typedef struct
 	char curr_req[PATH_MAX];
 } MalleabilityArgs;
 
+MalleabilityArgs *fill_malleability_args(p_argv *arguments);
+
 // Thread method attending client data requests.
 void *hercules_ucx_server(void *th_argv);
 int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps);
@@ -174,6 +176,7 @@ void *get_performance_metrics(void *th_argv);
 void *run_malleability(void *th_argv);
 void *comissioning_stage(MalleabilityArgs *arguments);
 int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove);
+int handle_memory_saturation(p_argv *arguments, int saturated_server_id);
 int ShutdownServer();
 // void Decomissioning_stage(p_argv *arguments, int id_server_to_remove);
 void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift);

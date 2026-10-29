@@ -763,10 +763,21 @@ extern "C"
 	char SERVER_TYPE;
 	uint64_t max_storage_size = 0;
 	int64_t quantity_occupied = 0;
+	int is_server_read_update = 0;
+	int memory_threshold_high = 80;
+	int memory_threshold_low = 30;
+	int notified_memory_saturation = 0;
 
 	int64_t get_size()
 	{
 		return max_storage_size;
+	}
+
+	void set_server_read_update(int ru)
+	{
+		is_server_read_update = ru;
+		slog_warn("[Server %d] Server READ_UPDATE status set to %d", SERVER_ID, ru);
+		fprintf(stderr, "[Server %d] Server READ_UPDATE status set to %d\n", SERVER_ID, ru);
 	}
 
 	/**
@@ -778,7 +789,7 @@ extern "C"
 	{
 		int ret = 1;
 		pthread_mutex_lock(&mutex_quantity_occupied);
-		if (quantity_occupied + required_space > max_storage_size)
+		if (is_server_read_update || (quantity_occupied + required_space > max_storage_size))
 		{
 			ret = 0;
 		}
@@ -796,6 +807,13 @@ extern "C"
 	{
 		int ret = 1;
 		pthread_mutex_lock(&mutex_quantity_occupied);
+		if (is_server_read_update)
+		{
+			slog_warn("[Server %d] Write allocation rejected: server is in READ_UPDATE mode.", SERVER_ID);
+			pthread_mutex_unlock(&mutex_quantity_occupied);
+			return 0;
+		}
+
 		if (quantity_occupied + required_space > max_storage_size)
 		{
 			slog_warn("memory occupied=%ld/%ld, required_space=%lu", quantity_occupied, max_storage_size, required_space);
@@ -807,6 +825,20 @@ extern "C"
 			slog_debug("memory occupied=%ld/%ld, required_space=%lu", quantity_occupied, max_storage_size, required_space);
 		}
 		pthread_mutex_unlock(&mutex_quantity_occupied);
+
+		if (ret && SERVER_TYPE == TYPE_DATA_SERVER)
+		{
+			double usage_pct = get_storage_usage_percentage();
+			if (usage_pct >= (double)memory_threshold_high && !notified_memory_saturation)
+			{
+				notified_memory_saturation = 1;
+				slog_warn("[Server %d] Memory threshold reached: %.2f%% (threshold=%d%%). Notifying metadata server.", SERVER_ID, usage_pct, memory_threshold_high);
+				fprintf(stderr, "[Server %d] Memory threshold reached: %.2f%% (threshold=%d%%). Notifying metadata server.\n", SERVER_ID, usage_pct, memory_threshold_high);
+				char notify_msg[REQUEST_SIZE] = {0};
+				snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_SATURATION, SERVER_ID, usage_pct);
+				StatACK(notify_msg, 0);
+			}
+		}
 		return ret;
 	}
 
@@ -832,6 +864,17 @@ extern "C"
 			slog_debug("memory occupied=%lu GB, freed_space=%lu", quantity_occupied / GB, freed_space);
 		}
 		pthread_mutex_unlock(&mutex_quantity_occupied);
+
+		if (ret && SERVER_TYPE == TYPE_DATA_SERVER && notified_memory_saturation)
+		{
+			double usage_pct = get_storage_usage_percentage();
+			if (usage_pct <= (double)memory_threshold_low)
+			{
+				notified_memory_saturation = 0;
+				slog_info("[Server %d] Memory drained below low threshold: %.2f%% (threshold=%d%%).", SERVER_ID, usage_pct, memory_threshold_low);
+				fprintf(stderr, "[Server %d] Memory drained below low threshold: %.2f%% (threshold=%d%%).\n", SERVER_ID, usage_pct, memory_threshold_low);
+			}
+		}
 		return ret;
 	}
 

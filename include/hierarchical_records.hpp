@@ -2,8 +2,8 @@
  * @file hierarchical_records.hpp
  * @author Genaro Sánchez-Gallegos, Javier Garcia-Blas, Jesus Carretero
  * @brief 
- * @version 0.2
- * @date 2025-08-01
+ * @version 0.4
+ * @date 2026-10-29
  * 
  * @copyright Copyright (c) 2025
  * 
@@ -11,9 +11,9 @@
 #ifndef H_H_MAP_RECORDS
 #define H_H_MAP_RECORDS
 
+#include "records.hpp"
 #include <cstdint>
 #include <map>
-#include "records.hpp"
 
 // Map used to store another map which conatins a list of all the children
 // specified in the directory reference by the key "string".
@@ -62,6 +62,10 @@ extern "C"
 	extern char SERVER_TYPE;
 	extern uint64_t max_storage_size;
 	extern int64_t quantity_occupied;
+	extern int is_server_read_update;
+	extern int memory_threshold_high;
+	extern int memory_threshold_low;
+	extern int notified_memory_saturation;
 
 	// Memory usage.
 	double get_storage_usage_percentage();
@@ -69,6 +73,7 @@ extern "C"
 	int DecreaseMemoryOccupied(int64_t freed_space);
 	int CheckForMemorySpace(int64_t required_space);
 	int64_t get_size();
+	void set_server_read_update(int ru);
 
 #ifdef __cplusplus
 }

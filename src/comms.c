@@ -1379,14 +1379,25 @@ extern "C"
 			msg_data += sizeof(imss_info);
 
 			// Copy the dynamic fields into the structure.
-			struct_->ips = (char **)malloc(struct_->num_storages * sizeof(char *));
-
-			for (int32_t i = 0; i < struct_->num_storages; i++)
+			if (struct_->num_storages > 0)
 			{
-				struct_->ips[i] = (char *)malloc(LINE_LENGTH * sizeof(char));
-				memcpy(struct_->ips[i], msg_data, LINE_LENGTH);
-				// slog_debug("pointer address = %p", &msg_data);
-				msg_data += LINE_LENGTH;
+				struct_->ips = (char **)malloc(struct_->num_storages * sizeof(char *));
+				for (int32_t i = 0; i < struct_->num_storages; i++)
+				{
+					struct_->ips[i] = (char *)malloc(LINE_LENGTH * sizeof(char));
+					memcpy(struct_->ips[i], msg_data, LINE_LENGTH);
+					// slog_debug("pointer address = %p", &msg_data);
+					msg_data += LINE_LENGTH;
+				}
+			}
+			else
+			{
+				struct_->ips = NULL;
+			}
+
+			if (struct_->num_views == 0 && struct_->num_storages > 0)
+			{
+				InitDefaultTopologyView(struct_);
 			}
 
 			// struct_->status = (int *)malloc(struct_->num_storages * sizeof(int));
@@ -1529,13 +1540,24 @@ extern "C"
 
 			// Copy the dynamic fields into the structure.
 			slog_live("struct_->num_storages=%d", struct_->num_storages);
-			struct_->ips = (char **)malloc(struct_->num_storages * sizeof(char *));
-
-			for (int32_t i = 0; i < struct_->num_storages; i++)
+			if (struct_->num_storages > 0)
 			{
-				struct_->ips[i] = (char *)malloc(LINE_LENGTH * sizeof(char));
-				memcpy(struct_->ips[i], msg_data, LINE_LENGTH);
-				msg_data += LINE_LENGTH;
+				struct_->ips = (char **)malloc(struct_->num_storages * sizeof(char *));
+				for (int32_t i = 0; i < struct_->num_storages; i++)
+				{
+					struct_->ips[i] = (char *)malloc(LINE_LENGTH * sizeof(char));
+					memcpy(struct_->ips[i], msg_data, LINE_LENGTH);
+					msg_data += LINE_LENGTH;
+				}
+			}
+			else
+			{
+				struct_->ips = NULL;
+			}
+
+			if (struct_->num_views == 0 && struct_->num_storages > 0)
+			{
+				InitDefaultTopologyView(struct_);
 			}
 
 			break;

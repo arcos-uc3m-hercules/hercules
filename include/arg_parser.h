@@ -77,6 +77,10 @@ struct arguments
 	int32_t malleability_windows_size;		/* how many records are used to check the performance status. */
 	CommunicationMode malleability_reorder_mode;	/* how blocks will be moved between servers, 0: network (network), 1: disk (checkpoint) */
 	double malleability_performance_threshold;	/* performance threshold in MB/s */
+	int32_t malleability_metric;			/* 0: BANDWIDTH, 1: MEMORY, 2: HYBRID */
+	int32_t malleability_mem_threshold_up;		/* high memory threshold percentage (default: 80) */
+	int32_t malleability_mem_threshold_down;	/* low memory threshold percentage (default: 30) */
+	int32_t malleability_read_update_mode;		/* 0: disabled, 1: read-update mode */
 	int32_t upper_bound_servers;
 	int32_t lower_bound_servers;
 	int32_t repl_factor;
