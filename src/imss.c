@@ -3877,7 +3877,7 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id, int deep)
 	int ret = -1;
 
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = get_data_location((char *)dataset_uri, dataset_id, dataset_id, GET)) == -1)
+	if ((n_server = get_data_location((char *)dataset_uri, dataset_id, dataset_id, GET, NULL, NULL)) == -1)
 		return -1;
 
 	// Servers that the data block is going to be requested to.
@@ -4530,8 +4530,17 @@ int32_t set_dataset(char * dataset_uri, unsigned char * buffer, uint64_t offset)
 /**********************************************************************************/
 
 // Method retrieving the location of a specific data object.
-int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id, int32_t op_type)
+int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id, int32_t op_type, TopologyView **view_out, int32_t *entry_val)
 {
+	if (view_out != NULL)
+	{
+		*view_out = NULL;
+	}
+	if (entry_val != NULL)
+	{
+		*entry_val = -1;
+	}
+
 	// If the current dataset policy was not established yet.
 	slog_debug("dataset_id=%d, id_current_dataset=%d", dataset_id, id_current_dataset);
 	slog_debug("dataset_uri=%s", dataset_uri);
@@ -4579,29 +4588,16 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 		id_current_dataset = dataset_id;
 	}
 
-	// char *curr_num_data_nodes = getenv("HERCULES_CURR_ACTIVE_DATA_NODES");
-	// int curr_num_data_nodes_env = atoi(getenv("HERCULES_CURR_ACTIVE_DATA_NODES"));
-	// // fprintf(stderr, "[++ HERCULES] curr_num_data_nodes_env=%d\n", curr_num_data_nodes_env);
-	// int32_t old_num_storages = curr_imss.info.num_active_storages;
-	// if (curr_num_data_nodes_env != curr_imss.info.num_active_storages)
-	// {
-	// 	stat_imss_info(curr_imss.info.uri_, &curr_imss.info);
-	// 	fprintf(stderr, "HERCULES_CURR_ACTIVE_DATA_NODES=%d, old_num_storages=%d, num_active_storages=%d, uri=%s\n", curr_num_data_nodes_env, old_num_storages, curr_imss.info.num_active_storages, curr_imss.info.uri_);
-	// 	// unsetenv("HERCULES_CURR_ACTIVE_DATA_NODES");
-
-	// 	// for (int i = 0; i < curr_imss.info.num_storages; i++)
-	// 	// {
-	// 	// 	fprintf(stderr, "server %d status = %d\n", i, curr_imss.info.status[i]);
-	// 	// }
-	// }
-
 	int32_t server = -1;
 	// slog_debug("curr_imss add=%p", &curr_imss.info.num_active_storages);
 	slog_live("curr_dataset->uri=%s,  curr_dataset->original_name=%s, curr_imss.info.num_storages(%p)=%d, curr_dataset->n_servers=%d, curr_imss.info.num_active_storages=%d, curr_dataset->n_servers_when_created=%d", curr_dataset->uri_, curr_dataset->original_name, &curr_imss.info.num_storages, curr_imss.info.num_storages, curr_dataset->n_servers, curr_imss.info.num_active_storages, curr_dataset->n_servers_when_created);
 	// Search for the server that is supposed to have the specified data element.
 	// slog_debug("curr_dataset->uri_=%s", curr_dataset->uri_);
-
 	int entry_value = GetValueFromInterval(curr_dataset, data_id);
+	if (entry_val != NULL)
+	{
+		*entry_val = entry_value;
+	}
 	int32_t target_view_id = -1;
 	if (entry_value == -1)
 	{
@@ -4619,6 +4615,11 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 		slog_fatal("HERCULES_ERR_FIND_SERVER_VIEW: No valid topology view found (target_view_id=%d, num_views=%d)", target_view_id, curr_imss.info.num_views);
 		fprintf(stderr, "HERCULES_ERR_FIND_SERVER_VIEW: No valid topology view found (target_view_id=%d, num_views=%d)\n", target_view_id, curr_imss.info.num_views);
 		return -1;
+	}
+
+	if (view_out != NULL)
+	{
+		*view_out = view;
 	}
 
 	int32_t logical_server = find_server(view->num_servers, data_id, curr_dataset->original_name, op_type, TYPE_DATA_SERVER, curr_dataset->session_plcy);
@@ -4646,7 +4647,7 @@ int32_t rename_dataset_srv_worker_dir_dir(char *old_dir, char *rdir_dest,
 {
 	int32_t n_server;
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = get_data_location(rdir_dest, dataset_id, data_id, GET)) == -1)
+	if ((n_server = get_data_location(rdir_dest, dataset_id, data_id, GET, NULL, NULL)) == -1)
 		return -1;
 
 	// Servers that the data block is going to be requested to.
@@ -4749,7 +4750,7 @@ int32_t rename_dataset_srv_worker(char *old_dataset_uri, char *new_dataset_uri, 
 {
 	int32_t n_server = 0;
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = get_data_location(new_dataset_uri, dataset_id, data_id, GET)) == -1)
+	if ((n_server = get_data_location(new_dataset_uri, dataset_id, data_id, GET, NULL, NULL)) == -1)
 		return -1;
 
 	// Servers that the data block is going to be requested to.
@@ -4845,7 +4846,7 @@ int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, i
 {
 	int32_t n_server;
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = get_data_location((char *)dataset_uri, dataset_id, data_id, GET)) == -1)
+	if ((n_server = get_data_location((char *)dataset_uri, dataset_id, data_id, GET, NULL, NULL)) == -1)
 		return -1;
 
 	// Servers that the data block is going to be requested to.
@@ -4990,7 +4991,7 @@ int32_t readv_multiple(char *dataset_uri,
 	// printf("readv size=%d",size);
 	int32_t n_server;
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = get_data_location(dataset_uri, dataset_id, curr_block, GET)) == -1)
+	if ((n_server = get_data_location(dataset_uri, dataset_id, curr_block, GET, NULL, NULL)) == -1)
 
 		return -1;
 
@@ -5732,36 +5733,20 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 
 	// if the number of server to be used was not provided, we try to obtain the data location.
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = TIMING(get_data_location(dataset_uri, dataset_id, data_id, GET), "get_data_location", int32_t, process_rank)) == -1)
+	TopologyView *view = NULL;
+	if ((n_server = TIMING(get_data_location(dataset_uri, dataset_id, data_id, GET, &view, NULL), "get_data_location", int32_t, process_rank)) == -1)
 	{
 		return -2;
 	}
 	replication_factor = curr_dataset->repl_factor;
 
-	// TOCHECK: GetValueFromInterval is called twice, the first one is on get_data_location.
-	int entry_value = GetValueFromInterval(curr_dataset, data_id);
-	if (entry_value == -1)
-	{
-		slog_warn("Entry from intervals is NULL, setting curr_imss_storages=%d (from curr_imss.info.num_storages)", curr_imss.info.num_storages);
-		curr_imss_storages = curr_imss.info.num_storages;
-	}
-	else
-	{
-		curr_imss_storages = entry_value;
-		if (curr_imss_storages > curr_imss.info.num_storages)
-		{
-			// Old datasets could have an invalid number of data storages nodes.
-			// During decommissiong all data is moved to the new number of storages nodes (curr_imss.info.num_storages).
-			slog_debug("Entry value is bigger than curr_imss.info.num_storages (%" PRId32 " > %" PRId32 "), using curr_imss.info.num_storages=%" PRId32 ".", curr_imss_storages, curr_imss.info.num_storages, curr_imss.info.num_storages);
-			curr_imss_storages = curr_imss.info.num_storages;
-		}
-	}
+	curr_imss_storages = (view != NULL && view->num_servers > 0) ? view->num_servers : curr_imss.info.num_storages;
 	slog_debug("curr_imss_storages=%d", curr_imss_storages);
 	// fprintf(stderr, "Using %d servers\n", curr_imss_storages);
 
-	if (replication_factor < 0 || curr_imss_storages < 0)
+	if (replication_factor <= 0 || curr_imss_storages <= 0)
 	{
-		fprintf(stderr, "HERCULES_ERR_GET_NDATA_BAD_PARAMS");
+		fprintf(stderr, "HERCULES_ERR_GET_NDATA_BAD_PARAMS\n");
 		slog_error("HERCULES_ERR_GET_NDATA_BAD_PARAMS");
 		return -1;
 	}
@@ -5778,7 +5763,14 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 	{
 		// Server storing the current data block.
 		// TODO: check if num_active_storages is still in use.
-		n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
+		if (replication_factor == 1)
+		{
+			n_server_ = n_server;
+		}
+		else
+		{
+			n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
+		}
 		slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset->n_servers=%d, curr_imss_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset->n_servers, curr_imss_storages, curr_imss.info.num_active_storages);
 
 		repl_servers[i] = n_server_;
@@ -6106,22 +6098,14 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 
 	// if the number of server to be used was not provided, we try to obtain the data location.
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = TIMING(get_data_location(dataset_uri, dataset_id, data_id, GET), "get_data_location", int32_t, process_rank)) == -1)
+	TopologyView *view = NULL;
+	if ((n_server = TIMING(get_data_location(dataset_uri, dataset_id, data_id, GET, &view, NULL), "get_data_location", int32_t, process_rank)) == -1)
 	{
 		return -2;
 	}
 	replication_factor = curr_dataset->repl_factor;
 
-	int entry_value = GetValueFromInterval(curr_dataset, data_id);
-	if (entry_value == -1)
-	{
-		slog_warn("Entry from intervals is NULL, setting curr_imss_storages=%d", curr_imss.info.num_storages);
-		curr_imss_storages = curr_imss.info.num_storages;
-	}
-	else
-	{
-		curr_imss_storages = entry_value; // entry->value;
-	}
+	curr_imss_storages = (view != NULL && view->num_servers > 0) ? view->num_servers : curr_imss.info.num_storages;
 	slog_debug("curr_imss_storages=%d", curr_imss_storages);
 
 	if (replication_factor <= 0 || curr_imss_storages <= 0)
@@ -6142,7 +6126,14 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 	for (int32_t i = 0; i < replication_factor; i++)
 	{
 		// Server storing the current data block.
-		n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
+		if (replication_factor == 1)
+		{
+			n_server_ = n_server;
+		}
+		else
+		{
+			n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
+		}
 		slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset->n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset->n_servers, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
 
 		repl_servers[i] = n_server_;
@@ -6281,27 +6272,19 @@ ssize_t start_block_request(char *dataset_uri, int32_t dataset_id, int32_t data_
 
 	// if the number of server to be used was not provided, we try to obtain the data location.
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = TIMING(get_data_location(dataset_uri, dataset_id, data_id, GET), "get_data_location", int32_t, process_rank)) == -1)
+	TopologyView *view = NULL;
+	if ((n_server = TIMING(get_data_location(dataset_uri, dataset_id, data_id, GET, &view, NULL), "get_data_location", int32_t, process_rank)) == -1)
 	{
 		return -2;
 	}
 	replication_factor = curr_dataset->repl_factor;
 
-	int entry_value = GetValueFromInterval(curr_dataset, data_id);
-	if (entry_value == -1)
-	{
-		slog_warn("Entry from intervals is NULL, setting curr_imss_storages=%d", curr_imss.info.num_storages);
-		curr_imss_storages = curr_imss.info.num_storages;
-	}
-	else
-	{
-		curr_imss_storages = entry_value; // entry->value;
-	}
+	curr_imss_storages = (view != NULL && view->num_servers > 0) ? view->num_servers : curr_imss.info.num_storages;
 	slog_debug("curr_imss_storages=%d", curr_imss_storages);
 
-	if (replication_factor < 0 || curr_imss_storages < 0)
+	if (replication_factor <= 0 || curr_imss_storages <= 0)
 	{
-		fprintf(stderr, "HERCULES_ERR_GET_NDATA_BAD_PARAMS");
+		fprintf(stderr, "HERCULES_ERR_GET_NDATA_BAD_PARAMS\n");
 		slog_error("HERCULES_ERR_GET_NDATA_BAD_PARAMS");
 		return -1;
 	}
@@ -6317,7 +6300,14 @@ ssize_t start_block_request(char *dataset_uri, int32_t dataset_id, int32_t data_
 	for (int32_t i = 0; i < replication_factor; i++)
 	{
 		// Server storing the current data block.
-		n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
+		if (replication_factor == 1)
+		{
+			n_server_ = n_server;
+		}
+		else
+		{
+			n_server_ = (n_server + i * (curr_imss_storages / replication_factor)) % curr_imss_storages;
+		}
 		slog_debug("[IMSS] next_server=%d, replication_factor=%d, curr_dataset->n_servers=%d, curr_imss.info.num_storages=%d, curr_imss.info.num_active_storages=%d", n_server_, replication_factor, curr_dataset->n_servers, curr_imss.info.num_storages, curr_imss.info.num_active_storages);
 
 		repl_servers[i] = n_server_;
@@ -6376,7 +6366,7 @@ size_t get_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, voi
 	int32_t n_server;
 
 	// Server containing the corresponding data to be retrieved.
-	if ((n_server = get_data_location(dataset_uri, dataset_id, data_id, GET)) == -1)
+	if ((n_server = get_data_location(dataset_uri, dataset_id, data_id, GET, NULL, NULL)) == -1)
 	{
 		return 0;
 	}
@@ -6618,8 +6608,10 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	int ret = 0;
 	int32_t n_server = 0;
 	size_t msg_length = 0;
+	TopologyView *view = NULL;
+	int32_t entry_value = -1;
 	// Server containing the corresponding data to be written.
-	if ((n_server = TIMING(get_data_location(dataset_uri, dataset_id, data_id, SET), "get_data_location", int32_t, process_rank)) == -1)
+	if ((n_server = TIMING(get_data_location(dataset_uri, dataset_id, data_id, SET, &view, &entry_value), "get_data_location", int32_t, process_rank)) == -1)
 	{
 		perror("HERCULES_ERR_GET_DATA_LOCATION");
 		slog_error("HERCULES_ERR_GET_DATA_LOCATION");
@@ -6631,9 +6623,8 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	pthread_mutex_lock(&lock_network);
 	char key_[REQUEST_SIZE] = {0};
 
-	int32_t curr_imss_storages = curr_imss.info.num_storages;
+	int32_t curr_imss_storages = (view != NULL && view->num_servers > 0) ? view->num_servers : curr_imss.info.num_storages;
 
-	int entry_value = GetValueFromInterval(curr_dataset, data_id);
 	bool value_from_interval = false;
 	if (entry_value != -1)
 	{
@@ -6676,7 +6667,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	{
 		ucp_ep_h ep;
 		// Server receiving the current data block.
-		uint32_t n_server_ = (n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages;
+		uint32_t n_server_ = (curr_dataset->repl_factor == 1) ? n_server : ((n_server + i * (curr_imss_storages / curr_dataset->repl_factor)) % curr_imss_storages);
 		server_id = n_server_;
 
 		if (!is_overwrite && server_id >= 0 && server_id < MAX_SERVERS_PER_VIEW && curr_imss.info.server_states[server_id] == SERVER_READ_UPDATE)
@@ -6945,7 +6936,7 @@ int32_t set_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, char *
 	int ret = 0;
 	int32_t n_server;
 	// Server containing the corresponding data to be written.
-	if ((n_server = get_data_location(dataset_uri, dataset_id, data_id, SET)) == -1)
+	if ((n_server = get_data_location(dataset_uri, dataset_id, data_id, SET, NULL, NULL)) == -1)
 
 		return -1;
 
@@ -7426,7 +7417,7 @@ int32_t split_location_servers(char *dataset_uri, int **list_servers, int32_t da
 		int32_t n_server;
 
 		// Server containing the corresponding data to be retrieved.
-		if ((n_server = get_data_location(dataset_uri, dataset_id, curr_blk, GET)) == -1)
+		if ((n_server = get_data_location(dataset_uri, dataset_id, curr_blk, GET, NULL, NULL)) == -1)
 		{
 			return -1;
 		}
@@ -7991,7 +7982,7 @@ int32_t set_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, co
 	curr_imss.info.num_storages = num_storages;
 
 	// Server containing the corresponding data to be written.
-	if ((n_server = get_data_location(dataset_uri, dataset_id, data_id, SET)) == -1)
+	if ((n_server = get_data_location(dataset_uri, dataset_id, data_id, SET, NULL, NULL)) == -1)
 	{
 		perror("ERR_HERCULES_GET_DATA_LOCATION");
 		slog_error("ERR_HERCULES_GET_DATA_LOCATION");

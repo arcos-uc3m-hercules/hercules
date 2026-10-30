@@ -122,8 +122,6 @@ struct DiskBlock
 gboolean replace_uri_base_path_dir(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
 gboolean replace_uri_base_path_regular_file(GHashTable *hash_table, const char *old_base_uri, const char *new_base_uri);
 
-int32_t get_data_location(char *, int32_t, int32_t, int32_t);
-
 // typedef enum {
 //     CLIENT_SERVER_SEND_RECV_STREAM  = UCS_BIT(0),
 //     CLIENT_SERVER_SEND_RECV_DEFAULT = CLIENT_SERVER_SEND_RECV_STREAM
@@ -312,6 +310,8 @@ extern "C"
 	TopologyView *GetTopologyView(imss_info *info, int32_t view_id);
 	int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *server_ids);
 	void InitDefaultTopologyView(imss_info *info);
+
+	int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id, int32_t op_type, TopologyView **view, int32_t *entry_val);
 
 	/****************************************************************************************************************************/
 	/****************************************** METADATA SERVICE MANAGEMENT FUNCTIONS  ******************************************/
