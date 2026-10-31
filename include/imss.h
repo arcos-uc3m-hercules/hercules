@@ -128,27 +128,27 @@ gboolean replace_uri_base_path_regular_file(GHashTable *hash_table, const char *
 // } send_type_t;
 
 #define MAX_SERVERS_PER_VIEW 100
-#define MAX_TOPOLOGY_VIEWS   32
+#define MAX_TOPOLOGY_VIEWS 256
 
 typedef enum
 {
-	SERVER_ACTIVE_RW      = 0,
-	SERVER_READ_UPDATE    = 1,
+	SERVER_ACTIVE_RW = 0,
+	SERVER_READ_UPDATE = 1,
 	SERVER_DECOMMISSIONED = 2
 } ServerStorageState;
 
 typedef enum
 {
-	MALLEABILITY_ACTION_COMMISSION   = 0,
+	MALLEABILITY_ACTION_COMMISSION = 0,
 	MALLEABILITY_ACTION_DECOMMISSION = 1,
-	MALLEABILITY_ACTION_READ_UPDATE  = 2
+	MALLEABILITY_ACTION_READ_UPDATE = 2
 } MalleabilityActionType;
 
 typedef enum
 {
 	MALLEABILITY_METRIC_BANDWIDTH = 0,
-	MALLEABILITY_METRIC_MEMORY    = 1,
-	MALLEABILITY_METRIC_HYBRID    = 2
+	MALLEABILITY_METRIC_MEMORY = 1,
+	MALLEABILITY_METRIC_HYBRID = 2
 } MalleabilityMetricType;
 
 typedef struct
@@ -752,6 +752,7 @@ RETURNS:	0 - Resources were released successfully.
 	int32_t init_network_resources(char *stat_hostfile, uint64_t stat_port, int32_t num_stat_servers, uint32_t rank, char *imss_root);
 	int32_t release_network_resources(const char *imss_uri, int is_parent, int process_rank);
 	int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, int server_id_to_remove, int new_number_of_servers);
+	int resolve_network_interfaces(void);
 	// int32_t ReleaseSpecificDataServerNetworkResourcesServer(imss *imss_, int is_parent, int server_id_to_remove, int new_number_of_servers);
 	void print_ips(imss *imss_);
 
@@ -761,7 +762,6 @@ RETURNS:	0 - Resources were released successfully.
 	int ConcatLastSlashC(char *pathname);
 	int RemoveLastSlash(std::string &pathname);
 	int RemoveLastSlashC(char *pathname);
-
 
 	/**
 	 * Compares two paths regardless of if one of them has a slash '/' at the end of the string.

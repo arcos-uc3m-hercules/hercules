@@ -1,3 +1,4 @@
+#include "imss.h"
 #include "arg_parser.h"
 #include "hierarchical_records.hpp"
 #include "map_ep.hpp"
@@ -231,6 +232,7 @@ int32_t main(int32_t argc, char **argv)
 	slog_time(",Time(msec), Comment, RetCode");
 
 	slog_debug("[SERVER] Starting server.");
+	resolve_network_interfaces();
 	if (args.type == TYPE_DATA_SERVER)
 	{
 		// args.stat_host = argv[3];
@@ -912,7 +914,8 @@ int32_t main(int32_t argc, char **argv)
 			// worker_attr.field_mask = UCP_WORKER_ATTR_FIELD_ADDRESS;
 			// status = ucp_worker_query(ucp_worker_meta, &worker_attr);
 			char request[REQUEST_SIZE] = {0};
-			sprintf(request, "%d SETSERVER %s %s", args.id, client_ip, args.data_hostname);
+			const char *ip_to_send = (client_ip[0] != '\0') ? client_ip : args.data_hostname;
+			sprintf(request, "%d SETSERVER %s %s", args.id, ip_to_send, args.data_hostname);
 			slog_debug("[main] Request - %s", request);
 			// if (send_req(ucp_worker_meta, stat_eps[i], worker_attr.address, worker_attr.address_length, request) == 0)
 			if (send_req(ucp_worker_meta, stat_eps[i], local_addr_meta, local_addr_len_meta, request) == 0)

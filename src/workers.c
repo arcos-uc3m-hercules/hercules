@@ -260,6 +260,12 @@ int AddIPS(imss_info *my_imss, char *line, int32_t n_chars, int at_position)
 			clean_len--;
 		}
 	}
+	if (line == NULL || clean_len <= 0 || clean_line[0] == '\0')
+	{
+		slog_error("rejected attempt to add empty or NULL hostname (len=%d)", clean_len);
+		fprintf(stderr, "HERCULES_WARN_ADD_IPS: rejected attempt to add empty or NULL hostname (len=%d)\n", clean_len);
+		return -1;
+	}
 	// Checks if the host is already in the ips map.
 	for (int i = 0; i < count; i++)
 	{
@@ -697,18 +703,18 @@ int32_t ensure_inter_backend_connected(const char *imss_uri)
 	}
 
 	const char *target_uri = (imss_uri != NULL && strlen(imss_uri) > 0) ? imss_uri : "imss://";
-	slog_info("ensure_inter_backend_connected: imss structure not found, requesting on-demand open_imss for %s", target_uri);
+	slog_info("imss structure not found, requesting on-demand open_imss for %s", target_uri);
 	uint32_t num_active_storages = 0;
 	int32_t ret_open_imss = open_imss((char *)target_uri, &num_active_storages);
 	if (ret_open_imss < 0)
 	{
-		slog_error("ensure_inter_backend_connected: open_imss failed for %s with code %d", target_uri, ret_open_imss);
+		slog_error("open_imss failed for %s with code %d", target_uri, ret_open_imss);
 		pthread_mutex_unlock(&connect_mutex);
 		return -1;
 	}
 
 	number_active_storage_servers.store(num_active_storages);
-	slog_info("ensure_inter_backend_connected: successfully connected to %u storage servers for %s", num_active_storages, target_uri);
+	slog_info("successfully connected to %u storage servers for %s", num_active_storages, target_uri);
 
 	pthread_mutex_unlock(&connect_mutex);
 	return 0;
@@ -1713,6 +1719,12 @@ int send_add_server_to_all_data_servers(ucp_worker_h ucp_worker, uint32_t thread
 	int ret = 0;
 	for (size_t i = 0; i < num_active_servers; i++)
 	{
+		if (i == (size_t)id_server_to_modify)
+		{
+			slog_debug("Skipping newly added server ID %zu", i);
+			fprintf(stderr, "[Metadata] Skipping newly added server ID %zu\n", i);
+			continue;
+		}
 		sprintf(request, "ADDSERVER %s %" PRIu32 " %" PRId32 "", node_to_use, num_active_servers, id_server_to_modify);
 		slog_debug("Sending %s to server ID %zu (%s), number of active storage servers=%" PRIu32, request, i, (curr_global_imss_info && curr_global_imss_info->ips) ? curr_global_imss_info->ips[i] : "unknown", num_active_servers);
 		slog_debug("Thread id %u", thread_id);
@@ -2598,15 +2610,13 @@ int process_add_server(p_argv *arguments, const char *req)
 	if (imss_found_in == -1)
 	{ // request the metadata.
 		slog_debug("imss structure not found, requesting to the metadata server");
-		uint32_t num_servers = 0;
-		int32_t ret_open_imss = open_imss(imss_uri, &num_servers);
-		if (ret_open_imss < 0 && ret_open_imss != -2)
+		if (ensure_inter_backend_connected(imss_uri) != 0)
 		{
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
-			pthread_exit(NULL);
+			fprintf(stderr, "HERCULES_ERR_PROCESS_ADD_SERVER_ENSURE_INTER_BACKEND_CONNECTED: failed for %s\n", imss_uri);
+			return -1;
 		}
-		// updates the variables related to the number of storages servers.
-		number_active_storage_servers.store(num_servers);
+		uint32_t num_servers = number_active_storage_servers.load();
 		if (find_imss_pointer(imss_uri, &imss_) != -1 && imss_)
 		{
 			imss_->info.num_active_storages = num_servers;
@@ -2682,6 +2692,21 @@ int process_add_server(p_argv *arguments, const char *req)
 			}
 			curr_imss = *imss_;
 			slog_debug("number_active_storage_servers=%d, curr_imss.info.num_storages=%d\n", number_active_storage_servers.load(), curr_imss.info.num_storages);
+			return 1;
+		}
+
+		if (arguments->args && (id_server_to_modify == (uint32_t)arguments->args->id ||
+					(arguments->args->data_hostname && strcmp(added_hostname, arguments->args->data_hostname) == 0)))
+		{
+			slog_debug("skipping self-connection for server ID %" PRIu32 " (%s)", id_server_to_modify, added_hostname);
+			number_active_storage_servers.store(num_servers);
+			imss_info_struct->num_active_storages = num_servers;
+			imss_info_struct->num_storages = num_servers;
+			if (arguments->args)
+			{
+				arguments->args->num_data_servers = num_servers;
+			}
+			curr_imss = *imss_;
 			return 1;
 		}
 
@@ -5127,20 +5152,36 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	else if (!strcmp(mode, "SETSERVER"))
 	{
 		int server_id_request = operation;
+		if (num_input_read < 4 || number[0] == '\0' || uri_[0] == '\0')
+		{
+			char err_msg[MAX_ERR_MSG_LEN] = {0};
+			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_WORKER_HELPER_SETSERVER: invalid request format '%s': expected '<id> SETSERVER <ip> <hostname>'", req);
+			slog_error("%s", err_msg);
+			fprintf(stderr, "%s\n", err_msg);
+			return -1;
+		}
+
 		imss new_imss;
 		new_imss.conns.peer_addr = (ucp_address_t **)malloc(1 * sizeof(ucp_address_t *));
+		if (!new_imss.conns.peer_addr)
+		{
+			slog_fatal("HERCULES_ERR_STAT_WORKER_HELPER_MALLOC: failed to allocate peer_addr");
+			fprintf(stderr, "HERCULES_ERR_STAT_WORKER_HELPER_MALLOC: failed to allocate peer_addr\n");
+			return -1;
+		}
 
 		int oob_sock = -1;
 		size_t addr_len = 0;
 		int ret = 0;
+		const char *connect_ip = number;
 		char *added_hostname = uri_;
 		uint64_t target_port = (arguments->args && arguments->args->data_port) ? arguments->args->data_port : 8500;
-		slog_debug("connecting to %s:%" PRIu64, number, target_port);
-		oob_sock = connect_common(number, target_port, AF_INET);
+		slog_debug("connecting to %s:%" PRIu64, connect_ip, target_port);
+		oob_sock = connect_common(connect_ip, target_port, AF_INET);
 		if (oob_sock < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%d - %s:%" PRIu64, server_id_request, number, target_port);
+			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%d - %s:%" PRIu64, server_id_request, connect_ip, target_port);
 			slog_error("%s", err_msg);
 			perror(err_msg);
 			free(new_imss.conns.peer_addr);
