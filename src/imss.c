@@ -1779,7 +1779,7 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 
 	slog_debug("[IMSS] session_policy new_imss.info.num_active_storages=%ld, num_storages=%ld", new_imss.info.num_active_storages, new_imss.info.num_storages);
 
-	new_imss.conns.peer_addr = (ucp_address_t **)malloc(new_imss.info.num_storages * sizeof(ucp_address_t *));
+	new_imss.conns.peer_addr = (ucp_address_t **)calloc(new_imss.info.num_storages, sizeof(ucp_address_t *));
 	new_imss.conns.id = (uint32_t *)calloc(new_imss.info.num_storages, sizeof(uint32_t));
 	new_imss.conns.eps = (ucp_ep_h *)calloc(new_imss.info.num_storages, sizeof(ucp_ep_h));
 	new_imss.conns.ep_contexts = (client_ep_context_t **)calloc(new_imss.info.num_storages, sizeof(client_ep_context_t *));
@@ -1817,6 +1817,9 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 			slog_warn("HERCULES_WARN_OPEN_IMSS: skipping invalid or empty IP at index %d", i);
 			fprintf(stderr, "HERCULES_WARN_OPEN_IMSS: skipping invalid or empty IP at index %d\n", i);
 			new_imss.conns.id[i] = i;
+			new_imss.conns.peer_addr[i] = NULL;
+			new_imss.conns.eps[i] = NULL;
+			new_imss.conns.ep_contexts[i] = NULL;
 			continue;
 		}
 
@@ -1828,6 +1831,9 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 				new_imss.conns.matching_server = i;
 				matching_server_id = i;
 				new_imss.conns.id[i] = i;
+				new_imss.conns.peer_addr[i] = NULL;
+				new_imss.conns.eps[i] = NULL;
+				new_imss.conns.ep_contexts[i] = NULL;
 				slog_debug("slot %d matches current backend server (%s), skipping self-connection", i, new_imss.info.ips[i]);
 				continue;
 			}
@@ -2260,38 +2266,57 @@ int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, in
 	// }
 
 	// Release UCX endpoint resources
-	ucp_ep_h ep = imss_->conns.eps[server_id_to_remove];
-	if (ep != NULL)
+	if (imss_->conns.eps != NULL)
 	{
-		void *close_req = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
-		if (UCS_PTR_IS_PTR(close_req))
+		ucp_ep_h ep = imss_->conns.eps[server_id_to_remove];
+		if (ep != NULL)
 		{
-			ucs_status_t status;
-			do
+			void *close_req = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FORCE);
+			if (UCS_PTR_IS_PTR(close_req))
 			{
-				ucp_worker_progress(ucp_worker_data);
-				status = ucp_request_check_status(close_req);
-			} while (status == UCS_INPROGRESS);
-			ucp_request_free(close_req);
-		}
-		else if (UCS_PTR_STATUS(close_req) != UCS_OK)
-		{
-			slog_error("Failed to close endpoint cleanly");
-		}
+				ucs_status_t status;
+				do
+				{
+					ucp_worker_progress(ucp_worker_data);
+					status = ucp_request_check_status(close_req);
+				} while (status == UCS_INPROGRESS);
+				ucp_request_free(close_req);
+			}
+			else if (UCS_PTR_STATUS(close_req) != UCS_OK)
+			{
+				slog_error("Failed to close endpoint cleanly");
+			}
 
-		imss_->conns.eps[server_id_to_remove] = NULL;
+			imss_->conns.eps[server_id_to_remove] = NULL;
+		}
 	}
 
-	free(imss_->info.ips[server_id_to_remove]);
-	imss_->info.ips[server_id_to_remove] = NULL;
-	slog_malleability("ips[%d] freed.", server_id_to_remove);
+	if (imss_->info.ips != NULL && imss_->info.ips[server_id_to_remove] != NULL)
+	{
+		free(imss_->info.ips[server_id_to_remove]);
+		imss_->info.ips[server_id_to_remove] = NULL;
+		slog_malleability("ips[%d] freed.", server_id_to_remove);
+	}
 
-	free(imss_->conns.peer_addr[server_id_to_remove]);
-	imss_->conns.peer_addr[server_id_to_remove] = NULL;
-	slog_malleability("peer_addr[%d] freed.", server_id_to_remove);
+	if (imss_->conns.peer_addr != NULL)
+	{
+		if (imss_->conns.peer_addr[server_id_to_remove] != NULL)
+		{
+			free(imss_->conns.peer_addr[server_id_to_remove]);
+			imss_->conns.peer_addr[server_id_to_remove] = NULL;
+			slog_malleability("peer_addr[%d] freed.", server_id_to_remove);
+		}
+		else
+		{
+			slog_malleability("peer_addr[%d] was NULL (skipped self-connection), no free needed.", server_id_to_remove);
+		}
+	}
 
-	free(imss_->conns.ep_contexts[server_id_to_remove]);
-	imss_->conns.ep_contexts[server_id_to_remove] = NULL;
+	if (imss_->conns.ep_contexts != NULL && imss_->conns.ep_contexts[server_id_to_remove] != NULL)
+	{
+		free(imss_->conns.ep_contexts[server_id_to_remove]);
+		imss_->conns.ep_contexts[server_id_to_remove] = NULL;
+	}
 
 	size_t num_elements_to_shift = imss_->info.num_storages - server_id_to_remove - 1;
 	slog_malleability("num_elements_to_shift=%d", num_elements_to_shift);
@@ -2299,34 +2324,52 @@ int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, in
 	{
 		slog_malleability("Sorting arrays");
 		// sort the ips array.
-		memmove(&imss_->info.ips[server_id_to_remove],
-			&imss_->info.ips[server_id_to_remove + 1],
-			num_elements_to_shift * sizeof(char *));
+		if (imss_->info.ips != NULL)
+		{
+			memmove(&imss_->info.ips[server_id_to_remove],
+				&imss_->info.ips[server_id_to_remove + 1],
+				num_elements_to_shift * sizeof(char *));
+		}
 
 		// sort the peer addresses array.
-		memmove(&imss_->conns.peer_addr[server_id_to_remove],
-			&imss_->conns.peer_addr[server_id_to_remove + 1],
-			num_elements_to_shift * sizeof(ucp_address_t *));
+		if (imss_->conns.peer_addr != NULL)
+		{
+			memmove(&imss_->conns.peer_addr[server_id_to_remove],
+				&imss_->conns.peer_addr[server_id_to_remove + 1],
+				num_elements_to_shift * sizeof(ucp_address_t *));
+		}
 
 		// sort the endpoints array.
-		memmove(&imss_->conns.eps[server_id_to_remove],
-			&imss_->conns.eps[server_id_to_remove + 1],
-			num_elements_to_shift * sizeof(ucp_ep_h));
+		if (imss_->conns.eps != NULL)
+		{
+			memmove(&imss_->conns.eps[server_id_to_remove],
+				&imss_->conns.eps[server_id_to_remove + 1],
+				num_elements_to_shift * sizeof(ucp_ep_h));
+		}
 
 		// sort the contexts array.
-		memmove(&imss_->conns.ep_contexts[server_id_to_remove],
-			&imss_->conns.ep_contexts[server_id_to_remove + 1],
-			num_elements_to_shift * sizeof(client_ep_context_t *));
+		if (imss_->conns.ep_contexts != NULL)
+		{
+			memmove(&imss_->conns.ep_contexts[server_id_to_remove],
+				&imss_->conns.ep_contexts[server_id_to_remove + 1],
+				num_elements_to_shift * sizeof(client_ep_context_t *));
+		}
 
 		// sort the ids array.
-		memmove(&imss_->conns.id[server_id_to_remove],
-			&imss_->conns.id[server_id_to_remove + 1],
-			num_elements_to_shift * sizeof(uint32_t));
+		if (imss_->conns.id != NULL)
+		{
+			memmove(&imss_->conns.id[server_id_to_remove],
+				&imss_->conns.id[server_id_to_remove + 1],
+				num_elements_to_shift * sizeof(uint32_t));
+		}
 
 		// sort the server states array.
-		memmove(&imss_->info.server_states[server_id_to_remove],
-			&imss_->info.server_states[server_id_to_remove + 1],
-			num_elements_to_shift * sizeof(int32_t));
+		if (imss_->info.server_states != NULL)
+		{
+			memmove(&imss_->info.server_states[server_id_to_remove],
+				&imss_->info.server_states[server_id_to_remove + 1],
+				num_elements_to_shift * sizeof(int32_t));
+		}
 	}
 
 	// Update matching_server_id if the removed server affects the local server index
@@ -2342,17 +2385,26 @@ int32_t ReleaseSpecificDataServerNetworkResources(imss *imss_, int is_parent, in
 	}
 
 	// re-sequence IDs from the removed slot
-	for (uint32_t k = server_id_to_remove; k < imss_->info.num_storages - 1; k++)
-		imss_->conns.id[k] = k;
+	if (imss_->conns.id != NULL)
+	{
+		for (uint32_t k = server_id_to_remove; k < imss_->info.num_storages - 1; k++)
+			imss_->conns.id[k] = k;
+	}
 
 	// Null the last slot in the array.
 	uint32_t last_idx = imss_->info.num_storages - 1;
-	imss_->info.ips[last_idx] = NULL;
-	imss_->conns.peer_addr[last_idx] = NULL;
-	imss_->conns.eps[last_idx] = NULL;
-	imss_->conns.ep_contexts[last_idx] = NULL;
-	imss_->conns.id[last_idx] = 0;
-	imss_->info.server_states[last_idx] = SERVER_DECOMMISSIONED;
+	if (imss_->info.ips != NULL)
+		imss_->info.ips[last_idx] = NULL;
+	if (imss_->conns.peer_addr != NULL)
+		imss_->conns.peer_addr[last_idx] = NULL;
+	if (imss_->conns.eps != NULL)
+		imss_->conns.eps[last_idx] = NULL;
+	if (imss_->conns.ep_contexts != NULL)
+		imss_->conns.ep_contexts[last_idx] = NULL;
+	if (imss_->conns.id != NULL)
+		imss_->conns.id[last_idx] = 0;
+	if (imss_->info.server_states != NULL)
+		imss_->info.server_states[last_idx] = SERVER_DECOMMISSIONED;
 
 	// slog_malleability("imss_ add=%p", &imss_->info.num_active_storages);
 	slog_malleability("imss_->info.num_storages=%d", imss_->info.num_storages);
@@ -2417,20 +2469,39 @@ int32_t release_network_resources(const char *imss_uri, int is_parent, int proce
 
 	for (int32_t i = 0; i < imss_.info.num_storages; i++)
 	{
-		ep = imss_.conns.eps[i];
-		close_ucx_endpoint(ucp_worker_data, ep);
+		if (imss_.conns.eps != NULL)
+		{
+			ep = imss_.conns.eps[i];
+			close_ucx_endpoint(ucp_worker_data, ep);
+		}
 
-		free(imss_.info.ips[i]);
-		free(imss_.conns.peer_addr[i]);
-		imss_.info.ips[i] = NULL;
-		imss_.conns.peer_addr[i] = NULL;
+		if (imss_.info.ips != NULL && imss_.info.ips[i] != NULL)
+		{
+			free(imss_.info.ips[i]);
+			imss_.info.ips[i] = NULL;
+		}
+
+		if (imss_.conns.peer_addr != NULL && imss_.conns.peer_addr[i] != NULL)
+		{
+			free(imss_.conns.peer_addr[i]);
+			imss_.conns.peer_addr[i] = NULL;
+		}
 	}
-	free(imss_.conns.eps);
-	free(imss_.info.ips);
-	free(imss_.conns.peer_addr);
-	imss_.conns.eps = NULL;
-	imss_.info.ips = NULL;
-	imss_.conns.peer_addr = NULL;
+	if (imss_.conns.eps)
+	{
+		free(imss_.conns.eps);
+		imss_.conns.eps = NULL;
+	}
+	if (imss_.info.ips)
+	{
+		free(imss_.info.ips);
+		imss_.info.ips = NULL;
+	}
+	if (imss_.conns.peer_addr)
+	{
+		free(imss_.conns.peer_addr);
+		imss_.conns.peer_addr = NULL;
+	}
 
 	// Free UCX resources with the metadata server.
 	char release_msg_metadata[REQUEST_SIZE] = {0};
@@ -5318,11 +5389,16 @@ int32_t imss_flush_data()
 	// Release the set of connections to the corresponding IMSS.
 	// fprintf(stderr, "imss_flush_data, curr_imss.info.num_storages=%" PRId32 "\n", curr_imss.info.num_storages);
 	slog_malleability("imss_flush_data, curr_imss.info.num_storages=%" PRId32 "\n", curr_imss.info.num_storages);
+	ucp_ep_h ep;
 	for (int32_t i = 0; i < curr_imss.info.num_storages; i++)
 	{
-		ucp_ep_h ep;
 		// fprintf(stderr, "i=%d\n", i);
 		ep = curr_imss.conns.eps[i];
+		// ep can be NULL if the server does not
+		// performed the connection to itself.
+		if (ep == NULL) {
+			continue;
+		}
 
 		flush_ep(ucp_worker_data, ep);
 	}

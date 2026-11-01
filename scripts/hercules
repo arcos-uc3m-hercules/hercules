@@ -173,9 +173,9 @@ WakeUpServers() {
                 ( rm -f "${START_FILE}" )
                 if [[ "${VERBOSE}" -eq "1" ]]; then
                     echo "[ + ] Starting data server $REAL_ID in $node..."
-                    echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND}"
+                    echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND}"
                 fi
-                ( cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND} || echo "STATUS = ERROR_LAUNCH_FAILED" > "${START_FILE}" ) ) &
+                ( cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND} || echo "STATUS = ERROR_LAUNCH_FAILED" > "${START_FILE}" ) ) &
             else
                 if [[ "${VERBOSE}" -eq "1" ]]; then
                     echo "[ + ] Removing temporal files on ${node}"
@@ -183,9 +183,9 @@ WakeUpServers() {
                 ( ssh ${node} "mkdir -p ${HERCULES_TEMPORAL_PATH} && echo ${INIT_HERCULES_NUM_DATA} > ${HERCULES_TEMPORAL_PATH}/hercules_num_act_nodes && ${RM}" )
                 if [[ "${VERBOSE}" -eq "1" ]]; then
                     echo "[ + ] Starting data server $REAL_ID in $node..."
-                    echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND}"
+                    echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND}"
                 fi
-                ( ssh ${node} "cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE} )" ) &
+                ( ssh ${node} "cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}' ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE} )" ) &
             fi
         else
             ## Deletes the file that we use to make sure that the server has started.
@@ -197,7 +197,7 @@ WakeUpServers() {
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "[+] Starting data server $REAL_ID on $node..."
             fi
-            srun --nodelist="${node}" --ntasks=1 --nodes=1 --cpus-per-task=4 --mem=0 --overlap --jobid="${SLURM_JOB_ID}" bash -c "export HERCULES_CONF=${CURR_HERCULES_CONF_FILE}; ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE}" &
+            srun --nodelist="${node}" --ntasks=1 --nodes=1 --cpus-per-task=4 --mem=0 --overlap --jobid="${SLURM_JOB_ID}" bash -c "export HERCULES_CONF=${CURR_HERCULES_CONF_FILE}; export HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}'; ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE}" &
         fi
         i=$(($i+1))
     done
@@ -554,6 +554,10 @@ fi
 
 export HERCULES_PATH=$HERCULES_PATH
 export HERCULES_TEMPORAL_PATH="$HERCULES_PATH/tmp/"
+export HERCULES_BUILD_PATH="${HERCULES_BUILD_PATH}"
+if [ -n "${HERCULES_BUILD_TYPE}" ]; then
+    export HERCULES_BUILD_TYPE="${HERCULES_BUILD_TYPE}"
+fi
 
 # Purge stale signals and stop markers from previous runs when starting
 if [[ "${STATUS}" = "start" ]]; then
@@ -1140,9 +1144,9 @@ do
             ( rm -f "${START_FILE}" )
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "[ + ] Starting metadata server $i on $node..."
-                echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND}"
+                echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND}"
             fi
-            ( cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND} || echo "STATUS = ERROR_LAUNCH_FAILED" > "${START_FILE}" ) ) &
+            ( cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND} || echo "STATUS = ERROR_LAUNCH_FAILED" > "${START_FILE}" ) ) &
         else
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "[ + ] Removing temporal files on $node"
@@ -1150,9 +1154,9 @@ do
             ( ssh ${node} "$RM" )
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "[ + ] Starting metadata server $i on $node..."
-                echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND}"
+                echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND}"
             fi
-            ( ssh ${node} "cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE} )" ) &
+            ( ssh ${node} "cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}' ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE} )" ) &
         fi
     else
         ## Deletes the file that we use to make sure that the server has started.
@@ -1169,7 +1173,7 @@ do
         # For example, if the header on the deployment script is "#SBATCH --cpus-per-task=36",
         # a valid entry here is "--cpus-per-task =18". This allows the execution of the next step 
         # "WaitForServers", which is being executed on the same node as the server task.
-        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- bash -c "export HERCULES_CONF=${CURR_HERCULES_CONF_FILE}; ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE}" &
+        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- bash -c "export HERCULES_CONF=${CURR_HERCULES_CONF_FILE}; export HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}'; ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE}" &
         set +x 
     fi
     i=$((i+1))

@@ -1186,7 +1186,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		for (size_t i = 0; i < arguments->args->num_data_servers; i++)
 		{
 			slog_malleability("Sending %s to remaining server ID %zu (%s)", end_decom_req, i, curr_global_imss_info->ips[i]);
-			fprintf(stderr, "Sending %s to remaining server ID %zu (%s)\n", end_decom_req, i, curr_global_imss_info->ips[i]);
+			fprintf(stderr, "[Malleability] Sending %s to remaining server ID %zu (%s)\n", end_decom_req, i, curr_global_imss_info->ips[i]);
 			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], end_decom_req);
 			if (ret == 0)
 			{
@@ -1370,12 +1370,30 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		fprintf(stderr, "[Hercules] Requesting Slurm on-demand node for data server %d (target active: %d)...\n",
 			new_server_id, new_num_active);
 
+		// hercules directory.
 		const char *hercules_dir = (arguments->args && arguments->args->hercules_path[0] != '\0')
 					       ? arguments->args->hercules_path
 					       : getenv("HERCULES_PATH");
 		if (!hercules_dir || hercules_dir[0] == '\0')
 			hercules_dir = ".";
 
+		// build path.
+		char hercules_build_path[PATH_MAX] = {'\0'};
+		const char *ptr_build_path = getenv("HERCULES_BUILD_PATH");
+		if (ptr_build_path && ptr_build_path[0] != '\0')
+		{
+			strncpy(hercules_build_path, ptr_build_path, sizeof(hercules_build_path) - 1);
+		}
+		else
+		{
+			const char *build_type = getenv("HERCULES_BUILD_TYPE");
+			if (build_type && build_type[0] != '\0')
+				snprintf(hercules_build_path, sizeof(hercules_build_path), "%s/build-%s", hercules_dir, build_type);
+			else
+				snprintf(hercules_build_path, sizeof(hercules_build_path), "%s/build", hercules_dir);
+		}
+
+		// configuration file.
 		const char *conf_file = (arguments->args && arguments->args->configuration_file_path[0] != '\0')
 					    ? arguments->args->configuration_file_path
 					    : getenv("HERCULES_CONF");
@@ -1386,12 +1404,14 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			return NULL;
 		}
 
+		// slurm partition.
 		const char *partition = (arguments->args && arguments->args->slurm_partition[0] != '\0')
 					    ? arguments->args->slurm_partition
 					    : getenv("HERCULES_SLURM_PARTITION");
 		if (!partition)
 			partition = getenv("SLURM_JOB_PARTITION");
 
+		// slurm account.
 		const char *account = (arguments->args && arguments->args->slurm_account[0] != '\0')
 					  ? arguments->args->slurm_account
 					  : getenv("HERCULES_SLURM_ACCOUNT");
@@ -1511,8 +1531,8 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		else if (pid == 0)
 		{
 			// Child process: execute slurm_data_server.sh
-			execl(script_path, script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, exclude_nodes_str.c_str(), str_meta_pid, (char *)NULL);
-			execlp("bash", "bash", script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, exclude_nodes_str.c_str(), str_meta_pid, (char *)NULL);
+			execl(script_path, script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, exclude_nodes_str.c_str(), str_meta_pid, hercules_build_path, (char *)NULL);
+			execlp("bash", "bash", script_path, str_server_id, str_num_active, conf_file, hercules_dir, partition, account, log_dir, exclude_nodes_str.c_str(), str_meta_pid, hercules_build_path, (char *)NULL);
 			char error_msg[256] = {'\0'};
 			sprintf(error_msg, "HERCULES_ERR_EXECL_SLURM_SCRIPT: failed to exec %s", script_path);
 			slog_error("%s", error_msg);
@@ -3119,10 +3139,12 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		slog_malleability("ENDDECOMMISSION received. Decommissioning complete across cluster.");
 		fprintf(stderr, "[%s] Decommissioning complete across cluster, attending pending requests.\n", arguments->args->data_hostname);
 		Attend_pending_requests();
+		fprintf(stderr, "[%s] All pending requests have been attended.\n", arguments->args->data_hostname);
 		pthread_mutex_lock(&mutex_malleability);
 		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
 		pthread_cond_signal(&global_run_malleability_cond);
 		pthread_mutex_unlock(&mutex_malleability);
+		fprintf(stderr, "[%s] Ending request %s.\n", arguments->args->data_hostname, MSG_END_DECOMMISSION);
 		return 1;
 	}
 
@@ -5162,7 +5184,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		}
 
 		imss new_imss;
-		new_imss.conns.peer_addr = (ucp_address_t **)malloc(1 * sizeof(ucp_address_t *));
+		new_imss.conns.peer_addr = (ucp_address_t **)calloc(1, sizeof(ucp_address_t *));
 		if (!new_imss.conns.peer_addr)
 		{
 			slog_fatal("HERCULES_ERR_STAT_WORKER_HELPER_MALLOC: failed to allocate peer_addr");

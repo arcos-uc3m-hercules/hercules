@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Slurm on-demand data server launcher for Hercules malleability
-# Usage: ./slurm_data_server.sh <server_id> <num_active> <conf_path> <hercules_path> <partition> <account> [log_dir] [exclude_nodes] [meta_pid]
+# Usage: ./slurm_data_server.sh <server_id> <num_active> <conf_path> <hercules_path> <partition> <account> [log_dir] [exclude_nodes] [meta_pid] [build_path]
 # Internal worker mode: ./slurm_data_server.sh --worker <server_id> <num_active> <conf_path> <hercules_path> <server_bin> <log_file> <log_dir> [meta_pid]
 
 if [[ "$1" == "--worker" ]]; then
@@ -73,10 +73,11 @@ ACCOUNT="$6"
 LOG_DIR="${7:-${HERCULES_PATH}/tmp/}"
 EXCLUDE_ARG="${8:-${HERCULES_EXCLUDE_NODES}}"
 META_PID="${9:-${HERCULES_META_PID}}"
+BUILD_PATH="${10:-${HERCULES_BUILD_PATH}}"
 TIME_LIMIT="${HERCULES_SLURM_TIME:-01:00:00}"
 
 if [[ -z "${SERVER_ID}" || -z "${NUM_ACTIVE}" || -z "${CONF_PATH}" || -z "${HERCULES_PATH}" || -z "${PARTITION}" || -z "${ACCOUNT}" ]]; then
-    echo "Usage: $0 <server_id> <num_active> <conf_path> <hercules_path> <partition> <account> [log_dir] [exclude_nodes] [meta_pid]" >&2
+    echo "Usage: $0 <server_id> <num_active> <conf_path> <hercules_path> <partition> <account> [log_dir] [exclude_nodes] [meta_pid] [build_path]" >&2
     exit 1
 fi
 
@@ -111,11 +112,20 @@ if [[ -n "${EXCLUDE_ARG}" ]]; then
     fi
 fi
 
-# Resolve the server binary based on build type if configured
+# Resolve the server binary: check BUILD_PATH first, then HERCULES_BUILD_TYPE, then configuration file, then default build directory
 SERVER_BIN="${HERCULES_PATH}/build/hercules_server"
-if [[ -n "${HERCULES_BUILD_TYPE}" && -x "${HERCULES_PATH}/build-${HERCULES_BUILD_TYPE}/hercules_server" ]]; then
+if [[ -n "${BUILD_PATH}" && -x "${BUILD_PATH}/hercules_server" ]]; then
+    SERVER_BIN="${BUILD_PATH}/hercules_server"
+elif [[ -n "${HERCULES_BUILD_TYPE}" && -x "${HERCULES_PATH}/build-${HERCULES_BUILD_TYPE}/hercules_server" ]]; then
     SERVER_BIN="${HERCULES_PATH}/build-${HERCULES_BUILD_TYPE}/hercules_server"
+elif [[ -f "${CONF_PATH}" ]]; then
+    CONF_BUILD_TYPE=$(grep "^[[:space:]]*HERCULES_BUILD_TYPE[[:space:]]*=" "${CONF_PATH}" 2>/dev/null | awk '{print $3}')
+    if [[ -n "${CONF_BUILD_TYPE}" && -x "${HERCULES_PATH}/build-${CONF_BUILD_TYPE}/hercules_server" ]]; then
+        SERVER_BIN="${HERCULES_PATH}/build-${CONF_BUILD_TYPE}/hercules_server"
+    fi
 fi
+
+echo "Running ${SERVER_BIN}"
 
 # Preserve the parent job ID for targeted child job tracking and cancellation
 PARENT_SLURM_JOB_ID="${SLURM_JOB_ID}"
