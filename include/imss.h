@@ -335,6 +335,7 @@ RETURNS:	 0 - Release operations were successfully performed.
 	 */
 	int32_t stat_release();
 	int32_t StatACK(char *message, int server_id);
+	int32_t send_meta_req_sync(char *message, int server_id);
 
 	/* Method retrieving the whole set of elements contained by a specific URI.
 

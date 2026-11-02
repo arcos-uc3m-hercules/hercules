@@ -1413,6 +1413,27 @@ int32_t StatACK(char *message, int server_id)
 	return 0;
 }
 
+int32_t send_meta_req_sync(char *message, int server_id)
+{
+	ucp_ep_h ep = stat_eps[server_id];
+	pthread_mutex_lock(&lock_network);
+	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, message) == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_SEND_META_REQ_SYNC");
+		perror("HERCULES_ERR_SEND_META_REQ_SYNC");
+		return -1;
+	}
+	size_t msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
+	if (msg_length > 0)
+	{
+		char ack_buffer[64] = {0};
+		recv_data(ucp_worker_meta, ep, ack_buffer, msg_length, local_meta_uid, SYNC);
+	}
+	pthread_mutex_unlock(&lock_network);
+	return 0;
+}
+
 // Method disabling the communication chucp_address_t *peer_addrannel with the metadata server. Besides, the current method releases session-related elements previously initialized.
 int32_t stat_release()
 {
@@ -3479,38 +3500,21 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 	int32_t action_type = MALLEABILITY_ACTION_DECOMMISSION;
 	int items_read = sscanf((const char *)result, "%s %" PRId32 " %" PRId32 " %d %s", message, &new_number_of_data_servers, &id_modified_server, &action_type, list_of_active_nodes);
 
-	if (items_read < 5)
+	if (items_read < 4 || (new_number_of_data_servers != 0 && items_read < 5))
 	{
-		slog_error("parse_malleability_message: malformed message (expected 5 items, read %d): %s", items_read, (const char *)result);
-		fprintf(stderr, "parse_malleability_message: malformed message (expected 5 items, read %d): %s", items_read, (const char *)result);
+		slog_error("parse_malleability_message: malformed message (expected %s items, read %d): %s", (new_number_of_data_servers != 0) ? "5" : "4", items_read, (const char *)result);
+		fprintf(stderr, "parse_malleability_message: malformed message (expected %s items, read %d): %s\n", (new_number_of_data_servers != 0) ? "5" : "4", items_read, (const char *)result);
 		return -1;
 	}
-
-	slog_malleability("message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 ", action_type=%d, list_of_active_nodes=%s, failed_hostname=%s", message, new_number_of_data_servers, id_modified_server, action_type, list_of_active_nodes, (failed_hostname == NULL) ? "not defined" : failed_hostname);
+	slog_malleability("message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 ", action_type=%d, list_of_active_nodes=%s, failed_hostname=%s",
+			  message,
+			  new_number_of_data_servers,
+			  id_modified_server, action_type,
+			  (strlen(list_of_active_nodes) > 0 ? list_of_active_nodes : "empty list"),
+			  (failed_hostname == NULL) ? "not defined" : failed_hostname);
 	// fprintf(stderr, "message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 ", action_type=%d, list_of_active_nodes=%s, failed_hostname=%s\n", message, new_number_of_data_servers, id_modified_server, action_type, list_of_active_nodes, (failed_hostname == NULL) ? "not defined" : failed_hostname);
 
-	// parse the expected ordered list from the metadata server
-	char *expected_server_list[MAX_SERVERS] = {NULL};
-	int size_expected_server_list = 0;
-
-	char list_copy[PATH_MAX];
-	strncpy(list_copy, list_of_active_nodes, PATH_MAX - 1);
-	list_copy[PATH_MAX - 1] = '\0';
-
-	char *token = strtok(list_copy, ",");
-	while (token != NULL && size_expected_server_list < MAX_SERVERS)
-	{
-		expected_server_list[size_expected_server_list++] = token;
-		token = strtok(NULL, ",");
-	}
-
-	if (size_expected_server_list == 0)
-	{
-		slog_error("parse_malleability_message: empty server list received");
-		return 0;
-	}
-
-	if (action_type == MALLEABILITY_ACTION_READ_UPDATE)
+	if (action_type == MALLEABILITY_ACTION_READ_UPDATE || new_number_of_data_servers == 0)
 	{
 		if (id_modified_server >= 0 && id_modified_server < MAX_SERVERS_PER_VIEW)
 		{
@@ -3544,96 +3548,121 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 		return changes_found;
 	}
 
-	// remove servers no longer in the expected list (decommission)
-	int initial_count = (int)local_imss_->info.num_storages;
-	for (int i = initial_count - 1; i >= 0; i--)
-	{
-		int still_active = 0;
-		for (int j = 0; j < size_expected_server_list; j++)
+	int size_expected_server_list = 0;
+	char *expected_server_list[MAX_SERVERS] = {NULL};
+	if (new_number_of_data_servers > 0)
+	{ // parse the expected ordered list from the metadata server
+		char list_copy[PATH_MAX];
+		strncpy(list_copy, list_of_active_nodes, PATH_MAX - 1);
+		list_copy[PATH_MAX - 1] = '\0';
+
+		char *token = strtok(list_copy, ",");
+		while (token != NULL && size_expected_server_list < MAX_SERVERS)
 		{
-			if (!strcmp(local_imss_->info.ips[i], expected_server_list[j]))
-			{
-				still_active = 1;
-				break;
-			}
+			expected_server_list[size_expected_server_list++] = token;
+			token = strtok(NULL, ",");
 		}
-		if (!still_active)
+
+		if (size_expected_server_list == 0)
 		{
-			slog_malleability("Server %s (id=%d) decommissioned, releasing.", local_imss_->info.ips[i], i);
-			int remaining = (int)local_imss_->info.num_storages - 1;
-			ReleaseSpecificDataServerNetworkResources(local_imss_, 1, i, remaining);
-			if (curr_dataset != NULL)
-			{
-				PrintIntervals(curr_dataset);
-				ClearIntervalsStructure(curr_dataset);
-			}
-			changes_found = 1;
+			slog_error("parse_malleability_message: empty server list received");
+			return 0;
 		}
 	}
 
-	// check slot by slot against the expected order
-	for (int slot = 0; slot < size_expected_server_list; slot++)
+	if (size_expected_server_list > 0)
 	{
-		int slot_exists = ((int)local_imss_->info.num_storages > slot);
-		int slot_matches = slot_exists && (strcmp(local_imss_->info.ips[slot], expected_server_list[slot]) == 0);
-
-		/*
-		 * A slot need to be refresh when:
-		 *  it mismatches the expected order from the received list, or
-		 *  it matches by name but is the server that just failed
-		 *  before calling this function (failed_hostname); endpoint must be recreated.
-		 */
-		int is_failed_server = (failed_hostname != NULL) && slot_exists && (strcmp(local_imss_->info.ips[slot], failed_hostname) == 0);
-
-		if (slot_matches && !is_failed_server)
+		// remove servers no longer in the expected list (decommission)
+		int initial_count = (int)local_imss_->info.num_storages;
+		for (int i = initial_count - 1; i >= 0; i--)
 		{
-			slog_malleability("Slot %d OK: '%s'", slot, local_imss_->info.ips[slot]);
-			continue;
+			int still_active = 0;
+			for (int j = 0; j < size_expected_server_list; j++)
+			{
+				if (!strcmp(local_imss_->info.ips[i], expected_server_list[j]))
+				{
+					still_active = 1;
+					break;
+				}
+			}
+			if (!still_active)
+			{
+				slog_malleability("Server %s (id=%d) decommissioned, releasing.", local_imss_->info.ips[i], i);
+				int remaining = (int)local_imss_->info.num_storages - 1;
+				ReleaseSpecificDataServerNetworkResources(local_imss_, 1, i, remaining);
+				if (curr_dataset != NULL)
+				{
+					PrintIntervals(curr_dataset);
+					ClearIntervalsStructure(curr_dataset);
+				}
+				changes_found = 1;
+			}
 		}
 
-		if (slot_exists)
+		// check slot by slot against the expected order
+		for (int slot = 0; slot < size_expected_server_list; slot++)
 		{
-			int remaining = (int)local_imss_->info.num_storages - 1;
-			slog_malleability("Restoring connection with slot %d ('%s')", slot, local_imss_->info.ips[slot]);
-			ReleaseSpecificDataServerNetworkResources(local_imss_, 1, slot, remaining);
+			int slot_exists = ((int)local_imss_->info.num_storages > slot);
+			int slot_matches = slot_exists && (strcmp(local_imss_->info.ips[slot], expected_server_list[slot]) == 0);
 
-			AddIPS(&local_imss_->info, expected_server_list[slot], strlen(expected_server_list[slot]), slot);
+			/*
+			 * A slot need to be refresh when:
+			 *  it mismatches the expected order from the received list, or
+			 *  it matches by name but is the server that just failed
+			 *  before calling this function (failed_hostname); endpoint must be recreated.
+			 */
+			int is_failed_server = (failed_hostname != NULL) && slot_exists && (strcmp(local_imss_->info.ips[slot], failed_hostname) == 0);
 
-			int ret = AddBackEndServer2Imss(local_imss_, slot);
-			if (ret == -1)
+			if (slot_matches && !is_failed_server)
 			{
-				// Connection failed — the server is not reachable yet (e.g. still being stopped or not yet started).
-				// Undo the AddIPS by removing the slot we just inserted so the local state stays consistent with what is actually reachable.
-				// We pass (num_storages - 1) as the new count because we are back to the same number we had after ReleaseSpecific above.
-				slog_warn("AddBackEndServer2Imss failed for '%s' at slot %d, rolling back.", expected_server_list[slot], slot);
-				int rollback_remaining = (int)local_imss_->info.num_storages - 1;
-				ReleaseSpecificDataServerNetworkResources(local_imss_, 0, slot, rollback_remaining);
-				// changes_found stays 0 for this slot — nothing usable was added
+				slog_malleability("Slot %d OK: '%s'", slot, local_imss_->info.ips[slot]);
+				continue;
+			}
+
+			if (slot_exists)
+			{
+				int remaining = (int)local_imss_->info.num_storages - 1;
+				slog_malleability("Restoring connection with slot %d ('%s')", slot, local_imss_->info.ips[slot]);
+				ReleaseSpecificDataServerNetworkResources(local_imss_, 1, slot, remaining);
+
+				AddIPS(&local_imss_->info, expected_server_list[slot], strlen(expected_server_list[slot]), slot);
+
+				int ret = AddBackEndServer2Imss(local_imss_, slot);
+				if (ret == -1)
+				{
+					// Connection failed — the server is not reachable yet (e.g. still being stopped or not yet started).
+					// Undo the AddIPS by removing the slot we just inserted so the local state stays consistent with what is actually reachable.
+					// We pass (num_storages - 1) as the new count because we are back to the same number we had after ReleaseSpecific above.
+					slog_warn("AddBackEndServer2Imss failed for '%s' at slot %d, rolling back.", expected_server_list[slot], slot);
+					int rollback_remaining = (int)local_imss_->info.num_storages - 1;
+					ReleaseSpecificDataServerNetworkResources(local_imss_, 0, slot, rollback_remaining);
+					// changes_found stays 0 for this slot — nothing usable was added
+				}
+				else
+				{
+					changes_found = 1;
+					slog_malleability("New number of storage servers %d", local_imss_->info.num_storages);
+					// PrintIntervals(curr_dataset);
+				}
 			}
 			else
 			{
-				changes_found = 1;
-				slog_malleability("New number of storage servers %d", local_imss_->info.num_storages);
-				// PrintIntervals(curr_dataset);
-			}
-		}
-		else
-		{
-			AddIPS(&local_imss_->info, expected_server_list[slot], strlen(expected_server_list[slot]), -1);
+				AddIPS(&local_imss_->info, expected_server_list[slot], strlen(expected_server_list[slot]), -1);
 
-			int ret = AddBackEndServer2Imss(local_imss_, -1);
-			if (ret == -1)
-			{
-				slog_warn("AddBackEndServer2Imss failed for scale-out server '%s', rolling back.",
-					  expected_server_list[slot]);
-				int rollback_remaining = (int)local_imss_->info.num_storages - 1;
-				ReleaseSpecificDataServerNetworkResources(local_imss_, 0,
-									  rollback_remaining,
-									  rollback_remaining);
-			}
-			else
-			{
-				changes_found = 1;
+				int ret = AddBackEndServer2Imss(local_imss_, -1);
+				if (ret == -1)
+				{
+					slog_warn("AddBackEndServer2Imss failed for scale-out server '%s', rolling back.",
+						  expected_server_list[slot]);
+					int rollback_remaining = (int)local_imss_->info.num_storages - 1;
+					ReleaseSpecificDataServerNetworkResources(local_imss_, 0,
+										  rollback_remaining,
+										  rollback_remaining);
+				}
+				else
+				{
+					changes_found = 1;
+				}
 			}
 		}
 	}
@@ -4149,7 +4178,7 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id, int deep)
 			int32_t changes_found = parse_malleability_message(result, NULL);
 			free(result);
 			result = NULL;
-			return unlink_dataset(dataset_uri, dataset_id, deep);
+			return unlink_dataset(dataset_uri, dataset_id, deep + 1);
 		}
 		else if (!strncmp((const char *)result, MSG_DELETE_OP, strlen(MSG_DELETE_OP)))
 		{
@@ -6227,7 +6256,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			}
 			int32_t changes_found = parse_malleability_message(response_buffer, NULL);
 			slog_malleability("changes_found=%d", changes_found);
-			return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep);
+			return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
 		}
 		else
 		{
@@ -7113,7 +7142,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 					int32_t changes_found = parse_malleability_message(response_buffer, NULL);
 					free(response_buffer);
 					response_buffer = NULL;
-					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep, op_type);
+					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
 				}
 
 				free(response_buffer);

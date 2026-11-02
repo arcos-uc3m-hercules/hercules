@@ -1370,6 +1370,14 @@ extern "C"
 				return -1;
 			}
 
+			if (length < sizeof(imss_info))
+			{
+				slog_error("HERCULES_ERR_RECV_DYNAMIC_STREAM: received data (%lu bytes) smaller than sizeof(imss_info) (%lu bytes)", length, sizeof(imss_info));
+				fprintf(stderr, "HERCULES_ERR_RECV_DYNAMIC_STREAM: received data (%lu bytes) smaller than sizeof(imss_info) (%lu bytes)\n", length, sizeof(imss_info));
+				free(result);
+				return -1;
+			}
+
 			// Copy the actual structure into the one provided through reference.
 			memcpy(struct_, msg_data, sizeof(imss_info));
 

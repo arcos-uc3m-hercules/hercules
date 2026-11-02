@@ -836,7 +836,7 @@ extern "C"
 				fprintf(stderr, "[Server %d] Memory threshold reached: %.2f%% (threshold=%d%%). Notifying metadata server.\n", SERVER_ID, usage_pct, memory_threshold_high);
 				char notify_msg[REQUEST_SIZE] = {0};
 				snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_SATURATION, SERVER_ID, usage_pct);
-				StatACK(notify_msg, 0);
+				send_meta_req_sync(notify_msg, 0);
 			}
 		}
 		return ret;

@@ -735,6 +735,46 @@ int getConfiguration(struct arguments *args)
 	// else if (cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"))
 	// 	args->lower_bound_servers = atoi(cfg_get(cfg, "LOWER_BOUND_MALLEABILITY"));
 
+	const char *upper_bound_str = getenv("HERCULES_UPPER_BOUND_MALLEABILITY");
+	if (upper_bound_str == NULL)
+	{
+		upper_bound_str = cfg_get(cfg, "UPPER_BOUND_MALLEABILITY");
+	}
+	args->upper_bound_servers = 0;
+	if (upper_bound_str != NULL)
+	{
+		int parsed_upper_bound = 0;
+		if (is_valid_integer(upper_bound_str, &parsed_upper_bound) && parsed_upper_bound >= 0)
+		{
+			args->upper_bound_servers = parsed_upper_bound;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid UPPER_BOUND_MALLEABILITY: '%s' (must be >= 0). Fallback to 0.\n", upper_bound_str);
+			args->upper_bound_servers = 0;
+		}
+	}
+
+	const char *lower_bound_str = getenv("HERCULES_LOWER_BOUND_MALLEABILITY");
+	if (lower_bound_str == NULL)
+	{
+		lower_bound_str = cfg_get(cfg, "LOWER_BOUND_MALLEABILITY");
+	}
+	args->lower_bound_servers = 0;
+	if (lower_bound_str != NULL)
+	{
+		int parsed_lower_bound = 0;
+		if (is_valid_integer(lower_bound_str, &parsed_lower_bound) && parsed_lower_bound >= 0)
+		{
+			args->lower_bound_servers = parsed_lower_bound;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid LOWER_BOUND_MALLEABILITY: '%s' (must be >= 0). Fallback to 0.\n", lower_bound_str);
+			args->lower_bound_servers = 0;
+		}
+	}
+
 	// End of Malleability configuration.
 
 	// Fault-tolerance.

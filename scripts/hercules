@@ -609,6 +609,7 @@ HERCULES_ALLOC_DATA_HOSTFILE=$(grep "^[[:space:]]*ALLOC_DATA_HOSTFILE[[:space:]]
 HERCULES_METADATA_HOSTFILE=$(grep "^[[:space:]]*METADATA_HOSTFILE[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
 INIT_HERCULES_NUM_DATA=$(grep "^[[:space:]]*INIT_NUM_DATA_SERVERS[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
 UPPER_BOUND_MALLEABILITY=$(grep "^[[:space:]]*UPPER_BOUND_MALLEABILITY[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
+LOWER_BOUND_MALLEABILITY=$(grep "^[[:space:]]*LOWER_BOUND_MALLEABILITY[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
 
 if [ -z "$INIT_HERCULES_NUM_DATA" ] || [ "$INIT_HERCULES_NUM_DATA" = "0" ] ; then
     INIT_HERCULES_NUM_DATA=$HERCULES_NUM_DATA
@@ -1097,6 +1098,14 @@ then
             else
                 cat "${candidate_file}" > "${HERCULES_ALLOC_DATA_HOSTFILE}"
             fi
+
+            if [[ -n "${LOWER_BOUND_MALLEABILITY}" && "${LOWER_BOUND_MALLEABILITY}" -ne "0" ]]; then
+                if [[ ${LOWER_BOUND_MALLEABILITY} -gt ${HERCULES_NUM_DATA} ]]; then
+                    echo "## Error: LOWER_BOUND_MALLEABILITY (${LOWER_BOUND_MALLEABILITY}) can not be greater than HERCULES_NUM_DATA (${HERCULES_NUM_DATA})"
+                    STATUS="stop"
+                    exit 1
+                fi
+            fi
             rm -f "${candidate_file}"
 
             if [[ $? -ne 0 ]]; then
@@ -1300,11 +1309,15 @@ export "HERCULES_ATTACHED=${ATTACHED}"
 if [ -n "${MALLEABILITY_METRIC}" ]; then
     export HERCULES_MALLEABILITY_METRIC="${MALLEABILITY_METRIC}"
 fi
+if [ -n "${LOWER_BOUND_MALLEABILITY}" ]; then
+    export HERCULES_LOWER_BOUND_MALLEABILITY="${LOWER_BOUND_MALLEABILITY}"
+fi
 
 unset META_PORT
 unset DATA_PORT
 unset MALLEABILITY
 unset MALLEABILITY_METRIC
+unset LOWER_BOUND_MALLEABILITY
 # unset HERCULES_NUM_METADATA
 # unset HERCULES_NUM_DATA
 unset NUM_NODES_FOR_CLIENTS
