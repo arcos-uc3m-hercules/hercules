@@ -43,6 +43,7 @@ typedef struct
 ****************************  GLOBAL VARIABLES  ****************************
 ***************************************************************************/
 u_int16_t CONF_MALLEABILITY_STATUS = MALLEABILITY_CONF_DISABLED;
+u_int16_t CONF_MALLEABILITY_METRIC = MALLEABILITY_METRIC_BANDWIDTH;
 u_int16_t TO_RECORD_INTERVALS = 0;
 u_int16_t ASYNC_IO;
 u_int32_t ASYNC_GET_CONCURRENCY = 0;
@@ -1199,7 +1200,8 @@ void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 	if (metric_str != NULL)
 	{
 		int temp_metric = 0;
-		if (is_valid_integer(metric_str, &temp_metric) && temp_metric >= 0 && temp_metric <= 2)
+		if (is_valid_integer(metric_str, &temp_metric) &&
+		    temp_metric >= MALLEABILITY_METRIC_BANDWIDTH && temp_metric <= MALLEABILITY_METRIC_HYBRID)
 		{
 			args->malleability_metric = temp_metric;
 		}
@@ -1209,6 +1211,12 @@ void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 			args->malleability_metric = MALLEABILITY_METRIC_BANDWIDTH;
 		}
 	}
+	slog_info("Malleability metric configured: %d (%s)", args->malleability_metric,
+		  args->malleability_metric == MALLEABILITY_METRIC_BANDWIDTH ? "BANDWIDTH" :
+		  (args->malleability_metric == MALLEABILITY_METRIC_MEMORY ? "MEMORY" : "HYBRID"));
+	CONF_MALLEABILITY_METRIC = args->malleability_metric;
+
+
 
 	// Memory saturation high threshold percentage (default: 80, bounds: 0 < up < 100)
 	const char *mem_up_str = getenv("HERCULES_MALLEABILITY_MEM_THRESHOLD_UP");

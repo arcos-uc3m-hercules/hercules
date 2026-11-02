@@ -2225,9 +2225,15 @@ void *get_performance_metrics(void *th_argv)
 	}
 	// pthread_mutex_unlock(&mutext_performance_metrics);
 
-	// Check that malleability has not been activated before by another thread.
+	// Check that malleability has not been activated before by another thread and that metric allows bandwidth scaling.
 	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED)
 	{
+		if (arguments->args->malleability_metric != MALLEABILITY_METRIC_BANDWIDTH)
+		{
+			slog_debug("Bandwidth malleability skipped: MALLEABILITY_METRIC is set to %d.", arguments->args->malleability_metric);
+			return NULL;
+		}
+
 		// Avoid running malleability while another malleability task is still pending or in progress
 		if (active_commissioning_pid.load() > 0 || comissioning_on.load(std::memory_order_acquire))
 		{

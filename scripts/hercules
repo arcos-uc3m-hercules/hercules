@@ -596,6 +596,7 @@ if [ -n "${DATA_PORT}" ]; then
     fi
 fi
 MALLEABILITY=$(grep "^[[:space:]]*MALLEABILITY[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
+MALLEABILITY_METRIC=$(grep "^[[:space:]]*MALLEABILITY_METRIC[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
 export HERCULES_NUM_METADATA=$(grep "^[[:space:]]*NUM_META_SERVERS[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
 export HERCULES_NUM_DATA=$(grep "^[[:space:]]*NUM_DATA_SERVERS[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
 NUM_NODES_FOR_CLIENTS=$(grep "^[[:space:]]*NUM_NODES_FOR_CLIENTS[[:space:]]*=" "${CURR_HERCULES_CONF_FILE}" | awk '{print $3}')
@@ -1296,10 +1297,14 @@ export "HERCULES_ALLOC_DATA_HOSTFILE=${HERCULES_ALLOC_DATA_HOSTFILE}"
 export "HERCULES_MPI_HOSTFILE_NAME=${HERCULES_MPI_HOSTFILE_NAME}"
 export "HERCULES_FULL_HOSTFILE=${FULL_HOSTFILE}"
 export "HERCULES_ATTACHED=${ATTACHED}"
+if [ -n "${MALLEABILITY_METRIC}" ]; then
+    export HERCULES_MALLEABILITY_METRIC="${MALLEABILITY_METRIC}"
+fi
 
 unset META_PORT
 unset DATA_PORT
 unset MALLEABILITY
+unset MALLEABILITY_METRIC
 # unset HERCULES_NUM_METADATA
 # unset HERCULES_NUM_DATA
 unset NUM_NODES_FOR_CLIENTS

@@ -3986,8 +3986,9 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 	result = NULL;
 
 	// MALLEABILITY_CONF_PERF is used to measure the performance when malleability is not enabled.
-	if (CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED || CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_PERF) // TODO: add a new condition to check the Malleability type (e.g., memory usage, performance, ...)
-	{														 // To send performance metrics.
+	if ((CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED || CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_PERF) &&
+	    CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH)
+	{ // To send performance metrics.
 		int status = send_performance_metrics(ep, dataset_uri, m_srv);
 	}
 
@@ -5396,7 +5397,8 @@ int32_t imss_flush_data()
 		ep = curr_imss.conns.eps[i];
 		// ep can be NULL if the server does not
 		// performed the connection to itself.
-		if (ep == NULL) {
+		if (ep == NULL)
+		{
 			continue;
 		}
 
@@ -6157,11 +6159,14 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		// without inspecting response_buffer before UCX receive finishes.
 		if (async == ASYNC)
 		{
-			std::string used_hostname_server = node_hostname;
-			backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + size_received_data);
-			backend_performance_metrics[used_hostname_server].read.total_data_time += (time_taken_req.count() + time_taken_data.count());
-			backend_performance_metrics[used_hostname_server].read.num_operations++;
-			backend_performance_metrics[used_hostname_server].server_id = server_id;
+			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH)
+			{
+				std::string used_hostname_server = node_hostname;
+				backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + size_received_data);
+				backend_performance_metrics[used_hostname_server].read.total_data_time += (time_taken_req.count() + time_taken_data.count());
+				backend_performance_metrics[used_hostname_server].read.num_operations++;
+				backend_performance_metrics[used_hostname_server].server_id = server_id;
+			}
 
 			pthread_mutex_unlock(&lock_network);
 			return (ssize_t)size_received_data;
@@ -6248,11 +6253,14 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			}
 
 			// performance read metrics.
-			std::string used_hostname_server = node_hostname;
-			backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + size_received_data);
-			backend_performance_metrics[used_hostname_server].read.total_data_time += (time_taken_req.count() + time_taken_data.count());
-			backend_performance_metrics[used_hostname_server].read.num_operations++;
-			backend_performance_metrics[used_hostname_server].server_id = server_id;
+			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH)
+			{
+				std::string used_hostname_server = node_hostname;
+				backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + size_received_data);
+				backend_performance_metrics[used_hostname_server].read.total_data_time += (time_taken_req.count() + time_taken_data.count());
+				backend_performance_metrics[used_hostname_server].read.num_operations++;
+				backend_performance_metrics[used_hostname_server].server_id = server_id;
+			}
 
 			// free(response_buffer);
 			pthread_mutex_unlock(&lock_network);
@@ -6441,11 +6449,14 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 			slog_info("OK!, length=%ld", msg_length);
 
 			// performance read metrics.
-			std::string used_hostname_server = curr_imss.info.ips[n_server_];
-			backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + msg_length);
-			backend_performance_metrics[used_hostname_server].read.total_data_time += time_taken;
-			backend_performance_metrics[used_hostname_server].read.num_operations++;
-			backend_performance_metrics[used_hostname_server].server_id = n_server_;
+			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH)
+			{
+				std::string used_hostname_server = curr_imss.info.ips[n_server_];
+				backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + msg_length);
+				backend_performance_metrics[used_hostname_server].read.total_data_time += time_taken;
+				backend_performance_metrics[used_hostname_server].read.num_operations++;
+				backend_performance_metrics[used_hostname_server].server_id = n_server_;
+			}
 
 			pthread_mutex_unlock(&lock_network);
 			return (ssize_t)msg_length;
@@ -7122,11 +7133,14 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				auto end_time_data = std::chrono::steady_clock::now();
 				std::chrono::duration<double> time_taken_data = end_time_data - start_time_data;
 
-				std::string used_hostname_server = node_hostname;
-				backend_performance_metrics[used_hostname_server].write.total_data_size += (size_sent_req + size_sent_data);
-				backend_performance_metrics[used_hostname_server].write.total_data_time += (time_taken_data.count() + time_taken_req.count());
-				backend_performance_metrics[used_hostname_server].write.num_operations++;
-				backend_performance_metrics[used_hostname_server].server_id = n_server_;
+				if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH)
+				{
+					std::string used_hostname_server = node_hostname;
+					backend_performance_metrics[used_hostname_server].write.total_data_size += (size_sent_req + size_sent_data);
+					backend_performance_metrics[used_hostname_server].write.total_data_time += (time_taken_data.count() + time_taken_req.count());
+					backend_performance_metrics[used_hostname_server].write.num_operations++;
+					backend_performance_metrics[used_hostname_server].server_id = n_server_;
+				}
 			}
 		}
 	}
