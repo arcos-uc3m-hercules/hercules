@@ -767,6 +767,8 @@ extern "C"
 	int memory_threshold_high = 80;
 	int memory_threshold_low = 30;
 	int notified_memory_saturation = 0;
+	int notified_memory_commission = 0;
+	static const double HARD_MEMORY_SATURATION_PERCENT = 99.0;
 
 	int64_t get_size()
 	{
@@ -829,11 +831,21 @@ extern "C"
 		if (ret && SERVER_TYPE == TYPE_DATA_SERVER)
 		{
 			double usage_pct = get_storage_usage_percentage();
-			if (usage_pct >= (double)memory_threshold_high && !notified_memory_saturation)
+			if (usage_pct >= (double)memory_threshold_high && !notified_memory_commission)
+			{
+				notified_memory_commission = 1;
+				slog_warn("[Server %d] Proactive memory high threshold reached: %.2f%% (threshold=%d%%). Requesting early commissioning.", SERVER_ID, usage_pct, memory_threshold_high);
+				fprintf(stderr, "[Server %d] Proactive memory high threshold reached: %.2f%% (threshold=%d%%). Requesting early commissioning.\n", SERVER_ID, usage_pct, memory_threshold_high);
+				char notify_msg[REQUEST_SIZE] = {0};
+				snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_PRE_SATURATION, SERVER_ID, usage_pct);
+				send_meta_req_sync(notify_msg, 0);
+			}
+
+			if (usage_pct >= HARD_MEMORY_SATURATION_PERCENT && !notified_memory_saturation)
 			{
 				notified_memory_saturation = 1;
-				slog_warn("[Server %d] Memory threshold reached: %.2f%% (threshold=%d%%). Notifying metadata server.", SERVER_ID, usage_pct, memory_threshold_high);
-				fprintf(stderr, "[Server %d] Memory threshold reached: %.2f%% (threshold=%d%%). Notifying metadata server.\n", SERVER_ID, usage_pct, memory_threshold_high);
+				slog_warn("[Server %d] Memory hard saturation reached: %.2f%% (>= %.1f%%). Notifying metadata server.", SERVER_ID, usage_pct, HARD_MEMORY_SATURATION_PERCENT);
+				fprintf(stderr, "[Server %d] Memory hard saturation reached: %.2f%% (>= %.1f%%). Notifying metadata server.\n", SERVER_ID, usage_pct, HARD_MEMORY_SATURATION_PERCENT);
 				char notify_msg[REQUEST_SIZE] = {0};
 				snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_SATURATION, SERVER_ID, usage_pct);
 				send_meta_req_sync(notify_msg, 0);
@@ -865,10 +877,14 @@ extern "C"
 		}
 		pthread_mutex_unlock(&mutex_quantity_occupied);
 
-		if (ret && SERVER_TYPE == TYPE_DATA_SERVER && notified_memory_saturation)
+		if (ret && SERVER_TYPE == TYPE_DATA_SERVER)
 		{
 			double usage_pct = get_storage_usage_percentage();
-			if (usage_pct <= (double)memory_threshold_low)
+			if (notified_memory_commission && usage_pct < (double)memory_threshold_high)
+			{
+				notified_memory_commission = 0;
+			}
+			if (notified_memory_saturation && usage_pct <= (double)memory_threshold_low)
 			{
 				notified_memory_saturation = 0;
 				slog_info("[Server %d] Memory drained below low threshold: %.2f%% (threshold=%d%%).", SERVER_ID, usage_pct, memory_threshold_low);

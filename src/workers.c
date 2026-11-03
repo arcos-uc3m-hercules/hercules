@@ -956,6 +956,72 @@ void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_s
 	return;
 }
 
+int handle_memory_pre_saturation(p_argv *arguments, int saturated_server_id)
+{
+	if (saturated_server_id < 0)
+	{
+		slog_error("HERCULES_ERR_HANDLE_MEM_PRE_SATURATION_INVALID_ID: %d", saturated_server_id);
+		return -1;
+	}
+
+	imss_info *imss_info_struct = curr_global_imss_info;
+	if (imss_info_struct == NULL)
+	{
+		slog_error("HERCULES_ERR_HANDLE_MEM_PRE_SATURATION_NULL_IMSS");
+		return -1;
+	}
+
+	slog_info("Proactive pre-saturation notification from server %d. Checking if early commissioning can be triggered.", saturated_server_id);
+	fprintf(stderr, "[Metadata Server] Proactive pre-saturation notification from server %d.\n", saturated_server_id);
+
+	struct arguments *cfg = arguments ? arguments->args : NULL;
+	if (cfg != NULL && cfg->malleability == MALLEABILITY_CONF_ENABLED && cfg->malleability_metric != MALLEABILITY_METRIC_BANDWIDTH)
+	{
+		if (!comissioning_on.load(std::memory_order_acquire) && active_commissioning_pid.load() == 0)
+		{
+			int total_current_servers = imss_info_struct->num_storages;
+			if (cfg->upper_bound_servers == 0 || total_current_servers < cfg->upper_bound_servers)
+			{
+				slog_info("Triggering proactive early commissioning of new data server due to memory pre-saturation (current=%d, upper=%d).", total_current_servers, cfg->upper_bound_servers);
+				fprintf(stderr, "[Metadata Server] Triggering proactive early commissioning of new data server due to memory pre-saturation.\n");
+
+				pthread_t comm_thread;
+				MalleabilityArgs *th_args = fill_malleability_args(arguments);
+				if (th_args == NULL)
+				{
+					slog_error("Malleability args is NULL");
+					fprintf(stderr, "Malleability args is NULL\n");
+					return -1;
+				}
+
+				if (pthread_create(&comm_thread, NULL, (void *(*)(void *))comissioning_stage, (void *)th_args) != 0)
+				{
+					perror("HERCULES_ERR_MALLEABILITY_PRE_COMISSIONING_THREAD_CREATE");
+					slog_error("HERCULES_ERR_MALLEABILITY_PRE_COMISSIONING_THREAD_CREATE");
+					free(th_args);
+					return -1;
+				}
+				if (pthread_detach(comm_thread) != 0)
+				{
+					perror("HERCULES_ERR_MALLEABILITY_PRE_COMISSIONING_THREAD_DETACH");
+					slog_error("HERCULES_ERR_MALLEABILITY_PRE_COMISSIONING_THREAD_DETACH");
+					return -1;
+				}
+			}
+			else
+			{
+				slog_warn("[Metadata Server] Cannot commission new server on pre-saturation: reached upper_bound_servers (%d).", cfg->upper_bound_servers);
+			}
+		}
+		else
+		{
+			slog_info("[Metadata Server] Commissioning already active or in-flight (comissioning_on=%d, active_pid=%d). Ignoring pre-saturation trigger.",
+				  comissioning_on.load(std::memory_order_acquire), active_commissioning_pid.load());
+		}
+	}
+	return 0;
+}
+
 int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 {
 	if (saturated_server_id < 0)
@@ -1026,7 +1092,7 @@ int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 	if (cfg != NULL && cfg->malleability == MALLEABILITY_CONF_ENABLED && cfg->malleability_metric != MALLEABILITY_METRIC_BANDWIDTH)
 	{ // for memory and hybrid metrics we can commission a new server to compensate the
 		// server in read-only state.
-		if (!comissioning_on.load(std::memory_order_acquire))
+		if (!comissioning_on.load(std::memory_order_acquire) && active_commissioning_pid.load() == 0)
 		{
 			int total_current_servers = imss_info_struct->num_storages;
 			if (cfg->upper_bound_servers == 0 || total_current_servers < cfg->upper_bound_servers)
@@ -1061,6 +1127,11 @@ int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 			{
 				slog_warn("[Metadata Server] Cannot commission new server: reached upper_bound_servers (%d).", cfg->upper_bound_servers);
 			}
+		}
+		else
+		{
+			slog_info("[Metadata Server] Commissioning already active or in-flight (comissioning_on=%d, active_pid=%d). Skipping redundant commissioning launch.", comissioning_on.load(std::memory_order_acquire), active_commissioning_pid.load());
+			fprintf(stderr, "[Metadata Server] Commissioning already active or in-flight. Skipping duplicate launch.\n");
 		}
 	}
 
@@ -5056,6 +5127,26 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	// Save the request to be served.
 	slog_info("Request - '%s'", req);
 	// fprintf(stderr, "Request=%s\n", req);
+	if (!strncmp(req, MSG_MEMORY_PRE_SATURATION, strlen(MSG_MEMORY_PRE_SATURATION)))
+	{
+		int saturated_server_id = -1;
+		float usage_pct = 0.0f;
+		int parsed = sscanf(req, "%*s %d %f", &saturated_server_id, &usage_pct);
+		if (parsed < 2)
+		{
+			slog_error("HERCULES_ERR_MEMORY_PRE_SATURATION_PARSE: Malformed request: %s", req);
+			fprintf(stderr, "HERCULES_ERR_MEMORY_PRE_SATURATION_PARSE: Malformed request: %s\n", req);
+			return -1;
+		}
+
+		slog_warn("Pre-saturated data server notification: ID %d (%.2f%% memory used).", saturated_server_id, usage_pct);
+		fprintf(stderr, "Pre-saturated data server notification: ID %d (%.2f%% memory used).\n", saturated_server_id, usage_pct);
+
+		SendConfirmationMessage(arguments, MSG_OK_OP);
+		handle_memory_pre_saturation(arguments, saturated_server_id);
+		return 0;
+	}
+
 	if (!strncmp(req, MSG_MEMORY_SATURATION, strlen(MSG_MEMORY_SATURATION)))
 	{
 		int saturated_server_id = -1;

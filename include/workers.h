@@ -176,6 +176,7 @@ void *get_performance_metrics(void *th_argv);
 void *run_malleability(void *th_argv);
 void *comissioning_stage(MalleabilityArgs *arguments);
 int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove);
+int handle_memory_pre_saturation(p_argv *arguments, int saturated_server_id);
 int handle_memory_saturation(p_argv *arguments, int saturated_server_id);
 int ShutdownServer();
 // void Decomissioning_stage(p_argv *arguments, int id_server_to_remove);

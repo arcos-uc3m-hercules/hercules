@@ -308,13 +308,13 @@ int32_t main(int32_t argc, char **argv)
 	}
 
 	// set memory thresholds for malleability
-	if (args.malleability_mem_threshold_up > 0)
+	if (args.malleability_mem_threshold_high > 0)
 	{
-		memory_threshold_high = args.malleability_mem_threshold_up;
+		memory_threshold_high = args.malleability_mem_threshold_high;
 	}
-	if (args.malleability_mem_threshold_down > 0)
+	if (args.malleability_mem_threshold_low > 0)
 	{
-		memory_threshold_low = args.malleability_mem_threshold_down;
+		memory_threshold_low = args.malleability_mem_threshold_low;
 	}
 
 	// init memory pool

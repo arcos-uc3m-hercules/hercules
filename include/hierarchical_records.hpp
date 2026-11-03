@@ -66,6 +66,7 @@ extern "C"
 	extern int memory_threshold_high;
 	extern int memory_threshold_low;
 	extern int notified_memory_saturation;
+	extern int notified_memory_commission;
 
 	// Memory usage.
 	double get_storage_usage_percentage();

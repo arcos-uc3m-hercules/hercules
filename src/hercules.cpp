@@ -1252,62 +1252,59 @@ void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 		}
 	}
 	slog_info("Malleability metric configured: %d (%s)", args->malleability_metric,
-		  args->malleability_metric == MALLEABILITY_METRIC_BANDWIDTH ? "BANDWIDTH" :
-		  (args->malleability_metric == MALLEABILITY_METRIC_MEMORY ? "MEMORY" : "HYBRID"));
+		  args->malleability_metric == MALLEABILITY_METRIC_BANDWIDTH ? "BANDWIDTH" : (args->malleability_metric == MALLEABILITY_METRIC_MEMORY ? "MEMORY" : "HYBRID"));
 	CONF_MALLEABILITY_METRIC = args->malleability_metric;
 
-
-
-	// Memory saturation high threshold percentage (default: 80, bounds: 0 < up < 100)
-	const char *mem_up_str = getenv("HERCULES_MALLEABILITY_MEM_THRESHOLD_UP");
-	if (mem_up_str == NULL)
+	// Memory proactive high threshold percentage for early commissioning (default: 80, bounds: 0 < high < 99)
+	const char *mem_high_str = getenv("HERCULES_MALLEABILITY_MEM_THRESHOLD_HIGH");
+	if (mem_high_str == NULL)
 	{
-		mem_up_str = cfg_get(cfg, "MALLEABILITY_MEM_THRESHOLD_UP");
+		mem_high_str = cfg_get(cfg, "MALLEABILITY_MEM_THRESHOLD_HIGH");
 	}
 
-	args->malleability_mem_threshold_up = 80;
-	if (mem_up_str != NULL)
+	args->malleability_mem_threshold_high = 80;
+	if (mem_high_str != NULL)
 	{
-		int temp_mem_up = 0;
-		if (is_valid_integer(mem_up_str, &temp_mem_up) && temp_mem_up > 0 && temp_mem_up < 100)
+		int temp_mem_high = 0;
+		if (is_valid_integer(mem_high_str, &temp_mem_high) && temp_mem_high > 0 && temp_mem_high < 99)
 		{
-			args->malleability_mem_threshold_up = temp_mem_up;
+			args->malleability_mem_threshold_high = temp_mem_high;
 		}
 		else
 		{
-			fprintf(stderr, "WARNING: Invalid MALLEABILITY_MEM_THRESHOLD_UP: '%s' (valid range: 1-99). Fallback to 80.\n", mem_up_str);
-			args->malleability_mem_threshold_up = 80;
+			fprintf(stderr, "WARNING: Invalid MALLEABILITY_MEM_THRESHOLD_HIGH: '%s' (valid range: 1-98). Fallback to 80.\n", mem_high_str);
+			args->malleability_mem_threshold_high = 80;
 		}
 	}
 
-	// Memory saturation low threshold percentage (default: 30, bounds: 0 < down < 100)
-	const char *mem_down_str = getenv("HERCULES_MALLEABILITY_MEM_THRESHOLD_DOWN");
-	if (mem_down_str == NULL)
+	// Memory saturation low threshold percentage for draining (default: 30, bounds: 0 < low < 99)
+	const char *mem_low_str = getenv("HERCULES_MALLEABILITY_MEM_THRESHOLD_LOW");
+	if (mem_low_str == NULL)
 	{
-		mem_down_str = cfg_get(cfg, "MALLEABILITY_MEM_THRESHOLD_DOWN");
+		mem_low_str = cfg_get(cfg, "MALLEABILITY_MEM_THRESHOLD_LOW");
 	}
 
-	args->malleability_mem_threshold_down = 30;
-	if (mem_down_str != NULL)
+	args->malleability_mem_threshold_low = 30;
+	if (mem_low_str != NULL)
 	{
-		int temp_mem_down = 0;
-		if (is_valid_integer(mem_down_str, &temp_mem_down) && temp_mem_down > 0 && temp_mem_down < 100)
+		int temp_mem_low = 0;
+		if (is_valid_integer(mem_low_str, &temp_mem_low) && temp_mem_low > 0 && temp_mem_low < 99)
 		{
-			args->malleability_mem_threshold_down = temp_mem_down;
+			args->malleability_mem_threshold_low = temp_mem_low;
 		}
 		else
 		{
-			fprintf(stderr, "WARNING: Invalid MALLEABILITY_MEM_THRESHOLD_DOWN: '%s' (valid range: 1-99). Fallback to 30.\n", mem_down_str);
-			args->malleability_mem_threshold_down = 30;
+			fprintf(stderr, "WARNING: Invalid MALLEABILITY_MEM_THRESHOLD_LOW: '%s' (valid range: 1-98). Fallback to 30.\n", mem_low_str);
+			args->malleability_mem_threshold_low = 30;
 		}
 	}
 
 	// High threshold must be strictly greater than low threshold
-	if (args->malleability_mem_threshold_up <= args->malleability_mem_threshold_down)
+	if (args->malleability_mem_threshold_high <= args->malleability_mem_threshold_low)
 	{
-		fprintf(stderr, "WARNING: MALLEABILITY_MEM_THRESHOLD_UP (%d) must be greater than MALLEABILITY_MEM_THRESHOLD_DOWN (%d). Fallback to defaults (UP=80, DOWN=30).\n", args->malleability_mem_threshold_up, args->malleability_mem_threshold_down);
-		args->malleability_mem_threshold_up = 80;
-		args->malleability_mem_threshold_down = 30;
+		fprintf(stderr, "WARNING: MALLEABILITY_MEM_THRESHOLD_HIGH (%d) must be greater than MALLEABILITY_MEM_THRESHOLD_LOW (%d). Fallback to defaults (HIGH=80, LOW=30).\n", args->malleability_mem_threshold_high, args->malleability_mem_threshold_low);
+		args->malleability_mem_threshold_high = 80;
+		args->malleability_mem_threshold_low = 30;
 	}
 
 	/* Read-update mode (0: disabled, 1: enabled, default: 1) */
