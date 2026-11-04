@@ -59,6 +59,7 @@ std::mutex operation_lock;
 // respond with a "malleability" string.
 std::atomic<int> malleability_status(MALLEABILITY_OFF);
 std::atomic<bool> comissioning_on(false);
+std::atomic<int> promise_enabled(0);
 std::atomic<uint32_t> number_active_storage_servers{0};
 std::atomic<uint32_t> prev_number_active_storage_servers{0};
 int32_t id_server_to_modify = -1;
@@ -430,8 +431,13 @@ void Attend_pending_requests()
 
 	if (curr_global_imss_info == NULL)
 	{
-		fprintf(stderr, "Invalid Hercules struct.\n");
-		slog_malleability("Invalid Hercules struct.");
+		curr_global_imss_info = &curr_imss.info;
+	}
+
+	if (curr_global_imss_info == NULL)
+	{
+		fprintf(stderr, "[HERCULES_WARN_INVALID_STRUCT] Invalid Hercules struct.\n");
+		slog_malleability("[HERCULES_WARN_INVALID_STRUCT] Invalid Hercules struct.");
 		return;
 	}
 
@@ -1071,19 +1077,6 @@ int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 	id_server_to_modify = saturated_server_id;
 	last_malleability_action = MALLEABILITY_ACTION_READ_UPDATE;
 
-	if (data_endpoints[saturated_server_id] != NULL)
-	{
-		char set_ro_req[REQUEST_SIZE] = {0};
-		snprintf(set_ro_req, sizeof(set_ro_req), "%s %d", MSG_SET_READ_UPDATE, active_count);
-		int ret = send_req(arguments->ucp_worker, data_endpoints[saturated_server_id],
-				   local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], set_ro_req);
-		if (ret == 0)
-		{
-			slog_error("HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %d", saturated_server_id);
-			fprintf(stderr, "HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %d\n", saturated_server_id);
-		}
-	}
-
 	pthread_mutex_unlock(&mutex_malleability);
 
 	Attend_pending_requests();
@@ -1132,6 +1125,39 @@ int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 		{
 			slog_info("[Metadata Server] Commissioning already active or in-flight (comissioning_on=%d, active_pid=%d). Skipping redundant commissioning launch.", comissioning_on.load(std::memory_order_acquire), active_commissioning_pid.load());
 			fprintf(stderr, "[Metadata Server] Commissioning already active or in-flight. Skipping duplicate launch.\n");
+		}
+	}
+
+	bool comm_in_flight = comissioning_on.load(std::memory_order_acquire) || (active_commissioning_pid.load() != 0);
+	if (active_count == 0 && comm_in_flight)
+	{
+		malleability_status.store(MALLEABILITY_INPROGRESS, std::memory_order_release);
+		char set_ro_req[REQUEST_SIZE] = {0};
+		snprintf(set_ro_req, sizeof(set_ro_req), "%s 0 1", MSG_SET_READ_UPDATE);
+		for (size_t i = 0; i < (size_t)imss_info_struct->num_storages; i++)
+		{
+			if (data_endpoints[i] != NULL)
+			{
+				int ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], set_ro_req);
+				if (ret == 0)
+				{
+					slog_error("HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %zu", i);
+					fprintf(stderr, "HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %zu\n", i);
+				}
+			}
+		}
+		slog_warn("[Metadata Server] All servers in READ_UPDATE. Promise sent to all data servers (commissioning in-flight).");
+		fprintf(stderr, "[Metadata Server] All servers in READ_UPDATE. Promise sent to all data servers (commissioning in-flight).\n");
+	}
+	else if (data_endpoints[saturated_server_id] != NULL)
+	{
+		char set_ro_req[REQUEST_SIZE] = {0};
+		snprintf(set_ro_req, sizeof(set_ro_req), "%s %d 0", MSG_SET_READ_UPDATE, active_count);
+		int ret = send_req(arguments->ucp_worker, data_endpoints[saturated_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], set_ro_req);
+		if (ret == 0)
+		{
+			slog_error("HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %d", saturated_server_id);
+			fprintf(stderr, "HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %d\n", saturated_server_id);
 		}
 	}
 
@@ -2778,7 +2804,7 @@ int process_add_server(p_argv *arguments, const char *req)
 		slog_debug("imss structure found, updating.");
 
 		uint32_t num_servers = 0;
-		uint32_t id_server_to_modify = 0;
+		uint32_t added_server_id = 0;
 		int oob_sock = -1;
 		size_t addr_len = 0;
 		int ret = 0;
@@ -2786,7 +2812,7 @@ int process_add_server(p_argv *arguments, const char *req)
 		char mode[MODE_SIZE + 1] = {0};
 
 		// Prevent buffer overflow by using width specifiers matching buffer sizes.
-		int items_read = sscanf(req, "%" STR(MODE_SIZE) "s %" STR(URI_) "s %" PRIu32 " %" PRIu32, mode, added_hostname, &num_servers, &id_server_to_modify);
+		int items_read = sscanf(req, "%" STR(MODE_SIZE) "s %" STR(URI_) "s %" PRIu32 " %" PRIu32, mode, added_hostname, &num_servers, &added_server_id);
 		if (items_read != 4)
 		{
 			slog_error("HERCULES_ERR_SRV_WORKER_HELPER_ADDSERVER: Error reading the request '%s': expecting 4 fields but %d were receiving.", req, items_read);
@@ -2794,7 +2820,7 @@ int process_add_server(p_argv *arguments, const char *req)
 			return -1;
 		}
 
-		slog_debug("mode=%s, added_hostname=%s, num_servers=%" PRIu32 ", id_server_to_modify=%" PRIu32, mode, added_hostname, num_servers, id_server_to_modify);
+		slog_debug("mode=%s, added_hostname=%s, num_servers=%" PRIu32 ", added_server_id=%" PRIu32, mode, added_hostname, num_servers, added_server_id);
 		// Checks if "added_hostname" is already in the ips map.
 		imss_info *imss_info_struct = &imss_->info;
 		int already_present = 0;
@@ -2811,9 +2837,9 @@ int process_add_server(p_argv *arguments, const char *req)
 		if (already_present)
 		{
 			slog_debug("process_add_server: server %s is already configured, skipping duplicate connection", added_hostname);
-			if (id_server_to_modify < (uint32_t)imss_info_struct->num_storages && imss_->conns.eps && imss_->conns.eps[id_server_to_modify])
+			if (added_server_id < (uint32_t)imss_info_struct->num_storages && imss_->conns.eps && imss_->conns.eps[added_server_id])
 			{
-				data_endpoints[id_server_to_modify] = imss_->conns.eps[id_server_to_modify];
+				data_endpoints[added_server_id] = imss_->conns.eps[added_server_id];
 			}
 			if ((uint32_t)imss_info_struct->num_storages != num_servers)
 			{
@@ -2830,13 +2856,23 @@ int process_add_server(p_argv *arguments, const char *req)
 			}
 			curr_imss = *imss_;
 			slog_debug("number_active_storage_servers=%d, curr_imss.info.num_storages=%d\n", number_active_storage_servers.load(), curr_imss.info.num_storages);
+			if (promise_enabled.load(std::memory_order_acquire))
+			{
+				id_server_to_modify = added_server_id;
+				last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
+				curr_global_imss_info = &curr_imss.info;
+				promise_enabled.store(0, std::memory_order_release);
+				Attend_pending_requests();
+				slog_info("[Server %d] Duplicate ADDSERVER attended pending queued writes.", arguments->args->id);
+				fprintf(stderr, "[Server %d] Duplicate ADDSERVER attended pending queued writes.\n", arguments->args->id);
+			}
 			return 1;
 		}
 
-		if (arguments->args && (id_server_to_modify == (uint32_t)arguments->args->id ||
+		if (arguments->args && (added_server_id == (uint32_t)arguments->args->id ||
 					(arguments->args->data_hostname && strcmp(added_hostname, arguments->args->data_hostname) == 0)))
 		{
-			slog_debug("skipping self-connection for server ID %" PRIu32 " (%s)", id_server_to_modify, added_hostname);
+			slog_debug("skipping self-connection for server ID %" PRIu32 " (%s)", added_server_id, added_hostname);
 			number_active_storage_servers.store(num_servers);
 			imss_info_struct->num_active_storages = num_servers;
 			imss_info_struct->num_storages = num_servers;
@@ -2849,7 +2885,7 @@ int process_add_server(p_argv *arguments, const char *req)
 		}
 
 		// Ensure capacity for the new server index within global tracking arrays
-		uint32_t required_capacity = id_server_to_modify + 1;
+		uint32_t required_capacity = added_server_id + 1;
 		slog_debug("required_capacity=%" PRIu32, required_capacity);
 
 		if (required_capacity > imss_->info.num_storages)
@@ -2893,7 +2929,7 @@ int process_add_server(p_argv *arguments, const char *req)
 		if (oob_sock < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%" PRIu32 " - %s:%" PRIu64, id_server_to_modify, added_hostname, conn_port);
+			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%" PRIu32 " - %s:%" PRIu64, added_server_id, added_hostname, conn_port);
 			slog_error("%s", err_msg);
 			perror(err_msg);
 			return -1;
@@ -2920,8 +2956,8 @@ int process_add_server(p_argv *arguments, const char *req)
 			return -1;
 		}
 
-		imss_->conns.peer_addr[id_server_to_modify] = (ucp_address_t *)malloc(addr_len);
-		if (imss_->conns.peer_addr[id_server_to_modify] == NULL)
+		imss_->conns.peer_addr[added_server_id] = (ucp_address_t *)malloc(addr_len);
+		if (imss_->conns.peer_addr[added_server_id] == NULL)
 		{
 			perror("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
 			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
@@ -2929,13 +2965,13 @@ int process_add_server(p_argv *arguments, const char *req)
 			return -1;
 		}
 
-		ret = recv(oob_sock, imss_->conns.peer_addr[id_server_to_modify], addr_len, MSG_WAITALL);
+		ret = recv(oob_sock, imss_->conns.peer_addr[added_server_id], addr_len, MSG_WAITALL);
 		if (ret < 0)
 		{
 			perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
 			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
-			free(imss_->conns.peer_addr[id_server_to_modify]);
-			imss_->conns.peer_addr[id_server_to_modify] = NULL;
+			free(imss_->conns.peer_addr[added_server_id]);
+			imss_->conns.peer_addr[added_server_id] = NULL;
 			close(oob_sock);
 			return -1;
 		}
@@ -2946,14 +2982,14 @@ int process_add_server(p_argv *arguments, const char *req)
 			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
 		}
 
-		imss_->conns.id[id_server_to_modify] = id_server_to_modify;
+		imss_->conns.id[added_server_id] = added_server_id;
 
-		client_create_ep_data(arguments->ucp_worker, &data_endpoints[id_server_to_modify], imss_->conns.peer_addr[id_server_to_modify], set_server_err_call_arg);
-		imss_->conns.eps[id_server_to_modify] = data_endpoints[id_server_to_modify];
+		client_create_ep_data(arguments->ucp_worker, &data_endpoints[added_server_id], imss_->conns.peer_addr[added_server_id], set_server_err_call_arg);
+		imss_->conns.eps[added_server_id] = data_endpoints[added_server_id];
 
 		global_malleability_t = clock() - global_malleability_t;
 		global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
-		slog_debug("Server %" PRIu32 " connected in %.4f seconds", id_server_to_modify, global_malleability_time_taken);
+		slog_debug("Server %" PRIu32 " connected in %.4f seconds", added_server_id, global_malleability_time_taken);
 
 		// num_storages is increased inside AddIPS.
 		fprintf(stderr, "Adding %s on the data server %d (%s).\n", added_hostname, arguments->args->id, arguments->args->data_hostname);
@@ -2974,6 +3010,13 @@ int process_add_server(p_argv *arguments, const char *req)
 		}
 		curr_imss = *imss_;
 		slog_debug("number_active_storage_servers=%d, curr_imss.info.num_storages=%d\n", number_active_storage_servers.load(), curr_imss.info.num_storages);
+		id_server_to_modify = added_server_id;
+		last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
+		curr_global_imss_info = &curr_imss.info;
+		promise_enabled.store(0, std::memory_order_release);
+		Attend_pending_requests();
+		slog_info("[Server %d] New data server %u joined. Attended all pending queued client writes.", arguments->args->id, added_server_id);
+		fprintf(stderr, "[Server %d] New data server %u joined. Attended all pending queued client writes.\n", arguments->args->id, added_server_id);
 	}
 	return 1;
 }
@@ -3254,12 +3297,20 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 	if (!strcmp(mode, MSG_SET_READ_UPDATE))
 	{
 		int32_t active_count = 0;
-		if (sscanf(req, "%*s %d", &active_count) == 1)
+		int32_t promise_flag = 0;
+		int items_read = sscanf(req, "%*s %d %d", &active_count, &promise_flag);
+		if (items_read >= 1)
 		{
 			number_active_storage_servers.store(active_count);
 		}
-		slog_warn("MSG_SET_READ_UPDATE received on server %d. Setting server to READ_UPDATE mode (active servers: %d).", arguments->args->id, number_active_storage_servers.load());
-		fprintf(stderr, "MSG_SET_READ_UPDATE received on server %d. Setting server to READ_UPDATE mode (active servers: %d).\n", arguments->args->id, number_active_storage_servers.load());
+		if (items_read >= 2 && promise_flag == 1)
+		{
+			promise_enabled.store(1, std::memory_order_release);
+			slog_info("[%s] Received READ_UPDATE with promise. Client writes will be queued.", arguments->args->data_hostname);
+			fprintf(stderr, "[%s] Received READ_UPDATE with promise: client writes will be queued.\n", arguments->args->data_hostname);
+		}
+		slog_warn("[%s] MSG_SET_READ_UPDATE received on server %d. Setting server to READ_UPDATE mode (active servers: %d, promise: %d).", arguments->args->data_hostname, arguments->args->id, number_active_storage_servers.load(), promise_flag);
+		fprintf(stderr, "[%s] MSG_SET_READ_UPDATE received on server %d. Setting server to READ_UPDATE mode (active servers: %d, promise: %d).\n", arguments->args->data_hostname, arguments->args->id, number_active_storage_servers.load(), promise_flag);
 		set_server_read_update(1);
 		last_malleability_action = MALLEABILITY_ACTION_READ_UPDATE;
 		id_server_to_modify = arguments->args->id;
@@ -4068,6 +4119,37 @@ int handle_write_operation(
 	{
 		if (is_server_read_update)
 		{
+			if (promise_enabled.load(std::memory_order_acquire))
+			{
+				slog_info("[%s] New block write %s held on server %d: promise enabled, waiting for new data server.", arguments->args->data_hostname, key.c_str(), arguments->args->id);
+				fprintf(stderr, "[%s] New block write %s held on server %d: waiting for new server.\n", arguments->args->data_hostname, key.c_str(), arguments->args->id);
+
+				// Drains incoming data for UCX consistency.
+				if (!expect_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
+				{
+					size_t drain_len = get_recv_data_length(arguments->ucp_worker, arguments->worker_uid);
+					if (drain_len > 0)
+					{
+						void *drain_buf = malloc(drain_len);
+						if (drain_buf != NULL)
+						{
+							recv_data(arguments->ucp_worker, arguments->server_ep, drain_buf, drain_len, arguments->worker_uid, 0);
+							free(drain_buf);
+						}
+					}
+				}
+
+				pthread_mutex_lock(&mutex_malleability);
+				PendingRequestInfo pending_info;
+				pending_info.ucp_worker = arguments->ucp_worker;
+				pending_info.server_ep = arguments->server_ep;
+				pending_info.worker_uid = arguments->worker_uid;
+				strncpy(pending_info.curr_req, arguments->curr_req, PATH_MAX);
+				pending_requests.push_back(pending_info);
+				pthread_mutex_unlock(&mutex_malleability);
+				return 1;
+			}
+
 			slog_warn("[%s] New block write %s rejected: server %d is in READ_UPDATE mode.", arguments->args->data_hostname, key.c_str(), arguments->args->id);
 			fprintf(stderr, "[%s] New block write %s rejected: server %d is in READ_UPDATE mode.\n", arguments->args->data_hostname, key.c_str(), arguments->args->id);
 
@@ -5469,6 +5551,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		}
 		// Send the request to all servers telling they have to updated the list of aviable nodes.
 		send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, added_hostname, number_active_storage_servers.load(), id_server_to_modify);
+
+		pthread_mutex_lock(&mutex_malleability);
+		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+		pthread_mutex_unlock(&mutex_malleability);
+		Attend_pending_requests();
 
 		// signal to the Comissioning thread.
 		pthread_mutex_lock(&server_ready_mutex);

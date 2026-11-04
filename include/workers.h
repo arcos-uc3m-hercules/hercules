@@ -66,6 +66,8 @@ extern std::atomic<uint32_t> number_active_storage_servers;
 extern HierarchicalRecords *global_hierarchical_map;
 extern HierarchicalRecords *garbage_collector_map;
 
+extern std::atomic<int> promise_enabled;
+
 // Set of arguments passed to each server thread.
 typedef struct
 {
