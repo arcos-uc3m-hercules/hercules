@@ -3473,6 +3473,37 @@ int32_t clear_dataset(const char *dataset_uri)
 	return 0;
 }
 
+/**
+ * @brief Parses a comma-separated list of server states and updates local IMSS server_states.
+ *
+ * @param local_imss_ Pointer to local IMSS structure.
+ * @param list_of_states Comma-separated string containing server states (e.g., "1,0").
+ * @return int Number of server states parsed, or 0 if empty/invalid.
+ */
+static int parse_server_states_from_list(imss *local_imss_, const char *list_of_states)
+{
+	if (!local_imss_ || !list_of_states || list_of_states[0] == '\0')
+	{
+		slog_error("HERCULES_WARN_PARSE_SERVER_STATES_INVALID_STRUCTS\n");
+		fprintf(stderr, "HERCULES_WARN_PARSE_SERVER_STATES_INVALID_STRUCTS\n");
+		return 0;
+	}
+
+	char states_copy[PATH_MAX];
+	strncpy(states_copy, list_of_states, sizeof(states_copy) - 1);
+	states_copy[sizeof(states_copy) - 1] = '\0';
+	char *token = strtok(states_copy, ",");
+	int idx = 0;
+	while (token != NULL && idx < (int)local_imss_->info.num_storages && idx < MAX_SERVERS_PER_VIEW)
+	{
+		local_imss_->info.server_states[idx] = (uint8_t)atoi(token);
+		slog_malleability("parse_malleability_message: server %d state set to %u from message", idx, local_imss_->info.server_states[idx]);
+		idx++;
+		token = strtok(NULL, ",");
+	}
+	return idx;
+}
+
 int32_t parse_malleability_message(void *result, const char *failed_hostname)
 {
 	if (!result)
@@ -3496,9 +3527,10 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 	int32_t new_number_of_data_servers = 0;
 	int32_t id_modified_server = 0;
 	char list_of_active_nodes[PATH_MAX] = {'\0'};
+	char list_of_states[PATH_MAX] = {'\0'};
 
 	int32_t action_type = MALLEABILITY_ACTION_DECOMMISSION;
-	int items_read = sscanf((const char *)result, "%s %" PRId32 " %" PRId32 " %d %s", message, &new_number_of_data_servers, &id_modified_server, &action_type, list_of_active_nodes);
+	int items_read = sscanf((const char *)result, "%s %" PRId32 " %" PRId32 " %d %s %s", message, &new_number_of_data_servers, &id_modified_server, &action_type, list_of_active_nodes, list_of_states);
 
 	if (items_read < 4 || (new_number_of_data_servers != 0 && items_read < 5))
 	{
@@ -3516,7 +3548,12 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 
 	if (action_type == MALLEABILITY_ACTION_READ_UPDATE || new_number_of_data_servers == 0)
 	{
-		if (id_modified_server >= 0 && id_modified_server < MAX_SERVERS_PER_VIEW)
+		if (items_read >= 6 && list_of_states[0] != '\0')
+		{
+			// parse the status of the servers.
+			parse_server_states_from_list(local_imss_, list_of_states);
+		}
+		else if (id_modified_server >= 0 && id_modified_server < MAX_SERVERS_PER_VIEW)
 		{
 			local_imss_->info.server_states[id_modified_server] = SERVER_READ_UPDATE;
 			slog_malleability("Server %d marked as SERVER_READ_UPDATE.", id_modified_server);
@@ -3666,7 +3703,13 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 			}
 		}
 	}
+	// parse the status of the servers.
+	if (items_read >= 6 && list_of_states[0] != '\0')
+	{
+		parse_server_states_from_list(local_imss_, list_of_states);
+	}
 
+	// make the list of the current active servers to make a new topology.
 	int32_t active_ids[MAX_SERVERS_PER_VIEW];
 	int32_t active_count = 0;
 	for (int i = 0; i < (int)local_imss_->info.num_storages && active_count < MAX_SERVERS_PER_VIEW; i++)
@@ -3680,6 +3723,11 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 	if (active_count > 0)
 	{
 		AddTopologyView(&local_imss_->info, active_count, active_ids);
+		local_imss_->info.num_active_storages = active_count;
+	}
+	else
+	{
+		local_imss_->info.num_active_storages = 0;
 	}
 
 	slog_malleability("parse_malleability_message done, changes_found=%d, final num_storages=%d",
