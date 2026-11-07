@@ -3546,14 +3546,13 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 			  (failed_hostname == NULL) ? "not defined" : failed_hostname);
 	// fprintf(stderr, "message=%s, new_number_of_data_servers=%" PRId32 ", id_modified_server=%" PRId32 ", action_type=%d, list_of_active_nodes=%s, failed_hostname=%s\n", message, new_number_of_data_servers, id_modified_server, action_type, list_of_active_nodes, (failed_hostname == NULL) ? "not defined" : failed_hostname);
 
-	if (action_type == MALLEABILITY_ACTION_READ_UPDATE || new_number_of_data_servers == 0)
+	uint8_t prev_states[MAX_SERVERS_PER_VIEW];
+	memcpy(prev_states, local_imss_->info.server_states, sizeof(prev_states));
+	int32_t prev_view_id = local_imss_->info.current_view_id;
+
+	if (items_read < 5 || list_of_active_nodes[0] == '\0')
 	{
-		if (items_read >= 6 && list_of_states[0] != '\0')
-		{
-			// parse the status of the servers.
-			parse_server_states_from_list(local_imss_, list_of_states);
-		}
-		else if (id_modified_server >= 0 && id_modified_server < MAX_SERVERS_PER_VIEW)
+		if (id_modified_server >= 0 && id_modified_server < MAX_SERVERS_PER_VIEW)
 		{
 			local_imss_->info.server_states[id_modified_server] = SERVER_READ_UPDATE;
 			slog_malleability("Server %d marked as SERVER_READ_UPDATE.", id_modified_server);
@@ -3587,7 +3586,7 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 
 	int size_expected_server_list = 0;
 	char *expected_server_list[MAX_SERVERS] = {NULL};
-	if (new_number_of_data_servers > 0)
+	if (list_of_active_nodes[0] != '\0')
 	{ // parse the expected ordered list from the metadata server
 		char list_copy[PATH_MAX];
 		strncpy(list_copy, list_of_active_nodes, PATH_MAX - 1);
@@ -3708,6 +3707,12 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 	{
 		parse_server_states_from_list(local_imss_, list_of_states);
 	}
+	else if (action_type == MALLEABILITY_ACTION_READ_UPDATE && id_modified_server >= 0 && id_modified_server < MAX_SERVERS_PER_VIEW)
+	{
+		local_imss_->info.server_states[id_modified_server] = SERVER_READ_UPDATE;
+		slog_malleability("Server %d marked as SERVER_READ_UPDATE.", id_modified_server);
+		fprintf(stderr, "Server %d marked as SERVER_READ_UPDATE.\n", id_modified_server);
+	}
 
 	// make the list of the current active servers to make a new topology.
 	int32_t active_ids[MAX_SERVERS_PER_VIEW];
@@ -3728,6 +3733,14 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 	else
 	{
 		local_imss_->info.num_active_storages = 0;
+		slog_warn("All servers marked as SERVER_READ_UPDATE, active_storages=0.");
+		fprintf(stderr, "All servers marked as SERVER_READ_UPDATE, active_storages=0.\n");
+	}
+	// Compares the previous states of the servers with the current states and if the topology view ID has changed.
+	if (memcmp(prev_states, local_imss_->info.server_states, sizeof(prev_states)) != 0 ||
+	    local_imss_->info.current_view_id != prev_view_id)
+	{
+		changes_found = 1;
 	}
 
 	slog_malleability("parse_malleability_message done, changes_found=%d, final num_storages=%d",
@@ -5063,6 +5076,12 @@ int32_t rename_dataset_srv_worker(char *old_dataset_uri, char *new_dataset_uri, 
  */
 int32_t delete_dataset_srv_worker(const char *dataset_uri, int32_t dataset_id, int32_t data_id)
 {
+	if (TO_RECORD_INTERVALS)
+	{ // Ensure up-to-date servers list before deleting the dataset data.
+		// TODO: find optimizations to avoid Malleability overhead.
+		get_malleability_changes(dataset_uri, NULL);
+	}
+
 	int32_t n_server;
 	// Server containing the corresponding data to be retrieved.
 	if ((n_server = get_data_location((char *)dataset_uri, dataset_id, data_id, GET, NULL, NULL)) == -1)
@@ -5910,6 +5929,18 @@ int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *ser
 		slog_error("HERCULES_ERR_ADD_TOPOLOGY_VIEW_MAX_SERVERS_EXCEEDED: num_servers=%d > MAX_SERVERS_PER_VIEW=%d", num_servers, MAX_SERVERS_PER_VIEW);
 		fprintf(stderr, "HERCULES_ERR_ADD_TOPOLOGY_VIEW_MAX_SERVERS_EXCEEDED: num_servers=%d exceeds MAX_SERVERS_PER_VIEW=%d\n", num_servers, MAX_SERVERS_PER_VIEW);
 		return -1;
+	}
+
+	// Checks if a previous view with the same servers exists and updates the current view.
+	for (int32_t v = 0; v < info->num_views; v++)
+	{
+		if (info->views[v].num_servers == num_servers &&
+		    memcmp(info->views[v].server_ids, server_ids, (size_t)num_servers * sizeof(int32_t)) == 0)
+		{
+			info->current_view_id = v;
+			slog_malleability("[AddTopologyView] Reusing existing view_id=%d with %d servers", v, num_servers);
+			return v;
+		}
 	}
 
 	if (info->num_views >= MAX_TOPOLOGY_VIEWS)

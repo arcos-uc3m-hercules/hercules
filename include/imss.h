@@ -310,6 +310,7 @@ extern "C"
 	TopologyView *GetTopologyView(imss_info *info, int32_t view_id);
 	int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *server_ids);
 	void InitDefaultTopologyView(imss_info *info);
+	int32_t get_malleability_changes(const char *dataset_uri, const char *failed_hostname);
 
 	int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id, int32_t op_type, TopologyView **view, int32_t *entry_val);
 

@@ -633,6 +633,11 @@ extern "C"
 		}
 		else
 		{
+			if (TO_RECORD_INTERVALS)
+			{ // Ensure up-to-date servers list before accessing a new dataset.
+				// TODO: check for optimizations to avoid Malleability overhead.
+				get_malleability_changes(imss_path, NULL);
+			}
 			file_desc = TIMING(open_dataset((char *)imss_path, 1), "imss_open,open_dataset", int32_t, 0);
 			switch (file_desc)
 			{
@@ -2542,6 +2547,12 @@ extern "C"
 		struct stat ds_stat;
 		// Check if already created!
 		const char *rpath = path;
+
+		if (TO_RECORD_INTERVALS && file_type != TYPE_DIRECTORY)
+		{ // Ensure up-to-date servers list before creating a new dataset.
+			// TODO: check for optimizations to avoid Malleability overhead.
+			get_malleability_changes(rpath, NULL);
+		}
 
 		// Assing file handler and create dataset.
 		int res = 0;

@@ -180,6 +180,7 @@ void *comissioning_stage(MalleabilityArgs *arguments);
 int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove);
 int handle_memory_pre_saturation(p_argv *arguments, int saturated_server_id);
 int handle_memory_saturation(p_argv *arguments, int saturated_server_id);
+int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id);
 int ShutdownServer();
 // void Decomissioning_stage(p_argv *arguments, int id_server_to_remove);
 void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift);

@@ -188,9 +188,9 @@ int HierarchicalRecords::HierarchicalMapPut(std::string key, void *address, uint
 	// 		pthread_mutex_unlock(&mutex_garbage);
 	// 		// return 2;
 	// 	}
-	if (!reused_buffer)
+	if (SERVER_TYPE == TYPE_DATA_SERVER || !reused_buffer)
 	{
-		// Increase only when a malloc was perform.
+		// Track dataset block occupancy across both freshly allocated and mem_pool recycled buffers on data servers.
 		if (IncreaseMemoryOccupied(length) == 0)
 		{
 			fprintf(stderr, "Max memory has been reached: %.2f%%, quantity ocupied: %" PRId64 "/%" PRIu64, hercules_usage_percentage, quantity_occupied, max_storage_size);
@@ -884,11 +884,22 @@ extern "C"
 			{
 				notified_memory_commission = 0;
 			}
-			if (notified_memory_saturation && usage_pct <= (double)memory_threshold_low)
+			if ((notified_memory_saturation || is_server_read_update) && usage_pct <= (double)memory_threshold_low)
 			{
+				if (reset_local_server_read_update_state(SERVER_ID) != 0)
+				{
+					slog_error("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_RESET_STATE: failed to reset local read-update state for server %d", SERVER_ID);
+					fprintf(stderr, "HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_RESET_STATE: failed to reset local read-update state for server %d\n", SERVER_ID);
+					return -1;
+				}
 				notified_memory_saturation = 0;
-				slog_info("[Server %d] Memory drained below low threshold: %.2f%% (threshold=%d%%).", SERVER_ID, usage_pct, memory_threshold_low);
-				fprintf(stderr, "[Server %d] Memory drained below low threshold: %.2f%% (threshold=%d%%).\n", SERVER_ID, usage_pct, memory_threshold_low);
+				notified_memory_commission = 0;
+				set_server_read_update(0);
+				slog_info("[Server %d] Memory unsaturated below low threshold: %.2f%% (threshold=%d%%). Transitioning back to ACTIVE_RW.", SERVER_ID, usage_pct, memory_threshold_low);
+				fprintf(stderr, "[Server %d] Memory unsaturated below low threshold: %.2f%% (threshold=%d%%). Transitioning back to ACTIVE_RW.\n", SERVER_ID, usage_pct, memory_threshold_low);
+				char notify_msg[REQUEST_SIZE] = {0};
+				snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_UNSATURATED, SERVER_ID, usage_pct);
+				send_meta_req_sync(notify_msg, 0);
 			}
 		}
 		return ret;

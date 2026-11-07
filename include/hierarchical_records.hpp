@@ -75,6 +75,7 @@ extern "C"
 	int CheckForMemorySpace(int64_t required_space);
 	int64_t get_size();
 	void set_server_read_update(int ru);
+	int reset_local_server_read_update_state(int server_id);
 
 #ifdef __cplusplus
 }

@@ -746,6 +746,48 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 	return total_data_moved;
 }
 
+extern char *IMSS_ROOT;
+
+/**
+ * @brief Resolves the dynamic IMSS URI from configured variables, runtime arguments, or environment.
+ * Checks argv arguments, IMSS_ROOT, global and local IMSS structures, and HERCULES_URI.
+ *
+ * @param argv Optional thread arguments structure containing server args.
+ * @return Resolved URI string pointer, defaulting to "imss://" if unconfigured.
+ */
+static const char *resolve_imss_uri(const p_argv *argv)
+{
+	if (argv != NULL)
+	{
+		if (argv->my_uri[0] != '\0')
+		{
+			return argv->my_uri;
+		}
+		if (argv->args != NULL && argv->args->imss_uri[0] != '\0')
+		{
+			return argv->args->imss_uri;
+		}
+	}
+	if (IMSS_ROOT != NULL && IMSS_ROOT[0] != '\0')
+	{
+		return IMSS_ROOT;
+	}
+	if (curr_global_imss_info != NULL && curr_global_imss_info->uri_[0] != '\0')
+	{
+		return curr_global_imss_info->uri_;
+	}
+	if (curr_imss.info.uri_[0] != '\0')
+	{
+		return curr_imss.info.uri_;
+	}
+	const char *env_uri = getenv("HERCULES_URI");
+	if (env_uri != NULL && env_uri[0] != '\0')
+	{
+		return env_uri;
+	}
+	return "imss://";
+}
+
 int32_t ensure_inter_backend_connected(const char *imss_uri)
 {
 	static pthread_mutex_t connect_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -753,8 +795,9 @@ int32_t ensure_inter_backend_connected(const char *imss_uri)
 
 	slog_debug("Running ensure_inter_backend_connected");
 
+	const char *target_uri = (imss_uri != NULL && strlen(imss_uri) > 0) ? imss_uri : resolve_imss_uri(NULL);
 	imss *local_imss_ = NULL;
-	int32_t imss_found_in = find_imss_pointer("imss://", &local_imss_);
+	int32_t imss_found_in = find_imss_pointer(target_uri, &local_imss_);
 	if (imss_found_in != -1 && local_imss_ != NULL && local_imss_->conns.eps != NULL)
 	{
 		slog_debug("Endpoints already connected");
@@ -762,7 +805,6 @@ int32_t ensure_inter_backend_connected(const char *imss_uri)
 		return 0;
 	}
 
-	const char *target_uri = (imss_uri != NULL && strlen(imss_uri) > 0) ? imss_uri : "imss://";
 	slog_info("imss structure not found, requesting on-demand open_imss for %s", target_uri);
 	uint32_t num_active_storages = 0;
 	int32_t ret_open_imss = open_imss((char *)target_uri, &num_active_storages);
@@ -861,7 +903,7 @@ void *move_blocks_2_server(void *th_argv)
 
 	uint64_t stat_port = arguments->args->stat_port;
 	uint32_t server_id = arguments->args->id;
-	const char *imss_uri = arguments->args->imss_uri;
+	const char *imss_uri = resolve_imss_uri(arguments);
 	// fprintf(stderr, "[move_blocks_2_server] new number of active storage servers=%d\n", number_active_storage_servers);
 	slog_debug("new number of active storage servers=%d", number_active_storage_servers.load());
 	// fprintf(stderr, "new number of active storage servers=%" PRIu32 ", prev number=%" PRIu32 "\n", number_active_storage_servers.load(), prev_number_active_storage_servers.load());
@@ -871,7 +913,7 @@ void *move_blocks_2_server(void *th_argv)
 	// fprintf(stderr, "Connecting to data servers\n");
 	int32_t imss_found_in = -1;
 	imss *local_imss_;
-	imss_found_in = find_imss_pointer("imss://", &local_imss_);
+	imss_found_in = find_imss_pointer(imss_uri, &local_imss_);
 
 	// imss_found_in = find_imss(imss_uri, &curr_imss);
 	if (imss_found_in == -1)
@@ -879,7 +921,7 @@ void *move_blocks_2_server(void *th_argv)
 		slog_debug("imss structure not found, requesting to the metadata server");
 		// fprintf(stderr, "imss structure not found, requesting to the metadata server\n");
 		uint32_t num_servers = 0;
-		int32_t open_ret = open_imss((char *)arguments->args->imss_uri, &num_servers);
+		int32_t open_ret = open_imss((char *)imss_uri, &num_servers);
 		if (open_ret < 0)
 		{
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
@@ -887,7 +929,7 @@ void *move_blocks_2_server(void *th_argv)
 		}
 		// This number have to match with the one received by the REORDERSERVER or STOPSERVER message.
 		number_active_storage_servers.store(num_servers);
-		imss_found_in = find_imss_pointer("imss://", &local_imss_);
+		imss_found_in = find_imss_pointer(imss_uri, &local_imss_);
 		if (imss_found_in == -1)
 		{
 			fprintf(stderr, "HERCULES_ERR_MOVE_BLOCKS_2_SERVER: Failed opening imss\n");
@@ -1120,7 +1162,7 @@ int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 	if (active_count > 0)
 	{
 		AddTopologyView(imss_info_struct, active_count, active_server_ids);
-		number_active_storage_servers.store(active_count);
+		number_active_storage_servers.store(imss_info_struct->num_storages);
 		imss_info_struct->num_active_storages = active_count;
 		slog_info("New TopologyView created: view_id=%d, active_servers=%d", imss_info_struct->current_view_id, active_count);
 	}
@@ -1222,8 +1264,176 @@ int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 			slog_error("HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %d", saturated_server_id);
 			fprintf(stderr, "HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %d\n", saturated_server_id);
 		}
+
+		// Notify peer data servers so their local server_states stay synchronized.
+		char state_req[REQUEST_SIZE] = {0};
+		snprintf(state_req, sizeof(state_req), "%s %d %d %d", MSG_UPDATE_SERVER_STATE, saturated_server_id, SERVER_READ_UPDATE, imss_info_struct->num_storages);
+		for (int32_t i = 0; i < imss_info_struct->num_storages; i++)
+		{
+			if (i != saturated_server_id && data_endpoints[i] != NULL)
+			{
+				send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], state_req);
+			}
+		}
 	}
 
+	return 0;
+}
+
+/**
+ * @brief Resets the local server read-update state back to active read-write (RW) mode.
+ * This method is invoked on a data server when storage occupancy drains at or below the low threshold, updating local IMSS topology structures.
+ *
+ * @param server_id ID of the local storage server recovering from READ_UPDATE mode.
+ * @return int 0 on success, -1 on error.
+ */
+int reset_local_server_read_update_state(int server_id)
+{
+	if (server_id < 0 || server_id >= MAX_SERVERS_PER_VIEW)
+	{
+		slog_error("HERCULES_ERR_RESET_LOCAL_SERVER_READ_UPDATE_INVALID_ID: server_id (%d) out of bounds [0, %d)", server_id, MAX_SERVERS_PER_VIEW);
+		fprintf(stderr, "HERCULES_ERR_RESET_LOCAL_SERVER_READ_UPDATE_INVALID_ID: server_id (%d) out of bounds [0, %d)\n", server_id, MAX_SERVERS_PER_VIEW);
+		return -1;
+	}
+
+	// Scope the mutex lock to synchronize IMSS topology updates and release before calling Attend_pending_requests.
+	{
+		std::lock_guard<std::mutex> lock(mutex_hercules_struct);
+		imss *imss_ = NULL;
+		const char *target_uri = resolve_imss_uri(NULL);
+		int32_t imss_found_in = find_imss_pointer(target_uri, &imss_);
+		if (imss_found_in == -1)
+		{ // request the metadata.
+			slog_debug("imss structure not found, requesting to the metadata server");
+			if (ensure_inter_backend_connected(target_uri) != 0)
+			{
+				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+				fprintf(stderr, "HERCULES_ERR_RESET_LOCAL_SERVER_READ_UPDATE_ENSURE_INTER_BACKEND_CONNECTED: failed for %s\n", target_uri);
+				return -1;
+			}
+			uint32_t num_servers = number_active_storage_servers.load();
+			if (find_imss_pointer(target_uri, &imss_) != -1 && imss_ != NULL)
+			{
+				imss_->info.num_storages = num_servers;
+				if (imss_->conns.eps != NULL)
+				{
+					for (uint32_t i = 0; i < num_servers; i++)
+					{
+						data_endpoints[i] = imss_->conns.eps[i];
+					}
+				}
+			}
+		}
+		if (imss_ == NULL || imss_->info.num_storages <= 0)
+		{
+			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+			fprintf(stderr, "HERCULES_ERR_RESET_LOCAL_SERVER_READ_UPDATE_INVALID_IMSS: failed to resolve valid IMSS structure for %s\n", target_uri);
+			return -1;
+		}
+
+		imss_->info.server_states[server_id] = SERVER_ACTIVE_RW;
+		// counts the number of servers in read-write mode.
+		int32_t active_rw_count = 0;
+		for (int32_t i = 0; i < imss_->info.num_storages; i++)
+		{
+			if (imss_->info.server_states[i] == SERVER_ACTIVE_RW)
+			{
+				active_rw_count++;
+			}
+		}
+		imss_->info.num_active_storages = active_rw_count;
+		number_active_storage_servers.store((uint32_t)imss_->info.num_storages);
+		curr_imss = *imss_;
+
+		if (curr_global_imss_info != NULL)
+		{
+			curr_global_imss_info->server_states[server_id] = SERVER_ACTIVE_RW;
+		}
+		id_server_to_modify = server_id;
+		last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
+
+		slog_info("Server %d transitioned to SERVER_ACTIVE_RW (local read-update state reset).", server_id);
+		fprintf(stderr, "[Local Server %d] Transitioned back to SERVER_ACTIVE_RW.\n", server_id);
+	}
+
+	// Release mutex_hercules_struct before waking pending requests to avoid lock inversion and contention.
+	if (promise_enabled.load(std::memory_order_acquire))
+	{
+		promise_enabled.store(0, std::memory_order_release);
+		Attend_pending_requests();
+	}
+	return 0;
+}
+
+int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id)
+{
+	if (unsaturated_server_id < 0 || unsaturated_server_id >= MAX_SERVERS_PER_VIEW)
+	{
+		slog_error("HERCULES_ERR_HANDLE_MEM_UNSATURATED_INVALID_ID: %d", unsaturated_server_id);
+		fprintf(stderr, "HERCULES_ERR_HANDLE_MEM_UNSATURATED_INVALID_ID: %d\n", unsaturated_server_id);
+		return -1;
+	}
+
+	imss_info *imss_info_struct = curr_global_imss_info;
+	if (imss_info_struct == NULL)
+	{
+		slog_error("HERCULES_ERR_HANDLE_MEM_UNSATURATED_NULL_IMSS");
+		fprintf(stderr, "HERCULES_ERR_HANDLE_MEM_UNSATURATED_NULL_IMSS\n");
+		return -1;
+	}
+
+	int32_t active_count = 0;
+	int32_t total_storages = 0;
+	pthread_mutex_lock(&mutex_malleability);
+
+	imss_info_struct->server_states[unsaturated_server_id] = SERVER_ACTIVE_RW;
+	slog_info("Server %d recovered to SERVER_ACTIVE_RW after memory unsaturation.", unsaturated_server_id);
+	fprintf(stderr, "[Metadata Server] Server %d recovered to SERVER_ACTIVE_RW after memory unsaturation.\n", unsaturated_server_id);
+
+	int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
+	// update the list of active servers.
+	for (int32_t i = 0; i < imss_info_struct->num_storages && active_count < MAX_SERVERS_PER_VIEW; i++)
+	{
+		if (imss_info_struct->server_states[i] == SERVER_ACTIVE_RW)
+		{
+			active_server_ids[active_count++] = i;
+		}
+	}
+
+	total_storages = imss_info_struct->num_storages;
+	if (active_count > 0)
+	{
+		AddTopologyView(imss_info_struct, active_count, active_server_ids);
+		number_active_storage_servers.store((uint32_t)imss_info_struct->num_storages);
+		imss_info_struct->num_active_storages = active_count;
+		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+		slog_info("TopologyView updated on memory unsaturation: view_id=%d, active_servers=%d/%d", imss_info_struct->current_view_id, active_count, total_storages);
+	}
+
+	id_server_to_modify = unsaturated_server_id;
+	last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
+
+	pthread_mutex_unlock(&mutex_malleability);
+
+	if (arguments != NULL && total_storages > 0)
+	{
+		char state_req[REQUEST_SIZE] = {0};
+		snprintf(state_req, sizeof(state_req), "%s %d %d %d", MSG_UPDATE_SERVER_STATE, unsaturated_server_id, SERVER_ACTIVE_RW, total_storages);
+		for (int32_t i = 0; i < total_storages; i++)
+		{
+			if (i != unsaturated_server_id && data_endpoints[i] != NULL)
+			{
+				int ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], state_req);
+				if (ret == 0)
+				{
+					slog_error("HERCULES_ERR_SEND_REQ_UPDATE_SERVER_STATE to server %d", i);
+					fprintf(stderr, "HERCULES_ERR_SEND_REQ_UPDATE_SERVER_STATE to server %d\n", i);
+				}
+			}
+		}
+	}
+
+	Attend_pending_requests();
 	return 0;
 }
 
@@ -1936,22 +2146,6 @@ int send_add_server_to_all_data_servers(ucp_worker_h ucp_worker, uint32_t thread
 		}
 	}
 	return 0;
-}
-
-static const char *resolve_imss_uri(const p_argv *argv)
-{
-	if (argv != NULL)
-	{
-		if (argv->my_uri[0] != '\0')
-		{
-			return argv->my_uri;
-		}
-		if (argv->args != NULL && argv->args->imss_uri[0] != '\0')
-		{
-			return argv->args->imss_uri;
-		}
-	}
-	return "imss://";
 }
 
 int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_used_in_frontend)
@@ -2868,9 +3062,9 @@ int process_add_server(p_argv *arguments, const char *req)
 			}
 			imss_->info.num_active_storages = active_rw_count;
 			imss_->info.num_storages = num_servers;
-			for (uint32_t i = 0; i < num_servers; i++)
+			if (imss_->conns.eps != NULL)
 			{
-				if (imss_->conns.eps)
+				for (uint32_t i = 0; i < num_servers; i++)
 				{
 					data_endpoints[i] = imss_->conns.eps[i];
 				}
@@ -3235,6 +3429,7 @@ int is_admin_or_malleability_mode(const char *mode)
 		!strcmp(mode, "REORDERSERVER") ||
 		!strcmp(mode, "ADDSERVER") ||
 		!strcmp(mode, MSG_SET_READ_UPDATE) ||
+		!strcmp(mode, MSG_UPDATE_SERVER_STATE) ||
 		!strcmp(mode, MSG_END_DECOMMISSION));
 }
 
@@ -3421,6 +3616,76 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 			{
 				curr_global_imss_info->server_states[arguments->args->id] = SERVER_READ_UPDATE;
 			}
+		}
+		return 0;
+	}
+
+	if (!strcmp(mode, MSG_UPDATE_SERVER_STATE))
+	{
+		int target_id = -1;
+		int new_state = 0;
+		int total_storages = 0;
+		int items_read = sscanf(req, "%*s %d %d %d", &target_id, &new_state, &total_storages);
+		if (items_read < 2 || target_id < 0 || target_id >= MAX_SERVERS_PER_VIEW)
+		{
+			slog_error("HERCULES_ERR_UPDATE_SERVER_STATE: invalid parameters in request '%s'", req);
+			fprintf(stderr, "HERCULES_ERR_UPDATE_SERVER_STATE: invalid parameters in request '%s'\n", req);
+			return -1;
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(mutex_hercules_struct);
+			imss *imss_ = NULL;
+			const char *imss_uri = resolve_imss_uri(arguments);
+			int32_t imss_found_in = find_imss_pointer(imss_uri, &imss_);
+			if (imss_found_in == -1)
+			{ // request the metadata.
+				slog_debug("imss structure not found, requesting to the metadata server");
+				if (ensure_inter_backend_connected(imss_uri) != 0)
+				{
+					slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+					fprintf(stderr, "HERCULES_ERR_UPDATE_SERVER_STATE_ENSURE_INTER_BACKEND_CONNECTED: failed for %s\n", imss_uri);
+					return -1;
+				}
+				find_imss_pointer(imss_uri, &imss_);
+			}
+			if (imss_ == NULL || imss_->info.num_storages <= 0)
+			{
+				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+				fprintf(stderr, "HERCULES_ERR_UPDATE_SERVER_STATE_INVALID_IMSS: failed to resolve valid IMSS structure for %s\n", imss_uri);
+				return -1;
+			}
+
+			imss_->info.server_states[target_id] = (uint8_t)new_state;
+			int32_t active_rw_count = 0;
+			// Counts how many servers are in read-write mode.
+			for (int32_t i = 0; i < imss_->info.num_storages; i++)
+			{
+				if (imss_->info.server_states[i] == SERVER_ACTIVE_RW)
+				{
+					active_rw_count++;
+				}
+			}
+			imss_->info.num_active_storages = active_rw_count;
+			curr_imss = *imss_;
+
+			if (curr_global_imss_info != NULL)
+			{
+				curr_global_imss_info->server_states[target_id] = (uint8_t)new_state;
+			}
+			if (total_storages > 0)
+			{
+				number_active_storage_servers.store((uint32_t)total_storages);
+			}
+			id_server_to_modify = target_id;
+			last_malleability_action = (new_state == SERVER_READ_UPDATE) ? MALLEABILITY_ACTION_READ_UPDATE : MALLEABILITY_ACTION_COMMISSION;
+		}
+
+		slog_info("[%s] Updated peer server %d state to %d (total storages: %u).", arguments->args->data_hostname, target_id, new_state, number_active_storage_servers.load());
+		if (new_state == SERVER_ACTIVE_RW && promise_enabled.load(std::memory_order_acquire))
+		{
+			promise_enabled.store(0, std::memory_order_release);
+			Attend_pending_requests();
 		}
 		return 0;
 	}
@@ -5354,6 +5619,26 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 
 		SendConfirmationMessage(arguments, MSG_OK_OP);
 		handle_memory_saturation(arguments, saturated_server_id);
+		return 0;
+	}
+
+	if (!strncmp(req, MSG_MEMORY_UNSATURATED, strlen(MSG_MEMORY_UNSATURATED)))
+	{
+		int unsaturated_server_id = -1;
+		float usage_pct = 0.0f;
+		int parsed = sscanf(req, "%*s %d %f", &unsaturated_server_id, &usage_pct);
+		if (parsed < 2)
+		{
+			slog_error("HERCULES_ERR_MEMORY_UNSATURATED_PARSE: Malformed request: %s", req);
+			fprintf(stderr, "HERCULES_ERR_MEMORY_UNSATURATED_PARSE: Malformed request: %s\n", req);
+			return -1;
+		}
+
+		slog_info("[Metadata Server] Unsaturated data server notification: ID %d (%.2f%% memory used). Restoring ACTIVE_RW.", unsaturated_server_id, usage_pct);
+		fprintf(stderr, "[Metadata Server] Unsaturated data server notification: ID %d (%.2f%% memory used). Restoring ACTIVE_RW.\n", unsaturated_server_id, usage_pct);
+
+		SendConfirmationMessage(arguments, MSG_OK_OP);
+		handle_memory_unsaturated(arguments, unsaturated_server_id);
 		return 0;
 	}
 

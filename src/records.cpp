@@ -899,7 +899,7 @@ int32_t map_records::rename_metadata_dir_stat_worker(std::string old_dir, std::s
  * @return 0 is returned if the memory is pushed to the memory pool, if the memory is actually freed
  * the size of that memory is returned.
  */
-int32_t map_records::cleaning(char server_type)
+uint64_t map_records::cleaning(char server_type)
 {
 
 	if (buffer_garbage_collector.size() == 0)
@@ -971,8 +971,7 @@ int32_t map_records::cleaning(char server_type)
  * @brief Check if the memory used by the block pointing by "item" will be reused (pushed on the memory pool)
  * or if it will be actually freed.
  * @param item Element pointing to an Hercules block.
- * @return 0 is returned if the memory is pushed to the memory pool, if the memory is actually freed
- * the size of that memory is returned.
+ * @return Size in bytes of the dataset block removed from active storage occupancy.
  */
 uint64_t map_records::FreeMemory(std::map<std::string, BufferValue>::iterator item)
 {
@@ -981,20 +980,20 @@ uint64_t map_records::FreeMemory(std::map<std::string, BufferValue>::iterator it
 	int ret = 0;
 	// checks if the mem pool has a slot,
 	// or if the current item memory size fits the block size (block 0 can have different size).
-	if (StsQueue.size(mem_pool) + item_mem_size >= total_size || item_mem_size != BLOCK_SIZE)
+	uint64_t pool_bytes = (uint64_t)StsQueue.size(mem_pool) * BLOCK_SIZE;
+	if (pool_bytes + item_mem_size >= total_size || item_mem_size != BLOCK_SIZE)
 	{ // actually free the memory.
 		// ret = DecreaseMemoryOccupied(item_mem_size);
 		slog_debug("Freeing memory of key %s with size %lu", item->first.c_str(), item_mem_size);
 		free(item->second.data); // free the memory of this block.
-		return item_mem_size;
 	}
 	else
 	{
 		slog_debug("Pushing memory of key %s into mem_pool", item->first.c_str());
 		// push the memory pointer of this block inside the mem pool to be reused.
 		StsQueue.push(mem_pool, item->second.data);
-		return 0;
 	}
+	return item_mem_size;
 }
 
 /**

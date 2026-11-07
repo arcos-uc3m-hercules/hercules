@@ -105,7 +105,7 @@ class map_records
 	int32_t rename_metadata_dir_stat_worker(std::string old_dir, std::string rdir_dest, GNode **gnode);
 	// Used in str_worker threads
 	// Method deleting the address associated to a certain record.
-	int32_t cleaning(char server_type);
+	uint64_t cleaning(char server_type);
 	int64_t cleaning_specific(std::string new_key);
 	int32_t freeAllMemory();
 	int32_t erase_broadcast_element(std::string key);
