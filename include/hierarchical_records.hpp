@@ -65,15 +65,20 @@ extern "C"
 	extern int is_server_read_update;
 	extern int memory_threshold_high;
 	extern int memory_threshold_low;
+	extern int64_t memory_threshold_high_bytes;
+	extern int64_t memory_threshold_low_bytes;
+	extern int64_t memory_saturation_bytes;
 	extern int notified_memory_saturation;
 	extern int notified_memory_commission;
 
 	// Memory usage.
+	void init_memory_thresholds();
 	double get_storage_usage_percentage();
 	uint32_t IncreaseMemoryOccupied(int64_t required_space);
 	int DecreaseMemoryOccupied(int64_t freed_space);
 	int CheckForMemorySpace(int64_t required_space);
 	int64_t get_size();
+	int get_server_read_update();
 	void set_server_read_update(int ru);
 	int reset_local_server_read_update_state(int server_id);
 

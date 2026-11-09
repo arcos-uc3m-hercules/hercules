@@ -11,12 +11,14 @@
 #include "hierarchical_records.hpp"
 #include "comms.h"
 #include "imss.h"
+#include "arg_parser.h"
 
 #include "slog.h" // to manage logs.
 #include <cstdint>
 #include <cstdio>
 #include <inttypes.h>
 
+extern struct arguments args;
 int SERVER_ID;
 // for sincronization in the map.
 std::mutex hierarchical_map_lock;
@@ -766,18 +768,38 @@ extern "C"
 	int is_server_read_update = 0;
 	int memory_threshold_high = 80;
 	int memory_threshold_low = 30;
+	int64_t memory_threshold_high_bytes = 0;
+	int64_t memory_threshold_low_bytes = 0;
+	int64_t memory_saturation_bytes = 0;
 	int notified_memory_saturation = 0;
 	int notified_memory_commission = 0;
 	static const double HARD_MEMORY_SATURATION_PERCENT = 99.0;
+
+	void init_memory_thresholds()
+	{
+		memory_threshold_high_bytes = static_cast<int64_t>((max_storage_size * static_cast<uint64_t>(memory_threshold_high)) / 100);
+		memory_threshold_low_bytes = static_cast<int64_t>((max_storage_size * static_cast<uint64_t>(memory_threshold_low)) / 100);
+		memory_saturation_bytes = static_cast<int64_t>((max_storage_size * 99ULL) / 100);
+	}
 
 	int64_t get_size()
 	{
 		return max_storage_size;
 	}
 
+	int get_server_read_update()
+	{
+		pthread_mutex_lock(&mutex_quantity_occupied);
+		int ru = is_server_read_update;
+		pthread_mutex_unlock(&mutex_quantity_occupied);
+		return ru;
+	}
+
 	void set_server_read_update(int ru)
 	{
+		pthread_mutex_lock(&mutex_quantity_occupied);
 		is_server_read_update = ru;
+		pthread_mutex_unlock(&mutex_quantity_occupied);
 		slog_warn("[Server %d] Server READ_UPDATE status set to %d", SERVER_ID, ru);
 		fprintf(stderr, "[Server %d] Server READ_UPDATE status set to %d\n", SERVER_ID, ru);
 	}
@@ -808,6 +830,11 @@ extern "C"
 	uint32_t IncreaseMemoryOccupied(int64_t required_space)
 	{
 		int ret = 1;
+		bool send_pre_sat = false;
+		bool send_sat = false;
+		int64_t occupied_snapshot = 0;
+		uint64_t max_size_snapshot = 0;
+
 		pthread_mutex_lock(&mutex_quantity_occupied);
 		if (is_server_read_update)
 		{
@@ -825,15 +852,32 @@ extern "C"
 		{
 			quantity_occupied = quantity_occupied + required_space;
 			slog_debug("memory occupied=%ld/%ld, required_space=%lu", quantity_occupied, max_storage_size, required_space);
+			if (SERVER_TYPE == TYPE_DATA_SERVER && max_storage_size > 0 && (!notified_memory_commission || !notified_memory_saturation))
+			{
+				if (!notified_memory_commission && quantity_occupied >= memory_threshold_high_bytes)
+				{
+					notified_memory_commission = 1;
+					send_pre_sat = true;
+				}
+				if (!notified_memory_saturation && quantity_occupied >= memory_saturation_bytes)
+				{
+					notified_memory_saturation = 1;
+					send_sat = true;
+				}
+				if (send_pre_sat || send_sat)
+				{
+					occupied_snapshot = quantity_occupied;
+					max_size_snapshot = max_storage_size;
+				}
+			}
 		}
 		pthread_mutex_unlock(&mutex_quantity_occupied);
 
-		if (ret && SERVER_TYPE == TYPE_DATA_SERVER)
+		if (send_pre_sat || send_sat)
 		{
-			double usage_pct = get_storage_usage_percentage();
-			if (usage_pct >= (double)memory_threshold_high && !notified_memory_commission)
+			const double usage_pct = static_cast<double>(occupied_snapshot) * 100.0 / static_cast<double>(max_size_snapshot);
+			if (send_pre_sat)
 			{
-				notified_memory_commission = 1;
 				slog_warn("[Server %d] Proactive memory high threshold reached: %.2f%% (threshold=%d%%). Requesting early commissioning.", SERVER_ID, usage_pct, memory_threshold_high);
 				fprintf(stderr, "[Server %d] Proactive memory high threshold reached: %.2f%% (threshold=%d%%). Requesting early commissioning.\n", SERVER_ID, usage_pct, memory_threshold_high);
 				char notify_msg[REQUEST_SIZE] = {0};
@@ -841,9 +885,8 @@ extern "C"
 				send_meta_req_sync(notify_msg, 0);
 			}
 
-			if (usage_pct >= HARD_MEMORY_SATURATION_PERCENT && !notified_memory_saturation)
+			if (send_sat)
 			{
-				notified_memory_saturation = 1;
 				slog_warn("[Server %d] Memory hard saturation reached: %.2f%% (>= %.1f%%). Notifying metadata server.", SERVER_ID, usage_pct, HARD_MEMORY_SATURATION_PERCENT);
 				fprintf(stderr, "[Server %d] Memory hard saturation reached: %.2f%% (>= %.1f%%). Notifying metadata server.\n", SERVER_ID, usage_pct, HARD_MEMORY_SATURATION_PERCENT);
 				char notify_msg[REQUEST_SIZE] = {0};
@@ -863,6 +906,10 @@ extern "C"
 	int DecreaseMemoryOccupied(int64_t freed_space)
 	{
 		int ret = 1;
+		bool send_unsat = false;
+		int64_t occupied_snapshot = 0;
+		uint64_t max_size_snapshot = 0;
+
 		pthread_mutex_lock(&mutex_quantity_occupied);
 		if (quantity_occupied - freed_space < 0)
 		{
@@ -874,33 +921,41 @@ extern "C"
 		{
 			quantity_occupied = quantity_occupied - freed_space;
 			slog_debug("memory occupied=%lu GB, freed_space=%lu", quantity_occupied / GB, freed_space);
+			if (SERVER_TYPE == TYPE_DATA_SERVER && max_storage_size > 0 && (notified_memory_commission || notified_memory_saturation || is_server_read_update))
+			{
+				if (notified_memory_commission && quantity_occupied < memory_threshold_high_bytes)
+				{
+					notified_memory_commission = 0;
+				}
+				if ((notified_memory_saturation || is_server_read_update) && quantity_occupied <= memory_threshold_low_bytes)
+				{
+					notified_memory_saturation = 0;
+					notified_memory_commission = 0;
+					is_server_read_update = 0;
+					send_unsat = true;
+					occupied_snapshot = quantity_occupied;
+					max_size_snapshot = max_storage_size;
+				}
+			}
 		}
 		pthread_mutex_unlock(&mutex_quantity_occupied);
 
-		if (ret && SERVER_TYPE == TYPE_DATA_SERVER)
+		if (send_unsat)
 		{
-			double usage_pct = get_storage_usage_percentage();
-			if (notified_memory_commission && usage_pct < (double)memory_threshold_high)
+			const double usage_pct = static_cast<double>(occupied_snapshot) * 100.0 / static_cast<double>(max_size_snapshot);
+			if (reset_local_server_read_update_state(SERVER_ID) != 0)
 			{
-				notified_memory_commission = 0;
+				slog_error("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_RESET_STATE: failed to reset local read-update state for server %d", SERVER_ID);
+				fprintf(stderr, "HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_RESET_STATE: failed to reset local read-update state for server %d\n", SERVER_ID);
+				return -1;
 			}
-			if ((notified_memory_saturation || is_server_read_update) && usage_pct <= (double)memory_threshold_low)
-			{
-				if (reset_local_server_read_update_state(SERVER_ID) != 0)
-				{
-					slog_error("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_RESET_STATE: failed to reset local read-update state for server %d", SERVER_ID);
-					fprintf(stderr, "HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_RESET_STATE: failed to reset local read-update state for server %d\n", SERVER_ID);
-					return -1;
-				}
-				notified_memory_saturation = 0;
-				notified_memory_commission = 0;
-				set_server_read_update(0);
-				slog_info("[Server %d] Memory unsaturated below low threshold: %.2f%% (threshold=%d%%). Transitioning back to ACTIVE_RW.", SERVER_ID, usage_pct, memory_threshold_low);
-				fprintf(stderr, "[Server %d] Memory unsaturated below low threshold: %.2f%% (threshold=%d%%). Transitioning back to ACTIVE_RW.\n", SERVER_ID, usage_pct, memory_threshold_low);
-				char notify_msg[REQUEST_SIZE] = {0};
-				snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_UNSATURATED, SERVER_ID, usage_pct);
-				send_meta_req_sync(notify_msg, 0);
-			}
+			slog_warn("[Server %d] Server READ_UPDATE status set to 0", SERVER_ID);
+			fprintf(stderr, "[Server %d] Server READ_UPDATE status set to 0\n", SERVER_ID);
+			slog_info("[%s] Memory unsaturated below low threshold: %.2f%% (threshold=%d%%). Transitioning back to ACTIVE_RW.", args.data_hostname, usage_pct, memory_threshold_low);
+			fprintf(stderr, "[%s] Memory unsaturated below low threshold: %.2f%% (threshold=%d%%). Transitioning back to ACTIVE_RW.\n", args.data_hostname, usage_pct, memory_threshold_low);
+			char notify_msg[REQUEST_SIZE] = {0};
+			snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_UNSATURATED, SERVER_ID, usage_pct);
+			send_meta_req_sync(notify_msg, 0);
 		}
 		return ret;
 	}
@@ -912,7 +967,11 @@ extern "C"
 			return 0.0;
 		}
 
-		return static_cast<double>(quantity_occupied) * 100.0 / max_storage_size;
+		pthread_mutex_lock(&mutex_quantity_occupied);
+		int64_t occupied = quantity_occupied;
+		pthread_mutex_unlock(&mutex_quantity_occupied);
+
+		return static_cast<double>(occupied) * 100.0 / max_storage_size;
 	}
 
 } // extern "C"

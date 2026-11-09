@@ -176,7 +176,7 @@ typedef struct
 	// List used to indicate how many data servers was active in the moment of a server "n" was down.
 	// int *arr_num_active_storages;
 	// Number of active data servers.
-	int num_active_storages;
+	int num_rw_storages;
 	// Number of IMSS servers.
 	int32_t num_storages;
 	// Policy that was followed for the metadata.

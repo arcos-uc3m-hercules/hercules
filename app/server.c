@@ -316,6 +316,7 @@ int32_t main(int32_t argc, char **argv)
 	{
 		memory_threshold_low = args.malleability_mem_threshold_low;
 	}
+	init_memory_thresholds();
 
 	// init memory pool
 	slog_info("[main] before sts queue create");
@@ -353,7 +354,7 @@ int32_t main(int32_t argc, char **argv)
 		// number of servers conforming the HERCULES deployment.
 		num_servers = args.num_data_servers;
 		// Dynamic number of servers conforming the HERCULES deployment used by malleability.
-		number_active_storage_servers.store(num_servers);
+		number_storage_servers.store(num_servers);
 		// HERCULES' MPI deployment file.
 		deployfile = args.data_hostfile;
 		// data block size
@@ -862,16 +863,16 @@ int32_t main(int32_t argc, char **argv)
 		// my_imss.status = (int *)malloc(num_servers * sizeof(int));
 		// my_imss.arr_num_active_storages = (int *)malloc(num_servers * sizeof(int));
 		my_imss.num_storages = 0; // This value is increase on ReadHostfile.  num_servers;
-		my_imss.num_active_storages = init_number_of_server;
+		my_imss.num_rw_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important
 		// ReadHostfile(deployfile, &my_imss);
 
 		char key_plus_size[REQUEST_SIZE] = {0};
 		// Send the created structure to the metadata server.
-		sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", IMSS_INFO, (sizeof(imss_info) + my_imss.num_active_storages * LINE_LENGTH + my_imss.num_active_storages * sizeof(int) + my_imss.num_active_storages * sizeof(int)), my_imss.uri_);
+		sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", IMSS_INFO, (sizeof(imss_info) + my_imss.num_rw_storages * LINE_LENGTH + my_imss.num_rw_storages * sizeof(int) + my_imss.num_rw_storages * sizeof(int)), my_imss.uri_);
 		// sprintf(key_plus_size, "%" PRIu32 " SET %lu %s", IMSS_INFO, (sizeof(imss_info) + my_imss.num_active_storages * LINE_LENGTH + my_imss.num_active_storages * sizeof(int) + my_imss.num_active_storages * sizeof(int)), my_imss.uri_);
-		slog_debug("[main] Request to metadata - %s, num_active_storages=%d, num metadata servers=%d", key_plus_size, my_imss.num_active_storages, args.num_metadata_servers);
+		slog_debug("[main] Request to metadata - %s, num_rw_storages=%d, num metadata servers=%d", key_plus_size, my_imss.num_rw_storages, args.num_metadata_servers);
 		for (size_t j = 0; j < args.num_metadata_servers; j++)
 		{
 

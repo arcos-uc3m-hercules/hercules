@@ -1477,7 +1477,7 @@ int32_t map_records::SnapshotProducer(uint64_t block_size, const char *snapshot_
 	std::vector<std::string> ignore_paths = parse_path_list(args.ignore_paths_list, args.mount_point);
 
 	char *POLICY = args.policy;
-	uint32_t act_nodes = number_active_storage_servers.load();
+	uint32_t act_nodes = number_storage_servers.load();
 	active_data_servers = (act_nodes > 0) ? act_nodes : (u_int32_t)args.num_data_servers;
 
 	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))
@@ -1774,7 +1774,7 @@ int32_t map_records::Checkpoint(uint64_t block_size, const char *checkpoint_dir,
 
 	char *POLICY = args.policy;
 	const int64_t number_of_data_servers = args.num_data_servers;
-	uint32_t act_nodes = number_active_storage_servers.load();
+	uint32_t act_nodes = number_storage_servers.load();
 	active_data_servers = (act_nodes > 0) ? act_nodes : (u_int32_t)args.num_data_servers;
 
 	if (!strcmp(POLICY, "LOCAL") || !strcmp(POLICY, "ZCOPY"))

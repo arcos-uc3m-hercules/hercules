@@ -61,7 +61,7 @@ extern bool checkpoint_local_finished;
 extern pthread_mutex_t mutex_snapshot_consumer;
 extern pthread_cond_t global_run_snapshot_consumer_cond;
 
-extern std::atomic<uint32_t> number_active_storage_servers;
+extern std::atomic<uint32_t> number_storage_servers;
 
 extern HierarchicalRecords *global_hierarchical_map;
 extern HierarchicalRecords *garbage_collector_map;
@@ -137,6 +137,7 @@ void *Checkpoint(void *th_argv);
 void *Snapshot(void *th_argv);
 void *SnapshotConsumerWorker(void *th_argv);
 int32_t ensure_inter_backend_connected(const char *imss_uri);
+const char *resolve_imss_uri(const p_argv *argv);
 int wait_drain_data_server(int server_id, struct timespec stop_signal_ts);
 
 // Thread method searching and cleaning nodes with st_nlink=0
