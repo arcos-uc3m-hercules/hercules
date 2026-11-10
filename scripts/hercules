@@ -679,42 +679,41 @@ then
         HERCULES_DATA_HOSTFILE="${DATA_SERVER_FILE}"
     fi
 
-    set -x
-    ## Writes an index file.
-    awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' "${HERCULES_DATA_HOSTFILE}" "${HERCULES_DATA_HOSTFILE}" > "${HERCULES_TEMPORAL_PATH}/data2${STATUS}_index_$SLURM_JOB_ID"
-    set +x
-
-    ## Write the default file "data2stop_hostfile".
-    ## To avoid overwrite this file, user must to use 
-    ## the hercules "remove" option to stop only some
-    ## data servers. "stop" option will stop all running
-    ## data servers.
-    cat "${HERCULES_DATA_HOSTFILE}" > "${HERCULES_TEMPORAL_PATH}/data2stop_hostfile_$SLURM_JOB_ID"
-
-    ## Creates an array with the data servers hostnames.
-    readarray -t hosts < "${HERCULES_DATA_HOSTFILE}"
-    ## Stop the data servers.
-    ## TODO: check if the servers are running on the remote node
-    ## before to try stop them.
-    StopServers "data" 1 "${STATUS}" "${hosts[@]}"
-    
-    ## Checks if user wants to wait until all servers are stopped.
-    # 1 indicates that this function should check if 
-    # all servers have stopped correctly (synchronous).
-    # 0 in other case (asynchronous).
-    if [[ "$WAIT_SERVERS" -eq "1" ]]; then
-        
-        WaitForServers "data" "d" "${STATUS}" ${hosts[@]}
-    else
-        echo "No waiting for data servers to be stopped."
-    fi
-    
     # Checks if user do not want to stop metadata server (KEEP_METADATA_ALIVE==1).
     ## echo "KEEP_METADATA_ALIVE=$KEEP_METADATA_ALIVE"
     if [ "$KEEP_METADATA_ALIVE" -eq "1" ]; then
+        set -x
+        ## Writes an index file.
+        awk 'FNR==NR{a[$0]=NR;next}{print a[$0]}' "${HERCULES_DATA_HOSTFILE}" "${HERCULES_DATA_HOSTFILE}" > "${HERCULES_TEMPORAL_PATH}/data2${STATUS}_index_$SLURM_JOB_ID"
+        set +x
+
+        ## Write the default file "data2stop_hostfile".
+        ## To avoid overwrite this file, user must to use 
+        ## the hercules "remove" option to stop only some
+        ## data servers. "stop" option will stop all running
+        ## data servers.
+        cat "${HERCULES_DATA_HOSTFILE}" > "${HERCULES_TEMPORAL_PATH}/data2stop_hostfile_$SLURM_JOB_ID"
+
+        ## Creates an array with the data servers hostnames.
+        readarray -t hosts < "${HERCULES_DATA_HOSTFILE}"
+        ## Stop the data servers.
+        ## TODO: check if the servers are running on the remote node
+        ## before to try stop them.
+        StopServers "data" 1 "${STATUS}" "${hosts[@]}"
+        
+        ## Checks if user wants to wait until all servers are stopped.
+        # 1 indicates that this function should check if 
+        # all servers have stopped correctly (synchronous).
+        # 0 in other case (asynchronous).
+        if [[ "$WAIT_SERVERS" -eq "1" ]]; then
+            
+            WaitForServers "data" "d" "${STATUS}" ${hosts[@]}
+        else
+            echo "No waiting for data servers to be stopped."
+        fi
         exit 0
     fi
-    # Stop metadata servers.
+    # Stop metadata servers and orchestrates shutdown of all connected data servers.
     StopAllMetadata
 
     # Cancel any on-demand Slurm data server jobs
@@ -1037,6 +1036,9 @@ if [ -z "${HERCULES_MPI_HOSTFILE_NAME}" ]; then
         fi
     fi
 fi
+if [[ -n "${HERCULES_MPI_HOSTFILE_NAME}" ]]; then
+    export "HERCULES_MPI_HOSTFILE_NAME=${HERCULES_MPI_HOSTFILE_NAME}"
+fi
 
 
 ## To run the metadata servers.
@@ -1148,6 +1150,12 @@ do
     START_FILE="${HERCULES_TEMPORAL_PATH}/m-hercules-$i-start"
     RM="rm -f ${START_FILE}"
     COMMAND="${HERCULES_BUILD_PATH}/hercules_server m ${i}"
+    META_EXPORT_CLIENT_HOSTFILE=""
+    META_INLINE_CLIENT_HOSTFILE=""
+    if [[ -n "${HERCULES_MPI_HOSTFILE_NAME}" ]]; then
+        META_EXPORT_CLIENT_HOSTFILE="export HERCULES_MPI_HOSTFILE_NAME='${HERCULES_MPI_HOSTFILE_NAME}'; "
+        META_INLINE_CLIENT_HOSTFILE="HERCULES_MPI_HOSTFILE_NAME='${HERCULES_MPI_HOSTFILE_NAME}' "
+    fi
     ## If slurm is not being used, we deploy the service by connecting
     ## to the node via ssh.
     if [[ "${SLURM}" -eq "0" ]]; then
@@ -1155,7 +1163,7 @@ do
             ( rm -f "${START_FILE}" )
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "[ + ] Starting metadata server $i on $node..."
-                echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND}"
+                echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${META_INLINE_CLIENT_HOSTFILE}${COMMAND}"
             fi
             ( cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND} || echo "STATUS = ERROR_LAUNCH_FAILED" > "${START_FILE}" ) ) &
         else
@@ -1165,9 +1173,9 @@ do
             ( ssh ${node} "$RM" )
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "[ + ] Starting metadata server $i on $node..."
-                echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND}"
+                echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${META_INLINE_CLIENT_HOSTFILE}${COMMAND}"
             fi
-            ( ssh ${node} "cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}' ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE} )" ) &
+            ( ssh ${node} "cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}' ${META_INLINE_CLIENT_HOSTFILE}${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE} )" ) &
         fi
     else
         ## Deletes the file that we use to make sure that the server has started.
@@ -1184,7 +1192,7 @@ do
         # For example, if the header on the deployment script is "#SBATCH --cpus-per-task=36",
         # a valid entry here is "--cpus-per-task =18". This allows the execution of the next step 
         # "WaitForServers", which is being executed on the same node as the server task.
-        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- bash -c "export HERCULES_CONF=${CURR_HERCULES_CONF_FILE}; export HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}'; ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE}" &
+        srun  -N 1 -n 1 --cpus-per-task=4 -w $node -- bash -c "export HERCULES_CONF=${CURR_HERCULES_CONF_FILE}; export HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}'; ${META_EXPORT_CLIENT_HOSTFILE}${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE}" &
         set +x 
     fi
     i=$((i+1))
