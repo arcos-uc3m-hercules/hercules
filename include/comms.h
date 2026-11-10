@@ -71,6 +71,7 @@ static char MSG_MALLEABILITY_DATASERVERS[] = "DATASERVERS";
 static char MSG_DECOM_DATASERVERS[] = "DECOMISSIONING_COMPLETE";
 static char MSG_END_DECOMMISSION[] = "ENDDECOMMISSION";
 static char MSG_STOP_SERVER[] = "STOP_SERVER";
+static char MSG_SHUTDOWN_SERVER[] = "SHUTDOWNSERVER";
 static char MSG_MEMORY_SATURATION[] = "NOTIFY_MEMORY_SATURATION";
 static char MSG_MEMORY_PRE_SATURATION[] = "NOTIFY_MEMORY_PRE_SATURATION";
 static char MSG_MEMORY_UNSATURATED[] = "NOTIFY_MEMORY_UNSATURATED";
@@ -80,6 +81,7 @@ static char MSG_EMPTY_DIRECTORY[] = "EMPTY_DIRECTORY";
 static const char MSG_ERROR_OP[] = "ERROR";
 static const char MSG_OK_OP[] = "OK";
 static const char MSG_RELEASE_OP[] = "RELEASE";
+static const char MSG_RELEASE_SERVER_OP[] = "RELEASE_SERVER";
 static const char MSG_RENAME_OP[] = "RENAME";
 static const char MSG_DELETE_OP[] = "DELETE";
 static const char MSG_NODELETE_OP[] = "NODELETE";
@@ -328,7 +330,9 @@ extern "C"
 	int connect_common(const char *server, uint64_t server_port, sa_family_t af);
 
 	ucs_status_t ucx_wait(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str);
+	ucs_status_t ucx_wait_timeout(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str, double timeout_sec);
 	int wait_ack(ucp_worker_h ucp_worker_data, uint64_t local_data_uid, ucp_ep_h ep, int async);
+	int wait_ack_timeout(ucp_worker_h ucp_worker_data, uint64_t local_data_uid, ucp_ep_h ep, int async, double timeout_sec);
 
 	size_t send_stream_addr(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len);
 

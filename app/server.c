@@ -984,9 +984,13 @@ int32_t main(int32_t argc, char **argv)
 
 	if (args.type == TYPE_DATA_SERVER)
 	{
+		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, tmp_file_action);
+		slog_info("Creating the file %s", tmp_file_path);
+		ready(tmp_file_path, "OK");
+
 		ucp_ep_h ep;
 		char release_msg_metadata[REQUEST_SIZE] = {0};
-		sprintf(release_msg_metadata, "%" PRIu32 " GET 2 RELEASE", args.id);
+		sprintf(release_msg_metadata, "%" PRIu32 " GET 2 %s", args.id, MSG_RELEASE_SERVER_OP);
 		for (int i = 0; i < args.num_metadata_servers; i++)
 		{
 			ep = stat_eps[i];
@@ -1084,10 +1088,13 @@ int32_t main(int32_t argc, char **argv)
 	ucp_worker_destroy(ucp_worker);
 	ucp_cleanup(ucp_context);
 
-	sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, tmp_file_action);
-	// fprintf(stdout, "Creating the file %s\n", tmp_file_path);
-	slog_info("Creating the file %s", tmp_file_path);
-	ready(tmp_file_path, "OK");
+	if (args.type != TYPE_DATA_SERVER)
+	{
+		sprintf(tmp_file_path, "%s/tmp/%c-hercules-%d-%s", args.hercules_path, args.type, args.id, tmp_file_action);
+		// fprintf(stdout, "Creating the file %s\n", tmp_file_path);
+		slog_info("Creating the file %s", tmp_file_path);
+		ready(tmp_file_path, "OK");
+	}
 
 	fprintf(stdout, ANSI_COLOR_GREEN "[%s] Ending %c-server %d" ANSI_COLOR_RESET "\n", args.data_hostname, args.type, args.id);
 	fflush(stdout);
@@ -1130,38 +1137,45 @@ void handle_signal_server(int signal)
 		char buf[16] = {0}, temporal_path[PATH_MAX];
 		char tmp_file_path[PATH_MAX];
 
-		snprintf(temporal_path, sizeof(temporal_path), "%s/tmp/hercules_pkill_operation", args.hercules_path);
-		// fprintf(stderr,"Temporal path: %s\n", temporal_path);
-
-		// Get the operation number.
-		int fd = open(temporal_path, O_RDONLY);
-		if (fd == -1)
+		if (shutdown_requested_by_metadata.load(std::memory_order_acquire) == 1)
 		{
-			slog_warn("pkill_operation file %s not found, defaulting to operation 1 (shutdown)", temporal_path);
 			pkill_operation = 1;
 		}
 		else
 		{
-			b_read = read(fd, buf, sizeof(buf) - 1);
-			Close_file(fd, "HERCULES_ERR_HANDLE_SIGNAL_SERVER_CLOSE_PKILL_OPERATION");
+			snprintf(temporal_path, sizeof(temporal_path), "%s/tmp/hercules_pkill_operation", args.hercules_path);
+			// fprintf(stderr,"Temporal path: %s\n", temporal_path);
 
-			if (b_read > 0)
+			// Get the operation number.
+			int fd = open(temporal_path, O_RDONLY);
+			if (fd == -1)
 			{
-				buf[b_read] = '\0';
-				if (is_valid_integer(buf, &pkill_operation))
-				{
-					slog_debug("Valid integer read: %d", pkill_operation);
-				}
-				else
-				{
-					slog_error("Invalid content in pkill file. Content: '%s' is not a number, defaulting to 1", buf);
-					pkill_operation = 1;
-				}
+				slog_warn("pkill_operation file %s not found, defaulting to operation 1 (shutdown)", temporal_path);
+				pkill_operation = 1;
 			}
 			else
 			{
-				slog_warn("pkill_operation file empty, defaulting to 1");
-				pkill_operation = 1;
+				b_read = read(fd, buf, sizeof(buf) - 1);
+				Close_file(fd, "HERCULES_ERR_HANDLE_SIGNAL_SERVER_CLOSE_PKILL_OPERATION");
+
+				if (b_read > 0)
+				{
+					buf[b_read] = '\0';
+					if (is_valid_integer(buf, &pkill_operation))
+					{
+						slog_debug("Valid integer read: %d", pkill_operation);
+					}
+					else
+					{
+						slog_error("Invalid content in pkill file. Content: '%s' is not a number, defaulting to 1", buf);
+						pkill_operation = 1;
+					}
+				}
+				else
+				{
+					slog_warn("pkill_operation file empty, defaulting to 1");
+					pkill_operation = 1;
+				}
 			}
 		}
 
@@ -1179,8 +1193,9 @@ void handle_signal_server(int signal)
 			// if (args.type == TYPE_METADATA_SERVER || global_finish_checkpoint == 1)
 			if (args.type == TYPE_METADATA_SERVER)
 			{
-				global_finish_threads = 1;
 				abort_active_commissioning();
+				shutdown_connected_data_servers();
+				global_finish_threads = 1;
 
 				if (global_finish_garbage_collector != 1)
 				{ // Garbage collector still running.

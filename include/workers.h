@@ -10,7 +10,10 @@
 #include "utils.h"
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <memory>
+#include <set>
+#include <time.h>
 
 // Backend operations.
 #define READ_OP 0
@@ -67,6 +70,24 @@ extern HierarchicalRecords *global_hierarchical_map;
 extern HierarchicalRecords *garbage_collector_map;
 
 extern std::atomic<int> promise_enabled;
+
+extern std::atomic<int> shutdown_requested_by_metadata;
+
+extern imss_info *curr_global_imss_info;
+extern ucp_ep_h data_endpoints[100];
+extern ucp_address_t **local_addr;
+extern size_t *local_addr_len;
+
+extern pthread_mutex_t stop_server_mutex;
+extern std::map<int, PendingRequestInfo> stop_server_pending_requests;
+extern std::map<int, struct timespec> stop_server_signal_timestamps;
+extern std::atomic<int> metadata_shutdown_pending;
+extern std::atomic<int> metadata_shutdown_active;
+extern std::atomic<int> expected_shutdown_servers;
+extern std::set<int> released_data_servers;
+extern pthread_cond_t all_data_servers_stopped_cond;
+extern bool all_data_servers_stopped;
+
 
 // Set of arguments passed to each server thread.
 typedef struct
@@ -130,6 +151,7 @@ typedef struct
 
 MalleabilityArgs *fill_malleability_args(p_argv *arguments);
 
+
 // Thread method attending client data requests.
 void *hercules_ucx_server(void *th_argv);
 int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps);
@@ -139,6 +161,9 @@ void *SnapshotConsumerWorker(void *th_argv);
 int32_t ensure_inter_backend_connected(const char *imss_uri);
 const char *resolve_imss_uri(const p_argv *argv);
 int wait_drain_data_server(int server_id, struct timespec stop_signal_ts);
+int SendConfirmationMessage(const p_argv *arguments, const char *msg);
+void send_shutdown_to_all_data_servers(p_argv *arguments);
+int shutdown_connected_data_servers(void);
 
 // Thread method searching and cleaning nodes with st_nlink=0
 void *GarbageCollector(void *th_argv);

@@ -142,11 +142,18 @@ std::atomic<ino_t> next_inode{1000000};
 size_t global_offset = 0;
 
 std::vector<PendingRequestInfo> pending_requests;
-static pthread_mutex_t stop_server_mutex = PTHREAD_MUTEX_INITIALIZER;
-static std::map<int, PendingRequestInfo> stop_server_pending_requests;
-static std::map<int, struct timespec> stop_server_signal_timestamps;
+pthread_mutex_t stop_server_mutex = PTHREAD_MUTEX_INITIALIZER;
+std::map<int, PendingRequestInfo> stop_server_pending_requests;
+std::map<int, struct timespec> stop_server_signal_timestamps;
 static struct timespec stop_server_start_ts = {0, 0};
 static clock_t stop_server_start_cpu = 0;
+std::atomic<int> shutdown_requested_by_metadata{0};
+std::atomic<int> metadata_shutdown_pending{0};
+std::atomic<int> metadata_shutdown_active{0};
+std::atomic<int> expected_shutdown_servers{0};
+std::set<int> released_data_servers;
+pthread_cond_t all_data_servers_stopped_cond = PTHREAD_COND_INITIALIZER;
+bool all_data_servers_stopped = false;
 
 // TODO: check if this variables can be moved to records.cpp
 std::mutex mtx;
@@ -2885,6 +2892,10 @@ void *hercules_ucx_server(void *th_argv)
 			ucp_worker_progress(arguments->ucp_worker);
 			/* Probing incoming events in non-block mode */
 			msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, tag_req, tag_mask, 1, &info_tag);
+			if (arguments->args != NULL && arguments->args->type == TYPE_METADATA_SERVER && metadata_shutdown_pending.exchange(0, std::memory_order_acq_rel) == 1)
+			{
+				send_shutdown_to_all_data_servers(arguments);
+			}
 			if (global_finish_threads == 1)
 			{
 				map_server_eps_destroy(map_server_eps);
@@ -3487,6 +3498,7 @@ int is_admin_or_malleability_mode(const char *mode)
 
 	return (!strcmp(mode, "BROADCAST") ||
 		!strcmp(mode, "STOPSERVER") ||
+		!strcmp(mode, MSG_SHUTDOWN_SERVER) ||
 		!strcmp(mode, "REORDERSERVER") ||
 		!strcmp(mode, "ADDSERVER") ||
 		!strcmp(mode, MSG_SET_READ_UPDATE) ||
@@ -3510,6 +3522,20 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		slog_error("HERCULES_ERR_HANDLE_ADMIN_COMMANDS: Invalid arguments or arguments->args");
 		fprintf(stderr, "HERCULES_ERR_HANDLE_ADMIN_COMMANDS: Invalid arguments or arguments->args\n");
 		return -1;
+	}
+
+	if (!strcmp(mode, MSG_SHUTDOWN_SERVER))
+	{
+		slog_info("[%s] Received %s from metadata server on data server %d. Initiating graceful shutdown.", arguments->args->data_hostname, MSG_SHUTDOWN_SERVER, arguments->args->id);
+		fprintf(stderr, "[%s] Received %s from metadata server on data server %d. Initiating graceful shutdown.\n", arguments->args->data_hostname, MSG_SHUTDOWN_SERVER, arguments->args->id);
+		SendConfirmationMessage(arguments, MSG_OK_OP);
+		flush_ep(arguments->ucp_worker, arguments->server_ep);
+		int expected = 0;
+		if (shutdown_requested_by_metadata.compare_exchange_strong(expected, 1, std::memory_order_acq_rel))
+		{
+			kill(getpid(), SIGUSR1);
+		}
+		return 0;
 	}
 
 	if (!strcmp(mode, "BROADCAST"))
@@ -5730,6 +5756,13 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	}
 	if (!strncmp(req, MSG_STOP_SERVER, strlen(MSG_STOP_SERVER)))
 	{
+		if (!arguments || !arguments->args)
+		{
+			slog_error("HERCULES_ERR_STOP_SERVER: Invalid arguments or arguments->args");
+			fprintf(stderr, "HERCULES_ERR_STOP_SERVER: Invalid arguments or arguments->args\n");
+			return -1;
+		}
+
 		int sender_id = -1;
 		long sig_sec = 0, sig_nsec = 0;
 		int parsed = sscanf(req, "%*s %d %ld %ld", &sender_id, &sig_sec, &sig_nsec);
@@ -5741,8 +5774,9 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		}
 		slog_info("STOP_SERVER request received from server ID %d (signal ts: %ld.%09ld)", sender_id, sig_sec, sig_nsec);
 		fprintf(stderr, "STOP_SERVER request received from server ID %d\n", sender_id);
-
-		int snapshot_enabled = (arguments->args != NULL && (strlen(arguments->args->hercules_snapshot_path) > 0)) ? 1 : 0;
+		// TODO: move snapshot_enabled to a global variable so we
+		// don't have to do this operation here.
+		int snapshot_enabled = (strlen(arguments->args->hercules_snapshot_path) > 0) ? 1 : 0;
 		if (!snapshot_enabled)
 		{
 			slog_info("Snapshot disabled on metadata server. Confirming STOP_SERVER immediately to server %d", sender_id);
@@ -5775,7 +5809,19 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			stop_server_signal_timestamps[sender_id] = sig_ts;
 		}
 
-		int expected_servers = number_storage_servers.load() > 0 ? number_storage_servers.load() : (arguments->args->num_data_servers > 0 ? arguments->args->num_data_servers : 1);
+		int expected_servers = 1;
+		if (metadata_shutdown_active.load(std::memory_order_acquire) && expected_shutdown_servers.load() > 0)
+		{
+			expected_servers = expected_shutdown_servers.load();
+		}
+		else if (number_storage_servers.load() > 0)
+		{
+			expected_servers = (int)number_storage_servers.load();
+		}
+		else if (arguments->args->num_data_servers > 0)
+		{
+			expected_servers = (int)arguments->args->num_data_servers;
+		}
 
 		struct timespec ts_now_mono;
 		clock_gettime(CLOCK_MONOTONIC, &ts_now_mono);
@@ -6215,6 +6261,20 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			slog_debug("[stat_worker_thread][READ_OP][RELEASE] Deleting endpoint with %" PRIu64 "", arguments->worker_uid);
 			map_server_eps_erase(map_server_eps, arguments->worker_uid, arguments->ucp_worker);
 			slog_debug("[stat_worker_thread][READ_OP][RELEASE] Endpoints deleted ");
+			if (metadata_shutdown_active.load(std::memory_order_acquire) && !strcmp(uri_, MSG_RELEASE_SERVER_OP))
+			{
+				pthread_mutex_lock(&stop_server_mutex);
+				released_data_servers.insert((int)operation);
+				int expected_srv = expected_shutdown_servers.load();
+				slog_info("[Metadata Server] [%zu/%d] Data server %u completed shutdown and released endpoint.", released_data_servers.size(), expected_srv, operation);
+				fprintf(stderr, "[Metadata Server] [%zu/%d] Data server %u completed shutdown and released endpoint.\n", released_data_servers.size(), expected_srv, operation);
+				if ((int)released_data_servers.size() >= expected_srv)
+				{
+					all_data_servers_stopped = true;
+					pthread_cond_broadcast(&all_data_servers_stopped_cond);
+				}
+				pthread_mutex_unlock(&stop_server_mutex);
+			}
 		}
 		break;
 		case DELETE_OP:

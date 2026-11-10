@@ -12,6 +12,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 static sa_family_t ai_family = AF_INET;
@@ -660,6 +661,67 @@ extern "C"
 			// pthread_mutex_unlock(&lock_network);
 			return -EAGAIN;
 		}
+		slog_debug("msg=%s", response_buffer);
+		free(response_buffer);
+		return 0;
+	}
+
+	int wait_ack_timeout(ucp_worker_h ucp_worker_data, uint64_t local_data_uid, ucp_ep_h ep, int async, double timeout_sec)
+	{
+		ucp_tag_recv_info_t info_tag;
+		ucp_tag_message_h msg_tag = NULL;
+		struct timespec start_ts, now_ts;
+		clock_gettime(CLOCK_MONOTONIC, &start_ts);
+
+		do
+		{
+			ucp_worker_progress(ucp_worker_data);
+			msg_tag = ucp_tag_probe_nb(ucp_worker_data, local_data_uid, tag_mask, 0, &info_tag);
+			if (msg_tag == NULL && timeout_sec > 0.0)
+			{
+				clock_gettime(CLOCK_MONOTONIC, &now_ts);
+				double elapsed = (now_ts.tv_sec - start_ts.tv_sec) + (now_ts.tv_nsec - start_ts.tv_nsec) / 1e9;
+				if (elapsed >= timeout_sec)
+				{
+					slog_warn("Timeout (%.2f s) waiting for ACK on UID %" PRIu64, timeout_sec, local_data_uid);
+					fprintf(stderr, "HERCULES_ERR_RECV_DATA_TIMEOUT: Timeout (%.2f s) waiting for ACK on UID %" PRIu64 "\n", timeout_sec, local_data_uid);
+					return -ETIMEDOUT;
+				}
+			}
+		} while (msg_tag == NULL);
+
+		size_t msg_length = info_tag.length;
+		if (msg_length == 0)
+		{
+			slog_error("ERR_HERCULES_GET_DATA_ACK_INVALID_MSG_LENGTH");
+			return -ECANCELED;
+		}
+
+		char *response_buffer = (char *)calloc(msg_length + 1, sizeof(char));
+		if (response_buffer == NULL)
+		{
+			perror("ERR_HERCULES_GET_DATA_ACK_MEMORY_ALLOCATION");
+			slog_error("ERR_HERCULES_GET_DATA_ACK_MEMORY_ALLOCATION");
+			return -ECANCELED;
+		}
+
+		if (recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async) == 0)
+		{
+			free(response_buffer);
+			return -ECANCELED;
+		}
+
+		if (!strncmp(response_buffer, MSG_SPACE_OP, strlen(MSG_SPACE_OP)))
+		{
+			free(response_buffer);
+			return -EAGAIN;
+		}
+		if (strncmp(response_buffer, MSG_OK_OP, strlen(MSG_OK_OP)) != 0)
+		{
+			free(response_buffer);
+			return -ECANCELED;
+		}
+
 		slog_debug("msg=%s", response_buffer);
 		free(response_buffer);
 		return 0;
@@ -1924,6 +1986,52 @@ extern "C"
 		// {
 		// 	printf("finish to %s %s\n", op_str, data_str);
 		// }
+		return status;
+	}
+
+	ucs_status_t ucx_wait_timeout(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str, double timeout_sec)
+	{
+		ucs_status_t status;
+		if (UCS_PTR_IS_ERR(request))
+		{
+			status = UCS_PTR_STATUS(request);
+		}
+		else if (UCS_PTR_IS_PTR(request))
+		{
+			struct timespec start_ts, now_ts;
+			clock_gettime(CLOCK_MONOTONIC, &start_ts);
+			do
+			{
+				ucp_worker_progress(ucp_worker);
+				status = ucp_request_check_status(request);
+				if (status == UCS_INPROGRESS && timeout_sec > 0.0)
+				{
+					clock_gettime(CLOCK_MONOTONIC, &now_ts);
+					double elapsed = (now_ts.tv_sec - start_ts.tv_sec) + (now_ts.tv_nsec - start_ts.tv_nsec) / 1e9;
+					if (elapsed >= timeout_sec)
+					{
+						ucp_request_cancel(ucp_worker, request);
+						while (status == UCS_INPROGRESS)
+						{
+							ucp_worker_progress(ucp_worker);
+							status = ucp_request_check_status(request);
+						}
+						break;
+					}
+				}
+			} while (status == UCS_INPROGRESS);
+
+			request->completed = 0;
+			ucp_request_free(request);
+		}
+		else
+		{
+			status = UCS_OK;
+		}
+		if (status != UCS_OK)
+		{
+			slog_warn("unable to %s %s (%s)", op_str, data_str, ucs_status_string(status));
+		}
 		return status;
 	}
 

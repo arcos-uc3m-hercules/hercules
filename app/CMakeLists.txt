@@ -24,6 +24,7 @@ ADD_EXECUTABLE( hercules_server
 		../src/policies.c
 		../src/hercules.cpp
 		../src/hierarchical_records.cpp
+		../src/malleability.cpp
 )
 
 ADD_LIBRARY( hercules_static STATIC
@@ -40,6 +41,7 @@ ADD_LIBRARY( hercules_static STATIC
 		../src/slog.c
 		../src/map_server_eps.cpp
 		../src/shared_memory.c
+		../src/malleability.cpp
 )
 
 ADD_LIBRARY( hercules_shared SHARED
@@ -57,6 +59,7 @@ ADD_LIBRARY( hercules_shared SHARED
 		../src/map_server_eps.cpp
 		../src/shared_memory.c
 		../src/hierarchical_records.cpp
+		../src/malleability.cpp
 )
 
 
