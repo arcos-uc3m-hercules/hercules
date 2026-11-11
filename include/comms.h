@@ -75,6 +75,8 @@ static char MSG_SHUTDOWN_SERVER[] = "SHUTDOWNSERVER";
 static char MSG_MEMORY_SATURATION[] = "NOTIFY_MEMORY_SATURATION";
 static char MSG_MEMORY_PRE_SATURATION[] = "NOTIFY_MEMORY_PRE_SATURATION";
 static char MSG_MEMORY_UNSATURATED[] = "NOTIFY_MEMORY_UNSATURATED";
+static char MSG_QUERY_STORAGE_USAGE[] = "QUERY_STORAGE_USAGE";
+static char MSG_CHECK_ACCEPT_DATA[] = "CHECK_ACCEPT_DATA";
 static char MSG_SET_READ_UPDATE[] = "SET_READ_UPDATE";
 static char MSG_UPDATE_SERVER_STATE[] = "UPDATESERVERSTATE";
 static char MSG_EMPTY_DIRECTORY[] = "EMPTY_DIRECTORY";
@@ -333,6 +335,7 @@ extern "C"
 	ucs_status_t ucx_wait_timeout(ucp_worker_h ucp_worker, struct ucx_context *request, const char *op_str, const char *data_str, double timeout_sec);
 	int wait_ack(ucp_worker_h ucp_worker_data, uint64_t local_data_uid, ucp_ep_h ep, int async);
 	int wait_ack_timeout(ucp_worker_h ucp_worker_data, uint64_t local_data_uid, ucp_ep_h ep, int async, double timeout_sec);
+	int recv_response_timeout(ucp_worker_h ucp_worker_data, uint64_t local_data_uid, ucp_ep_h ep, char *response_buffer, size_t max_buffer_len, double timeout_sec);
 
 	size_t send_stream_addr(ucp_worker_h ucp_worker, ucp_ep_h ep, ucp_address_t *addr, size_t addr_len);
 

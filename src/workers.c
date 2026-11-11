@@ -1499,6 +1499,131 @@ int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id)
 }
 
 /**
+ * @brief Verifies if remaining servers can absorb the decommissioned server's
+ * data without exceeding their memory high threshold.
+ * @param arguments Pointer to thread arguments structure containing UCX worker and configuration.
+ * @param id_server_to_remove Identifier of the data server targeted for decommissioning.
+ * @param old_num_servers Current number of active storage servers.
+ * @return 1 if admission check passes and scale-down is safe, 0 otherwise.
+ */
+static int check_decommission_admission(MalleabilityArgs *arguments, int id_server_to_remove, int old_num_servers)
+{
+	if (arguments == NULL || arguments->args == NULL || arguments->ucp_worker == NULL)
+	{
+		slog_error("HERCULES_ERR_ADMISSION_CHECK_NULL_ARGS: Thread arguments or args structure is NULL");
+		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_NULL_ARGS: Thread arguments or args structure is NULL\n");
+		return 0;
+	}
+
+	if (local_addr == NULL || local_addr[arguments->thread_id] == NULL)
+	{
+		slog_error("HERCULES_ERR_ADMISSION_CHECK_NULL_LOCAL_ADDR: local_addr is NULL");
+		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_NULL_LOCAL_ADDR: local_addr is NULL\n");
+		return 0;
+	}
+
+	int surviving_count = old_num_servers - 1;
+	if (surviving_count <= 0)
+	{
+		slog_warn("Admission check vetoed: no surviving servers available after removing server %d", id_server_to_remove);
+		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_VETOED_NO_SURVIVORS: no surviving servers available after removing server %d\n", id_server_to_remove);
+		return 0;
+	}
+
+	if (data_endpoints[id_server_to_remove] == NULL)
+	{
+		slog_error("HERCULES_ERR_ADMISSION_CHECK_NULL_ENDPOINT: Target server %d endpoint is NULL", id_server_to_remove);
+		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_NULL_ENDPOINT: Target server %d endpoint is NULL\n", id_server_to_remove);
+		return 0;
+	}
+
+	ucp_worker_address_attr_t attr;
+	memset(&attr, 0, sizeof(attr));
+	attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
+	ucp_worker_address_query(local_addr[arguments->thread_id], &attr);
+	uint64_t meta_worker_uid = attr.worker_uid;
+
+	// Query target server for its exact storage usage
+	size_t sent_bytes = send_req(arguments->ucp_worker, data_endpoints[id_server_to_remove], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], MSG_QUERY_STORAGE_USAGE);
+	if (sent_bytes == 0)
+	{
+		slog_warn("HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_SEND: unable to send %s to server %d", MSG_QUERY_STORAGE_USAGE, id_server_to_remove);
+		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_SEND: unable to send %s to server %d\n", MSG_QUERY_STORAGE_USAGE, id_server_to_remove);
+		return 0;
+	}
+
+	char resp[MAX_RESPONSE_MSG_LEN] = {0};
+	const double timeout_sec = 2.0;
+	int ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, data_endpoints[id_server_to_remove], resp, sizeof(resp), timeout_sec);
+	if (ret != 0)
+	{
+		slog_warn("HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_RECV: server %d did not respond to %s (ret=%d)", id_server_to_remove, MSG_QUERY_STORAGE_USAGE, ret);
+		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_RECV: server %d did not respond to %s (ret=%d)\n", id_server_to_remove, MSG_QUERY_STORAGE_USAGE, ret);
+		return 0;
+	}
+
+	int64_t target_storage_usage = 0;
+	char status_str[MAX_RESPONSE_MSG_LEN] = {0};
+	int parsed = sscanf(resp, "%s %" PRId64, status_str, &target_storage_usage);
+	if (parsed < 2 || strcmp(status_str, MSG_OK_OP) != 0 || target_storage_usage < 0)
+	{
+		slog_warn("HERCULES_ERR_ADMISSION_CHECK_INVALID_RESPONSE: invalid response '%s' from server %d", resp, id_server_to_remove);
+		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_INVALID_RESPONSE: invalid response '%s' from server %d\n", resp, id_server_to_remove);
+		return 0;
+	}
+
+	// Calculates how much data each server has to receive.
+	int64_t delta_bytes = 0;
+	if (target_storage_usage > 0)
+	{
+		delta_bytes = (target_storage_usage + (surviving_count - 1)) / surviving_count;
+	}
+
+	slog_malleability("Decommission candidate server %d reports %" PRId64 " bytes. Probing %d surviving servers for %" PRId64 " bytes each.", id_server_to_remove, target_storage_usage, surviving_count, delta_bytes);
+	fprintf(stderr, "[Malleability] Decommission candidate server %d reports %" PRId64 " bytes. Probing %d surviving servers for %" PRId64 " bytes each.\n", id_server_to_remove, target_storage_usage, surviving_count, delta_bytes);
+
+	// Ask to remaining servers if they can accept the amount of data each.
+	char check_req[REQUEST_SIZE] = {0};
+	snprintf(check_req, sizeof(check_req), "%s %" PRId64, MSG_CHECK_ACCEPT_DATA, delta_bytes);
+
+	for (int i = 0; i < old_num_servers; i++)
+	{
+		if (i == id_server_to_remove)
+		{
+			continue;
+		}
+
+		if (data_endpoints[i] == NULL)
+		{
+			slog_warn("HERCULES_ERR_ADMISSION_CHECK_NULL_ENDPOINT: surviving server %d endpoint is NULL", i);
+			fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_NULL_ENDPOINT: surviving server %d endpoint is NULL\n", i);
+			return 0;
+		}
+
+		sent_bytes = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], check_req);
+		if (sent_bytes == 0)
+		{
+			slog_warn("HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_SEND: Admission check vetoed: unable to send %s to surviving server %d", MSG_CHECK_ACCEPT_DATA, i);
+			fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_SEND: unable to send %s to surviving server %d\n", MSG_CHECK_ACCEPT_DATA, i);
+			return 0;
+		}
+
+		memset(resp, 0, sizeof(resp));
+		ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, data_endpoints[i], resp, sizeof(resp), timeout_sec);
+		if (ret != 0 || strcmp(resp, MSG_OK_OP) != 0)
+		{
+			slog_malleability("Decommission of server %d VETOED: surviving server %d rejected %" PRId64 " bytes (resp='%s', ret=%d).", id_server_to_remove, i, delta_bytes, resp, ret);
+			fprintf(stderr, "[Malleability] Decommission of server %d VETOED: surviving server %d rejected %" PRId64 " bytes (resp='%s', ret=%d).\n", id_server_to_remove, i, delta_bytes, resp, ret);
+			return 0;
+		}
+	}
+
+	slog_malleability("Decommission of server %d APPROVED: all %d surviving servers can safely accept %" PRId64 " bytes.", id_server_to_remove, surviving_count, delta_bytes);
+	fprintf(stderr, "[Malleability] Decommission of server %d APPROVED: all %d surviving servers can safely accept %" PRId64 " bytes.\n", id_server_to_remove, surviving_count, delta_bytes);
+	return 1;
+}
+
+/**
  * @brief Decrease the number of servers.
  *
  * @param arguments
@@ -1507,6 +1632,13 @@ int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id)
 int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 {
 	consecutive_decommissioning_signals = 0;
+	if (arguments == NULL || arguments->args == NULL || arguments->ucp_worker == NULL)
+	{
+		slog_error("HERCULES_ERR_DECOMISSIONING_STAGE_NULL_ARGS: Thread arguments or args structure is NULL");
+		fprintf(stderr, "HERCULES_ERR_DECOMISSIONING_STAGE_NULL_ARGS: Thread arguments or args structure is NULL\n");
+		return 0;
+	}
+
 	// Check if malleability is enable from the configuration file and if malleability is not running.
 	// Setting MALLEABILITY_INPROGRESS helps to avoid requests until malleability is done.
 	int expected_status = MALLEABILITY_OFF;
@@ -1517,7 +1649,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		fprintf(stderr, "[INFO] Stopping server %d, old_num_servers=%d, new_number_of_servers=%" PRId32 "\n", id_server_to_remove, old_num_servers, new_number_of_servers);
 		slog_debug("[INFO] Stopping server %d.", id_server_to_remove);
 
-		if (id_server_to_remove > old_num_servers - 1)
+		if (id_server_to_remove < 0 || id_server_to_remove > old_num_servers - 1)
 		{
 			fprintf(stderr, "HERCULES_ERR_DECOMISSIONING_STAGE_INVALID_SERVER_ID_TO_REMOVE\n");
 			slog_error("HERCULES_ERR_DECOMISSIONING_STAGE_INVALID_SERVER_ID_TO_REMOVE");
@@ -1536,6 +1668,15 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		{
 			fprintf(stderr, "[INFO] Cannot decommission server %d: new server count (%" PRId32 ") would fall below lower bound (%d). Canceling decomissioning stage.\n", id_server_to_remove, new_number_of_servers, min_servers_allowed);
 			slog_malleability("Decommissioning skipped: new server count (%" PRId32 ") would fall below lower bound (%d).", new_number_of_servers, min_servers_allowed);
+			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+			return 0;
+		}
+
+		int admission_ok = check_decommission_admission(arguments, id_server_to_remove, old_num_servers);
+		if (!admission_ok)
+		{
+			slog_malleability("Decommissioning of server %d cancelled by admission handshake. Remaining in HOLD.", id_server_to_remove);
+			fprintf(stderr, "[Malleability] Decommissioning of server %d cancelled by admission handshake. Remaining in HOLD.\n", id_server_to_remove);
 			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
 			return 0;
 		}
@@ -3505,6 +3646,8 @@ int is_admin_or_malleability_mode(const char *mode)
 		!strcmp(mode, "ADDSERVER") ||
 		!strcmp(mode, MSG_SET_READ_UPDATE) ||
 		!strcmp(mode, MSG_UPDATE_SERVER_STATE) ||
+		!strcmp(mode, MSG_QUERY_STORAGE_USAGE) ||
+		!strcmp(mode, MSG_CHECK_ACCEPT_DATA) ||
 		!strcmp(mode, MSG_END_DECOMMISSION));
 }
 
@@ -3779,6 +3922,50 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		{
 			promise_enabled.store(0, std::memory_order_release);
 			Attend_pending_requests();
+		}
+		return 0;
+	}
+
+	if (!strcmp(mode, MSG_QUERY_STORAGE_USAGE))
+	{ // Respond to the caller the amount of data currently used in this server.
+		int64_t current_usage = 0;
+		if (arguments->hierarchical_map != NULL)
+		{
+			current_usage = arguments->hierarchical_map->GetStorageUsage();
+		}
+		else
+		{
+			current_usage = quantity_occupied;
+		}
+
+		char response[MAX_RESPONSE_MSG_LEN] = {0};
+		snprintf(response, sizeof(response), "%s %" PRId64, MSG_OK_OP, current_usage);
+		slog_malleability("[%s] Responding to %s with usage=%" PRId64 " bytes.", arguments->args->data_hostname, MSG_QUERY_STORAGE_USAGE, current_usage);
+		SendConfirmationMessage(arguments, response);
+		return 0;
+	}
+
+	if (!strcmp(mode, MSG_CHECK_ACCEPT_DATA))
+	{ // Respond to the caller whether it can accept the data or not.
+		int64_t delta_bytes = 0;
+		int items_read = sscanf(req, "%*s %" PRId64, &delta_bytes);
+		if (items_read < 1 || delta_bytes < 0)
+		{
+			slog_error("HERCULES_ERR_CHECK_ACCEPT_DATA: Invalid request parameters: %s", req);
+			SendConfirmationMessage(arguments, MSG_ERROR_OP);
+			return -1;
+		}
+
+		int can_accept = CheckAcceptData(delta_bytes);
+		if (can_accept)
+		{
+			slog_malleability("[%s] Admission check ACCEPTED for %" PRId64 " bytes.", arguments->args->data_hostname, delta_bytes);
+			SendConfirmationMessage(arguments, MSG_OK_OP);
+		}
+		else
+		{
+			slog_malleability("[%s] Admission check REJECTED for %" PRId64 " bytes (pre-saturation limit would be reached).", arguments->args->data_hostname, delta_bytes);
+			SendConfirmationMessage(arguments, MSG_ERROR_OP);
 		}
 		return 0;
 	}

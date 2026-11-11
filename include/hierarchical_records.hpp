@@ -77,6 +77,7 @@ extern "C"
 	uint32_t IncreaseMemoryOccupied(int64_t required_space);
 	int DecreaseMemoryOccupied(int64_t freed_space);
 	int CheckForMemorySpace(int64_t required_space);
+	int CheckAcceptData(int64_t required_space);
 	int64_t get_size();
 	int get_server_read_update();
 	void set_server_read_update(int ru);

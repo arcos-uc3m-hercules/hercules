@@ -727,6 +727,69 @@ extern "C"
 		return 0;
 	}
 
+	int recv_response_timeout(ucp_worker_h ucp_worker_data, uint64_t local_data_uid, ucp_ep_h ep, char *response_buffer, size_t max_buffer_len, double timeout_sec)
+	{
+		if (response_buffer == NULL || max_buffer_len == 0)
+		{
+			slog_error("HERCULES_ERR_RECV_RESPONSE_INVALID_BUFFER");
+			fprintf(stderr, "HERCULES_ERR_RECV_RESPONSE_INVALID_BUFFER");
+			return -EINVAL;
+		}
+
+		ucp_tag_recv_info_t info_tag;
+		ucp_tag_message_h msg_tag = NULL;
+		struct timespec start_ts, now_ts;
+		clock_gettime(CLOCK_MONOTONIC, &start_ts);
+
+		do
+		{
+			ucp_worker_progress(ucp_worker_data);
+			msg_tag = ucp_tag_probe_nb(ucp_worker_data, local_data_uid, tag_mask, 0, &info_tag);
+			if (msg_tag == NULL && timeout_sec > 0.0)
+			{
+				clock_gettime(CLOCK_MONOTONIC, &now_ts);
+				double elapsed = (now_ts.tv_sec - start_ts.tv_sec) + (now_ts.tv_nsec - start_ts.tv_nsec) / 1e9;
+				if (elapsed >= timeout_sec)
+				{
+					slog_warn("Timeout (%.2f s) waiting for response on UID %" PRIu64, timeout_sec, local_data_uid);
+					fprintf(stderr, "HERCULES_ERR_RECV_DATA_TIMEOUT: Timeout (%.2f s) waiting for response on UID %" PRIu64 "\n", timeout_sec, local_data_uid);
+					return -ETIMEDOUT;
+				}
+			}
+		} while (msg_tag == NULL);
+
+		size_t msg_length = info_tag.length;
+		if (msg_length == 0)
+		{
+			slog_error("HERCULES_ERR_GET_DATA_ACK_INVALID_MSG_LENGTH");
+			fprintf(stderr, "HERCULES_ERR_GET_DATA_ACK_INVALID_MSG_LENGTH");
+			return -ECANCELED;
+		}
+
+		char *temp_buffer = (char *)calloc(msg_length + 1, sizeof(char));
+		if (temp_buffer == NULL)
+		{
+			perror("HERCULES_ERR_GET_DATA_ACK_MEMORY_ALLOCATION");
+			slog_error("HERCULES_ERR_GET_DATA_ACK_MEMORY_ALLOCATION");
+			return -ECANCELED;
+		}
+
+		if (recv_data(ucp_worker_data, ep, temp_buffer, msg_length, local_data_uid, 0) == 0)
+		{
+			slog_error("HERCULES_ERR_RECV_RESPONSE_RECV_DATA");
+			fprintf(stderr, "HERCULES_ERR_RECV_RESPONSE_RECV_DATA");
+			free(temp_buffer);
+			return -ECANCELED;
+		}
+
+		size_t copy_len = (msg_length < max_buffer_len - 1) ? msg_length : (max_buffer_len - 1);
+		memcpy(response_buffer, temp_buffer, copy_len);
+		response_buffer[copy_len] = '\0';
+		slog_debug("recv_response_timeout msg=%s", response_buffer);
+		free(temp_buffer);
+		return 0;
+	}
+
 	/**
 	 * @brief START asynchronous data reception from the server.
 	 */

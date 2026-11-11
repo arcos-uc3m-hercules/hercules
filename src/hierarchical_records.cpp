@@ -822,6 +822,24 @@ extern "C"
 	}
 
 	/**
+	 * @brief Evaluates whether accepting additional data would push this server to 
+	 * or above its memory high threshold.
+	 * @param required_space Requested memory in bytes.
+	 * @return 1 if memory can be safely accepted without breaching threshold, 0 otherwise.
+	 */
+	int CheckAcceptData(int64_t required_space)
+	{
+		int ret = 1;
+		pthread_mutex_lock(&mutex_quantity_occupied);
+		if (is_server_read_update || (quantity_occupied + required_space >= memory_threshold_high_bytes))
+		{
+			ret = 0;
+		}
+		pthread_mutex_unlock(&mutex_quantity_occupied);
+		return ret;
+	}
+
+	/**
 	 * @brief Increase the counter of how much memory is in use.
 	 * Also checks if there are enough memory to alloc the "required space".
 	 * @param required_space Space to be used by the new block.
