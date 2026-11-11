@@ -1660,6 +1660,7 @@ void *run_malleability(void *th_argv)
 	if (!arguments || !arguments->args)
 	{
 		slog_error("HERCULES_ERR_RUN_MALLEABILITY_NULL_ARGS");
+		fprintf(stderr, "HERCULES_ERR_RUN_MALLEABILITY_NULL_ARGS\n");
 		// changes comissioning_on to false.
 		comissioning_on.store(false, std::memory_order_release);
 		if (arguments != NULL)
@@ -2711,7 +2712,8 @@ void *get_performance_metrics(void *th_argv)
 	// Check that malleability has not been activated before by another thread and that metric allows bandwidth scaling.
 	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED)
 	{
-		if (arguments->args->malleability_metric != MALLEABILITY_METRIC_BANDWIDTH)
+		if (arguments->args->malleability_metric != MALLEABILITY_METRIC_BANDWIDTH &&
+		    arguments->args->malleability_metric != MALLEABILITY_METRIC_HYBRID)
 		{
 			slog_debug("Bandwidth malleability skipped: MALLEABILITY_METRIC is set to %d.", arguments->args->malleability_metric);
 			return NULL;

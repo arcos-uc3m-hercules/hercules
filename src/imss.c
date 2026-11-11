@@ -4083,7 +4083,7 @@ int32_t close_dataset(const char *dataset_uri, int fd)
 
 	// MALLEABILITY_CONF_PERF is used to measure the performance when malleability is not enabled.
 	if ((CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_ENABLED || CONF_MALLEABILITY_STATUS == MALLEABILITY_CONF_PERF) &&
-	    CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH)
+	    (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH || CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_HYBRID))
 	{ // To send performance metrics.
 		int status = send_performance_metrics(ep, dataset_uri, m_srv);
 	}
@@ -6273,7 +6273,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		// without inspecting response_buffer before UCX receive finishes.
 		if (async == ASYNC)
 		{
-			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH)
+			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH || CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_HYBRID)
 			{
 				std::string used_hostname_server = node_hostname;
 				backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + size_received_data);
@@ -6367,7 +6367,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			}
 
 			// performance read metrics.
-			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH)
+			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH || CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_HYBRID)
 			{
 				std::string used_hostname_server = node_hostname;
 				backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + size_received_data);
@@ -6563,7 +6563,7 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 			slog_info("OK!, length=%ld", msg_length);
 
 			// performance read metrics.
-			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH)
+			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH || CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_HYBRID)
 			{
 				std::string used_hostname_server = curr_imss.info.ips[n_server_];
 				backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + msg_length);
@@ -7247,7 +7247,7 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				auto end_time_data = std::chrono::steady_clock::now();
 				std::chrono::duration<double> time_taken_data = end_time_data - start_time_data;
 
-				if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH)
+				if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH || CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_HYBRID)
 				{
 					std::string used_hostname_server = node_hostname;
 					backend_performance_metrics[used_hostname_server].write.total_data_size += (size_sent_req + size_sent_data);
