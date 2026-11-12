@@ -156,6 +156,8 @@ typedef struct
 	int32_t view_id;
 	int32_t num_servers;
 	int32_t server_ids[MAX_SERVERS_PER_VIEW];
+	int32_t decommissioned_server_id; // Server retired in this view (-1 if none).
+	int32_t next_view;                // Next view following decommissioning (-1 if none).
 } TopologyView;
 
 // Structure storing all information related to a certain IMSS.

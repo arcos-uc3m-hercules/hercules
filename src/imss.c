@@ -3733,8 +3733,14 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 	}
 	if (active_count > 0)
 	{
-		AddTopologyView(&local_imss_->info, active_count, active_ids);
+		int32_t new_view_id = AddTopologyView(&local_imss_->info, active_count, active_ids);
 		local_imss_->info.num_rw_storages = active_count;
+		// Links previous topology view to the new view on client decommissioning notification.
+		if (action_type == MALLEABILITY_ACTION_DECOMMISSION && prev_view_id >= 0 && prev_view_id < local_imss_->info.num_views && new_view_id != -1)
+		{
+			local_imss_->info.views[prev_view_id].decommissioned_server_id = id_modified_server;
+			local_imss_->info.views[prev_view_id].next_view = new_view_id;
+		}
 	}
 	else
 	{
@@ -4855,11 +4861,6 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 		return -1;
 	}
 
-	if (view_out != NULL)
-	{
-		*view_out = view;
-	}
-
 	int32_t logical_server = find_server(view->num_servers, data_id, curr_dataset->original_name, op_type, TYPE_DATA_SERVER, curr_dataset->session_plcy);
 	if (logical_server < 0)
 	{
@@ -4868,6 +4869,61 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 		return -1;
 	}
 	server = view->server_ids[logical_server];
+
+	// Follows the topology view chain if the assigned server was decommissioned.
+	while (view != NULL)
+	{
+		int32_t next_vid = -1;
+		if (view->next_view != -1 && server == view->decommissioned_server_id)
+		{
+			next_vid = view->next_view;
+		}
+		else if (server >= 0 && server < MAX_SERVERS_PER_VIEW &&
+		         curr_imss.info.server_states[server] == SERVER_DECOMMISSIONED)
+		{
+			// Searches subsequent views if the server was retired in a later transition.
+			for (int32_t v = view->view_id; v < curr_imss.info.num_views; v++)
+			{
+				if (curr_imss.info.views[v].decommissioned_server_id == server &&
+				    curr_imss.info.views[v].next_view != -1)
+				{
+					next_vid = curr_imss.info.views[v].next_view;
+					break;
+				}
+			}
+			if (next_vid == -1 && curr_imss.info.current_view_id != view->view_id)
+			{
+				next_vid = curr_imss.info.current_view_id;
+			}
+		}
+
+		if (next_vid == -1)
+		{
+			break;
+		}
+
+		view = GetTopologyView(&curr_imss.info, next_vid);
+		if (view == NULL || view->num_servers <= 0)
+		{
+			slog_fatal("HERCULES_ERR_FIND_SERVER_VIEW: No valid next_view topology found");
+			fprintf(stderr, "HERCULES_ERR_FIND_SERVER_VIEW: No valid next_view topology found\n");
+			return -1;
+		}
+		logical_server = find_server(view->num_servers, data_id, curr_dataset->original_name, op_type, TYPE_DATA_SERVER, curr_dataset->session_plcy);
+		if (logical_server < 0)
+		{
+			perror("HERCULES_ERR_FIND_SERVER_VIEW");
+			slog_fatal("HERCULES_ERR_FIND_SERVER_VIEW");
+			return -1;
+		}
+		server = view->server_ids[logical_server];
+	}
+
+	if (view_out != NULL)
+	{
+		*view_out = view;
+	}
+
 	slog_debug("[get_data_location] view_id=%d, num_servers=%d, logical=%d, physical=%d for data_id=%d", view->view_id, view->num_servers, logical_server, server, data_id);
 	slog_debug("next_server=%d", server);
 
@@ -5937,15 +5993,17 @@ int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *ser
 		return -1;
 	}
 
-	// Checks if a previous view with the same servers exists and updates the current view.
-	for (int32_t v = 0; v < info->num_views; v++)
+	// Checks if the current active view already has the exact same servers.
+	// Only reuse if the current view has not undergone decommissioning (next_view == -1).
+	int32_t curr_v = info->current_view_id;
+	if (curr_v >= 0 && curr_v < info->num_views)
 	{
-		if (info->views[v].num_servers == num_servers &&
-		    memcmp(info->views[v].server_ids, server_ids, (size_t)num_servers * sizeof(int32_t)) == 0)
+		if (info->views[curr_v].num_servers == num_servers &&
+		    info->views[curr_v].next_view == -1 &&
+		    memcmp(info->views[curr_v].server_ids, server_ids, (size_t)num_servers * sizeof(int32_t)) == 0)
 		{
-			info->current_view_id = v;
-			slog_malleability("[AddTopologyView] Reusing existing view_id=%d with %d servers", v, num_servers);
-			return v;
+			slog_malleability("[AddTopologyView] Reusing current active view_id=%d with %d servers", curr_v, num_servers);
+			return curr_v;
 		}
 	}
 
@@ -5965,6 +6023,8 @@ int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *ser
 	{
 		view->server_ids[i] = server_ids[i];
 	}
+	view->decommissioned_server_id = -1;
+	view->next_view = -1;
 
 	info->num_views++;
 	info->current_view_id = new_view_id;

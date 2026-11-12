@@ -12,8 +12,11 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
+#include <string>
 #include <time.h>
+#include <vector>
 
 // Backend operations.
 #define READ_OP 0
@@ -61,6 +64,7 @@ typedef enum
 extern bool snapshot_local_finished;
 extern bool checkpoint_local_finished;
 
+extern pthread_mutex_t memory_protect;
 extern pthread_mutex_t mutex_snapshot_consumer;
 extern pthread_cond_t global_run_snapshot_consumer_cond;
 
@@ -88,6 +92,29 @@ extern std::set<int> released_data_servers;
 extern pthread_cond_t all_data_servers_stopped_cond;
 extern bool all_data_servers_stopped;
 
+// Information needed to fulfill a client read held during decommissioning migration.
+typedef struct
+{
+	ucp_worker_h ucp_worker;
+	ucp_ep_h server_ep;
+	uint64_t worker_uid;
+	int32_t thread_id;
+	std::string key;
+	uint32_t op_type;
+	uint32_t block_offset;
+	size_t to_read;
+	int is_shared_memory;
+	key_t shm_key;
+	int async_io;
+} PendingMigratingRead;
+
+extern std::vector<PendingMigratingRead> pending_migrating_reads;
+extern std::mutex mutex_pending_migrating_reads;
+extern std::atomic<bool> decommissioning_active;
+extern std::atomic<int32_t> decom_target_id;
+extern std::atomic<int32_t> decom_prev_view_id;
+extern std::atomic<int32_t> decom_new_view_id;
+extern char err_code[];
 
 // Set of arguments passed to each server thread.
 typedef struct
@@ -151,7 +178,6 @@ typedef struct
 
 MalleabilityArgs *fill_malleability_args(p_argv *arguments);
 
-
 // Thread method attending client data requests.
 void *hercules_ucx_server(void *th_argv);
 int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps);
@@ -207,6 +233,10 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove);
 int handle_memory_pre_saturation(p_argv *arguments, int saturated_server_id);
 int handle_memory_saturation(p_argv *arguments, int saturated_server_id);
 int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id);
+bool is_block_in_flight(const std::string &key, int32_t current_server_id);
+void attend_pending_migrating_reads(p_argv *arguments);
+bool is_migration_write_request(const p_argv *arguments, CommunicationMode transfer_mode);
+bool handle_stale_migration_write(p_argv *arguments, CommunicationMode transfer_mode, const std::string &key, size_t msg_length);
 int ShutdownServer();
 // void Decomissioning_stage(p_argv *arguments, int id_server_to_remove);
 void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift);

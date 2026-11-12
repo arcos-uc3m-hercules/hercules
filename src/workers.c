@@ -664,6 +664,17 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 		return 0;
 	}
 
+	// Retrieves the target topology view to route migrating blocks to active servers.
+	TopologyView *dest_view = NULL;
+	if (curr_global_imss_info != NULL)
+	{
+		int32_t vid = curr_global_imss_info->current_view_id;
+		if (vid >= 0 && vid < curr_global_imss_info->num_views)
+		{
+			dest_view = &curr_global_imss_info->views[vid];
+		}
+	}
+
 	slog_malleability("Calling first garbage collector.");
 	global_hierarchical_map->HierarchicalMapCleanGarbageCollector();
 	// Get all the keys of this server.
@@ -714,7 +725,18 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 					continue;
 				}
 				// TODO: check for the current data policy in the dataset, not in the imss configuration.
+				/*				
 				next_server = find_server(number_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_global_imss_info->session_plcy);
+				*/
+				if (dest_view != NULL && dest_view->num_servers > 0)
+				{
+					int32_t logical_server = find_server(dest_view->num_servers, block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_global_imss_info->session_plcy);
+					next_server = dest_view->server_ids[logical_server];
+				}
+				else
+				{
+					next_server = find_server(number_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_global_imss_info->session_plcy);
+				}
 
 				// TODO: check replication factor.
 
@@ -1681,15 +1703,57 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 			return 0;
 		}
 
+		int32_t current_vid = -1;
+		TopologyView *prev_view = NULL;
+		if (curr_global_imss_info != NULL)
+		{
+			current_vid = curr_global_imss_info->current_view_id;
+			if (current_vid >= 0 && current_vid < curr_global_imss_info->num_views)
+			{
+				prev_view = &curr_global_imss_info->views[current_vid];
+			}
+		}
+
+		int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
+		int32_t active_count = 0;
+		int32_t new_view_id = -1;
+		if (curr_global_imss_info != NULL)
+		{
+			// Mark target server decommissioned in server_states before collecting active servers
+			curr_global_imss_info->server_states[id_server_to_remove] = SERVER_DECOMMISSIONED;
+			active_count = collect_active_rw_servers(curr_global_imss_info, active_server_ids);
+			if (active_count > 0)
+			{
+				new_view_id = AddTopologyView(curr_global_imss_info, active_count, active_server_ids);
+			}
+			if (prev_view != NULL && new_view_id != -1)
+			{
+				prev_view->decommissioned_server_id = id_server_to_remove;
+				prev_view->next_view = new_view_id;
+			}
+		}
+
 		is_new_server_ready = false;
 		char request[REQUEST_SIZE] = {0};
+		char notify_req[REQUEST_SIZE] = {0};
 		int ret = 0;
+
+		int stop_written = snprintf(request, sizeof(request), "STOPSERVER %" PRId32 " %" PRId32 " %d", new_number_of_servers, new_view_id, active_count);
+		for (int s = 0; s < active_count && stop_written < (int)sizeof(request) - 16; s++)
+		{
+			stop_written += snprintf(request + stop_written, sizeof(request) - stop_written, " %d", active_server_ids[s]);
+		}
+
+		int notify_written = snprintf(notify_req, sizeof(notify_req), "%s %d %d %d", MSG_NOTIFY_DECOMMISSION, id_server_to_remove, new_view_id, active_count);
+		for (int s = 0; s < active_count && notify_written < (int)sizeof(notify_req) - 16; s++)
+		{
+			notify_written += snprintf(notify_req + notify_written, sizeof(notify_req) - notify_written, " %d", active_server_ids[s]);
+		}
+
+		/*
 		int32_t new_id = 0;
-		// fprintf(stderr, "Sending %s to server ID %d\n", request, id_server_to_remove);
 		for (size_t i = 0; i < old_num_servers; i++)
 		{
-
-			// Send the request to all servers.
 			if (i == id_server_to_remove)
 			{
 				sprintf(request, "STOPSERVER %" PRId32 "", new_number_of_servers);
@@ -1699,17 +1763,62 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 				sprintf(request, "REORDERSERVER %" PRId32 " %" PRId32 " %d", new_number_of_servers, new_id, id_server_to_remove);
 				new_id++;
 			}
-			slog_malleability("Sending %s to server ID %zu (%s), number of old active storage servers=%d", request, i, curr_global_imss_info->ips[i], old_num_servers);
-			fprintf(stderr, "Sending %s to server ID %zu (%s), number of old active storage servers=%d\n", request, i, curr_global_imss_info->ips[i], old_num_servers);
-			slog_debug("Thread id %d", arguments->thread_id);
 			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
+		}
+		*/
+
+		ucp_worker_address_attr_t attr;
+		memset(&attr, 0, sizeof(attr));
+		attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
+		ucp_worker_address_query(local_addr[arguments->thread_id], &attr);
+		uint64_t meta_worker_uid = attr.worker_uid;
+
+		// Notify all remaining servers and wait for their acknowledgments
+		for (size_t i = 0; i < old_num_servers; i++)
+		{
+			if (i == (size_t)id_server_to_remove)
+			{
+				continue;
+			}
+
+			if (data_endpoints[i] == NULL)
+			{
+				slog_warn("Remaining server ID %zu endpoint is NULL, skipping notification.", i);
+				continue;
+			}
+
+			slog_malleability("Sending %s to remaining server ID %zu (%s)", notify_req, i, curr_global_imss_info->ips[i]);
+			fprintf(stderr, "[Metadata] Sending %s to remaining server ID %zu (%s)\n", notify_req, i, curr_global_imss_info->ips[i]);
+			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], notify_req);
 			if (ret == 0)
 			{
-				perror("HERCULES_ERR_SEND_REQ_SETSERVER");
-				slog_fatal("HERCULES_ERR_SEND_REQ_SETSERVER");
-				// TODO: if it fails we continue the loop. We need to ensure consistency between servers so this operation should succeed.
-				// return;
+				perror("HERCULES_ERR_SEND_REQ_NOTIFY_DECOM");
+				slog_fatal("HERCULES_ERR_SEND_REQ_NOTIFY_DECOM");
 			}
+
+			// Verify the OK confirmation from the remaining server
+			char resp[MAX_RESPONSE_MSG_LEN] = {0};
+			int recv_ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, data_endpoints[i], resp, sizeof(resp), 0.0);
+			if (recv_ret != 0 || strcmp(resp, MSG_OK_OP) != 0)
+			{
+				slog_warn("Server ID %zu did not confirm %s properly (ret=%d, resp='%s')", i, MSG_NOTIFY_DECOMMISSION, recv_ret, resp);
+				fprintf(stderr, "[Metadata] Server ID %zu did not confirm %s properly (ret=%d, resp='%s')\n", i, MSG_NOTIFY_DECOMMISSION, recv_ret, resp);
+			}
+			else
+			{
+				slog_malleability("Server ID %zu confirmed decommissioning hold active.", i);
+				fprintf(stderr, "[Metadata] Server ID %zu confirmed decommissioning hold active.\n", i);
+			}
+		}
+
+		// Now that all remaining servers have confirmed, order the decommissioned server to begin migration
+		slog_malleability("Sending %s to decommissioned server ID %d (%s)", request, id_server_to_remove, curr_global_imss_info->ips[id_server_to_remove]);
+		fprintf(stderr, "[Metadata] Sending %s to decommissioned server ID %d (%s)\n", request, id_server_to_remove, curr_global_imss_info->ips[id_server_to_remove]);
+		ret = send_req(arguments->ucp_worker, data_endpoints[id_server_to_remove], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
+		if (ret == 0)
+		{
+			perror("HERCULES_ERR_SEND_REQ_STOPSERVER");
+			slog_fatal("HERCULES_ERR_SEND_REQ_STOPSERVER");
 		}
 
 		// Close the endpoint connection.
@@ -1728,6 +1837,8 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 
 		id_server_to_modify = id_server_to_remove;
 		last_malleability_action = MALLEABILITY_ACTION_DECOMMISSION;
+		/*
+		// View already updated and linked upfront
 		if (curr_global_imss_info != NULL)
 		{
 			int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
@@ -1737,6 +1848,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 				AddTopologyView(curr_global_imss_info, active_count, active_server_ids);
 			}
 		}
+		*/
 		slog_malleability("Set: id_server_to_modify=%" PRId32 ", action=DECOMMISSION", id_server_to_modify);
 		// set the global id, used when attending pending requests.
 
@@ -3502,7 +3614,17 @@ int process_add_server(p_argv *arguments, const char *req)
 			slog_warn("[%s] HERCULES_WARN_ADDSERVER_ADDIPS_COUNT_MISMATCH: local server count (%d) does not match metadata server count (%" PRIu32 "), synchronizing.", server_args->data_hostfile, imss_info_struct->num_storages, num_servers);
 		}
 		number_storage_servers.store(num_servers);
-		collect_active_rw_servers(imss_info_struct, NULL);
+		if (added_server_id < MAX_SERVERS_PER_VIEW)
+		{
+			imss_info_struct->server_states[added_server_id] = SERVER_ACTIVE_RW;
+		}
+		int32_t active_ids[MAX_SERVERS_PER_VIEW];
+		int32_t active_count = collect_active_rw_servers(imss_info_struct, active_ids);
+		if (active_count > 0)
+		{
+			// Registers the new server in the topology view structure.
+			AddTopologyView(imss_info_struct, active_count, active_ids);
+		}
 		imss_info_struct->num_storages = num_servers;
 		server_args->num_data_servers = num_servers;
 		curr_global_imss_info = &imss_->info;
@@ -3643,6 +3765,7 @@ int is_admin_or_malleability_mode(const char *mode)
 		!strcmp(mode, "STOPSERVER") ||
 		!strcmp(mode, MSG_SHUTDOWN_SERVER) ||
 		!strcmp(mode, "REORDERSERVER") ||
+		!strcmp(mode, MSG_NOTIFY_DECOMMISSION) ||
 		!strcmp(mode, "ADDSERVER") ||
 		!strcmp(mode, MSG_SET_READ_UPDATE) ||
 		!strcmp(mode, MSG_UPDATE_SERVER_STATE) ||
@@ -3704,25 +3827,69 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		global_finish_dispatcher = FINISH_SERVER_STATUS;
 		id_server_to_modify = arguments->args->id;
 		uint32_t num_servers = 0;
-		int items_read = sscanf(req, "%23s %" PRIu32, mode, &num_servers);
+		int32_t target_new_view = -1;
+		int num_active = 0;
+		int offset = 0;
+		int items_read = sscanf(req, "%*s %" PRIu32 " %" PRId32 " %d%n", &num_servers, &target_new_view, &num_active, &offset);
 
-		if (items_read == 2)
+		if (items_read >= 1)
 		{
 			prev_number_storage_servers.store(number_storage_servers.load());
 			number_storage_servers.store(num_servers);
 		}
 		else
 		{
-			slog_error("HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %s: expecting 2 fields but %d were receiving.", req, items_read);
-			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %s: expecting 2 fields but %d were receiving\n", req, items_read);
+			slog_error("HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %s: expecting at least 1 field but %d were received.", req, items_read);
+			fprintf(stderr, "HERCULES_ERR_SRV_WORKER_HELPER_STOPSERVER: Error reading the request %s: expecting at least 1 field but %d were received\n", req, items_read);
 			return -1;
 		}
 
-		slog_debug("[malleability] stopping this server.");
+		int32_t active_ids[MAX_SERVERS_PER_VIEW];
+		if (items_read >= 3 && num_active > 0 && num_active <= MAX_SERVERS_PER_VIEW)
+		{
+			// get the active ids
+			const char *ptr = req + offset;
+			for (int i = 0; i < num_active; i++)
+			{
+				int parsed_id = -1;
+				int bytes_read = 0;
+				if (sscanf(ptr, "%d%n", &parsed_id, &bytes_read) >= 1)
+				{
+					active_ids[i] = parsed_id;
+					ptr += bytes_read;
+				}
+				else
+				{
+					active_ids[i] = -1;
+				}
+			}
+
+			std::lock_guard<std::mutex> lock(mutex_hercules_struct);
+			imss *imss_ = NULL;
+			const char *imss_uri = resolve_imss_uri(arguments);
+			int32_t imss_found_in = find_imss_pointer(imss_uri, &imss_);
+			if (imss_found_in != -1 && imss_ != NULL)
+			{
+				int32_t current_vid = imss_->info.current_view_id;
+				imss_->info.server_states[arguments->args->id] = SERVER_DECOMMISSIONED;
+				int32_t local_new_vid = AddTopologyView(&imss_->info, num_active, active_ids);
+				// Marks server decommissioned and links current topology view to the target view.
+				if (current_vid >= 0 && current_vid < imss_->info.num_views && local_new_vid != -1)
+				{
+					imss_->info.views[current_vid].decommissioned_server_id = arguments->args->id;
+					imss_->info.views[current_vid].next_view = local_new_vid;
+				}
+				curr_global_imss_info = &imss_->info;
+			}
+		}
+
+		slog_debug("[malleability] stopping this server, target_new_view=%d.", target_new_view);
 
 		pthread_t thread;
 		p_argv *arguments_aux = new p_argv;
 		*arguments_aux = *arguments;
+		strncpy(arguments_aux->curr_req, req, sizeof(arguments_aux->curr_req) - 1);
+		arguments_aux->curr_req[sizeof(arguments_aux->curr_req) - 1] = '\0';
 		arguments_aux->status = false;
 
 		if (pthread_create(&thread, NULL, move_blocks_2_server, (void *)arguments_aux) != 0)
@@ -3755,6 +3922,7 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		return 1;
 	}
 
+	/*
 	if (!strcmp(mode, "REORDERSERVER"))
 	{
 		malleability_status.store(MALLEABILITY_INPROGRESS, std::memory_order_release);
@@ -3803,6 +3971,114 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 			return 1;
 		}
 		return 1;
+	}
+	*/
+
+	if (!strcmp(mode, MSG_NOTIFY_DECOMMISSION))
+	{
+		int target_id = -1;
+		int new_view_id = -1;
+		int num_active = 0;
+		int offset = 0;
+		// Get the target server to be decommissioned and the new view's id it belongs to.
+		int items_read = sscanf(req, "%*s %d %d %d%n", &target_id, &new_view_id, &num_active, &offset);
+		if (items_read < 2 || target_id < 0 || target_id >= MAX_SERVERS_PER_VIEW)
+		{
+			slog_error("HERCULES_ERR_NOTIFY_DECOMMISSION: invalid parameters in request '%s'", req);
+			fprintf(stderr, "HERCULES_ERR_NOTIFY_DECOMMISSION: invalid parameters in request '%s'\n", req);
+			SendConfirmationMessage(arguments, MSG_ERROR_OP);
+			return -1;
+		}
+		// Parse the list of servers that are active in the new view
+		int32_t active_ids[MAX_SERVERS_PER_VIEW];
+		if (items_read >= 3 && num_active > 0 && num_active <= MAX_SERVERS_PER_VIEW)
+		{
+			const char *ptr = req + offset;
+			for (int i = 0; i < num_active; i++)
+			{
+				int parsed_id = -1;
+				int bytes_read = 0;
+				if (sscanf(ptr, "%d%n", &parsed_id, &bytes_read) >= 1)
+				{
+					active_ids[i] = parsed_id;
+					ptr += bytes_read;
+				}
+				else
+				{
+					active_ids[i] = -1;
+				}
+			}
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(mutex_hercules_struct);
+			imss *imss_ = NULL;
+			const char *imss_uri = resolve_imss_uri(arguments);
+			int32_t imss_found_in = find_imss_pointer(imss_uri, &imss_);
+			if (imss_found_in == -1)
+			{
+				slog_debug("imss structure not found, requesting to the metadata server");
+				if (ensure_inter_backend_connected(imss_uri) != 0)
+				{
+					slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+					fprintf(stderr, "HERCULES_ERR_NOTIFY_DECOMMISSION_ENSURE_INTER_BACKEND_CONNECTED: failed for %s\n", imss_uri);
+					SendConfirmationMessage(arguments, MSG_ERROR_OP);
+					return -1;
+				}
+				find_imss_pointer(imss_uri, &imss_);
+			}
+			if (imss_ == NULL || imss_->info.num_storages <= 0)
+			{
+				slog_fatal("Error creating HERCULES's resources, the process cannot be started");
+				fprintf(stderr, "HERCULES_ERR_NOTIFY_DECOMMISSION_INVALID_IMSS: failed to resolve valid IMSS structure for %s\n", imss_uri);
+				SendConfirmationMessage(arguments, MSG_ERROR_OP);
+				return -1;
+			}
+
+			int32_t current_vid = imss_->info.current_view_id;
+
+			// Mark target server decommissioned in server_states.
+			imss_->info.server_states[target_id] = SERVER_DECOMMISSIONED;
+
+			// Add or update the new topology view.
+			int32_t local_new_vid = -1;
+			if (num_active > 0)
+			{
+				local_new_vid = AddTopologyView(&imss_->info, num_active, active_ids);
+				number_storage_servers.store((uint32_t)num_active);
+			}
+			else
+			{
+				int32_t fallback_active[MAX_SERVERS_PER_VIEW];
+				int32_t fallback_count = collect_active_rw_servers(&imss_->info, fallback_active);
+				if (fallback_count > 0)
+				{
+					local_new_vid = AddTopologyView(&imss_->info, fallback_count, fallback_active);
+					number_storage_servers.store((uint32_t)fallback_count);
+				}
+			}
+
+			// Update previous active view link.
+			if (current_vid >= 0 && current_vid < imss_->info.num_views && local_new_vid != -1)
+			{
+				imss_->info.views[current_vid].decommissioned_server_id = target_id;
+				imss_->info.views[current_vid].next_view = local_new_vid;
+			}
+
+			curr_global_imss_info = &imss_->info;
+			id_server_to_modify = target_id;
+			last_malleability_action = MALLEABILITY_ACTION_DECOMMISSION;
+
+			// Enables read hold state for migrating blocks targeting this server.
+			decom_target_id.store(target_id, std::memory_order_release);
+			decom_prev_view_id.store(current_vid, std::memory_order_release);
+			decom_new_view_id.store(local_new_vid, std::memory_order_release);
+			decommissioning_active.store(true, std::memory_order_release);
+		}
+
+		slog_malleability("[MSG_NOTIFY_DECOMMISSION] Target server %d decommissioned, linked to view %d (no local blocks moved)", target_id, new_view_id);
+		SendConfirmationMessage(arguments, MSG_OK_OP);
+		return 0;
 	}
 
 	if (!strcmp(mode, "ADDSERVER"))
@@ -3975,6 +4251,7 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		slog_malleability("ENDDECOMMISSION received. Decommissioning complete across cluster.");
 		fprintf(stderr, "[%s] Decommissioning complete across cluster, attending pending requests.\n", arguments->args->data_hostname);
 		Attend_pending_requests();
+		attend_pending_migrating_reads(arguments);
 		fprintf(stderr, "[%s] All pending requests have been attended.\n", arguments->args->data_hostname);
 		pthread_mutex_lock(&mutex_malleability);
 		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
@@ -3993,7 +4270,6 @@ int handle_unlink_op(p_argv *arguments, const std::string &key, uint32_t block_o
 	void *address_ = NULL;
 	uint64_t block_size_rtvd = 0;
 	HierarchicalRecords *hierarchical_map = arguments->hierarchical_map;
-	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 	const char *response_msg = NULL;
 
 	// "block offset" represent how many processes has the file open.
@@ -4164,7 +4440,6 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 	uint64_t block_size_rtvd = 0;
 	HierarchicalRecords *hierarchical_map = arguments->hierarchical_map;
 	std::shared_ptr<map_records> map = arguments->map;
-	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 	int32_t ret = -1;
 
 	switch (op_type)
@@ -4176,107 +4451,147 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 
 		if (ret == 0)
 		{ // block does not exist.
-		  // Send the error code block.
-			ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
-			if (ret < 0)
+			if (is_block_in_flight(key, arguments->args->id))
 			{
-				SendConfirmationMessage(arguments, MSG_OK_OP);
-				perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
-				slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
+				std::lock_guard<std::mutex> lock(mutex_pending_migrating_reads);
+				if (decommissioning_active.load(std::memory_order_acquire))
+				{
+					// Re-check if the block arrived before acquiring lock.
+					ret = hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd);
+					if (ret == 0)
+					{
+						slog_malleability("[READ_OP] In-flight migrating block requested: key=%s. Enqueueing pending read.", key.c_str());
+						PendingMigratingRead pending_read;
+						pending_read.ucp_worker = arguments->ucp_worker;
+						pending_read.server_ep = arguments->server_ep;
+						pending_read.worker_uid = arguments->worker_uid;
+						pending_read.thread_id = arguments->thread_id;
+						pending_read.key = key;
+						pending_read.op_type = op_type;
+						pending_read.block_offset = block_offset;
+						pending_read.to_read = to_read;
+						pending_read.is_shared_memory = is_shared_memory;
+						pending_read.shm_key = shm_key;
+						pending_read.async_io = (arguments->args != NULL) ? arguments->args->async_io : SYNC;
+						pending_migrating_reads.push_back(pending_read);
+						return 0;
+					}
+				}
+				else
+				{
+					// Decommissioning concluded during lock acquisition; re-check if block was stored.
+					ret = hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd);
+				}
+			}
+			else if (ret == 0 && decom_target_id.load(std::memory_order_acquire) >= 0)
+			{
+				// Decommissioning might have concluded immediately prior to in-flight check; re-check once.
+				ret = hierarchical_map->HierarchicalMapGet(key, &address_, &block_size_rtvd);
+			}
+
+			if (ret == 0)
+			{
+				// Send the error code block.
+				ret = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, err_code, STRING, arguments->worker_uid);
+				if (ret < 0)
+				{
+					SendConfirmationMessage(arguments, MSG_OK_OP);
+					perror("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
+					slog_error("HERCULES_ERR_WORKER_SEND_DYNAMIC_STREAM_READ_NON_EXISTING_BLOCK");
+					return -1;
+				}
+				break;
+			}
+		}
+
+		// Here we do not need to check the number of links to the dataset
+		// because to know if the file is dirty, we use the metadata server.
+		// check if it is the block 0.
+		bool is_block_zero = false;
+		std::size_t found = key.find("$0");
+		if (found != std::string::npos)
+		{
+			is_block_zero = true;
+		}
+
+		if (to_read <= 0)
+		{
+			to_read = block_size_rtvd;
+		}
+		slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld bytes (%ld kb), is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read, to_read / 1024, is_shared_memory);
+		size_t ret_send_data = 0;
+		if (is_shared_memory)
+		{
+			// put the private data on the shared memory.
+			pthread_mutex_lock(&memory_protect);
+			void *content = setContentSMByID(shm_key, to_read, (char *)address_ + block_offset);
+			pthread_mutex_unlock(&memory_protect);
+			const char *response = MSG_OK_OP;
+
+			if (content == NULL)
+			{
+				fprintf(stderr, "HERCULES_ERR_SETTING_SHM_CONTENT_READ_OP\n");
+				slog_error("HERCULES_ERR_SETTING_SHM_CONTENT_READ_OP");
+				response = MSG_ERROR_OP;
+			}
+			else
+			{
+				unlinkSM(content);
+			}
+
+			// send the confirmation to the client.
+			ret = SendConfirmationMessage(arguments, response);
+			if (ret == 0)
+			{
+				perror("HERCULES_ERR_PUBLISH_READ_BLOCK_SHM");
+				slog_error("HERCULES_ERR_PUBLISH_READ_BLOCK_SHM");
 				return -1;
 			}
 		}
 		else
 		{
-			// Here we do not need to check the number of links to the dataset
-			// because to know if the file is dirty, we use the metadata server.
-			// check if it is the block 0.
-			bool is_block_zero = false;
-			std::size_t found = key.find("$0");
-			if (found != std::string::npos)
-			{
-				is_block_zero = true;
-			}
-
-			if (to_read <= 0)
-			{
-				to_read = block_size_rtvd;
-			}
-			slog_debug("[READ_OP][READ_OP] Send the requested block with key=%s, block_offset=%ld, block_size_rtvd=%ld kb, to_read=%ld bytes (%ld kb), is_shared_memory=%d", key.c_str(), block_offset, block_size_rtvd / 1024, to_read, to_read / 1024, is_shared_memory);
-			size_t ret_send_data = 0;
-			if (is_shared_memory)
-			{
-				// put the private data on the shared memory.
+			if (arguments->args->async_io == SYNC)
+			{ // Synchronous.
 				pthread_mutex_lock(&memory_protect);
-				void *content = setContentSMByID(shm_key, to_read, (char *)address_ + block_offset);
+				ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
 				pthread_mutex_unlock(&memory_protect);
-				const char *response = MSG_OK_OP;
-
-				if (content == NULL)
-				{
-					fprintf(stderr, "HERCULES_ERR_SETTING_SHM_CONTENT_READ_OP\n");
-					slog_error("HERCULES_ERR_SETTING_SHM_CONTENT_READ_OP");
-					response = MSG_ERROR_OP;
-				}
-				else
-				{
-					unlinkSM(content);
-				}
-
-				// send the confirmation to the client.
-				ret = SendConfirmationMessage(arguments, response);
-				if (ret == 0)
-				{
-					perror("HERCULES_ERR_PUBLISH_READ_BLOCK_SHM");
-					slog_error("HERCULES_ERR_PUBLISH_READ_BLOCK_SHM");
-					return -1;
-				}
 			}
 			else
-			{
-				if (arguments->args->async_io == SYNC)
-				{ // Synchronous.
-					pthread_mutex_lock(&memory_protect);
-					ret_send_data = send_data(arguments->ucp_worker, arguments->server_ep, (char *)address_ + block_offset, to_read, arguments->worker_uid);
-					pthread_mutex_unlock(&memory_protect);
+			{ // Asynchronous.
+				char *send_buffer = (char *)malloc(to_read);
+				if (send_buffer == NULL)
+				{
+					slog_error("HERCULES_ERR_ASYNC_READ_MEM_ERR %zu bytes.", to_read);
+					return -1;
+				}
+				pthread_mutex_lock(&memory_protect);
+				memcpy(send_buffer, (char *)address_ + block_offset, to_read);
+				pthread_mutex_unlock(&memory_protect);
+
+				// Create a tracking struct and add it to our list.
+				ServerSendRequest *new_send = new ServerSendRequest();
+				new_send->buffer_to_free = send_buffer;
+				outstanding_sends++;
+				void *ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, send_buffer, to_read, arguments->worker_uid, new_send);
+				if (UCS_PTR_IS_PTR(ucx_req_handle))
+				{
+					// The request is sending. The callback will handle cleanup and decrement outstanding_sends.
+				}
+				else if (UCS_PTR_IS_ERR(ucx_req_handle))
+				{
+					slog_error("Failed to initiate async send on server.");
+					fprintf(stderr, "Failed to initiate async send on server.");
+					if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+					{
+						outstanding_sends--;
+					}
 				}
 				else
-				{ // Asynchronous.
-					char *send_buffer = (char *)malloc(to_read);
-					if (send_buffer == NULL)
+				{
+					// It completed immediately. isend_data2 already cleaned up new_send and send_buffer via ~ServerSendRequest().
+					if (outstanding_sends.load(std::memory_order_relaxed) > 0)
 					{
-						slog_error("HERCULES_ERR_ASYNC_READ_MEM_ERR %zu bytes.", to_read);
-						return -1;
-					}
-					pthread_mutex_lock(&memory_protect);
-					memcpy(send_buffer, (char *)address_ + block_offset, to_read);
-					pthread_mutex_unlock(&memory_protect);
-
-					// Create a tracking struct and add it to our list.
-					ServerSendRequest *new_send = new ServerSendRequest();
-					new_send->buffer_to_free = send_buffer;
-					outstanding_sends++;
-					void *ucx_req_handle = isend_data2(arguments->ucp_worker, arguments->server_ep, send_buffer, to_read, arguments->worker_uid, new_send);
-					if (UCS_PTR_IS_PTR(ucx_req_handle))
-					{
-						// The request is sending. The callback will handle cleanup and decrement outstanding_sends.
-					}
-					else if (UCS_PTR_IS_ERR(ucx_req_handle))
-					{
-						slog_error("Failed to initiate async send on server.");
-						fprintf(stderr, "Failed to initiate async send on server.");
-						if (outstanding_sends.load(std::memory_order_relaxed) > 0)
-						{
-							outstanding_sends--;
-						}
-					}
-					else
-					{
-						// It completed immediately. isend_data2 already cleaned up new_send and send_buffer via ~ServerSendRequest().
-						if (outstanding_sends.load(std::memory_order_relaxed) > 0)
-						{
-							outstanding_sends--;
-						}
+						outstanding_sends--;
 					}
 				}
 			}
@@ -5087,6 +5402,22 @@ int handle_write_operation(
 		{
 			// Another thread has inserted the same key.
 			slog_debug("[WRITE_OP] Race lost! Key %s appeared while receiving data.", key.c_str());
+			if (is_migration_write_request(arguments, transfer_mode))
+			{
+				pthread_mutex_unlock(&memory_protect);
+				slog_debug("[WRITE_OP] Key %s already updated by client. Skipping stale migration overwrite.", key.c_str());
+				if (reused_memory == 0)
+				{
+					free(buffer);
+				}
+				else
+				{
+					StsQueue.push(mem_pool, buffer);
+				}
+				buffer = NULL;
+				return 0;
+			}
+
 			// We copy the temporal buffer into the one that is already on the map.
 			memcpy((char *)address_ + block_offset, (char *)buffer + block_offset, msg_length);
 			pthread_mutex_unlock(&memory_protect);
@@ -5123,7 +5454,7 @@ int handle_write_operation(
 			struct stat *old, *latest;
 			size_t msg_length = 0;
 			// If data is stored in shared memory due LOCAL policy, the server does not need to receive the data.
-			if (transfer_mode == CommunicationMode::MODE_NETWORK || transfer_mode == CommunicationMode::MODE_DISK)
+			if (transfer_mode != CommunicationMode::MODE_SHM)
 			{ // non shared memory method.
 				void *buffer = NULL;
 				if (transfer_mode == CommunicationMode::MODE_NETWORK)
@@ -5134,6 +5465,12 @@ int handle_write_operation(
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
 						return -1;
+					}
+
+					// Stale migration check on existing block 0
+					if (handle_stale_migration_write(arguments, transfer_mode, key, msg_length))
+					{
+						return 0;
 					}
 
 					buffer = static_cast<void *>(malloc(msg_length));
@@ -5147,6 +5484,10 @@ int handle_write_operation(
 				}
 				else
 				{
+					if (handle_stale_migration_write(arguments, transfer_mode, key, block_size_recv))
+					{
+						return 0;
+					}
 					msg_length = block_size_recv;
 					buffer = (void *)data_from_disk;
 				}
@@ -5255,7 +5596,7 @@ int handle_write_operation(
 		{ // non block 0.
 			slog_debug("[WRITE_OP] Updated non 0 existing block, key.c_str(): %s", key.c_str());
 			size_t msg_length = 0;
-			if (transfer_mode == CommunicationMode::MODE_NETWORK || transfer_mode == CommunicationMode::MODE_DISK)
+			if (transfer_mode != CommunicationMode::MODE_SHM)
 			{ // non shared memory.
 				if (transfer_mode == CommunicationMode::MODE_NETWORK)
 				{
@@ -5268,6 +5609,13 @@ int handle_write_operation(
 						// pthread_mutex_unlock(&memory_protect);
 						return -1;
 					}
+
+					// Stale migration check on existing block:
+					if (handle_stale_migration_write(arguments, transfer_mode, key, msg_length))
+					{
+						return 0;
+					}
+
 					slog_debug("msg_length=%lu, block_offset=%ld, msg_length=%zu", msg_length, block_offset, msg_length);
 					pthread_mutex_lock(&memory_protect);
 					msg_length = recv_data(arguments->ucp_worker, arguments->server_ep, static_cast<char *>(address_) + block_offset, msg_length, arguments->worker_uid, 1);
@@ -5275,6 +5623,10 @@ int handle_write_operation(
 				}
 				else
 				{
+					if (handle_stale_migration_write(arguments, transfer_mode, key, block_size_recv))
+					{
+						return 0;
+					}
 					msg_length = block_size_recv;
 					memcpy((char *)address_ + block_offset, data_from_disk, msg_length);
 				}
@@ -5847,9 +6199,6 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	int64_t more = -1;
 	size_t more_size = sizeof(more);
 
-	// Code to be sent if the requested to-be-read key does not exist.
-	char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
-
 	uint32_t operation = 0; // Hercules instance or dataset structure.
 	char mode[MODE_SIZE + 1] = {0};
 	char number[NUMBER_SIZE + 1] = {0};
@@ -5925,10 +6274,11 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 	if (!strncmp(req, MSG_DECOM_DATASERVERS, strlen(MSG_DECOM_DATASERVERS)))
 	{
 		acks_received++;
-		int expected_acks = arguments->args->num_data_servers + 1;
+		// Removed server notifies metadata server upon completing migration.
+		int expected_acks = 1;
 		fprintf(stderr, "[%d/%d] ACK received: %s\n", acks_received.load(), expected_acks, req);
 		slog_malleability("[%d/%d] ACK received: %s", acks_received.load(), expected_acks, req);
-		if (acks_received >= expected_acks)
+		// if (acks_received >= expected_acks)
 		{
 			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
 			Attend_pending_requests();
