@@ -1899,6 +1899,13 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 	return 0;
 }
 
+void reset_malleability_event_counters()
+{
+	consecutive_commissioning_signals = 0;
+	consecutive_decommissioning_signals = 0;
+	consecutive_hold_signals = 0;
+}
+
 /**
  * @brief Malleability thread to take the decision to increase or decrease the number of data servers.
  *
@@ -1946,7 +1953,7 @@ void *run_malleability(void *th_argv)
 
 	// Only trigger the actual scaling operation if the threshold is met.
 	if (consecutive_commissioning_signals >= arguments->args->malleability_tolerance_commissioning)
-	{
+	{ // commissioning threshold.
 		comissioning_stage(arguments);
 		arguments = NULL;
 		// Clear all history metrics for remaining servers
@@ -1957,60 +1964,62 @@ void *run_malleability(void *th_argv)
 		}
 		pthread_mutex_unlock(&mutext_performance_metrics);
 	}
-	else
-	{
-		slog_malleability("SCALE_UP: Waiting for more consecutive strakes. consecutive_commissioning_signals=%d, CONSECUTIVE_SIGNALS_THRESHOLD=%" PRId32, consecutive_commissioning_signals, arguments->args->malleability_tolerance_commissioning);
-
+	
+	else if (consecutive_decommissioning_signals >= arguments->args->malleability_tolerance_decommissioning)
+	{ // decommissioning threshold.
 		int32_t min_servers_allowed = (arguments->args->lower_bound_servers > 1)
 						  ? arguments->args->lower_bound_servers
 						  : 1;
-
-		if (consecutive_decommissioning_signals >= arguments->args->malleability_tolerance_decommissioning)
+		if ((int32_t)number_storage_servers.load() <= min_servers_allowed)
 		{
-			if ((int32_t)number_storage_servers.load() <= min_servers_allowed)
+			slog_malleability("SCALE_DOWN skipped: current active servers (%d) is at or below lower bound (%d).", number_storage_servers.load(), min_servers_allowed);
+			fprintf(stderr, "SCALE_DOWN skipped: current active servers (%d) is at or below lower bound (%d).\n", number_storage_servers.load(), min_servers_allowed);
+			consecutive_decommissioning_signals = 0;
+		}
+		else if (slowest_server.server_id != -1)
+		{
+			std::string key_to_remove = slowest_server.server_hostname;
+			int target_id = slowest_server.server_id;
+			int ret = decomissioning_stage(arguments, target_id);
+			if (ret)
 			{
-				slog_malleability("SCALE_DOWN skipped: current active servers (%d) is at or below lower bound (%d).", number_storage_servers.load(), min_servers_allowed);
-				fprintf(stderr, "SCALE_DOWN skipped: current active servers (%d) is at or below lower bound (%d).\n", number_storage_servers.load(), min_servers_allowed);
-				consecutive_decommissioning_signals = 0;
-			}
-			else if (slowest_server.server_id != -1)
-			{
-				std::string key_to_remove = slowest_server.server_hostname;
-				int target_id = slowest_server.server_id;
-				int ret = decomissioning_stage(arguments, target_id);
-				if (ret)
+				pthread_mutex_lock(&mutext_performance_metrics);
+				// remove the decommissioned server
+				size_t erased_elements = elasticity_records_history.erase(key_to_remove);
+				// clear the history metrics for all remaining servers
+				for (auto &pair : elasticity_records_history)
 				{
-					pthread_mutex_lock(&mutext_performance_metrics);
-					// remove the decommissioned server
-					size_t erased_elements = elasticity_records_history.erase(key_to_remove);
-					// clear the history metrics for all remaining servers
-					for (auto &pair : elasticity_records_history)
-					{
-						pair.second.clear();
-					}
-					pthread_mutex_unlock(&mutext_performance_metrics);
-
-					if (erased_elements > 0)
-					{
-						slog_malleability("Server %s has been deleted from the elasticity records history.", key_to_remove.c_str());
-					}
-					else
-					{
-						slog_error("Server %s has NOT been deleted from the elasticity records history.", key_to_remove.c_str());
-					}
+					pair.second.clear();
 				}
-			}
-			else
-			{
-				fprintf(stderr, "HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
-				slog_error("HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
+				pthread_mutex_unlock(&mutext_performance_metrics);
+
+				if (erased_elements > 0)
+				{
+					slog_malleability("Server %s has been deleted from the elasticity records history.", key_to_remove.c_str());
+				}
+				else
+				{
+					slog_error("Server %s has NOT been deleted from the elasticity records history.", key_to_remove.c_str());
+				}
 			}
 		}
 		else
 		{
-			slog_malleability("SCALE_DOWN: Waiting for more consecutive strakes. consecutive_decommissioning_signals=%d, CONSECUTIVE_SIGNALS_THRESHOLD=%" PRId32, consecutive_decommissioning_signals, arguments->args->malleability_tolerance_decommissioning);
+			fprintf(stderr, "HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
+			slog_error("HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
 		}
 	}
+	else if (consecutive_hold_signals >= 10) 
+	{ // stable threshold.
+		fprintf(stderr,"HOLD: System has been stable for 10 events, restarting counters.\n");
+		reset_malleability_event_counters();
+	}
+	else
+	{
+		slog_malleability("SCALE_DOWN: Waiting for more consecutive strakes. consecutive_decommissioning_signals=%d/%" PRId32 ", consecutive_commissioning_signals=%d/%" PRId32 ", consecutive_hold_signals=%d/10", consecutive_decommissioning_signals, arguments->args->malleability_tolerance_decommissioning, consecutive_commissioning_signals, arguments->args->malleability_tolerance_commissioning, consecutive_hold_signals);
+	}
+
+
 
 	comissioning_on.store(false, std::memory_order_release);
 	pthread_mutex_unlock(&mutext_malleability);
@@ -2039,8 +2048,8 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 
 	if (imss_info_struct == NULL)
 	{
-		fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_INVALID_HERCULES_STRUCT\n");
 		slog_error("HERCULES_ERR_COMISSIONING_STAGE_INVALID_HERCULES_STRUCT");
+		fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_INVALID_HERCULES_STRUCT\n");
 		comissioning_on.store(false, std::memory_order_release);
 		free(arguments);
 		return NULL;
@@ -2793,11 +2802,13 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 	// 	fprintf(stderr, "DECISION: SCALE UP! Performance trend is strongly negative (%.2f), number of active servers=%d\n", slope, number_storage_servers);
 	// 	return true;
 	// }
-	if (consecutive_commissioning_signals > 0)
-		consecutive_commissioning_signals = 0;
+	// if (consecutive_commissioning_signals > 0)
+	// 	consecutive_commissioning_signals = 0;
 
-	if (consecutive_decommissioning_signals > 0)
-		consecutive_decommissioning_signals = 0;
+	// if (consecutive_decommissioning_signals > 0)
+	// 	consecutive_decommissioning_signals = 0;
+
+	consecutive_hold_signals++;
 
 #ifdef DPRINTF
 	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, overall_moving_average=%.2f bytes (%.2f MB/s)\n", overall_moving_average, overall_moving_average / MB, performance_threshold, performance_threshold / MB, number_storage_servers.load(), overall_moving_average, overall_moving_average / MB);

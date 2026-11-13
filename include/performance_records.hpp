@@ -67,6 +67,7 @@ static int best_number_of_servers = 0;
 static std::atomic<int> number_of_history_records{0};
 static unsigned int consecutive_commissioning_signals = 0;
 static unsigned int consecutive_decommissioning_signals = 0;
+static unsigned int consecutive_hold_signals = 0;
 
 // static void PerformanceRecordsRemoveKey(int32_t server_id)
 static int PerformanceRecordsRemoveKey(char *server_hostname)
