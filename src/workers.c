@@ -675,6 +675,13 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 		}
 	}
 
+	if (dest_view == NULL || dest_view->num_servers <= 0)
+	{
+		slog_error("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_INVALID_VIEW: dest_view is NULL or empty");
+		fprintf(stderr, "HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_INVALID_VIEW: dest_view is NULL or empty\n");
+		return 0;
+	}
+
 	slog_malleability("Calling first garbage collector.");
 	global_hierarchical_map->HierarchicalMapCleanGarbageCollector();
 	// Get all the keys of this server.
@@ -685,7 +692,7 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 	int number_of_blocks_sent = 0;
 	uint64_t total_data_moved = 0;
 
-	// One buffer per server, allocated lazily.
+	// One buffer per target connection index, allocated lazily.
 	std::unordered_map<int, ServerBuffer> server_buffers;
 
 	for (const std::string &key : block_keys)
@@ -701,7 +708,6 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 			const auto &inner_map = *value;
 
 			// Iterate through the inner map
-			int next_server = 0;
 			for (const auto &inner_pair : inner_map)
 			{
 				number_of_blocks_sent++;
@@ -724,32 +730,25 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 					slog_error("Invalid block '%s' extracted from '%s'", block.c_str(), inner_key.c_str());
 					continue;
 				}
-				// TODO: check for the current data policy in the dataset, not in the imss configuration.
-				/*				
-				next_server = find_server(number_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_global_imss_info->session_plcy);
-				*/
-				if (dest_view != NULL && dest_view->num_servers > 0)
-				{
-					int32_t logical_server = find_server(dest_view->num_servers, block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_global_imss_info->session_plcy);
-					next_server = dest_view->server_ids[logical_server];
-				}
-				else
-				{
-					next_server = find_server(number_storage_servers.load(), block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_global_imss_info->session_plcy);
-				}
+
+				// Resolve target server using destination topology view.
+				// target_conn_idx is the connection index (0 .. dest_view->num_servers - 1) in curr_imss.conns.eps.
+				// next_server is the persistent physical server ID in dest_view->server_ids.
+				int32_t target_conn_idx = find_server(dest_view->num_servers, block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_global_imss_info->session_plcy);
+				int next_server = dest_view->server_ids[target_conn_idx];
 
 				// TODO: check replication factor.
 
-				slog_live("key='%s',\turi='%s',\tblock='%s',\tnext server=%d", inner_key.c_str(), data_uri.c_str(), block.c_str(), next_server);
+				slog_live("key='%s',\turi='%s',\tblock='%s',\tnext server=%d,\tconn_idx=%d", inner_key.c_str(), data_uri.c_str(), block.c_str(), next_server, target_conn_idx);
 
-				if (next_server == server_id && server_status == true)
+				if (next_server == (int)server_id && server_status == true)
 				{
-					// fprintf(stderr, "[SKIP] BLOCK %ld TO %d SERVER\n", block_number, next_server);
+					// Skip blocks that remain mapped to the current server.
 					slog_debug("[SKIP] BLOCK %d TO SERVER %d ", block_number, next_server);
 					continue;
 				}
 
-				ServerBuffer &srv_buf = server_buffers[next_server]; // only used for MODE_DISK and MODE_BUFF_NETWORK
+				ServerBuffer &srv_buf = server_buffers[target_conn_idx]; // only used for MODE_DISK and MODE_BUFF_NETWORK
 				if (mode == CommunicationMode::MODE_DISK || mode == CommunicationMode::MODE_BUFF_NETWORK)
 				{
 					if (srv_buf.data.capacity() == 0)
@@ -758,22 +757,22 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 					// Flush the buffer first if the next block would exceed max_size.
 					if (append_block_to_buffer(srv_buf, data_uri.c_str(), (int32_t)block_number, inner_value.data, (uint64_t)inner_value.size))
 					{
-						slog_debug("Buffer full for server %d (%zu bytes), flushing before appending.", next_server, srv_buf.data.size());
+						slog_debug("Buffer full for connection %d (server %d, %zu bytes), flushing before appending.", target_conn_idx, next_server, srv_buf.data.size());
 
-						// Flush the full buffer.
+						// Flush the full buffer using endpoint connection index.
 						int rc = 0;
 						if (mode == CommunicationMode::MODE_DISK)
 						{
-							rc = flush_server_buffer(next_server, srv_buf, malleability_checkpoint_path, data_hostname, number_storage_servers.load());
+							rc = flush_server_buffer(target_conn_idx, srv_buf, malleability_checkpoint_path, data_hostname, dest_view->num_servers);
 						}
 						if (mode == CommunicationMode::MODE_BUFF_NETWORK)
 						{
-							rc = flush_data_to_network(next_server, srv_buf, data_hostname, number_storage_servers.load());
+							rc = flush_data_to_network(target_conn_idx, srv_buf, data_hostname, dest_view->num_servers);
 						}
 
 						if (rc < 0)
 						{
-							slog_error("HERCULES_ERR_FLUSH_MID_LOOP, server=%d", next_server);
+							slog_error("HERCULES_ERR_FLUSH_MID_LOOP, conn_idx=%d, server=%d", target_conn_idx, next_server);
 							return -1;
 						}
 
@@ -785,14 +784,14 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 				}
 				else
 				{ // MODE_NETWORK case.
-					// 	here we can send key.c_str() directly to reduce the number of operations.
+					// Send block directly to target server using endpoint connection index.
 					if (set_data_server(data_uri.c_str(),
 							    (int32_t)block_number,
 							    inner_value.data,
 							    inner_value.size,
 							    0,
-							    next_server,
-							    number_storage_servers.load()) < 0)
+							    target_conn_idx,
+							    dest_view->num_servers) < 0)
 					{
 						slog_error("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_SET_DATA");
 						fprintf(stderr, "HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_SET_DATA\n");
@@ -806,25 +805,25 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 		}
 	}
 
-	// flush all per-server buffers to disk or network and notify the corresponding server.
+	// Flush all per-server buffers to disk or network and notify the corresponding server.
 	if (mode == CommunicationMode::MODE_DISK || mode == CommunicationMode::MODE_BUFF_NETWORK)
 	{
-		for (auto &[srv_id, srv_buf] : server_buffers)
+		for (auto &[conn_idx, srv_buf] : server_buffers)
 		{
 			int rc = 0;
 			if (mode == CommunicationMode::MODE_DISK)
 			{
-				rc = flush_server_buffer(srv_id, srv_buf, malleability_checkpoint_path, data_hostname, number_storage_servers.load());
+				rc = flush_server_buffer(conn_idx, srv_buf, malleability_checkpoint_path, data_hostname, dest_view->num_servers);
 			}
 			if (mode == CommunicationMode::MODE_BUFF_NETWORK)
 			{
-				rc = flush_data_to_network(srv_id, srv_buf, data_hostname, number_storage_servers.load());
+				rc = flush_data_to_network(conn_idx, srv_buf, data_hostname, dest_view->num_servers);
 			}
 
 			if (rc < 0)
 			{
-				slog_error("HERCULES_ERR_FLUSH_MID_LOOP, server=%d", srv_id);
-				fprintf(stderr, "HERCULES_ERR_FLUSH_MID_LOOP, server=%d\n", srv_id);
+				slog_error("HERCULES_ERR_FLUSH_MID_LOOP, conn_idx=%d", conn_idx);
+				fprintf(stderr, "HERCULES_ERR_FLUSH_MID_LOOP, conn_idx=%d\n", conn_idx);
 				return -1;
 			}
 		}
@@ -1030,10 +1029,9 @@ void *move_blocks_2_server(void *th_argv)
 	else
 	{ // update current struct.
 		slog_debug("imss structure found, updating.");
-		// fprintf(stderr, "imss structure found, updating.\n");
-		// size_t num_elements_to_shift = update_ips_list(id_server_to_modify);
-		// Update_data_endpoint_list(id_server_to_modify, num_elements_to_shift);
-		ReleaseSpecificDataServerNetworkResources(local_imss_, 1, id_server_to_modify, number_storage_servers.load());
+		// Derives target server count from destination topology view.
+		int32_t current_vid = local_imss_->info.current_view_id;
+		ReleaseSpecificDataServerNetworkResources(local_imss_, 1, id_server_to_modify, local_imss_->info.views[current_vid].num_servers);
 	}
 	curr_global_imss_info = &local_imss_->info;
 
