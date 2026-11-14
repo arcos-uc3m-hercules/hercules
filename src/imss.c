@@ -3612,6 +3612,9 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 		}
 	}
 
+	// Tracks whether at least one server was removed during this call so repeated
+	// DATASERVERS messages do not re-link an already-active topology view.
+	int decommissioned_in_this_call = 0;
 	if (size_expected_server_list > 0)
 	{
 		// remove servers no longer in the expected list (decommission)
@@ -3632,11 +3635,14 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 				slog_malleability("Server %s (id=%d) decommissioned, releasing.", local_imss_->info.ips[i], i);
 				int remaining = (int)local_imss_->info.num_storages - 1;
 				ReleaseSpecificDataServerNetworkResources(local_imss_, 1, i, remaining);
+				// Mark the removed slot as -1 and shift higher IDs down across existing views
+				// to stay aligned with the compacted ips and eps arrays.
+				RemapTopologyViewsOnSlotRemoval(&local_imss_->info, i);
 				if (curr_dataset != NULL)
 				{
 					PrintIntervals(curr_dataset);
-					ClearIntervalsStructure(curr_dataset);
 				}
+				decommissioned_in_this_call = 1;
 				changes_found = 1;
 			}
 		}
@@ -3735,11 +3741,33 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 	{
 		int32_t new_view_id = AddTopologyView(&local_imss_->info, active_count, active_ids);
 		local_imss_->info.num_rw_storages = active_count;
-		// Links previous topology view to the new view on client decommissioning notification.
-		if (action_type == MALLEABILITY_ACTION_DECOMMISSION && prev_view_id >= 0 && prev_view_id < local_imss_->info.num_views && new_view_id != -1)
+		// Links previous topology view to the new view only when a server was actually removed
+		// in this notification and AddTopologyView created/selected a distinct view.
+		if (action_type == MALLEABILITY_ACTION_DECOMMISSION && decommissioned_in_this_call && new_view_id != -1)
 		{
-			local_imss_->info.views[prev_view_id].decommissioned_server_id = id_modified_server;
-			local_imss_->info.views[prev_view_id].next_view = new_view_id;
+			// Guard prev_view_id != new_view_id to avoid creating a self-loop if the active view was reused.
+			if (prev_view_id >= 0 && prev_view_id < local_imss_->info.num_views && prev_view_id != new_view_id)
+			{
+				// RemapTopologyViewsOnSlotRemoval already replaced the retired slot in server_ids
+				// with -1 and shifted surviving IDs down, so keep decommissioned_server_id cleared.
+				local_imss_->info.views[prev_view_id].decommissioned_server_id = -1;
+				local_imss_->info.views[prev_view_id].next_view = new_view_id;
+			}
+			// Link any older views that contain decommissioned slots (-1) and have no next_view yet
+			for (int32_t v = 0; v < new_view_id; v++)
+			{
+				if (local_imss_->info.views[v].next_view == -1)
+				{
+					for (int32_t s = 0; s < local_imss_->info.views[v].num_servers; s++)
+					{
+						if (local_imss_->info.views[v].server_ids[s] == -1)
+						{
+							local_imss_->info.views[v].next_view = new_view_id;
+							break;
+						}
+					}
+				}
+			}
 		}
 	}
 	else
@@ -4871,21 +4899,39 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 	server = view->server_ids[logical_server];
 
 	// Follows the topology view chain if the assigned server was decommissioned.
-	while (view != NULL)
+	// Bound traversal by total view count to guarantee termination even if a cycle occurs.
+	int32_t hops = 0;
+	int32_t max_hops = (curr_imss.info.num_views > 0) ? curr_imss.info.num_views : 1;
+	while (view != NULL && hops < max_hops)
 	{
 		int32_t next_vid = -1;
-		if (view->next_view != -1 && server == view->decommissioned_server_id)
+		if (server == -1)
+		{
+			// Slot -1 means RemapTopologyViewsOnSlotRemoval cleared a retired server here;
+			// advance to the drained next_view (or current active view as fallback).
+			if (view->next_view != -1 && view->next_view != view->view_id)
+			{
+				next_vid = view->next_view;
+			}
+			else if (curr_imss.info.current_view_id != view->view_id)
+			{
+				next_vid = curr_imss.info.current_view_id;
+			}
+		}
+		else if (view->next_view != -1 && view->next_view != view->view_id &&
+			 view->decommissioned_server_id != -1 && server == view->decommissioned_server_id)
 		{
 			next_vid = view->next_view;
 		}
 		else if (server >= 0 && server < MAX_SERVERS_PER_VIEW &&
-		         curr_imss.info.server_states[server] == SERVER_DECOMMISSIONED)
+			 curr_imss.info.server_states[server] == SERVER_DECOMMISSIONED)
 		{
 			// Searches subsequent views if the server was retired in a later transition.
 			for (int32_t v = view->view_id; v < curr_imss.info.num_views; v++)
 			{
 				if (curr_imss.info.views[v].decommissioned_server_id == server &&
-				    curr_imss.info.views[v].next_view != -1)
+				    curr_imss.info.views[v].next_view != -1 &&
+				    curr_imss.info.views[v].next_view != view->view_id)
 				{
 					next_vid = curr_imss.info.views[v].next_view;
 					break;
@@ -4897,10 +4943,12 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 			}
 		}
 
-		if (next_vid == -1)
+		// Stop once an active server is found or if next_vid points back to the current view.
+		if (next_vid == -1 || next_vid == view->view_id)
 		{
 			break;
 		}
+		hops++;
 
 		view = GetTopologyView(&curr_imss.info, next_vid);
 		if (view == NULL || view->num_servers <= 0)
@@ -6030,6 +6078,48 @@ int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *ser
 	info->current_view_id = new_view_id;
 	slog_malleability("[AddTopologyView] Created view_id=%d with %d servers", new_view_id, view->num_servers);
 	return new_view_id;
+}
+
+/**
+ * @brief Updates existing topology views when a server slot is removed and compacted out of ips/eps.
+ * Replaces references to removed_slot with -1 and shifts higher surviving server IDs down by 1.
+ */
+void RemapTopologyViewsOnSlotRemoval(imss_info *info, int32_t removed_slot)
+{
+	if (info == NULL || removed_slot < 0 || info->num_views <= 0)
+	{
+		slog_error("HERCULES_ERR_REMAP_VIEWS_INVALID_ARGS: invalid arguments (info=%p, removed_slot=%d, num_views=%d)", info, removed_slot, (info ? info->num_views : 0));
+		fprintf(stderr, "HERCULES_ERR_REMAP_VIEWS_INVALID_ARGS: invalid arguments (info=%p, removed_slot=%d, num_views=%d)\n", info, removed_slot, (info ? info->num_views : 0));
+		return;
+	}
+
+	for (int32_t v = 0; v < info->num_views; v++)
+	{
+		TopologyView *view = &info->views[v];
+		// Mark the retired slot as -1 and compact surviving server indices above removed_slot.
+		for (int32_t i = 0; i < view->num_servers; i++)
+		{
+			if (view->server_ids[i] == removed_slot)
+			{
+				view->server_ids[i] = -1;
+			}
+			else if (view->server_ids[i] > removed_slot)
+			{
+				view->server_ids[i]--;
+			}
+		}
+
+		// Keep decommissioned_server_id consistent with the shifted server indices.
+		if (view->decommissioned_server_id == removed_slot)
+		{
+			view->decommissioned_server_id = -1;
+		}
+		else if (view->decommissioned_server_id > removed_slot)
+		{
+			view->decommissioned_server_id--;
+		}
+	}
+	slog_malleability("[RemapTopologyViewsOnSlotRemoval] Remapped views for removed slot %d", removed_slot);
 }
 
 void InitDefaultTopologyView(imss_info *info)

@@ -234,6 +234,8 @@ int handle_memory_pre_saturation(p_argv *arguments, int saturated_server_id);
 int handle_memory_saturation(p_argv *arguments, int saturated_server_id);
 int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id);
 bool is_block_in_flight(const std::string &key, int32_t current_server_id);
+int32_t collect_active_rw_servers(imss_info *info, int32_t *active_server_ids);
+void finalize_decommission_on_surviving_server(p_argv *arguments);
 void attend_pending_migrating_reads(p_argv *arguments);
 bool is_migration_write_request(const p_argv *arguments, CommunicationMode transfer_mode);
 bool handle_stale_migration_write(p_argv *arguments, CommunicationMode transfer_mode, const std::string &key, size_t msg_length);

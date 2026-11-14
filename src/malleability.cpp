@@ -515,3 +515,90 @@ bool handle_stale_migration_write(p_argv *arguments, CommunicationMode transfer_
 
 	return true;
 }
+
+/**
+ * @brief Removes the decommissioned peer and re-indexes local IDs on surviving data servers.
+ *
+ * @param arguments Worker thread arguments containing server ID and hostname configuration.
+ */
+void finalize_decommission_on_surviving_server(p_argv *arguments)
+{
+	if (!arguments || !arguments->args)
+	{
+		slog_error("HERCULES_ERR_END_DECOM_NULL_ARGS: Invalid arguments or arguments->args in finalize_decommission_on_surviving_server");
+		fprintf(stderr, "HERCULES_ERR_END_DECOM_NULL_ARGS: Invalid arguments or arguments->args in finalize_decommission_on_surviving_server\n");
+		return;
+	}
+
+	int32_t target_id = decom_target_id.exchange(-1, std::memory_order_acq_rel);
+	if (target_id < 0)
+	{
+		return;
+	}
+
+	const char *imss_uri = resolve_imss_uri(arguments);
+	imss *imss_ = NULL;
+	int32_t target_num_servers = 0;
+
+	std::unique_lock<std::mutex> lock(mutex_hercules_struct);
+	int32_t imss_found_in = find_imss_pointer(imss_uri, &imss_);
+	if (imss_found_in == -1 || imss_ == NULL || imss_->info.num_storages <= 0)
+	{
+		slog_warn("HERCULES_WARN_END_DECOM_INVALID_IMSS: cannot finalize decommission for target %d (uri=%s)", target_id, imss_uri ? imss_uri : "null");
+		fprintf(stderr, "HERCULES_WARN_END_DECOM_INVALID_IMSS: cannot finalize decommission for target %d (uri=%s)\n", target_id, imss_uri ? imss_uri : "null");
+		return;
+	}
+
+	if (target_id >= imss_->info.num_storages)
+	{
+		slog_debug("finalize_decommission_on_surviving_server: target_id=%d already outside num_storages=%d", target_id, imss_->info.num_storages);
+		return;
+	}
+
+	// Never remove this surviving server's own hostname slot.
+	if (arguments->args->data_hostname[0] != '\0' && imss_->info.ips != NULL && imss_->info.ips[target_id] != NULL && strcmp(imss_->info.ips[target_id], arguments->args->data_hostname) == 0)
+	{
+		slog_error("HERCULES_ERR_END_DECOM_SELF_REMOVAL: target_id=%d matches self hostname '%s', aborting cleanup.", target_id, arguments->args->data_hostname);
+		fprintf(stderr, "HERCULES_ERR_END_DECOM_SELF_REMOVAL: target_id=%d matches self hostname '%s', aborting cleanup.\n", target_id, arguments->args->data_hostname);
+		return;
+	}
+
+	target_num_servers = imss_->info.num_storages - 1;
+	// ReleaseSpecificDataServerNetworkResources acquires mutex_hercules_struct internally.
+	lock.unlock();
+
+	int32_t release_ret = ReleaseSpecificDataServerNetworkResources(imss_, 1, target_id, target_num_servers);
+
+	lock.lock();
+	if (release_ret != 0)
+	{
+		slog_error("HERCULES_ERR_END_DECOM_RELEASE: failed to release resources for target_id=%d (ret=%d)", target_id, release_ret);
+		return;
+	}
+
+	number_storage_servers.store((uint32_t)imss_->info.num_storages);
+	size_t num_elements_to_shift = (imss_->info.num_storages > target_id) ? (size_t)(imss_->info.num_storages - target_id) : 0;
+	Update_data_endpoint_list(target_id, num_elements_to_shift);
+
+	// Shift local server ID down to stay aligned with metadata server and client slot indices.
+	if (arguments->args->id > target_id)
+	{
+		arguments->args->id--;
+	}
+	if (arguments->args != &args && args.id > target_id)
+	{
+		args.id--;
+	}
+	arguments->args->num_data_servers = (uint32_t)imss_->info.num_storages;
+	args.num_data_servers = (uint32_t)imss_->info.num_storages;
+
+	int32_t active_ids[MAX_SERVERS_PER_VIEW];
+	int32_t active_count = collect_active_rw_servers(&imss_->info, active_ids);
+	if (active_count > 0)
+	{
+		AddTopologyView(&imss_->info, active_count, active_ids);
+	}
+	curr_global_imss_info = &imss_->info;
+
+	slog_malleability("[END_DECOMMISSION] Removed server slot %d, new server_id=%d, num_storages=%d, current_view_id=%d", target_id, arguments->args->id, imss_->info.num_storages, imss_->info.current_view_id);
+}

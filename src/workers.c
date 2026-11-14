@@ -441,7 +441,7 @@ int SendConfirmationMessage(const p_argv *arguments, const char *msg)
  * @param active_server_ids Output array of at least MAX_SERVERS_PER_VIEW elements (can be NULL).
  * @return int32_t Number of active read-write storage servers found.
  */
-static int32_t collect_active_rw_servers(imss_info *info, int32_t *active_server_ids)
+int32_t collect_active_rw_servers(imss_info *info, int32_t *active_server_ids)
 {
 	if (info == NULL)
 	{
@@ -498,9 +498,10 @@ static int build_active_node_and_state_lists(const imss_info *info,
 	slog_malleability("Making list of avaiable nodes, num of storages %d (limit=%zu).", info->num_storages, limit);
 	fprintf(stderr, "Making list of avaiable nodes, num of storages %d (limit=%zu).\n", info->num_storages, limit);
 
+	int included_count = 0;
 	for (size_t i = 0; i < limit; i++)
 	{
-		if (info->ips[i] && info->ips[i][0] != '\0')
+		if (info->ips[i] && info->ips[i][0] != '\0' && info->server_states[i] != SERVER_DECOMMISSIONED)
 		{
 			if (list_of_active_nodes[0] != '\0')
 			{
@@ -513,9 +514,10 @@ static int build_active_node_and_state_lists(const imss_info *info,
 			uint8_t st = info->server_states[i];
 			snprintf(state_str, sizeof(state_str), "%u", st);
 			strncat(list_of_states, state_str, states_size - strlen(list_of_states) - 1);
+			included_count++;
 		}
 	}
-	return 0;
+	return included_count;
 }
 
 void Attend_pending_requests()
@@ -568,10 +570,16 @@ void Attend_pending_requests()
 	char response[PATH_MAX] = {'\0'};
 	char list_of_active_nodes[PATH_MAX] = {'\0'};
 	char list_of_states[PATH_MAX] = {'\0'};
-	build_active_node_and_state_lists(curr_global_imss_info, list_of_active_nodes, sizeof(list_of_active_nodes), list_of_states, sizeof(list_of_states));
+	int active_node_count = build_active_node_and_state_lists(curr_global_imss_info, list_of_active_nodes, sizeof(list_of_active_nodes), list_of_states, sizeof(list_of_states));
+	if (active_node_count < 0)
+	{
+		slog_error("Attend_pending_requests: Failed to build active node and state lists.");
+		fprintf(stderr, "[%s] Attend_pending_requests: Failed to build active node and state lists.\n", args.data_hostname);
+		return;
+	}
 	slog_malleability("List to send: %s, states: %s", list_of_active_nodes, list_of_states);
 
-	sprintf(response, "%s %" PRIu32 " %" PRId32 " %d %s %s", MSG_MALLEABILITY_DATASERVERS, number_storage_servers.load(), id_server_to_modify, last_malleability_action, list_of_active_nodes, list_of_states);
+	sprintf(response, "%s %" PRIu32 " %" PRId32 " %d %s %s", MSG_MALLEABILITY_DATASERVERS, (uint32_t)active_node_count, id_server_to_modify, last_malleability_action, list_of_active_nodes, list_of_states);
 	int ret = -1;
 	fprintf(stderr, "[AttendingPendingRequests] There are %zu pending requests, response=%s\n", requests_to_attend.size(), response);
 	// slog_malleability("There are %d pending requests", pending_requests.size());
@@ -1964,7 +1972,7 @@ void *run_malleability(void *th_argv)
 		}
 		pthread_mutex_unlock(&mutext_performance_metrics);
 	}
-	
+
 	else if (consecutive_decommissioning_signals >= arguments->args->malleability_tolerance_decommissioning)
 	{ // decommissioning threshold.
 		int32_t min_servers_allowed = (arguments->args->lower_bound_servers > 1)
@@ -2009,17 +2017,15 @@ void *run_malleability(void *th_argv)
 			slog_error("HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
 		}
 	}
-	else if (consecutive_hold_signals >= 10) 
+	else if (consecutive_hold_signals >= 10)
 	{ // stable threshold.
-		fprintf(stderr,"HOLD: System has been stable for 10 events, restarting counters.\n");
+		fprintf(stderr, "HOLD: System has been stable for 10 events, restarting counters.\n");
 		reset_malleability_event_counters();
 	}
 	else
 	{
 		slog_malleability("SCALE_DOWN: Waiting for more consecutive strakes. consecutive_decommissioning_signals=%d/%" PRId32 ", consecutive_commissioning_signals=%d/%" PRId32 ", consecutive_hold_signals=%d/10", consecutive_decommissioning_signals, arguments->args->malleability_tolerance_decommissioning, consecutive_commissioning_signals, arguments->args->malleability_tolerance_commissioning, consecutive_hold_signals);
 	}
-
-
 
 	comissioning_on.store(false, std::memory_order_release);
 	pthread_mutex_unlock(&mutext_malleability);
@@ -2543,13 +2549,20 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_use
 		}
 	}
 
+	int active_node_count = -1;
 	if (curr_global_imss_info && curr_global_imss_info->ips)
 	{
-		build_active_node_and_state_lists(curr_global_imss_info, list_of_active_nodes, sizeof(list_of_active_nodes), list_of_states, sizeof(list_of_states));
+		active_node_count = build_active_node_and_state_lists(curr_global_imss_info, list_of_active_nodes, sizeof(list_of_active_nodes), list_of_states, sizeof(list_of_states));
+	}
+	if (active_node_count < 0)
+	{
+		slog_error("send_node_list_2_frontend: Failed to build active node and state lists.");
+		fprintf(stderr, "[%s] send_node_list_2_frontend: Failed to build active node and state lists.\n", args.data_hostname);
+		return -1;
 	}
 	slog_debug("List to send: %s, states: %s", list_of_active_nodes, list_of_states);
 
-	sprintf(response, "%s %" PRIu32 " %" PRId32 " %d %s %s", MSG_MALLEABILITY_DATASERVERS, number_storage_servers.load(), id_server_to_modify, last_malleability_action, list_of_active_nodes, list_of_states);
+	sprintf(response, "%s %" PRIu32 " %" PRId32 " %d %s %s", MSG_MALLEABILITY_DATASERVERS, (uint32_t)active_node_count, id_server_to_modify, last_malleability_action, list_of_active_nodes, list_of_states);
 	int ret = -1;
 	ret = SendConfirmationMessage(&temp_p_argv_for_calls, response);
 	if (ret == 0)
@@ -3493,8 +3506,25 @@ int process_add_server(p_argv *arguments, const char *req)
 			return 1;
 		}
 
-		if (added_server_id == (uint32_t)server_args->id ||
-		    (server_args->data_hostname[0] != '\0' && strcmp(added_hostname, server_args->data_hostname) == 0))
+		if (server_args->data_hostname[0] != '\0')
+		{
+			if (strcmp(added_hostname, server_args->data_hostname) == 0)
+			{
+				slog_debug("skipping self-connection for server ID %" PRIu32 " (%s)", added_server_id, added_hostname);
+				number_storage_servers.store(num_servers);
+				collect_active_rw_servers(imss_info_struct, NULL);
+				imss_info_struct->num_storages = num_servers;
+				server_args->num_data_servers = num_servers;
+				curr_global_imss_info = &imss_->info;
+				return 1;
+			}
+			else if (added_server_id == (uint32_t)server_args->id)
+			{
+				slog_warn("HERCULES_WARN_ADDSERVER_ID_COLLISION: added server %s has ID %" PRIu32 " matching local server ID but distinct hostname (%s), proceeding to connect", added_hostname, added_server_id, server_args->data_hostname);
+				fprintf(stderr, "HERCULES_WARN_ADDSERVER_ID_COLLISION: added server %s has ID %" PRIu32 " matching local server ID but distinct hostname (%s), proceeding to connect\n", added_hostname, added_server_id, server_args->data_hostname);
+			}
+		}
+		else if (added_server_id == (uint32_t)server_args->id)
 		{
 			slog_debug("skipping self-connection for server ID %" PRIu32 " (%s)", added_server_id, added_hostname);
 			number_storage_servers.store(num_servers);
@@ -4259,8 +4289,9 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 	{
 		slog_malleability("ENDDECOMMISSION received. Decommissioning complete across cluster.");
 		fprintf(stderr, "[%s] Decommissioning complete across cluster, attending pending requests.\n", arguments->args->data_hostname);
-		Attend_pending_requests();
 		attend_pending_migrating_reads(arguments);
+		finalize_decommission_on_surviving_server(arguments);
+		Attend_pending_requests();
 		fprintf(stderr, "[%s] All pending requests have been attended.\n", arguments->args->data_hostname);
 		pthread_mutex_lock(&mutex_malleability);
 		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
