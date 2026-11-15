@@ -672,7 +672,7 @@ int32_t main(int32_t argc, char **argv)
 	}
 	else
 	{
-		extra_threads = 2; // dispatcher + garbage collector.
+		extra_threads = 3; // dispatcher + garbage collector + elasticity monitor.
 	}
 
 	total_threads = hercules_thread_pool_size + extra_threads;
@@ -680,7 +680,7 @@ int32_t main(int32_t argc, char **argv)
 	// Thread arguments.
 	p_argv arguments[total_threads];
 
-	ucp_worker_threads = (ucp_worker_h *)malloc(hercules_thread_pool_size * sizeof(ucp_worker_h));
+	ucp_worker_threads = (ucp_worker_h *)calloc(hercules_thread_pool_size, sizeof(ucp_worker_h));
 	// ucp_worker_h shared_worker;
 	// ret = init_worker(ucp_context, &shared_worker);
 	// if (ret != 0)
@@ -758,6 +758,25 @@ int32_t main(int32_t argc, char **argv)
 				ready(tmp_file_path, "ERROR");
 				perror("HERCULES_ERR_GARBAGE_COLLECTOR_DEPLOY");
 				slog_error("HERCULES_ERR_GARBAGE_COLLECTOR_DEPLOY");
+				pthread_exit(NULL);
+			}
+		}
+		else if (i == 2 && args.type != TYPE_DATA_SERVER)
+		{ // elasticity monitor.
+			slog_debug("[SERVER] Creating elasticity monitor thread.");
+			// Explicitly zero non-object fields on stack-allocated p_argv before spawning the monitor thread.
+			arguments[i].ucp_worker = NULL;
+			arguments[i].ucp_data_worker = NULL;
+			arguments[i].server_ep = NULL;
+			arguments[i].peer_address = NULL;
+			arguments[i].worker_uid = 0;
+			arguments[i].thread_id = 0;
+			arguments[i].curr_req[0] = '\0';
+			if (pthread_create(&threads[i], NULL, ElasticityMonitor, (void *)&arguments[i]) != 0)
+			{
+				ready(tmp_file_path, "ERROR");
+				perror("HERCULES_ERR_ELASTICITY_MONITOR_DEPLOY");
+				slog_error("HERCULES_ERR_ELASTICITY_MONITOR_DEPLOY");				
 				pthread_exit(NULL);
 			}
 		}
@@ -1196,6 +1215,11 @@ void handle_signal_server(int signal)
 				abort_active_commissioning();
 				shutdown_connected_data_servers();
 				global_finish_threads = 1;
+
+				// Wake the periodic elasticity monitor thread immediately so it exits cleanly on shutdown.
+				pthread_mutex_lock(&mutex_elasticity_monitor);
+				pthread_cond_broadcast(&cond_elasticity_monitor);
+				pthread_mutex_unlock(&mutex_elasticity_monitor);
 
 				if (global_finish_garbage_collector != 1)
 				{ // Garbage collector still running.

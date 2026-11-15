@@ -37,6 +37,15 @@ typedef struct
     // double tolerance_threshold = 0.0;
 } ElasticityMetric;
 
+// Accumulates raw I/O bytes per server within the active time interval 
+// before flushing.
+typedef struct
+{
+    int server_id = 0;         // Latest storage server ID reported for this hostname.
+    long long write_bytes = 0; // Total written bytes accumulated in the current interval.
+    long long read_bytes = 0;  // Total read bytes accumulated in the current interval.
+} PerformanceBucket;
+
 /**
  * @brief Contains the minimal information needed to reply to a client
  * whose request was queued during a malleability operation.
@@ -62,7 +71,9 @@ enum class scaling_action {
 static std::map<std::string, IOServerMetrics> backend_performance_metrics;
 // static std::vector<std::pair<int32_t, ElasticityMetric>> elasticy_records_history;
 // static std::map<int32_t, std::vector<ElasticityMetric>> elasticity_records_history;
-static std::map<std::string, std::vector<ElasticityMetric>> elasticity_records_history;
+extern std::map<std::string, std::vector<ElasticityMetric>> elasticity_records_history;
+// Maps each data server hostname to its accumulated raw byte totals for the current interval.
+extern std::map<std::string, PerformanceBucket> pending_perf_bucket;
 static int best_number_of_servers = 0;
 static std::atomic<int> number_of_history_records{0};
 static unsigned int consecutive_commissioning_signals = 0;

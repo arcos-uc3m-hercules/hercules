@@ -3908,6 +3908,23 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 
 	pthread_mutex_lock(&lock_network);
 
+	// Count only servers that recorded actual I/O bytes.
+	uint64_t num_entries = 0;
+	for (const auto &pair : backend_performance_metrics)
+	{
+		if (pair.second.write.total_data_size > 0 || pair.second.read.total_data_size > 0)
+		{
+			num_entries++;
+		}
+	}
+	// If no server recorded any I/O bytes, clear the metrics and return.
+	if (num_entries == 0)
+	{
+		backend_performance_metrics.clear();
+		pthread_mutex_unlock(&lock_network);
+		return ret;
+	}
+
 	slog_debug("[IMSS] Sending request to metadata server='%s'", formated_uri);
 	msg_length = send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri);
 	slog_debug("[IMSS] after send_req, ret=%lu", msg_length);
@@ -3919,19 +3936,22 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 		return -1;
 	}
 
-	// Calculate the size of a single key-value entry in a generic way.
-	// We use a reference to the first element to get the correct types.
-	double write_performance = 0.0, read_performance = 0.0; // to store the performance of each server.
-	uint64_t num_entries = static_cast<uint64_t>(backend_performance_metrics.size());
+	// Calculate the exact serialized buffer size using raw byte counts.
+	long long write_bytes = 0, read_bytes = 0; // store raw bytes transferred per server.
 	slog_debug("Sending metrics of %llu server(s).", num_entries);
 	// memory for the buffer to store serializated data.
 	size_t total_size = sizeof(num_entries);
 	for (const auto &pair : backend_performance_metrics)
 	{
-		// String length, string data, server_id, and performance metrics
+		// Skip servers with zero transferred bytes to keep payload compact and match num_entries.
+		if (pair.second.write.total_data_size <= 0 && pair.second.read.total_data_size <= 0)
+		{
+			continue;
+		}
+		// String length, string data, server_id, and byte counts
 		total_size += sizeof(uint64_t) + pair.first.length();
 		total_size += sizeof(pair.second.server_id);
-		total_size += sizeof(write_performance) + sizeof(read_performance);
+		total_size += sizeof(write_bytes) + sizeof(read_bytes);
 	}
 
 	// data serialization.
@@ -3942,10 +3962,18 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 	memcpy(current_ptr, &num_entries, sizeof(num_entries));
 	current_ptr += sizeof(num_entries);
 
-	// copy the key (ID) and the performance of each server.
+	// Copy the key (hostname) and raw transferred bytes so the metadata server can aggregate across clients by time interval.
 	// fprintf(stderr, "Sending metrics of %d server(s).\n", num_entries);
 	for (const auto &pair : backend_performance_metrics)
 	{
+		write_bytes = (pair.second.write.total_data_size > 0) ? pair.second.write.total_data_size : 0;
+		read_bytes = (pair.second.read.total_data_size > 0) ? pair.second.read.total_data_size : 0;
+		// Omit empty server entries consistent with the size calculation above.
+		if (write_bytes == 0 && read_bytes == 0)
+		{
+			continue;
+		}
+
 		// Copy the length of the string key
 		uint64_t key_length = static_cast<uint64_t>(pair.first.length());
 		memcpy(current_ptr, &key_length, sizeof(key_length));
@@ -3959,31 +3987,11 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 		memcpy(current_ptr, &pair.second.server_id, sizeof(pair.second.server_id));
 		current_ptr += sizeof(pair.second.server_id);
 
-		// Calculates the write performance.
-		if (pair.second.write.total_data_time > 0.0 && !double_are_equal(pair.second.write.total_data_size, 0.0))
-		{
-			write_performance = pair.second.write.total_data_size / pair.second.write.total_data_time;
-		}
-		else
-		{
-			write_performance = 0.0;
-		}
+		memcpy(current_ptr, &write_bytes, sizeof(write_bytes));
+		current_ptr += sizeof(write_bytes);
 
-		memcpy(current_ptr, &write_performance, sizeof(write_performance));
-		current_ptr += sizeof(write_performance);
-
-		// Calculates the read performance.
-		if (pair.second.read.total_data_time > 0.0 && !double_are_equal(pair.second.read.total_data_size, 0.0))
-		{
-			read_performance = pair.second.read.total_data_size / pair.second.read.total_data_time;
-		}
-		else
-		{
-			read_performance = 0.0;
-		}
-
-		memcpy(current_ptr, &read_performance, sizeof(read_performance));
-		current_ptr += sizeof(read_performance);
+		memcpy(current_ptr, &read_bytes, sizeof(read_bytes));
+		current_ptr += sizeof(read_bytes);
 
 		// fprintf(stderr, "key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, write_performance=%.2f (%.2f MB), read_size=%lld (%lld MB), read_time=%.2f, read_performance=%.2f (%.2f MB)\n",
 		// 		pair.first.c_str(),
@@ -3998,19 +4006,7 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 		// 		pair.second.read.total_data_time,
 		// 		read_performance,
 		// 		read_performance / MB);
-		slog_debug("key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, write_performance=%.2f (%.2f MB), read_size=%lld (%lld MB), read_time=%.2f, read_performance=%.2f (%.2f MB)",
-			   pair.first.c_str(),
-			   pair.second.server_id,
-			   pair.second.write.total_data_size,
-			   pair.second.write.total_data_size / MB,
-			   pair.second.write.total_data_time,
-			   write_performance,
-			   write_performance / MB,
-			   pair.second.read.total_data_size,
-			   pair.second.read.total_data_size / MB,
-			   pair.second.read.total_data_time,
-			   read_performance,
-			   read_performance / MB);
+		slog_debug("key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, read_size=%lld (%lld MB), read_time=%.2f", pair.first.c_str(), pair.second.server_id, write_bytes, write_bytes / MB, pair.second.write.total_data_time, read_bytes, read_bytes / MB, pair.second.read.total_data_time);
 	}
 
 	// Send the struct of the performance metrics in a serialized way.

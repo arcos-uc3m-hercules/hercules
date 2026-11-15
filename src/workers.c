@@ -1964,8 +1964,9 @@ void *run_malleability(void *th_argv)
 	{ // commissioning threshold.
 		comissioning_stage(arguments);
 		arguments = NULL;
-		// Clear all history metrics for remaining servers
+		// Clear all history metrics and pending interval bytes for remaining servers so pre-scaling I/O does not bleed into post-scaling intervals.
 		pthread_mutex_lock(&mutext_performance_metrics);
+		pending_perf_bucket.clear();
 		for (auto &pair : elasticity_records_history)
 		{
 			pair.second.clear();
@@ -1992,8 +1993,9 @@ void *run_malleability(void *th_argv)
 			if (ret)
 			{
 				pthread_mutex_lock(&mutext_performance_metrics);
-				// remove the decommissioned server
+				// remove the decommissioned server and discard pre-decommission interval bytes
 				size_t erased_elements = elasticity_records_history.erase(key_to_remove);
+				pending_perf_bucket.clear();
 				// clear the history metrics for all remaining servers
 				for (auto &pair : elasticity_records_history)
 				{
@@ -2862,9 +2864,6 @@ void *get_performance_metrics(void *th_argv)
 	p_argv *arguments = (p_argv *)th_argv;
 
 	size_t msg_length = 0;
-	void *data_ref = NULL;
-	void *address_ = NULL;
-	uint64_t block_size_rtvd = 0;
 	std::string key;
 
 	// Here the metadata server get the data server's performance measure by each client.
@@ -2886,6 +2885,14 @@ void *get_performance_metrics(void *th_argv)
 		return NULL;
 	}
 	char *current_ptr = buffer_metrics_ser.data();
+	const char *end_ptr = current_ptr + msg_length;
+	// Verify the serialized payload contains at least the entry count header before reading.
+	if ((size_t)(end_ptr - current_ptr) < sizeof(uint64_t))
+	{
+		slog_error("HERCULES_ERR_METADATA_WORKER_MALFORMED_PERFORMANCE_HEADER");
+		fprintf(stderr,"HERCULES_ERR_METADATA_WORKER_MALFORMED_PERFORMANCE_HEADER\n");
+		return NULL;
+	}
 	// Get the number of entries.
 	uint64_t num_entries = 0;
 	memcpy(&num_entries, current_ptr, sizeof(num_entries));
@@ -2895,57 +2902,55 @@ void *get_performance_metrics(void *th_argv)
 	// double min_overall_performance = -1.0;
 	int current_record = ++number_of_history_records;
 
-	// decode all metrics sent from the client.
+	// decode all metrics sent from the client and accumulate raw bytes into the active interval bucket.
 	pthread_mutex_lock(&mutext_performance_metrics);
 	for (size_t i = 0; i < num_entries; ++i)
 	{
-		ElasticityMetric received_metrics;
-
-		// Get the key Size.
+		// Validate that enough bytes remain to decode the hostname length prefix.
+		if ((size_t)(end_ptr - current_ptr) < sizeof(uint64_t))
+		{
+			slog_error("HERCULES_ERR_METADATA_WORKER_MALFORMED_PERFORMANCE_ENTRY");
+			fprintf(stderr,"HERCULES_ERR_METADATA_WORKER_MALFORMED_PERFORMANCE_ENTRY\n");
+			break;
+		}
 		uint64_t key_length = 0;
 		memcpy(&key_length, current_ptr, sizeof(key_length));
 		current_ptr += sizeof(key_length);
 
+		int server_id = 0;
+		long long write_bytes = 0;
+		long long read_bytes = 0;
+		// Guard against truncated buffers or integer underflow before copying hostname and byte counts.
+		size_t remaining = (size_t)(end_ptr - current_ptr);
+		size_t entry_fixed_size = sizeof(server_id) + sizeof(write_bytes) + sizeof(read_bytes);
+		if (key_length > remaining || (remaining - key_length) < entry_fixed_size)
+		{
+			slog_error("HERCULES_ERR_METADATA_WORKER_TRUNCATED_PERFORMANCE_ENTRY");
+			fprintf(stderr,"HERCULES_ERR_METADATA_WORKER_TRUNCATED_PERFORMANCE_ENTRY\n");
+			break;
+		}
+
 		// get the key (hostname).
-		std::string key(current_ptr, key_length);
-		received_metrics.server_hostname = key;
+		key.assign(current_ptr, key_length);
 		current_ptr += key_length;
 
 		// Deserialize the server ID
-		memcpy(&received_metrics.server_id, current_ptr, sizeof(received_metrics.server_id));
-		current_ptr += sizeof(received_metrics.server_id);
+		memcpy(&server_id, current_ptr, sizeof(server_id));
+		current_ptr += sizeof(server_id);
 
-		// Deserialize write performance.
-		memcpy(&received_metrics.write_performance, current_ptr, sizeof(received_metrics.write_performance));
-		current_ptr += sizeof(received_metrics.write_performance);
-		// fprintf(stderr, "Write Performance for server %d: %f\n", server_id, write_performance/MB);
+		// Deserialize write and read raw bytes.
+		memcpy(&write_bytes, current_ptr, sizeof(write_bytes));
+		current_ptr += sizeof(write_bytes);
 
-		// Deserialize read performance.
-		memcpy(&received_metrics.read_performance, current_ptr, sizeof(received_metrics.read_performance));
-		current_ptr += sizeof(received_metrics.read_performance);
-		// fprintf(stderr, "Read Performance for server %d: %.2f\n", server_id, read_performance/MB);
+		memcpy(&read_bytes, current_ptr, sizeof(read_bytes));
+		current_ptr += sizeof(read_bytes);
 
-		int metric_recorded = 2; // 0;
-		// Calculates overall performance.
-		if (!double_are_equal(received_metrics.read_performance, 0.0))
-		{ // read performance is not zero.
-		  // metric_recorded++;
-		}
-		else
+		// Skip entries with zero transferred bytes so idle reports do not trigger bucket updates.
+		if (write_bytes <= 0 && read_bytes <= 0)
 		{
-			slog_debug("read performance is near zero, %.2f", received_metrics.read_performance);
+			slog_debug("Skipping zero-activity performance record for %s (id=%d)", key.c_str(), server_id);
+			continue;
 		}
-
-		if (!double_are_equal(received_metrics.write_performance, 0.0))
-		{ // write performance is not zero.
-		  // metric_recorded++;
-		}
-		else
-		{
-			slog_debug("write performance is near zero, %.2f", received_metrics.write_performance);
-		}
-
-		received_metrics.overall_performance = (received_metrics.read_performance + received_metrics.write_performance) / metric_recorded;
 
 		// TODO: use a different lock here to prevent delays on other operations.
 		// if (i == 0)
@@ -2953,117 +2958,29 @@ void *get_performance_metrics(void *th_argv)
 		// 	fprintf(stderr, "Server id\t Write (MB/s)\t Read (MB/s)\t Overall (MB/s)\n");
 		// }
 		// fprintf(stderr, "%s\t %d\t %f\t %f\t %f\t %d\n",received_metrics.server_hostname.c_str(), received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, number_of_history_records);
-		slog_debug("%s\t %d\t %f\t %f\t %f\t %d", received_metrics.server_hostname.c_str(), received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, current_record);
+		slog_debug("%s\t %d\t write=%lld (%lld MB)\t read=%lld (%lld MB)\t %d", key.c_str(), server_id, write_bytes, write_bytes / MB, read_bytes, read_bytes / MB, current_record);
 
-		// Add the new record to the history for the specific server ID.
-		// slog_debug("Pushing into elasticity_records_history")
-		elasticity_records_history[received_metrics.server_hostname].push_back(received_metrics);
-		// slog_debug("Element has been pushed");
+		// Sum concurrent client byte counts into this server's pending interval bucket (integer addition only).
+		PerformanceBucket &bucket = pending_perf_bucket[key];
+		bucket.server_id = server_id;
+		if (write_bytes > 0)
+		{
+			bucket.write_bytes += write_bytes;
+		}
+		if (read_bytes > 0)
+		{
+			bucket.read_bytes += read_bytes;
+		}
 	}
 	pthread_mutex_unlock(&mutext_performance_metrics);
 
-	// checks if the struct is not pointing to the hercules instance.
-	// if (arguments->hercules_info_struct == NULL || curr_global_imss_info == NULL)
-	// pthread_mutex_lock(&mutext_performance_metrics);
-	if (curr_global_imss_info == NULL)
+	// Resolve curr_global_imss_info lazily so active servers are known during interval flushing.
+	const char *imss_uri = (arguments && arguments->args) ? arguments->args->imss_uri : NULL;
+	if (resolve_global_imss_info(imss_uri) == NULL)
 	{
-		slog_debug("curr_global_imss_info is NULL, looking for the value.");
-		if (global_hierarchical_map->HierarchicalMapGet(arguments->args->imss_uri, &address_, &block_size_rtvd))
-		{
-			curr_global_imss_info = (imss_info *)address_;
-			// arguments->hercules_info_struct = (imss_info *)address_;
-		}
-		else
-		{
-			fprintf(stderr, "Hercules instance information has not been found.\n");
-			slog_error("Hercules instance information has not been found.");
-			// pthread_mutex_unlock(&mutext_performance_metrics);
-			return NULL;
-		}
-		slog_live("Hercules instance found: %s", arguments->args->imss_uri);
-	}
-	// pthread_mutex_unlock(&mutext_performance_metrics);
-
-	// Check that malleability has not been activated before by another thread and that metric allows bandwidth scaling.
-	if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED)
-	{
-		if (arguments->args->malleability_metric != MALLEABILITY_METRIC_BANDWIDTH &&
-		    arguments->args->malleability_metric != MALLEABILITY_METRIC_HYBRID)
-		{
-			slog_debug("Bandwidth malleability skipped: MALLEABILITY_METRIC is set to %d.", arguments->args->malleability_metric);
-			return NULL;
-		}
-
-		// Avoid running malleability while another malleability task is still pending or in progress
-		if (active_commissioning_pid.load() > 0 || comissioning_on.load(std::memory_order_acquire))
-		{
-			slog_debug("Malleability skipped: another malleability task is already active (commissioning_on=%d, active_pid=%d).",
-				   comissioning_on.load(std::memory_order_relaxed), active_commissioning_pid.load());
-			return NULL;
-		}
-
-		bool expected = false;
-		if (!comissioning_on.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-		{
-			slog_debug("Malleability skipped: another thread claimed malleability evaluation.");
-			return NULL;
-		}
-
-		pthread_t malleability_stage_thread;
-		MalleabilityArgs *malleability_args = fill_malleability_args(arguments);
-		if (malleability_args == NULL)
-		{
-			slog_error("Malleability args is NULL");
-			comissioning_on.store(false, std::memory_order_release);
-			return NULL; // TODO: check if get_performance_metrics will be a thread.
-		}
-
-		slog_debug("Malleability is enabled and is NOT in progress by another thread.");
-		if (pthread_create(&malleability_stage_thread, NULL, run_malleability, (void *)malleability_args) != 0)
-		{
-			perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
-			slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_CREATE");
-			comissioning_on.store(false, std::memory_order_release);
-			free(malleability_args);
-			return (void *)-1;
-		}
-		if (pthread_detach(malleability_stage_thread) != 0)
-		{
-			perror("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
-			slog_error("HERCULES_ERR_MALLEABILITY_COMISSIONING_THREAD_DETACH");
-			return (void *)-1;
-		}
-	}
-	else
-	{
-		// slog_debug("Malleability is not enabled or is in progress by another thread.");
-		slog_debug("Malleability is not enabled.");
-		// just for testing.
-		if (arguments->args->malleability == MALLEABILITY_CONF_PERF)
-		{
-			// int slowest_server_id;
-			std::map<std::string, std::vector<ElasticityMetric>> history_snapshot;
-			ElasticityMetric slowest_server;
-
-			pthread_mutex_lock(&mutext_performance_metrics);
-			history_snapshot = elasticity_records_history;
-			pthread_mutex_unlock(&mutext_performance_metrics);
-
-			pthread_mutex_lock(&mutext_malleability);
-			make_scaling_decision(history_snapshot, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
-			pthread_mutex_unlock(&mutext_malleability);
-		}
-		// else
-		// {
-		// 	int ret = CheckForMalleability(arguments, arguments->curr_req);
-		// 	if (ret != 0)
-		// 	{ // request was saved to be attended after malleability.
-		// 		return NULL;
-		// 	}
-		// }
-		// #ifdef DPRINTF
-		// 		fprintf(stderr, "Testing block\n");
-		// #endif
+		fprintf(stderr, "Hercules instance information has not been found.\n");
+		slog_error("Hercules instance information has not been found.");
+		return NULL;
 	}
 
 	return NULL;

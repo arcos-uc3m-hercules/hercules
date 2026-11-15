@@ -687,6 +687,8 @@ int getConfiguration(struct arguments *args)
 	else
 		args->malleability = 0;
 
+	args->malleability_interval_ms = DEFAULT_MALLEABILITY_INTERVAL_MS;
+
 	switch (args->malleability)
 	{
 	case MALLEABILITY_CONF_DISABLED:
@@ -1326,6 +1328,28 @@ void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 		{
 			fprintf(stderr, "WARNING: Invalid MALLEABILITY_READ_UPDATE_MODE: '%s' (valid values: 0, 1). Fallback to 1.\n", ru_mode_str);
 			args->malleability_read_update_mode = 1;
+		}
+	}
+
+	/* Periodic bandwidth evaluation interval in milliseconds (default: 1000, bounds: 100-60000) */
+	const char *interval_ms_str = getenv("HERCULES_MALLEABILITY_INTERVAL_MS");
+	if (interval_ms_str == NULL)
+	{
+		interval_ms_str = cfg_get(cfg, "MALLEABILITY_INTERVAL_MS");
+	}
+
+	args->malleability_interval_ms = DEFAULT_MALLEABILITY_INTERVAL_MS;
+	if (interval_ms_str != NULL)
+	{
+		int temp_interval_ms = 0;
+		if (is_valid_integer(interval_ms_str, &temp_interval_ms) && temp_interval_ms >= 100 && temp_interval_ms <= 60000)
+		{
+			args->malleability_interval_ms = temp_interval_ms;
+		}
+		else
+		{
+			fprintf(stderr, "WARNING: Invalid MALLEABILITY_INTERVAL_MS: '%s' (valid range: 100-60000). Fallback to %" PRId32 ".\n", interval_ms_str, DEFAULT_MALLEABILITY_INTERVAL_MS);
+			args->malleability_interval_ms = DEFAULT_MALLEABILITY_INTERVAL_MS;
 		}
 	}
 

@@ -36,6 +36,11 @@
 // #define CLOSE_EP 9999999
 #define MALLEABILITY_SET_BYPASS 9999
 
+// Time conversion constants for interval and timespec arithmetic.
+#define MS_PER_SEC 1000L
+#define NS_PER_MS 1000000L
+#define NS_PER_SEC 1000000000L
+
 #define SHM_SIZE 50L * 1024L * 1024L * 1024L
 
 #define IP_STRING_LEN 50
@@ -132,6 +137,7 @@ typedef enum
 const static int32_t DEFAULT_ANALYSIS_WINDOW_SIZE = 20;
 const static int32_t DEFAULT_TOLERANCE_COMMISIONING = 100;
 const static int32_t DEFAULT_TOLERANCE_DECOMMISIONING = 300;
+const static int32_t DEFAULT_MALLEABILITY_INTERVAL_MS = 1000;
 
 // To synchronize network operations.
 extern pthread_mutex_t lock_network;

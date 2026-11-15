@@ -15,6 +15,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <sys/types.h>
 #include <time.h>
 #include <vector>
 
@@ -65,9 +66,17 @@ extern bool snapshot_local_finished;
 extern bool checkpoint_local_finished;
 
 extern pthread_mutex_t memory_protect;
+extern pthread_mutex_t mutext_malleability;
+extern pthread_mutex_t mutext_performance_metrics;
 extern pthread_mutex_t mutex_snapshot_consumer;
 extern pthread_cond_t global_run_snapshot_consumer_cond;
+extern pthread_mutex_t mutex_elasticity_monitor;
+extern pthread_cond_t cond_elasticity_monitor;
 
+extern std::atomic<bool> comissioning_on;
+extern std::atomic<pid_t> active_commissioning_pid;
+extern int global_finish_threads;
+extern ucp_worker_h *ucp_worker_threads;
 extern std::atomic<uint32_t> number_storage_servers;
 
 extern HierarchicalRecords *global_hierarchical_map;
@@ -193,6 +202,10 @@ int shutdown_connected_data_servers(void);
 
 // Thread method searching and cleaning nodes with st_nlink=0
 void *GarbageCollector(void *th_argv);
+// Periodic metadata thread flushing interval byte buckets and evaluating bandwidth elasticity.
+imss_info *resolve_global_imss_info(const char *imss_uri);
+int flush_performance_interval(int32_t interval_ms, int32_t analysis_window_size, const char *imss_uri);
+void *ElasticityMonitor(void *th_argv);
 
 // Thread method attending client metadata requests.
 int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps);

@@ -75,6 +75,7 @@ struct arguments
 	int32_t malleability_tolerance_commissioning;	/* tolerance for performing a malleability commissioning operation. */
 	int32_t malleability_tolerance_decommissioning; /* tolerance for performing a malleability decommissioning operation. */
 	int32_t malleability_windows_size;		/* how many records are used to check the performance status. */
+	int32_t malleability_interval_ms;		/* interval in ms for periodic bandwidth evaluation (default: 1000) */
 	CommunicationMode malleability_reorder_mode;	/* how blocks will be moved between servers, 0: network (network), 1: disk (checkpoint) */
 	double malleability_performance_threshold;	/* performance threshold in MB/s */
 	int32_t malleability_metric;			/* 0: BANDWIDTH, 1: MEMORY, 2: HYBRID */
