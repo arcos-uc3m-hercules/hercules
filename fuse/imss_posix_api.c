@@ -28,9 +28,14 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <unordered_set>
 #include <vector>
 
 #define HEADER sizeof(uint32_t)
+
+// Tracks datasets whose intervals changed locally.
+static std::mutex g_dirty_intervals_mutex;
+static std::unordered_set<std::string> g_dirty_intervals_paths;
 
 /*
    -----------	IMSS Global variables, filled at the beggining or by default -----------
@@ -174,6 +179,36 @@ extern "C"
 	{
 		pthread_once(&backend_init_once, connect_backend_internal);
 		return backend_init_status;
+	}
+
+	/**
+	 * @brief Marks a dataset URI as having unsynchronized interval updates.
+	 *
+	 * @param path Dataset URI whose intervals were modified locally.
+	 */
+	static void mark_intervals_dirty(const char *path)
+	{
+		if (TO_RECORD_INTERVALS && path != NULL)
+		{
+			std::lock_guard<std::mutex> lock(g_dirty_intervals_mutex);
+			g_dirty_intervals_paths.insert(path);
+		}
+	}
+
+	/**
+	 * @brief Atomically checks and clears the dirty-interval flag for a dataset URI.
+	 *
+	 * @param path Dataset URI to test and clear.
+	 * @return true if the dataset had unsynchronized interval updates, false otherwise.
+	 */
+	static bool consume_intervals_dirty(const char *path)
+	{
+		if (!TO_RECORD_INTERVALS || path == NULL)
+		{
+			return false;
+		}
+		std::lock_guard<std::mutex> lock(g_dirty_intervals_mutex);
+		return g_dirty_intervals_paths.erase(path) > 0;
 	}
 
 	int get_number_of_data_servers(int i_blk, int num_of_blk)
@@ -886,11 +921,6 @@ extern "C"
 			}
 		}
 
-		if (TO_RECORD_INTERVALS)
-		{
-			update_dataset((char *)path, ds);
-		}
-
 		// total_amount_read += byte_count;
 		slog_read("TotalSizeToRead=%lu B (%lu kB, %lu mB), offset=%lu, total(to_read+offset)=%lu B (%lu mB), file size=%ld B (%ld mB), readed=%lu B", size, size / 1024, size / 1024 / 1024, offset, size + offset, (size + offset) / 1024 / 10240, stats.st_size, stats.st_size / 1024 / 1024, total_bytes_scheduled);
 
@@ -1183,10 +1213,6 @@ extern "C"
 			}
 		}
 
-		if (TO_RECORD_INTERVALS)
-		{
-			update_dataset((char *)path, ds);
-		}
 		async_data_worker_progress(0);
 
 		slog_read("TotalSizeToRead=%lu B (%lu kB), offset=%lu, file size=%ld B, readed=%lu B",
@@ -1945,11 +1971,8 @@ extern "C"
 			async_data_worker_progress(0);
 		}
 
-		// updates intervals on the back-end.
-		if (TO_RECORD_INTERVALS)
-		{
-			update_dataset((char *)path, ds);
-		}
+		// Mark intervals dirty; sync with metadata server on close/flush.
+		mark_intervals_dirty(path);
 
 		// Update header count if the file has become bigger.
 		if (size + off > stats.st_size)
@@ -2513,6 +2536,11 @@ extern "C"
 		// Updates block 0 on the data server.
 		ds = imss_release(path);
 		slog_debug("Ending imss_release, ret=%d", ds);
+		// Synchronize recorded intervals to the metadata server on close before decrementing open count.
+		if (ds >= 0 && consume_intervals_dirty(path))
+		{
+			update_dataset((char *)path, ds);
+		}
 		// Closes the dataset on the metadata servers.
 		ret = close_dataset(path, ds);
 		slog_debug("Ending close_dataset, ret=%d", ret);
@@ -2612,6 +2640,10 @@ extern "C"
 		// pthread_mutex_lock(&lock_file); // lock.
 		// map_put(map, rpath, *fh, ds_stat, (char *)buff);
 		HierarchicalMapPut(hierarchical_map, rpath, *fh, ds_stat, (char *)buff);
+		if (file_type != TYPE_DIRECTORY)
+		{
+			mark_intervals_dirty(rpath);
+		}
 		slog_debug("map_put(map, rpath:%s, fh:%ld, ds_stat.st_blksize=%ld)", rpath, *fh, ds_stat.st_blksize);
 		// if (PREFETCH != 0)
 		// {
@@ -2687,6 +2719,7 @@ extern "C"
 		ret = delete_dataset(imss_path, file_desc, 0);
 		if (ret == 0)
 		{ // dataset has been delete on the metadata backend.
+			consume_intervals_dirty(imss_path);
 			// to erase data in the backend.
 			ret = unlink_dataset(imss_path, file_desc, INITIAL_RECURSION);
 		}
@@ -2938,6 +2971,10 @@ extern "C"
 		pthread_mutex_lock(&lock);
 		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
 		pthread_mutex_unlock(&lock);
+		if (ret_set_data >= 0 && consume_intervals_dirty(path))
+		{
+			update_dataset((char *)path, file_desc);
+		}
 		if (ret_set_data < 0)
 		{
 			slog_error("Error writing to imss.");

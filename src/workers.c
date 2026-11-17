@@ -1143,6 +1143,12 @@ size_t update_ips_list(int id_server_to_remove)
 		imss_info_struct->server_states[imss_info_struct->num_storages] = SERVER_DECOMMISSIONED;
 	}
 
+	// Keep metadata server TopologyViews aligned with compacted ips/server_states slot indices.
+	if (imss_info_struct->num_views > 0)
+	{
+		RemapTopologyViewsOnSlotRemoval(imss_info_struct, id_server_to_remove);
+	}
+
 	collect_active_rw_servers(imss_info_struct, NULL);
 
 	slog_malleability("num_elements_to_shift=%d, imss_info_struct->num_storages=%d", num_elements_to_shift, imss_info_struct->num_storages);

@@ -2660,46 +2660,29 @@ int32_t release_imss(const char *imss_uri, uint32_t release_op)
 }
 
 /**
- * @brief Method retrieving information related to a certain IMSS instance.
- * This function only connects to the metadata server when the IMSS instance
- * is not locally.
+ * @brief Fetches the authoritative imss_info structure from the metadata server.
  *
- * @param imss_info_ pointer to the info structure.
- * @return if the "info" is found locally, 2 is returned.
- * When a connection is perform to the metadata server,
- * 1 is returned on success, 0 if not found. On other case
- * -1 is returned.
+ * @param imss_uri URI of the IMSS instance to query.
+ * @param imss_info_ Output pointer populated with the remote imss_info structure.
+ * @return 1 on success, 0 if not found, or -1 on error.
  */
-int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
+static int32_t fetch_remote_imss_info(const char *imss_uri, imss_info *imss_info_)
 {
-	// Check for the IMSS info structure in the local vector.
-	int32_t imss_found_in = -1;
-	imss searched_imss;
-	int ret = 0;
-	ucp_ep_h ep = NULL;
-
-	// slog_debug("[IMSS] imss_uri=%s", imss_uri);
-	if ((imss_found_in = find_imss(imss_uri, &searched_imss)) != -1)
+	if (imss_uri == NULL || imss_info_ == NULL)
 	{
-		slog_live("[IMSS] imss_found_in=%d, imss_info_->num_storages=%d, searched_imss.info.num_storages=%d", imss_found_in, imss_info_->num_storages, searched_imss.info.num_storages);
-		memcpy(imss_info_, &searched_imss.info, sizeof(imss_info));
-		imss_info_->ips = (char **)malloc((searched_imss.info.num_storages) * sizeof(char *));
-		for (int32_t i = 0; i < searched_imss.info.num_storages; i++)
-		{
-			imss_info_->ips[i] = (char *)malloc(LINE_LENGTH * sizeof(char));
-			strcpy(imss_info_->ips[i], searched_imss.info.ips[i]);
-		}
-
-		return 2;
+		slog_error("HERCULES_ERR_FETCH_REMOTE_IMSS_INFO_INVALID_ARGS: invalid arguments");
+		fprintf(stderr, "HERCULES_ERR_FETCH_REMOTE_IMSS_INFO_INVALID_ARGS: invalid arguments\n");
+		return -1;
 	}
 
-	// Formated imss uri to be sent to the metadata server.
+	int ret = 0;
+	ucp_ep_h ep = NULL;
 	char formated_uri[REQUEST_SIZE] = {0};
 
 	// Discover the metadata server that handles the IMSS instance.
 	char first_parent_dir[URI_] = {0};
 	uint32_t m_srv = 0;
-	int first_parent_offset = find_first_parent_dir(imss_uri, first_parent_dir);
+	int first_parent_offset = find_first_parent_dir((char *)imss_uri, first_parent_dir);
 	slog_debug("imss_uri=%s, first_parent_dir=%s, first_parent_offset=%d", imss_uri, first_parent_dir, first_parent_offset);
 	m_srv = find_server(n_stat_servers, 0, first_parent_dir, GET, TYPE_METADATA_SERVER, curr_imss.info.session_plcy);
 
@@ -2707,7 +2690,6 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 
 	pthread_mutex_lock(&lock_network);
 	// Send the request.
-	// sprintf(formated_uri, "%" PRIu32 " GET 0 %s", stat_ids[m_srv], imss_uri);
 	sprintf(formated_uri, "%" PRIu32 " GET 0 %s %" PRIu64 "", IMSS_INFO, imss_uri, local_meta_uid);
 	slog_info("[IMSS] Request to metadata %d - '%s'", m_srv, formated_uri);
 	if (send_req(ucp_worker_meta, ep, local_addr_meta, local_addr_len_meta, formated_uri) == 0)
@@ -2728,9 +2710,6 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 		slog_error("HERCULES_ERR_STAT_IMSS_GET_RECV_DATA_LENGTH");
 		return -1;
 	}
-	// void *request = malloc(length);
-	//	ret = recv_dynamic_stream(ucp_worker_meta, ep, request, IMSS_INFO, local_meta_uid, length);
-	// ret = recv_dynamic_stream(ucp_worker_meta, ep, &imss_info_, IMSS_INFO, local_meta_uid, length);
 	ret = recv_dynamic_stream(ucp_worker_meta, ep, imss_info_, IMSS_INFO, local_meta_uid, length);
 
 	slog_debug("[IMSS] End, ret=%d", ret);
@@ -2738,19 +2717,97 @@ int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
 	if (ret == -1)
 	{
 		pthread_mutex_unlock(&lock_network);
-		// free(request);
+		slog_error("HERCULES_ERR_FETCH_REMOTE_IMSS_INFO_NOT_FOUND: %s", imss_uri);
+		fprintf(stderr, "HERCULES_ERR_FETCH_REMOTE_IMSS_INFO_NOT_FOUND: %s\n", imss_uri);
 		return 0;
 	}
-	// imss_info_ = (imss_info *)request;
-	// memcpy(imss_info_, request, sizeof(imss_info));
-	// imss_info *aux = (imss_info *)request;
-	// free(aux->ips);
-	// free(aux->status);
-	// free(aux->arr_num_active_storages);
 
-	// free(request);
 	pthread_mutex_unlock(&lock_network);
 	return 1;
+}
+
+/**
+ * @brief Synchronizes TopologyView history from the metadata server so view_id mappings match across all ranks.
+ *
+ * @param target_imss Pointer to the client imss structure to update.
+ * @return 0 on success, or -1 if interval recording is disabled, metadata endpoints are unavailable, or the fetch fails.
+ */
+static int32_t sync_topology_views_from_metadata(imss *target_imss)
+{
+	if (!TO_RECORD_INTERVALS || target_imss == NULL || n_stat_servers <= 0 || stat_eps == NULL)
+	{
+		slog_error("HERCULES_ERR_SYNC_TOPOLOGY_VIEWS_INVALID_STATE: TO_RECORD_INTERVALS=%u, target_imss=%p, n_stat_servers=%d", TO_RECORD_INTERVALS, (void *)target_imss, n_stat_servers);
+		fprintf(stderr, "HERCULES_ERR_SYNC_TOPOLOGY_VIEWS_INVALID_STATE: TO_RECORD_INTERVALS=%u, target_imss=%p, n_stat_servers=%d\n", TO_RECORD_INTERVALS, (void *)target_imss, n_stat_servers);
+		return -1;
+	}
+	if (target_imss->info.uri_[0] == '\0')
+	{
+		slog_error("HERCULES_ERR_SYNC_TOPOLOGY_VIEWS_EMPTY_URI: empty IMSS URI");
+		fprintf(stderr, "HERCULES_ERR_SYNC_TOPOLOGY_VIEWS_EMPTY_URI: empty IMSS URI\n");
+		return -1;
+	}
+
+	imss_info remote_info;
+	memset(&remote_info, 0, sizeof(imss_info));
+	int32_t ret = fetch_remote_imss_info(target_imss->info.uri_, &remote_info);
+	if (ret <= 0)
+	{
+		slog_error("HERCULES_ERR_SYNC_TOPOLOGY_VIEWS_FETCH_FAILED: fetch_remote_imss_info returned %d for %s", ret, target_imss->info.uri_);
+		fprintf(stderr, "HERCULES_ERR_SYNC_TOPOLOGY_VIEWS_FETCH_FAILED: fetch_remote_imss_info returned %d for %s\n", ret, target_imss->info.uri_);
+		return -1;
+	}
+
+	if (remote_info.num_views > 0 && remote_info.num_views <= MAX_TOPOLOGY_VIEWS)
+	{
+		memcpy(target_imss->info.views, remote_info.views, sizeof(target_imss->info.views));
+		target_imss->info.num_views = remote_info.num_views;
+		target_imss->info.current_view_id = remote_info.current_view_id;
+		slog_malleability("[sync_topology_views_from_metadata] Synced %d views (current_view_id=%d) from metadata server", target_imss->info.num_views, target_imss->info.current_view_id);
+	}
+
+	if (remote_info.ips != NULL)
+	{
+		for (int32_t i = 0; i < remote_info.num_storages; i++)
+		{
+			free(remote_info.ips[i]);
+		}
+		free(remote_info.ips);
+	}
+	return 0;
+}
+
+/**
+ * @brief Method retrieving the information of an IMSS instance from the local cache or metadata server.
+ *
+ * @param imss_uri URI of the IMSS instance.
+ * @param imss_info_ pointer to the info structure.
+ * @return if the "info" is found locally, 2 is returned.
+ * When a connection is perform to the metadata server,
+ * 1 is returned on success, 0 if not found. On other case
+ * -1 is returned.
+ */
+int32_t stat_imss(char *imss_uri, imss_info *imss_info_)
+{
+	// Check for the IMSS info structure in the local vector.
+	int32_t imss_found_in = -1;
+	imss searched_imss;
+
+	// slog_debug("[IMSS] imss_uri=%s", imss_uri);
+	if ((imss_found_in = find_imss(imss_uri, &searched_imss)) != -1)
+	{
+		slog_live("[IMSS] imss_found_in=%d, imss_info_->num_storages=%d, searched_imss.info.num_storages=%d", imss_found_in, imss_info_->num_storages, searched_imss.info.num_storages);
+		memcpy(imss_info_, &searched_imss.info, sizeof(imss_info));
+		imss_info_->ips = (char **)malloc((searched_imss.info.num_storages) * sizeof(char *));
+		for (int32_t i = 0; i < searched_imss.info.num_storages; i++)
+		{
+			imss_info_->ips[i] = (char *)malloc(LINE_LENGTH * sizeof(char));
+			strcpy(imss_info_->ips[i], searched_imss.info.ips[i]);
+		}
+
+		return 2;
+	}
+
+	return fetch_remote_imss_info(imss_uri, imss_info_);
 }
 
 // int32_t stat_imss_info(char *imss_uri, imss_info *imss_info_)
@@ -3041,16 +3098,9 @@ int32_t create_dataset(char *dataset_uri,
 		// GInsert(&datasetd_pos, &datasetd_max_size, (char *)&new_dataset, datasetd, free_datasetd);
 		if (ret == -3)
 		{ // -3: The dataset is not in the local GArray.
-
-			// dataset_info *aux_dataset = (dataset_info *)malloc(sizeof(dataset_info));
-			// memcpy(aux_dataset, &new_dataset, sizeof(dataset_info));
-			// add_dataset_entry(&datasetd, dataset_uri, aux_dataset);
 			add_dataset_entry_in_pool(dataset_uri, new_dataset);
 		}
-		else
-		{ // the dataset is in the local GArray, we have to clear the intervals.
-			ClearIntervalsStructure(new_dataset);
-		}
+		// Preserve existing intervals when returning -EEXIST so open/truncate does not lose block-to-view mappings.
 
 		// fprintf(stderr, "dataset already exists, ret=%d\n", ret);
 		return -EEXIST;
@@ -3783,6 +3833,15 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 		changes_found = 1;
 	}
 
+	// Sync authoritative TopologyView history from the metadata server when topology changed.
+	if (changes_found == 1 && sync_topology_views_from_metadata(local_imss_) == 0)
+	{
+		if (local_imss_->info.current_view_id != prev_view_id)
+		{
+			changes_found = 1;
+		}
+	}
+
 	slog_malleability("parse_malleability_message done, changes_found=%d, final num_storages=%d",
 			  changes_found, local_imss_->info.num_storages);
 
@@ -3793,56 +3852,40 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 	return changes_found;
 }
 
-int32_t wait_malleability_changes(ucp_worker_h ucp_worker, uint64_t local_data_uid, ucp_ep_h ep, const char *failed_hostname)
+/**
+ * @brief Receives the serialized malleability response from the metadata server.
+ *
+ * @param ep Metadata server UCX endpoint.
+ * @return Heap-allocated response buffer on success (caller must free), or NULL on error.
+ */
+static void *recv_malleability_response(ucp_ep_h ep)
 {
-	int32_t ret = -1, changes_found = 1;
-	size_t msg_length = 0;
-
-	time_t init_malleability_t = clock();
-	time_t end_malleability_t, end_send_performance_t;
-	double malleability_time_taken = 0.0, send_performance_time_taken;
-	// Wait for the metadata server to get the current number of data servers.
-	// This value can change due malleability operations.
-	// DATASERVERS operation. MSG_MALLEABILITY_DATASERVERS
-	slog_malleability("Waiting for response");
-	msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
+	size_t msg_length = get_recv_data_length(ucp_worker_meta, local_meta_uid);
 	slog_malleability("get_recv_data_length, msg_length=%lu", msg_length);
 	if (msg_length == 0)
 	{
-		// pthread_mutex_unlock(&lock_network);
 		perror("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
 		slog_error("HERCULES_ERR_MSG_LENGTH_PERFORMANCE_RESPONSE");
-		return -1;
+		return NULL;
 	}
 
 	void *result = malloc(msg_length);
+	if (result == NULL)
+	{
+		perror("HERCULES_ERR_MALLOC_PERFORMANCE_RESPONSE");
+		slog_error("HERCULES_ERR_MALLOC_PERFORMANCE_RESPONSE");
+		return NULL;
+	}
 	msg_length = recv_data(ucp_worker_meta, ep, result, msg_length, local_meta_uid, 0);
 	slog_malleability(" after recv_data, msg_length=%lu", msg_length);
 	if (msg_length == 0)
 	{
-		// pthread_mutex_unlock(&lock_network);
 		perror("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
 		slog_error("HERCULES_ERR_RECV_DATA_PERFORMANCE_RESPONSE");
 		free(result);
-		return -1;
+		return NULL;
 	}
-	slog_malleability(" result=%s, msg_length=%d", result, msg_length);
-	// fprintf(stderr, " result=%s, msg_length=%d\n", result, msg_length);
-	// int id_modified_server, new_number_of_data_servers;
-	changes_found = parse_malleability_message(result, failed_hostname);
-	slog_malleability("changes_found=%d", changes_found);
-	if (changes_found)
-	{
-		end_malleability_t = clock() - init_malleability_t;
-		malleability_time_taken = ((double)end_malleability_t) / CLOCKS_PER_SEC; // in seconds
-#ifdef DPRINTF
-		fprintf(stderr, "read | write, Malleability changes han been applied in %f seconds\n", malleability_time_taken);
-#endif
-		slog_malleability("Malleability changes han been applied in %f seconds.", malleability_time_taken);
-	}
-	free(result);
-	result = NULL;
-	return changes_found;
+	return result;
 }
 
 int32_t get_malleability_changes(const char *dataset_uri, const char *failed_hostname)
@@ -3853,7 +3896,6 @@ int32_t get_malleability_changes(const char *dataset_uri, const char *failed_hos
 	}
 
 	char formated_uri[REQUEST_SIZE] = {0};
-	int32_t ret = -1;
 	size_t msg_length = 0;
 	ucp_ep_h ep;
 
@@ -3881,12 +3923,29 @@ int32_t get_malleability_changes(const char *dataset_uri, const char *failed_hos
 		return -1;
 	}
 
-	// wait_ack(ucp_worker_meta, local_meta_uid, ep, SYNC);
-
-	int changes_found = wait_malleability_changes(ucp_worker_meta, local_meta_uid, ep, failed_hostname);
-	slog_malleability("changes_found=%d", changes_found);
-
+	time_t init_malleability_t = clock();
+	slog_malleability("Waiting for response");
+	void *result = recv_malleability_response(ep);
 	pthread_mutex_unlock(&lock_network);
+	if (result == NULL)
+	{
+		return -1;
+	}
+
+	// Parse topology/endpoint updates.
+	slog_malleability(" result=%s", (const char *)result);
+	int changes_found = parse_malleability_message(result, failed_hostname);
+	slog_malleability("changes_found=%d", changes_found);
+	if (changes_found)
+	{
+		time_t end_malleability_t = clock() - init_malleability_t;
+		double malleability_time_taken = ((double)end_malleability_t) / CLOCKS_PER_SEC;
+#ifdef DPRINTF
+		fprintf(stderr, "read | write, Malleability changes han been applied in %f seconds\n", malleability_time_taken);
+#endif
+		slog_malleability("Malleability changes han been applied in %f seconds.", malleability_time_taken);
+	}
+	free(result);
 	return changes_found;
 }
 
@@ -4574,6 +4633,8 @@ int32_t rename_dataset_metadata(char *old_dataset_uri, char *new_dataset_uri)
 }
 
 // Send a query to the metadata server to tell it a client is opening a local dataset.
+static int32_t stat_dataset_with_refresh(const char *dataset_uri, dataset_info **dataset_info_, int opened, bool force_refresh);
+
 int32_t open_local_dataset(const char *dataset_uri, int opened)
 {
 	int ret = 0;
@@ -4637,6 +4698,36 @@ int32_t open_local_dataset(const char *dataset_uri, int opened)
 		pthread_mutex_unlock(&lock_network);
 		slog_debug("[open_local_dataset] dataset opened = %s", dataset_uri);
 		free(result);
+		if (TO_RECORD_INTERVALS)
+		{
+			// Refresh cluster topology, endpoints, intervals, and TopologyViews when reopening a locally cached file.
+			get_malleability_changes(dataset_uri, NULL);
+			dataset_info *refreshed_ds = NULL;
+			int32_t refresh_ret = stat_dataset_with_refresh(dataset_uri, &refreshed_ds, 0, true);
+			if (refresh_ret == -3 && refreshed_ds != NULL)
+			{
+				int32_t assoc_idx = imss_check((char *)dataset_uri);
+				refreshed_ds->imss_d = (assoc_idx >= 0) ? assoc_idx : -1;
+				if (assoc_idx >= 0 && imssd != NULL && assoc_idx < (int32_t)imssd->len)
+				{
+					refreshed_ds->local_conn = g_array_index(imssd, imss, assoc_idx).conns.matching_server;
+				}
+				else
+				{
+					refreshed_ds->local_conn = -1;
+				}
+				add_dataset_entry_in_pool(dataset_uri, refreshed_ds);
+			}
+			else if (refresh_ret < 0 && refresh_ret != -3)
+			{
+				slog_error("HERCULES_ERR_OPEN_LOCAL_DATASET_REFRESH: failed to refresh metadata for %s (ret=%d)", dataset_uri, refresh_ret);
+				fprintf(stderr, "HERCULES_ERR_OPEN_LOCAL_DATASET_REFRESH: failed to refresh metadata for %s (ret=%d)\n", dataset_uri, refresh_ret);
+			}
+			if (refreshed_ds != NULL)
+			{
+				curr_dataset = refreshed_ds;
+			}
+		}
 		return 1;
 	}
 
@@ -4671,17 +4762,15 @@ int paths_equal(const char *a, const char *b)
 }
 
 /**
- * @brief Method retrieving information related to a certain dataset from the metadata server.
- * It search first if the dataset has been stored on the local map "datasetd" to avoid extra calls.
- * The file information is supposed to be stored on this map if it was stated previously.
+ * @brief Stat a dataset with optional forced metadata refresh.
+ *
  * @param dataset_uri Path of the dataset.
- * @param dataset_info Pointer to the struct where the dataset information will be stored.
- * @param opened "1" indicates to the remote metadata server if the file is being to be opened by the current process
- * or "0" if it is a simple request. If "0", the counter of how many process has the file opened will not be increased.
- * @return if the dataset is on the local map "datasetd", the index is returned, -3 if the info was retreived from the remote metadata
- * server, -2 if the dataset does not exist, or -1 on error.
+ * @param dataset_info_ Pointer to the struct where the dataset information will be stored.
+ * @param opened "1" indicates the file is being opened (increments metadata open count), "0" does not.
+ * @param force_refresh True to bypass the local cache and refresh intervals/views from the metadata server.
+ * @return 1 if found in cache (or refreshed in cache), -3 if retrieved from metadata server, -2 if not found, or -1 on error.
  */
-int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int opened)
+static int32_t stat_dataset_with_refresh(const char *dataset_uri, dataset_info **dataset_info_, int opened, bool force_refresh)
 {
 	int ret = 0;
 	ucp_ep_h ep;
@@ -4689,25 +4778,14 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int 
 	// slog_live("[IMSS] opened=%d, datasetd->len=%d", opened, datasetd->len);
 	slog_live("[IMSS] opened=%d, datasetd->len=%d", opened, g_hash_table_size(datasetd));
 
-	// Search for the requested dataset in the local vector.
-	// if (g_hash_table_size(datasetd) > 0)
+	dataset_info *dataset_info_aux = NULL;
+	int found_in_cache = find_dataset_by_uri_hash_pool(dataset_uri, &dataset_info_aux);
+	// Refresh from the metadata server on reopen when recording intervals so merged intervals from other ranks are fetched.
+	if (found_in_cache == 1 && !force_refresh)
 	{
-		dataset_info *dataset_info_aux;
-		// ret = find_dataset_by_uri_hash(datasetd, dataset_uri, &dataset_info_aux);
-		ret = find_dataset_by_uri_hash_pool(dataset_uri, &dataset_info_aux);
-		// if (!strcmp(dataset_uri, "imss://test-dir.0-0/mdtest_tree.0.0/file.mdtest.0.0"))
-		// {
-		// 	fprintf(stderr, "stat dataset\n");
-		// }
-		// if (dataset_info_aux)
-		if (ret == 1)
-		{
-			slog_debug("Dataset %s found in the hash table, aux uri=%s", dataset_uri, dataset_info_aux->uri_);
-			*dataset_info_ = dataset_info_aux;
-			// memcpy(dataset_info_, dataset_info_aux, sizeof(dataset_info));
-
-			return 1;
-		}
+		slog_debug("Dataset %s found in the hash table, aux uri=%s", dataset_uri, dataset_info_aux->uri_);
+		*dataset_info_ = dataset_info_aux;
+		return 1;
 	}
 
 	// Formated dataset uri to be sent to the metadata server.
@@ -4773,7 +4851,39 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int 
 		free(data);
 		return -2;
 	}
+	if (found_in_cache == 1 && dataset_info_aux != NULL)
+	{
+		dataset_info *fresh_dataset = (dataset_info *)data;
+		ClearIntervalsStructure(dataset_info_aux);
+		dataset_info_aux->intervals = fresh_dataset->intervals;
+		dataset_info_aux->num_intervals = fresh_dataset->num_intervals;
+		dataset_info_aux->capacity = fresh_dataset->capacity;
+		dataset_info_aux->first_block_id = fresh_dataset->first_block_id;
+		dataset_info_aux->last_block_id = fresh_dataset->last_block_id;
+		dataset_info_aux->n_servers = fresh_dataset->n_servers;
+		fresh_dataset->intervals = NULL;
+		fresh_dataset->num_intervals = 0;
+		fresh_dataset->capacity = 0;
+		free(fresh_dataset);
+		pthread_mutex_unlock(&lock_network);
+		int32_t imss_idx = imss_check((char *)dataset_uri);
+		if (imss_idx >= 0 && imssd != NULL && imss_idx < (int32_t)imssd->len)
+		{
+			sync_topology_views_from_metadata(&g_array_index(imssd, imss, imss_idx));
+		}
+		*dataset_info_ = dataset_info_aux;
+		slog_debug("Refreshed cached dataset %s from metadata server (num_intervals=%d)", dataset_info_aux->uri_, dataset_info_aux->num_intervals);
+		return 1;
+	}
 	pthread_mutex_unlock(&lock_network);
+	if ((opened == 1 || force_refresh) && TO_RECORD_INTERVALS)
+	{
+		int32_t imss_idx = imss_check((char *)dataset_uri);
+		if (imss_idx >= 0 && imssd != NULL && imss_idx < (int32_t)imssd->len)
+		{
+			sync_topology_views_from_metadata(&g_array_index(imssd, imss, imss_idx));
+		}
+	}
 	// keep the pointer of data.
 	*dataset_info_ = (dataset_info *)data;
 	// memcpy(dataset_info_, data, sizeof(dataset_info));
@@ -4781,6 +4891,22 @@ int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int 
 	// free(data);
 
 	return -3;
+}
+
+/**
+ * @brief Method retrieving information related to a certain dataset from the metadata server.
+ * It search first if the dataset has been stored on the local map "datasetd" to avoid extra calls.
+ * The file information must to be stored on this map if it was stated previously.
+ * @param dataset_uri Path of the dataset.
+ * @param dataset_info_ Pointer to the struct where the dataset information will be stored.
+ * @param opened "1" indicates to the remote metadata server if the file is being to be opened by the current process
+ * or "0" if it is a simple request. If "0", the counter of how many process has the file opened will not be increased.
+ * @return if the dataset is on the local map "datasetd", the index is returned, -3 if the info was retreived from the remote metadata
+ * server, -2 if the dataset does not exist, or -1 on error.
+ */
+int32_t stat_dataset(const char *dataset_uri, dataset_info **dataset_info_, int opened)
+{
+	return stat_dataset_with_refresh(dataset_uri, dataset_info_, opened, (opened == 1 && TO_RECORD_INTERVALS));
 }
 
 /*
@@ -6954,6 +7080,10 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 	}
 
 	curr_dataset = dataset_info_aux;
+	if (curr_dataset->imss_d >= 0 && imssd != NULL && curr_dataset->imss_d < (int32_t)imssd->len)
+	{
+		curr_imss = g_array_index(imssd, imss, curr_dataset->imss_d);
+	}
 
 	int32_t session_policy = curr_dataset->session_plcy;
 
@@ -6977,8 +7107,8 @@ int32_t update_dataset(char *dataset_uri, int32_t dataset_id)
 			SetInterval(curr_dataset, curr_imss.info.current_view_id, 0, 0);
 		}
 
-		// set the interval for other blocks if not already present.
-		if (curr_dataset->num_intervals <= 1 && curr_dataset->first_block_id != -1 && curr_dataset->last_block_id != -1)
+		// Only set fallback interval if no data block interval was recorded for first_block_id.
+		if (curr_dataset->first_block_id != -1 && curr_dataset->last_block_id != -1 && GetValueFromInterval(curr_dataset, curr_dataset->first_block_id) == -1)
 		{
 			slog_debug("curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_dataset->first_block_id, curr_dataset->last_block_id);
 			SetInterval(curr_dataset, curr_imss.info.current_view_id, curr_dataset->first_block_id, curr_dataset->last_block_id);
