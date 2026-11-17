@@ -236,7 +236,7 @@ int ready(char *tmp_file_path, const char *msg);
 int ReadHostfile(char *deployfile, imss_info *my_imss);
 int AddIPS(imss_info *my_imss, char *line, int32_t n_chars, int at_position);
 int CheckForMalleability(const p_argv *arguments, const char *req);
-scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double minimum_performance_threshold, ElasticityMetric &slowest_server);
+scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &history, int32_t analysis_window_size, double minimum_performance_threshold, ElasticityMetric &slowest_server, bool update_counters);
 
 // Malleability functions.
 void *get_performance_metrics(void *th_argv);

@@ -11,6 +11,7 @@
 #include <ctime>
 #include <errno.h>
 #include <pthread.h>
+#include <set>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -27,6 +28,7 @@ std::atomic<int32_t> decom_new_view_id{-1};
 // Shared bandwidth history and current interval byte buckets across worker and monitor modules.
 std::map<std::string, std::vector<ElasticityMetric>> elasticity_records_history;
 std::map<std::string, PerformanceBucket> pending_perf_bucket;
+std::atomic<bool> discard_transition_interval{false};
 
 // Synchronization for the periodic elasticity monitor thread.
 pthread_mutex_t mutex_elasticity_monitor = PTHREAD_MUTEX_INITIALIZER;
@@ -686,6 +688,48 @@ static double compute_overall_bandwidth(double write_bw, double read_bw)
 }
 
 /**
+ * @brief Computes the cluster-wide maximum parallel client active write and read durations across all server buckets.
+ */
+static void compute_cluster_active_durations(const std::map<std::string, PerformanceBucket> &buckets, double *out_write_sec, double *out_read_sec)
+{
+	std::map<uint64_t, double> total_client_write;
+	std::map<uint64_t, double> total_client_read;
+	double max_write = 0.0;
+	double max_read = 0.0;
+
+	for (const auto &pair : buckets)
+	{
+		for (const auto &cw : pair.second.client_write_time_sec)
+		{
+			double total = (total_client_write[cw.first] += cw.second);
+			if (total > max_write)
+			{
+				max_write = total;
+			}
+		}
+		for (const auto &cr : pair.second.client_read_time_sec)
+		{
+			double total = (total_client_read[cr.first] += cr.second);
+			if (total > max_read)
+			{
+				max_read = total;
+			}
+		}
+		if (pair.second.client_write_time_sec.empty() && pair.second.max_write_time_sec > max_write)
+		{
+			max_write = pair.second.max_write_time_sec;
+		}
+		if (pair.second.client_read_time_sec.empty() && pair.second.max_read_time_sec > max_read)
+		{
+			max_read = pair.second.max_read_time_sec;
+		}
+	}
+
+	*out_write_sec = max_write;
+	*out_read_sec = max_read;
+}
+
+/**
  * @brief Flushes pending interval byte buckets into aligned per-server bandwidth history.
  *
  * @param interval_ms Monitoring interval length in milliseconds.
@@ -702,6 +746,39 @@ int flush_performance_interval(int32_t interval_ms, int32_t analysis_window_size
 	}
 
 	pthread_mutex_lock(&mutext_performance_metrics);
+	// Drop accumulated transition metrics on the first tick after a scaling operation finishes.
+	if (discard_transition_interval.exchange(false, std::memory_order_acq_rel))
+	{
+		pending_perf_bucket.clear();
+		pthread_mutex_unlock(&mutext_performance_metrics);
+		return 0;
+	}
+
+	std::set<std::string> active_rw_hosts;
+	std::map<std::string, int> active_rw_ids;
+	for (int32_t i = 0; i < curr_global_imss_info->num_storages; ++i)
+	{
+		if (curr_global_imss_info->ips[i] != NULL && curr_global_imss_info->ips[i][0] != '\0' && curr_global_imss_info->server_states[i] == SERVER_ACTIVE_RW)
+		{
+			std::string srv_host = curr_global_imss_info->ips[i];
+			active_rw_hosts.insert(srv_host);
+			active_rw_ids[srv_host] = i;
+		}
+	}
+
+	// Prune late reports from decommissioned or inactive servers so they never re-enter elasticity history.
+	for (auto it = pending_perf_bucket.begin(); it != pending_perf_bucket.end();)
+	{
+		if (active_rw_hosts.find(it->first) == active_rw_hosts.end())
+		{
+			it = pending_perf_bucket.erase(it);
+		}
+		else
+		{
+			++it;
+		}
+	}
+
 	long long total_interval_bytes = 0;
 	for (const auto &pair : pending_perf_bucket)
 	{
@@ -716,30 +793,31 @@ int flush_performance_interval(int32_t interval_ms, int32_t analysis_window_size
 		return 0;
 	}
 
-	for (int32_t i = 0; i < curr_global_imss_info->num_storages; ++i)
+	for (const auto &kv : active_rw_ids)
 	{
-		if (curr_global_imss_info->ips[i] != NULL && curr_global_imss_info->ips[i][0] != '\0' && curr_global_imss_info->server_states[i] == SERVER_ACTIVE_RW)
+		// Seed a zero-byte bucket for active RW servers with no traffic in this interval so per-server history vectors remain index-aligned.
+		if (pending_perf_bucket.find(kv.first) == pending_perf_bucket.end())
 		{
-			std::string srv_host = curr_global_imss_info->ips[i];
-			// Seed a zero-byte bucket for active RW servers with no traffic in this interval so per-server history vectors remain index-aligned.
-			if (pending_perf_bucket.find(srv_host) == pending_perf_bucket.end())
-			{
-				PerformanceBucket zero_bucket;
-				zero_bucket.server_id = i;
-				pending_perf_bucket[srv_host] = zero_bucket;
-			}
+			PerformanceBucket zero_bucket;
+			zero_bucket.server_id = kv.second;
+			pending_perf_bucket[kv.first] = zero_bucket;
 		}
 	}
 
 	double interval_sec = (double)interval_ms / (double)MS_PER_SEC;
-	// Convert each server's accumulated interval bytes into bytes/sec, append the new sample to its history, and trim older entries beyond analysis_window_size.
+	double cluster_write_sec = 0.0;
+	double cluster_read_sec = 0.0;
+	compute_cluster_active_durations(pending_perf_bucket, &cluster_write_sec, &cluster_read_sec);
+	double write_denom = (cluster_write_sec > 0.0) ? cluster_write_sec : interval_sec;
+	double read_denom = (cluster_read_sec > 0.0) ? cluster_read_sec : interval_sec;
+	// Divide each server's interval bytes by the cluster-wide maximum parallel client transfer duration (falling back to interval_sec when duration is zero), then bound per-server history to analysis_window_size.
 	for (const auto &pair : pending_perf_bucket)
 	{
 		ElasticityMetric metric;
 		metric.server_hostname = pair.first;
 		metric.server_id = pair.second.server_id;
-		metric.write_performance = (double)pair.second.write_bytes / interval_sec;
-		metric.read_performance = (double)pair.second.read_bytes / interval_sec;
+		metric.write_performance = (pair.second.write_bytes > 0) ? ((double)pair.second.write_bytes / write_denom) : 0.0;
+		metric.read_performance = (pair.second.read_bytes > 0) ? ((double)pair.second.read_bytes / read_denom) : 0.0;
 		metric.overall_performance = compute_overall_bandwidth(metric.write_performance, metric.read_performance);
 
 		std::vector<ElasticityMetric> &server_hist = elasticity_records_history[pair.first];
@@ -791,6 +869,30 @@ static bool ensure_monitor_ucp_worker(p_argv *arguments)
 	}
 
 	return true;
+}
+
+/**
+ * @brief Takes a snapshot of elasticity history and evaluates/prints current cluster bandwidth.
+ */
+static scaling_action evaluate_performance_snapshot(p_argv *arguments, bool lock_malleability, bool update_counters)
+{
+	std::map<std::string, std::vector<ElasticityMetric>> history_snapshot;
+	ElasticityMetric slowest_server;
+
+	pthread_mutex_lock(&mutext_performance_metrics);
+	history_snapshot = elasticity_records_history;
+	pthread_mutex_unlock(&mutext_performance_metrics);
+
+	if (lock_malleability)
+	{
+		pthread_mutex_lock(&mutext_malleability);
+	}
+	scaling_action action = make_scaling_decision(history_snapshot, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server, update_counters);
+	if (lock_malleability)
+	{
+		pthread_mutex_unlock(&mutext_malleability);
+	}
+	return action;
 }
 
 /**
@@ -871,10 +973,11 @@ void *ElasticityMonitor(void *th_argv)
 
 		if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED)
 		{
-			// Guard against overlapping malleability workflows already in flight.
+			// Guard against overlapping malleability workflows already in flight while still reporting current bandwidth without updating signal counters.
 			if (active_commissioning_pid.load() > 0 || comissioning_on.load(std::memory_order_acquire))
 			{
 				slog_debug("Malleability skipped: another malleability task is already active (commissioning_on=%d, active_pid=%d).", comissioning_on.load(std::memory_order_relaxed), active_commissioning_pid.load());
+				evaluate_performance_snapshot(arguments, false, false);
 				continue;
 			}
 
@@ -882,6 +985,7 @@ void *ElasticityMonitor(void *th_argv)
 			if (!comissioning_on.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
 			{
 				slog_debug("Malleability skipped: another thread claimed malleability evaluation.");
+				evaluate_performance_snapshot(arguments, false, false);
 				continue;
 			}
 
@@ -913,16 +1017,16 @@ void *ElasticityMonitor(void *th_argv)
 		}
 		else if (arguments->args->malleability == MALLEABILITY_CONF_PERF)
 		{
-			std::map<std::string, std::vector<ElasticityMetric>> history_snapshot;
-			ElasticityMetric slowest_server;
+			scaling_action action = evaluate_performance_snapshot(arguments, true, true);
 
-			pthread_mutex_lock(&mutext_performance_metrics);
-			history_snapshot = elasticity_records_history;
-			pthread_mutex_unlock(&mutext_performance_metrics);
-
-			pthread_mutex_lock(&mutext_malleability);
-			make_scaling_decision(history_snapshot, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
-			pthread_mutex_unlock(&mutext_malleability);
+			// Discard in-flight transition metrics accumulated during a scaling operation so the next interval starts cleanly on the new topology.
+			if (action != scaling_action::HOLD)
+			{
+				discard_transition_interval.store(true, std::memory_order_release);
+				pthread_mutex_lock(&mutext_performance_metrics);
+				pending_perf_bucket.clear();
+				pthread_mutex_unlock(&mutext_performance_metrics);
+			}
 		}
 	}
 

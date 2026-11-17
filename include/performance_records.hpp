@@ -2,48 +2,53 @@
 #define H_PERFORMANCE_RECORDS
 
 #include "slog.h"
+#include <atomic>
+#include <map>
 #include <stdint.h>
 #include <stdio.h>
-#include <time.h>
 #include <sys/time.h>
-#include <map>
+#include <time.h>
 #include <vector>
 
 // Structure to hold performance metrics
 typedef struct
 {
-    // double total_req_time = 0.0;
-    double total_data_time = 0.0;
-    long long total_data_size = 0;
-    long long num_operations = 0;
+	// double total_req_time = 0.0;
+	double total_data_time = 0.0;
+	long long total_data_size = 0;
+	long long num_operations = 0;
 } ServerMetrics;
 
 typedef struct
 {
-    int server_id = 0;
-    ServerMetrics write;
-    ServerMetrics read;
+	int server_id = 0;
+	ServerMetrics write;
+	ServerMetrics read;
 } IOServerMetrics;
 
 typedef struct
 {
-    int server_id = 0;
-    std::string server_hostname;
-    double rio = 0.0; // recomended io throughput.
-    double aio = 0.0; // acctual I/O throughput.
-    double write_performance = 0.0;
-    double read_performance = 0.0;
-    double overall_performance = 0.0;
-    // double tolerance_threshold = 0.0;
+	int server_id = 0;
+	std::string server_hostname;
+	double rio = 0.0; // recomended io throughput.
+	double aio = 0.0; // acctual I/O throughput.
+	double write_performance = 0.0;
+	double read_performance = 0.0;
+	double overall_performance = 0.0;
+	// double tolerance_threshold = 0.0;
 } ElasticityMetric;
 
-// Accumulates raw I/O bytes per server within the active time interval 
+// Accumulates raw I/O bytes and maximum parallel client duration per server within the active time interval
 // before flushing.
 typedef struct
 {
-    int server_id = 0;         // Latest storage server ID reported for this hostname.
-    long long write_bytes = 0; // Total written bytes accumulated in the current interval.
-    long long read_bytes = 0;  // Total read bytes accumulated in the current interval.
+	int server_id = 0;				       // Latest storage server ID reported for this hostname.
+	long long write_bytes = 0;			       // Total written bytes accumulated in the current interval.
+	long long read_bytes = 0;			       // Total read bytes accumulated in the current interval.
+	double max_write_time_sec = 0.0;		       // Maximum single-client cumulative write duration (seconds) in the current interval.
+	double max_read_time_sec = 0.0;			       // Maximum single-client cumulative read duration (seconds) in the current interval.
+	std::map<uint64_t, double> client_write_time_sec;      // Per-client (worker_uid) cumulative active write duration in the current interval.
+	std::map<uint64_t, double> client_read_time_sec;       // Per-client (worker_uid) cumulative active read duration in the current interval.
 } PerformanceBucket;
 
 /**
@@ -52,19 +57,19 @@ typedef struct
  */
 typedef struct
 {
-    ucp_worker_h ucp_worker; // Needed for send_data
-    ucp_ep_h server_ep;      // The client endpoint to reply to
-    uint64_t worker_uid;     // The UCP worker ID for the send operation
-    char curr_req[PATH_MAX]; // The original request string, used for logging
+	ucp_worker_h ucp_worker; // Needed for send_data
+	ucp_ep_h server_ep;	 // The client endpoint to reply to
+	uint64_t worker_uid;	 // The UCP worker ID for the send operation
+	char curr_req[PATH_MAX]; // The original request string, used for logging
 } PendingRequestInfo;
 
 // Malleability actions.
-enum class scaling_action {
-    HOLD = 0,
-    SCALE_UP = 1,
-    SCALE_DOWN = -1
+enum class scaling_action
+{
+	HOLD = 0,
+	SCALE_UP = 1,
+	SCALE_DOWN = -1
 };
-
 
 // Use a map to store metrics, mapping server_id to its metrics.
 // static std::map<int32_t, IOServerMetrics> backend_performance_metrics;
@@ -74,6 +79,8 @@ static std::map<std::string, IOServerMetrics> backend_performance_metrics;
 extern std::map<std::string, std::vector<ElasticityMetric>> elasticity_records_history;
 // Maps each data server hostname to its accumulated raw byte totals for the current interval.
 extern std::map<std::string, PerformanceBucket> pending_perf_bucket;
+// Flags the next interval flush to discard in-flight metrics left over from a scaling transition.
+extern std::atomic<bool> discard_transition_interval;
 static int best_number_of_servers = 0;
 static std::atomic<int> number_of_history_records{0};
 static unsigned int consecutive_commissioning_signals = 0;
@@ -83,20 +90,24 @@ static unsigned int consecutive_hold_signals = 0;
 // static void PerformanceRecordsRemoveKey(int32_t server_id)
 static int PerformanceRecordsRemoveKey(char *server_hostname)
 {
-    if (server_hostname == nullptr) {
-        slog_error("HERCULES_ERR_PERFORMANCE_RECORDS_REMOVE_KEY: Invalid server hostname");
-        return -1;
-    }
-    // backend_performance_metrics.erase(server_id);
-    slog_debug("Removing server hostname %s", server_hostname);
-    size_t elements_removed = backend_performance_metrics.erase(server_hostname);
-    if (elements_removed > 0) {
-        slog_debug("%s deleted.", server_hostname);
-        return 0;
-    } else {
-        slog_debug("%s does not exist.", server_hostname);
-        return -1;
-    }
+	if (server_hostname == nullptr)
+	{
+		slog_error("HERCULES_ERR_PERFORMANCE_RECORDS_REMOVE_KEY: Invalid server hostname");
+		return -1;
+	}
+	// backend_performance_metrics.erase(server_id);
+	slog_debug("Removing server hostname %s", server_hostname);
+	size_t elements_removed = backend_performance_metrics.erase(server_hostname);
+	if (elements_removed > 0)
+	{
+		slog_debug("%s deleted.", server_hostname);
+		return 0;
+	}
+	else
+	{
+		slog_debug("%s does not exist.", server_hostname);
+		return -1;
+	}
 }
 
 #endif // H_PERFORMANCE_RECORDS

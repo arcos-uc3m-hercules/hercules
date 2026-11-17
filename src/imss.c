@@ -3995,8 +3995,9 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 		return -1;
 	}
 
-	// Calculate the exact serialized buffer size using raw byte counts.
+	// Calculate the exact serialized buffer size using raw byte counts and active transfer durations.
 	long long write_bytes = 0, read_bytes = 0; // store raw bytes transferred per server.
+	double write_time_sec = 0.0, read_time_sec = 0.0;
 	slog_debug("Sending metrics of %llu server(s).", num_entries);
 	// memory for the buffer to store serializated data.
 	size_t total_size = sizeof(num_entries);
@@ -4007,10 +4008,11 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 		{
 			continue;
 		}
-		// String length, string data, server_id, and byte counts
+		// String length, string data, server_id, byte counts, and active durations
 		total_size += sizeof(uint64_t) + pair.first.length();
 		total_size += sizeof(pair.second.server_id);
 		total_size += sizeof(write_bytes) + sizeof(read_bytes);
+		total_size += sizeof(write_time_sec) + sizeof(read_time_sec);
 	}
 
 	// data serialization.
@@ -4021,12 +4023,14 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 	memcpy(current_ptr, &num_entries, sizeof(num_entries));
 	current_ptr += sizeof(num_entries);
 
-	// Copy the key (hostname) and raw transferred bytes so the metadata server can aggregate across clients by time interval.
+	// Copy the key (hostname), raw transferred bytes, and active durations so the metadata server can aggregate parallel interval bandwidth.
 	// fprintf(stderr, "Sending metrics of %d server(s).\n", num_entries);
 	for (const auto &pair : backend_performance_metrics)
 	{
 		write_bytes = (pair.second.write.total_data_size > 0) ? pair.second.write.total_data_size : 0;
 		read_bytes = (pair.second.read.total_data_size > 0) ? pair.second.read.total_data_size : 0;
+		write_time_sec = (write_bytes > 0 && pair.second.write.total_data_time > 0.0) ? pair.second.write.total_data_time : 0.0;
+		read_time_sec = (read_bytes > 0 && pair.second.read.total_data_time > 0.0) ? pair.second.read.total_data_time : 0.0;
 		// Omit empty server entries consistent with the size calculation above.
 		if (write_bytes == 0 && read_bytes == 0)
 		{
@@ -4051,6 +4055,12 @@ int32_t send_performance_metrics(ucp_ep_h ep, const char *dataset_uri, uint32_t 
 
 		memcpy(current_ptr, &read_bytes, sizeof(read_bytes));
 		current_ptr += sizeof(read_bytes);
+
+		memcpy(current_ptr, &write_time_sec, sizeof(write_time_sec));
+		current_ptr += sizeof(write_time_sec);
+
+		memcpy(current_ptr, &read_time_sec, sizeof(read_time_sec));
+		current_ptr += sizeof(read_time_sec);
 
 		// fprintf(stderr, "key=%s, server_id=%d, write_size=%lld (%lld MB), write_time=%.2f, write_performance=%.2f (%.2f MB), read_size=%lld (%lld MB), read_time=%.2f, read_performance=%.2f (%.2f MB)\n",
 		// 		pair.first.c_str(),

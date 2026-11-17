@@ -496,7 +496,7 @@ static int build_active_node_and_state_lists(const imss_info *info,
 		limit = MAX_SERVERS_PER_VIEW;
 	}
 	slog_malleability("Making list of avaiable nodes, num of storages %d (limit=%zu).", info->num_storages, limit);
-	fprintf(stderr, "Making list of avaiable nodes, num of storages %d (limit=%zu).\n", info->num_storages, limit);
+	// fprintf(stderr, "Making list of avaiable nodes, num of storages %d (limit=%zu).\n", info->num_storages, limit);
 
 	int included_count = 0;
 	for (size_t i = 0; i < limit; i++)
@@ -1963,7 +1963,7 @@ void *run_malleability(void *th_argv)
 	// comissioning_on = true;
 	// Always check the performance trend.
 	// int slowest_server_id;
-	scaling_action action = make_scaling_decision(history_snapshot, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server);
+	scaling_action action = make_scaling_decision(history_snapshot, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server, true);
 
 	// Only trigger the actual scaling operation if the threshold is met.
 	if (consecutive_commissioning_signals >= arguments->args->malleability_tolerance_commissioning)
@@ -1971,6 +1971,7 @@ void *run_malleability(void *th_argv)
 		comissioning_stage(arguments);
 		arguments = NULL;
 		// Clear all history metrics and pending interval bytes for remaining servers so pre-scaling I/O does not bleed into post-scaling intervals.
+		discard_transition_interval.store(true, std::memory_order_release);
 		pthread_mutex_lock(&mutext_performance_metrics);
 		pending_perf_bucket.clear();
 		for (auto &pair : elasticity_records_history)
@@ -1998,6 +1999,7 @@ void *run_malleability(void *th_argv)
 			int ret = decomissioning_stage(arguments, target_id);
 			if (ret)
 			{
+				discard_transition_interval.store(true, std::memory_order_release);
 				pthread_mutex_lock(&mutext_performance_metrics);
 				// remove the decommissioned server and discard pre-decommission interval bytes
 				size_t erased_elements = elasticity_records_history.erase(key_to_remove);
@@ -2589,11 +2591,11 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_use
  * @param elasticity_records_history The map containing the metrics history for all servers.
  */
 // double moving_average_test = 0;
-double write_moving_average = 0.0;
-double read_moving_average = 0.0;
-double overall_moving_average = 0.0;
-scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &elasticity_records_history, int32_t analysis_window_size, double performance_threshold, ElasticityMetric &slowest_server)
+scaling_action make_scaling_decision(const std::map<std::string, std::vector<ElasticityMetric>> &elasticity_records_history, int32_t analysis_window_size, double performance_threshold, ElasticityMetric &slowest_server, bool update_counters)
 {
+	double write_moving_average = 0.0;
+	double read_moving_average = 0.0;
+	double overall_moving_average = 0.0;
 	if (analysis_window_size <= 0)
 	{
 		analysis_window_size = DEFAULT_ANALYSIS_WINDOW_SIZE;
@@ -2622,24 +2624,6 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 	double tolerance_percentage = 0.2;
 	double lower_bound = performance_threshold * (1.0 - tolerance_percentage);
 	double upper_bound = performance_threshold * (1.0 + tolerance_percentage);
-
-	if (num_records < analysis_window_size)
-	{
-		// fprintf(stderr, "Not enough data to make a decision. Need %d records, have %zu.\n", analysis_window_size, num_records);
-		slog_debug("Not enough data to make a decision. Need %d records, have %zu.", analysis_window_size, num_records);
-
-		// if (overall_moving_average > 0.0)
-		// {
-		// 	fprintf(stderr, "Elasticity analysis: Average Overall Performance = %.2f MB/s, Average Write Performance = %.2f, Average Read Performance = %.2f, Threshold Bounds = [%.2f - %.2f] MB/s, servers = %d\n",
-		// 		overall_moving_average / MB,
-		// 		write_moving_average / MB,
-		// 		read_moving_average / MB,
-		// 		lower_bound / MB,
-		// 		upper_bound / MB,
-		// 		number_storage_servers.load());
-		// }
-		return scaling_action::HOLD;
-	}
 
 	slog_debug("num_records=%d, analysis_window_size=%d", num_records, analysis_window_size);
 
@@ -2710,8 +2694,15 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 			// aggregate_performance_history.push_back(total_performance_at_point_i / active_servers_count);
 			// aggregate_performance_history.push_back(total_read_performance_at_point_i);
 			aggregate_overall_performance_history.push_back(total_overall_performance_at_point_i);
-			aggregate_read_performance_history.push_back(total_read_performance_at_point_i);
-			aggregate_write_performance_history.push_back(total_write_performance_at_point_i);
+			// Filter out opposite-phase residual noise (< 5% of overall bandwidth) so read-only intervals do not depress write averages and vice versa.
+			if (total_read_performance_at_point_i >= 0.05 * total_overall_performance_at_point_i)
+			{
+				aggregate_read_performance_history.push_back(total_read_performance_at_point_i);
+			}
+			if (total_write_performance_at_point_i >= 0.05 * total_overall_performance_at_point_i)
+			{
+				aggregate_write_performance_history.push_back(total_write_performance_at_point_i);
+			}
 		}
 	}
 
@@ -2724,6 +2715,8 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 
 	double write_performance_sum = 0.0;
 	double read_performance_sum = 0.0;
+	write_moving_average = 0.0;
+	read_moving_average = 0.0;
 	if (!aggregate_write_performance_history.empty())
 	{
 		write_performance_sum = std::accumulate(aggregate_write_performance_history.begin(), aggregate_write_performance_history.end(), 0.0);
@@ -2762,6 +2755,13 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 
 	slog_debug("Elasticity analysis: Average Performance = %.2f MB/s, Performance Threshold = %.2f, servers = %d\n", overall_moving_average / MB, performance_threshold / MB, number_storage_servers.load());
 
+	// Wait until the sliding window is full before evaluating scaling tolerance.
+	if (num_records < analysis_window_size)
+	{
+		slog_debug("Not enough data to make a decision. Need %d records, have %zu.", analysis_window_size, num_records);
+		return scaling_action::HOLD;
+	}
+
 	// Decision Logic.
 	if (overall_moving_average < lower_bound)
 	{
@@ -2784,7 +2784,10 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 			   overall_moving_average,
 			   overall_moving_average / MB);
 
-		consecutive_commissioning_signals++; // Increment counter if comissiong is needed.
+		if (update_counters)
+		{
+			consecutive_commissioning_signals++; // Increment counter if comissiong is needed.
+		}
 		return scaling_action::SCALE_UP;
 	}
 	if (overall_moving_average > upper_bound)
@@ -2808,7 +2811,10 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 			   overall_moving_average,
 			   overall_moving_average / MB);
 
-		consecutive_decommissioning_signals++; // Increment counter if decomissiong is needed.
+		if (update_counters)
+		{
+			consecutive_decommissioning_signals++; // Increment counter if decomissiong is needed.
+		}
 
 		if (slowest_server_ptr != NULL)
 		{
@@ -2829,7 +2835,10 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 	// if (consecutive_decommissioning_signals > 0)
 	// 	consecutive_decommissioning_signals = 0;
 
-	consecutive_hold_signals++;
+	if (update_counters)
+	{
+		consecutive_hold_signals++;
+	}
 
 #ifdef DPRINTF
 	fprintf(stderr, "DECISION: HOLD. Performance is stable and above threshold, %.2f bytes (%.2f MB/s) of %.2f bytes (%.2f MB/s), number of active servers=%d, overall_moving_average=%.2f bytes (%.2f MB/s)\n", overall_moving_average, overall_moving_average / MB, performance_threshold, performance_threshold / MB, number_storage_servers.load(), overall_moving_average, overall_moving_average / MB);
@@ -2865,6 +2874,26 @@ MalleabilityArgs *fill_malleability_args(p_argv *arguments)
 	return malleability_args;
 }
 
+/**
+ * @brief Accumulates transferred bytes and sequential per-client active duration for one I/O direction.
+ */
+static void accumulate_direction_metric(long long bytes, double duration_sec, uint64_t worker_uid, long long *bucket_bytes, double *max_duration_sec, std::map<uint64_t, double> *client_durations)
+{
+	if (bytes <= 0 || bucket_bytes == NULL || max_duration_sec == NULL || client_durations == NULL)
+	{
+		return;
+	}
+	*bucket_bytes += bytes;
+	if (duration_sec > 0.0)
+	{
+		double client_total = ((*client_durations)[worker_uid] += duration_sec);
+		if (client_total > *max_duration_sec)
+		{
+			*max_duration_sec = client_total;
+		}
+	}
+}
+
 void *get_performance_metrics(void *th_argv)
 {
 	p_argv *arguments = (p_argv *)th_argv;
@@ -2896,7 +2925,7 @@ void *get_performance_metrics(void *th_argv)
 	if ((size_t)(end_ptr - current_ptr) < sizeof(uint64_t))
 	{
 		slog_error("HERCULES_ERR_METADATA_WORKER_MALFORMED_PERFORMANCE_HEADER");
-		fprintf(stderr,"HERCULES_ERR_METADATA_WORKER_MALFORMED_PERFORMANCE_HEADER\n");
+		fprintf(stderr, "HERCULES_ERR_METADATA_WORKER_MALFORMED_PERFORMANCE_HEADER\n");
 		return NULL;
 	}
 	// Get the number of entries.
@@ -2916,7 +2945,7 @@ void *get_performance_metrics(void *th_argv)
 		if ((size_t)(end_ptr - current_ptr) < sizeof(uint64_t))
 		{
 			slog_error("HERCULES_ERR_METADATA_WORKER_MALFORMED_PERFORMANCE_ENTRY");
-			fprintf(stderr,"HERCULES_ERR_METADATA_WORKER_MALFORMED_PERFORMANCE_ENTRY\n");
+			fprintf(stderr, "HERCULES_ERR_METADATA_WORKER_MALFORMED_PERFORMANCE_ENTRY\n");
 			break;
 		}
 		uint64_t key_length = 0;
@@ -2926,13 +2955,15 @@ void *get_performance_metrics(void *th_argv)
 		int server_id = 0;
 		long long write_bytes = 0;
 		long long read_bytes = 0;
-		// Guard against truncated buffers or integer underflow before copying hostname and byte counts.
+		double write_time_sec = 0.0;
+		double read_time_sec = 0.0;
+		// Guard against truncated buffers or integer underflow before copying hostname, byte counts, and active durations.
 		size_t remaining = (size_t)(end_ptr - current_ptr);
-		size_t entry_fixed_size = sizeof(server_id) + sizeof(write_bytes) + sizeof(read_bytes);
+		size_t entry_fixed_size = sizeof(server_id) + sizeof(write_bytes) + sizeof(read_bytes) + sizeof(write_time_sec) + sizeof(read_time_sec);
 		if (key_length > remaining || (remaining - key_length) < entry_fixed_size)
 		{
 			slog_error("HERCULES_ERR_METADATA_WORKER_TRUNCATED_PERFORMANCE_ENTRY");
-			fprintf(stderr,"HERCULES_ERR_METADATA_WORKER_TRUNCATED_PERFORMANCE_ENTRY\n");
+			fprintf(stderr, "HERCULES_ERR_METADATA_WORKER_TRUNCATED_PERFORMANCE_ENTRY\n");
 			break;
 		}
 
@@ -2944,12 +2975,18 @@ void *get_performance_metrics(void *th_argv)
 		memcpy(&server_id, current_ptr, sizeof(server_id));
 		current_ptr += sizeof(server_id);
 
-		// Deserialize write and read raw bytes.
+		// Deserialize write and read raw bytes and active transfer durations.
 		memcpy(&write_bytes, current_ptr, sizeof(write_bytes));
 		current_ptr += sizeof(write_bytes);
 
 		memcpy(&read_bytes, current_ptr, sizeof(read_bytes));
 		current_ptr += sizeof(read_bytes);
+
+		memcpy(&write_time_sec, current_ptr, sizeof(write_time_sec));
+		current_ptr += sizeof(write_time_sec);
+
+		memcpy(&read_time_sec, current_ptr, sizeof(read_time_sec));
+		current_ptr += sizeof(read_time_sec);
 
 		// Skip entries with zero transferred bytes so idle reports do not trigger bucket updates.
 		if (write_bytes <= 0 && read_bytes <= 0)
@@ -2964,19 +3001,13 @@ void *get_performance_metrics(void *th_argv)
 		// 	fprintf(stderr, "Server id\t Write (MB/s)\t Read (MB/s)\t Overall (MB/s)\n");
 		// }
 		// fprintf(stderr, "%s\t %d\t %f\t %f\t %f\t %d\n",received_metrics.server_hostname.c_str(), received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, number_of_history_records);
-		slog_debug("%s\t %d\t write=%lld (%lld MB)\t read=%lld (%lld MB)\t %d", key.c_str(), server_id, write_bytes, write_bytes / MB, read_bytes, read_bytes / MB, current_record);
+		slog_debug("%s\t %d\t write=%lld (%lld MB, %.3fs)\t read=%lld (%lld MB, %.3fs)\t %d", key.c_str(), server_id, write_bytes, write_bytes / MB, write_time_sec, read_bytes, read_bytes / MB, read_time_sec, current_record);
 
-		// Sum concurrent client byte counts into this server's pending interval bucket (integer addition only).
+		// Sum concurrent client byte counts and track the maximum per-client cumulative transfer duration per direction.
 		PerformanceBucket &bucket = pending_perf_bucket[key];
 		bucket.server_id = server_id;
-		if (write_bytes > 0)
-		{
-			bucket.write_bytes += write_bytes;
-		}
-		if (read_bytes > 0)
-		{
-			bucket.read_bytes += read_bytes;
-		}
+		accumulate_direction_metric(write_bytes, write_time_sec, arguments->worker_uid, &bucket.write_bytes, &bucket.max_write_time_sec, &bucket.client_write_time_sec);
+		accumulate_direction_metric(read_bytes, read_time_sec, arguments->worker_uid, &bucket.read_bytes, &bucket.max_read_time_sec, &bucket.client_read_time_sec);
 	}
 	pthread_mutex_unlock(&mutext_performance_metrics);
 
