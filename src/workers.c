@@ -2891,12 +2891,15 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		// number  == client ip.
 		// uri_ == hostname.
 		char *added_hostname = uri_;
-		slog_debug("connecting to %s:8500",number);
-		oob_sock = connect_common(number, 85000, AF_INET);
+		// The joining data server answers on its configured DATA_PORT.
+		slog_debug("connecting to %s:%" PRIu64, number, arguments->args.data_port);
+		oob_sock = connect_common(number, arguments->args.data_port, AF_INET);
 		if (oob_sock < 0)
 		{
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			sprintf(err_msg, "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%d - %s:%d", server_id_request, new_imss.info.ips[server_id_request], new_imss.info.conn_port);
+			// new_imss is not initialised here: report the request itself.
+			sprintf(err_msg, "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%d - %s:%" PRIu64, server_id_request, number, arguments->args.data_port);
+			free(new_imss.conns.peer_addr);
 			slog_error("%s", err_msg);
 			perror(err_msg);
 			return -1;

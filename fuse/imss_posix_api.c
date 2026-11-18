@@ -802,6 +802,15 @@ extern "C"
 			return 0;
 		}
 
+		// POSIX read semantics: never transfer data past the end of the file.
+		// The per-block logic below clamps only the first block, so a request
+		// spanning several blocks would otherwise return bytes beyond EOF.
+		if ((size_t)offset + size > (size_t)stats.st_size)
+		{
+			size = (size_t)stats.st_size - (size_t)offset;
+			end_blk = ceil((double)(offset + size) / IMSS_DATA_BSIZE);
+		}
+
 		i_blk = 0;
 		while (curr_blk <= end_blk)
 		{
@@ -825,6 +834,10 @@ extern "C"
 						slog_info("[imss_read] case 3");
 						to_read = IMSS_DATA_BSIZE - start_offset;
 					}
+				}
+				if ((size_t)to_read > size)
+				{
+					to_read = size;
 				}
 				slog_debug("[imss_read] FIRST BLOCK CASE, to_read=%ld, fd=%d, ds=%d", to_read, fd, ds);
 

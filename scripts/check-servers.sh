@@ -45,10 +45,19 @@ echo ${HERCULES_PATH}
 CheckForStatusFile
 # echo $STATUS > file-status.out
 #echo "STATUS=$STATUS" >> ${HERCULES_PATH}/tmp/$SERVER_TYPE-hercules-$SERVER_NUMBER-$ACTION
-# If the server is locked we will wait until it is unlocked.
-until [ "$STATUS" != "LOCKED" ]; do
-    echo "[+][$HOSTNAME] Server $SERVER_NUMBER is locked, $STATUS"
-    CheckForStatusFile
+# Wait while the server is locked. The server rewrites the status file in
+# place (fopen "w+"), so an empty status means it is being written: wait too.
+polls=0
+until [ "$STATUS" = "OK" ] || [ "$STATUS" = "ERROR" ]; do
+    polls=$((polls + 1))
+    if [ $polls -gt $((ATTEMPS * 5)) ]; then
+        exit 1
+    fi
+    if [ $((polls % 25)) -eq 1 ]; then
+        echo "[+][$HOSTNAME] Server $SERVER_NUMBER status: ${STATUS:-<being written>}"
+    fi
+    sleep 0.2
+    CheckForStatusFile > /dev/null
 done
 
 
