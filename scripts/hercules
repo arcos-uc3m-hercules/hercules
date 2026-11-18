@@ -97,11 +97,12 @@ StopServers() {
         # echo "[+] Removing temporal files on ${node}"
         echo "[+] Stopping server ID ${REAL_ID} on ${node}"
 
+        ## Signal only this server: metadata and data servers may share a node.
         ## TODO: adapt this to ssh when slrum is not avaiable.
         set -x 
         # ( ssh $node "$RM" )
         # ( ssh ${node} "pkill -SIGUSR1 hercules_server" )
-        srun --nodelist="${node}" --ntasks=1 --nodes=1 --overlap --jobid="${SLURM_JOB_ID}" bash -c "rm -f ${FILE_TO_REMOVE}; pkill -SIGUSR1 hercules_server"
+        srun --nodelist="${node}" --ntasks=1 --nodes=1 --overlap --jobid="${SLURM_JOB_ID}" bash -c "rm -f ${FILE_TO_REMOVE}; pkill -SIGUSR1 -f \"hercules_server ${SERVER_TYPE} ${REAL_ID}( |\$)\""
         set +x
         i=$(($i+1))
 
@@ -538,7 +539,10 @@ then
             echo "Data server file ${DATA_SERVER_FILE} does not exist"
             exit 0
         fi
-        HERCULES_DATA_HOSTFILE="${DATA_SERVER_FILE}"
+        ## StopServers removes stopped hosts from HERCULES_DATA_HOSTFILE:
+        ## work on a copy so that the user's host file is never modified.
+        HERCULES_DATA_HOSTFILE="${HERCULES_TEMPORAL_PATH}/data2stop_userfile_${SLURM_JOB_ID}"
+        cp "${DATA_SERVER_FILE}" "${HERCULES_DATA_HOSTFILE}"
     fi
 
     set -x
@@ -825,6 +829,10 @@ else
     ## determinate set of metadata servers.
     echo "[+] Reading metadata server file - $META_SERVER_FILE"
     readarray -t meta_hosts < "$META_SERVER_FILE"
+    ## The configuration names HERCULES_METADATA_HOSTFILE: keep it in step.
+    if [[ -n "${HERCULES_METADATA_HOSTFILE}" && "${META_SERVER_FILE}" != "${HERCULES_METADATA_HOSTFILE}" ]]; then
+        cp "${META_SERVER_FILE}" "${HERCULES_METADATA_HOSTFILE}"
+    fi
 fi
 
 ## The array is read to deploy the metadata servers.
@@ -903,6 +911,15 @@ then
         # echo ${HERCULES_ALLOC_DATA_HOSTFILE}
         # echo ${MALLEABILITY}
         tail -n +$((HERCULES_NUM_METADATA+1)) "${FULL_HOSTFILE}" | head -n "${HERCULES_NUM_DATA}" > "${HERCULES_DATA_HOSTFILE}"
+        ## Too few nodes after the metadata nodes (e.g., a one-node allocation):
+        ## complete the list with the other allocated nodes, one data server each.
+        if [[ $(wc -l < "${HERCULES_DATA_HOSTFILE}") -lt "${HERCULES_NUM_DATA}" ]]; then
+            awk -v n="${HERCULES_NUM_DATA}" "FILENAME==ARGV[1]{seen[\$0]=1; c++; next} c<n && !(\$0 in seen){print; seen[\$0]=1; c++}" "${HERCULES_DATA_HOSTFILE}" "${FULL_HOSTFILE}" >> "${HERCULES_DATA_HOSTFILE}"
+        fi
+        if [[ $(wc -l < "${HERCULES_DATA_HOSTFILE}") -lt "${HERCULES_NUM_DATA}" ]]; then
+            echo "[Error] NUM_DATA_SERVERS=${HERCULES_NUM_DATA} needs at least that many allocated nodes."
+            exit 1
+        fi
     fi
     ## To create an array with the data nodes.
     readarray -t data_hosts < "${HERCULES_DATA_HOSTFILE}"
@@ -912,6 +929,10 @@ else
     ## determinate set of data servers.
     echo "[+] Reading data server file."
     readarray -t data_hosts < "${DATA_SERVER_FILE}"
+    ## The configuration and the index below use HERCULES_DATA_HOSTFILE.
+    if [[ -n "${HERCULES_DATA_HOSTFILE}" && "${DATA_SERVER_FILE}" != "${HERCULES_DATA_HOSTFILE}" ]]; then
+        cp "${DATA_SERVER_FILE}" "${HERCULES_DATA_HOSTFILE}"
+    fi
 fi
 
 # Index file
