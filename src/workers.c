@@ -995,6 +995,7 @@ int wait_drain_data_server(int server_id, struct timespec stop_signal_ts)
 	} while (true);
 }
 
+extern imss curr_imss;
 void *move_blocks_2_server(void *th_argv)
 {
 
@@ -1014,10 +1015,10 @@ void *move_blocks_2_server(void *th_argv)
 	imss *local_imss_;
 	imss_found_in = find_imss_pointer(imss_uri, &local_imss_);
 
-	if (imss_found_in == -1)
-	{ // request the metadata.
-		slog_debug("imss structure not found, requesting to the metadata server");
-		// fprintf(stderr, "imss structure not found, requesting to the metadata server\n");
+	uint32_t target_num_servers = number_storage_servers.load();
+	if (imss_found_in == -1 || local_imss_ == NULL)
+	{
+		slog_debug("imss structure not found, requesting fresh metadata from metadata server");
 		uint32_t num_servers = 0;
 		int32_t open_ret = open_imss((char *)imss_uri, &num_servers);
 		if (open_ret < 0)
@@ -1025,22 +1026,22 @@ void *move_blocks_2_server(void *th_argv)
 			slog_fatal("Error creating HERCULES's resources, the process cannot be started");
 			pthread_exit(NULL);
 		}
-		// This number have to match with the one received by the REORDERSERVER or STOPSERVER message.
-		number_storage_servers.store(num_servers);
 		imss_found_in = find_imss_pointer(imss_uri, &local_imss_);
-		if (imss_found_in == -1)
+		if (imss_found_in == -1 || local_imss_ == NULL)
 		{
 			fprintf(stderr, "HERCULES_ERR_MOVE_BLOCKS_2_SERVER: Failed opening imss\n");
 			pthread_exit(NULL);
 		}
 	}
-	else
-	{ // update current struct.
-		slog_debug("imss structure found, updating.");
-		// Derives target server count from destination topology view.
-		int32_t current_vid = local_imss_->info.current_view_id;
-		ReleaseSpecificDataServerNetworkResources(local_imss_, 1, id_server_to_modify, local_imss_->info.views[current_vid].num_servers);
+	// If metadata or cached imss had not yet shifted ips, remove the departing server slot locally.
+	if ((uint32_t)local_imss_->info.num_storages > target_num_servers && id_server_to_modify >= 0 && id_server_to_modify < local_imss_->info.num_storages)
+	{
+		ReleaseSpecificDataServerNetworkResources(local_imss_, 1, id_server_to_modify, (int)target_num_servers);
 	}
+	number_storage_servers.store(target_num_servers);
+	pthread_mutex_lock(&lock_network);
+	curr_imss = *local_imss_;
+	pthread_mutex_unlock(&lock_network);
 	curr_global_imss_info = &local_imss_->info;
 
 	// Here data server should to move the datablocks.
@@ -2745,13 +2746,15 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 
 	// fprintf(stderr, "Elasticity analysis: Average Performance = %.2f MB/s, Performance Threshold = %.2f, servers = %d\n", moving_average / (MB * 1.0f), performance_threshold / (MB * 1.0f), number_storage_servers.load());
 
-	fprintf(stderr, "Elasticity analysis: Average Overall Performance = %.2f MB/s, Average Write Performance = %.2f, Average Read Performance = %.2f, Threshold Bounds = [%.2f - %.2f] MB/s, servers = %d\n",
-		overall_moving_average / MB,
-		write_moving_average / MB,
-		read_moving_average / MB,
-		lower_bound / MB,
-		upper_bound / MB,
-		number_storage_servers.load());
+	time_t now_sec = time(NULL);
+	struct tm tm_now;
+	char ts_buf[32] = {0};
+	if (localtime_r(&now_sec, &tm_now) != NULL)
+	{
+		strftime(ts_buf, sizeof(ts_buf), "%a %b %d %H:%M:%S %Y", &tm_now);
+	}
+
+	fprintf(stderr, "[%s] Elasticity analysis: Average Overall Performance = %.2f MB/s, Average Write Performance = %.2f, Average Read Performance = %.2f, Threshold Bounds = [%.2f - %.2f] MB/s, servers = %d\n", ts_buf, overall_moving_average / MB, write_moving_average / MB, read_moving_average / MB, lower_bound / MB, upper_bound / MB, number_storage_servers.load());
 
 	slog_debug("Elasticity analysis: Average Performance = %.2f MB/s, Performance Threshold = %.2f, servers = %d\n", overall_moving_average / MB, performance_threshold / MB, number_storage_servers.load());
 

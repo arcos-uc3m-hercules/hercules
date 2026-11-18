@@ -6277,8 +6277,30 @@ void InitDefaultTopologyView(imss_info *info)
 	}
 }
 
+/**
+ * @brief Records data-block read or write transfer metrics.
+ */
+static void record_backend_data_metric(const char *hostname, int server_id, int32_t data_id, bool is_write, size_t data_bytes, double data_time_sec)
+{
+	if (data_id <= 0 || hostname == NULL || hostname[0] == '\0' || data_bytes == 0)
+	{
+		return;
+	}
+	if (CONF_MALLEABILITY_METRIC != MALLEABILITY_METRIC_BANDWIDTH && CONF_MALLEABILITY_METRIC != MALLEABILITY_METRIC_HYBRID)
+	{
+		return;
+	}
+	std::string used_hostname_server = hostname;
+	ServerMetrics &dir_metrics = is_write ? backend_performance_metrics[used_hostname_server].write : backend_performance_metrics[used_hostname_server].read;
+	dir_metrics.total_data_size += (long long)data_bytes;
+	dir_metrics.total_data_time += data_time_sec;
+	dir_metrics.num_operations++;
+	backend_performance_metrics[used_hostname_server].server_id = server_id;
+}
+
 ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request, int deep)
 {
+	auto start_read_op = std::chrono::steady_clock::now();
 	slog_debug("dataset_uri=%s, dataset_id=%d, data_id=%d", dataset_uri, dataset_id, data_id);
 
 	if (buffer_request)
@@ -6555,14 +6577,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		// without inspecting response_buffer before UCX receive finishes.
 		if (async == ASYNC)
 		{
-			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH || CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_HYBRID)
-			{
-				std::string used_hostname_server = node_hostname;
-				backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + size_received_data);
-				backend_performance_metrics[used_hostname_server].read.total_data_time += (time_taken_req.count() + time_taken_data.count());
-				backend_performance_metrics[used_hostname_server].read.num_operations++;
-				backend_performance_metrics[used_hostname_server].server_id = server_id;
-			}
+			std::chrono::duration<double> op_time = std::chrono::steady_clock::now() - start_read_op;
+			record_backend_data_metric(node_hostname, server_id, data_id, false, size_received_data, op_time.count());
 
 			pthread_mutex_unlock(&lock_network);
 			return (ssize_t)size_received_data;
@@ -6649,14 +6665,8 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			}
 
 			// performance read metrics.
-			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH || CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_HYBRID)
-			{
-				std::string used_hostname_server = node_hostname;
-				backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + size_received_data);
-				backend_performance_metrics[used_hostname_server].read.total_data_time += (time_taken_req.count() + time_taken_data.count());
-				backend_performance_metrics[used_hostname_server].read.num_operations++;
-				backend_performance_metrics[used_hostname_server].server_id = server_id;
-			}
+			std::chrono::duration<double> op_time = std::chrono::steady_clock::now() - start_read_op;
+			record_backend_data_metric(node_hostname, server_id, data_id, false, size_received_data, op_time.count());
 
 			// free(response_buffer);
 			pthread_mutex_unlock(&lock_network);
@@ -6679,6 +6689,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 // Method retrieving a data element associated to a certain dataset.
 ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_id, void **buffer_prefetch, size_t total_read_size, size_t num_blocks_to_read)
 {
+	auto start_prefetch_op = std::chrono::steady_clock::now();
 	slog_debug("dataset_uri=%s, dataset_id=%d, data_id=%d", dataset_uri, dataset_id, data_id);
 
 	int n_server = -1;
@@ -6845,14 +6856,8 @@ ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_i
 			slog_info("OK!, length=%ld", msg_length);
 
 			// performance read metrics.
-			if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH || CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_HYBRID)
-			{
-				std::string used_hostname_server = curr_imss.info.ips[n_server_];
-				backend_performance_metrics[used_hostname_server].read.total_data_size += (size_sent_req + msg_length);
-				backend_performance_metrics[used_hostname_server].read.total_data_time += time_taken;
-				backend_performance_metrics[used_hostname_server].read.num_operations++;
-				backend_performance_metrics[used_hostname_server].server_id = n_server_;
-			}
+			std::chrono::duration<double> op_time = std::chrono::steady_clock::now() - start_prefetch_op;
+			record_backend_data_metric(curr_imss.info.ips[n_server_], n_server_, data_id, false, msg_length, op_time.count());
 
 			pthread_mutex_unlock(&lock_network);
 			return (ssize_t)msg_length;
@@ -7218,6 +7223,7 @@ int32_t wait_ack_set_data(char **response_buffer, ucp_ep_h ep, int async)
  */
 int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int async, int deep, hercules_modes_t op_type)
 {
+	auto start_write_op = std::chrono::steady_clock::now();
 	int ret = 0;
 	int32_t n_server = 0;
 	size_t msg_length = 0;
@@ -7533,14 +7539,8 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 				auto end_time_data = std::chrono::steady_clock::now();
 				std::chrono::duration<double> time_taken_data = end_time_data - start_time_data;
 
-				if (CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_BANDWIDTH || CONF_MALLEABILITY_METRIC == MALLEABILITY_METRIC_HYBRID)
-				{
-					std::string used_hostname_server = node_hostname;
-					backend_performance_metrics[used_hostname_server].write.total_data_size += (size_sent_req + size_sent_data);
-					backend_performance_metrics[used_hostname_server].write.total_data_time += (time_taken_data.count() + time_taken_req.count());
-					backend_performance_metrics[used_hostname_server].write.num_operations++;
-					backend_performance_metrics[used_hostname_server].server_id = n_server_;
-				}
+				std::chrono::duration<double> op_time = std::chrono::steady_clock::now() - start_write_op;
+				record_backend_data_metric(node_hostname, n_server_, data_id, true, size_sent_data, op_time.count());
 			}
 		}
 	}
@@ -8132,6 +8132,14 @@ int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const 
 		pthread_mutex_unlock(&lock_network);
 		perror("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_FORMATING");
 		slog_error("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_FORMATING: request formatting error for server %d", server_id);
+		return -1;
+	}
+
+	if (n_server_ >= (uint32_t)curr_imss.info.num_storages || curr_imss.conns.eps == NULL || curr_imss.conns.eps[n_server_] == NULL || curr_imss.info.ips == NULL || curr_imss.info.ips[n_server_] == NULL)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_INVALID_EP: server_id=%u num_storages=%d", n_server_, curr_imss.info.num_storages);
+		fprintf(stderr, "HERCULES_ERR_FLUSH_DATA_TO_NETWORK_INVALID_EP: server_id=%u num_storages=%d\n", n_server_, curr_imss.info.num_storages);
 		return -1;
 	}
 
