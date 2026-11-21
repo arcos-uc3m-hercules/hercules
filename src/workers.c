@@ -165,6 +165,19 @@ int data_ready = 0;
 #define GARBAGE_COLLECTOR_PERIOD 10
 #define CKECKPOINT_PERIOD 10
 
+/**
+ * @brief Strips trailing newline and whitespace characters from a hostname string.
+ */
+static std::string trim_hostname(const char *raw)
+{
+	if (!raw)
+		return std::string();
+	std::string h(raw);
+	while (!h.empty() && (h.back() == '\n' || h.back() == '\r' || h.back() == ' ' || h.back() == '\t'))
+		h.pop_back();
+	return h;
+}
+
 int preload_metadata_servers(const char *meta_hostfile)
 {
 	if (!meta_hostfile || meta_hostfile[0] == '\0')
@@ -190,11 +203,7 @@ int preload_metadata_servers(const char *meta_hostfile)
 	char line_buf[256];
 	while (fgets(line_buf, sizeof(line_buf), mf) != NULL)
 	{
-		std::string mh = line_buf;
-		while (!mh.empty() && (mh.back() == '\n' || mh.back() == '\r' || mh.back() == ' '))
-		{
-			mh.pop_back();
-		}
+		std::string mh = trim_hostname(line_buf);
 
 		if (!mh.empty() && mh[0] != '#')
 		{
@@ -650,6 +659,30 @@ int Shutdown_server()
 	global_finish_garbage_collector = 1;
 	pthread_cond_signal(&global_run_garbage_collector_cond);
 	pthread_mutex_unlock(&mutex_garbage);
+
+	// Stop and wake snapshot producer and consumer threads so decommissioned servers exit cleanly.
+	pthread_mutex_lock(&global_finish_mut);
+	if (global_finish_snapshot != SNAPSHOT_STATE_FINISHED)
+	{
+		global_finish_snapshot = SNAPSHOT_STATE_STOP_REQUESTED;
+	}
+	if (global_finish_checkpoint != CHECKPOINT_STATE_FINISHED)
+	{
+		global_finish_checkpoint = CHECKPOINT_STATE_STOP_REQUESTED;
+	}
+	pthread_mutex_unlock(&global_finish_mut);
+
+	pthread_mutex_lock(&mutex_snapshot);
+	pthread_cond_signal(&global_run_snapshot_cond);
+	pthread_mutex_unlock(&mutex_snapshot);
+
+	pthread_mutex_lock(&mutex_snapshot_consumer);
+	pthread_cond_signal(&global_run_snapshot_consumer_cond);
+	pthread_mutex_unlock(&mutex_snapshot_consumer);
+
+	pthread_mutex_lock(&mutex_checkpoint);
+	pthread_cond_signal(&global_run_checkpoint_cond);
+	pthread_mutex_unlock(&mutex_checkpoint);
 	return 0;
 }
 
@@ -1943,6 +1976,8 @@ void *run_malleability(void *th_argv)
 		pthread_exit(NULL);
 	}
 
+	struct arguments *cfg = arguments->args;
+
 	slog_malleability("Waiting for the mutex to be free");
 	pthread_mutex_lock(&mutext_malleability);
 	comissioning_on.store(true, std::memory_order_release);
@@ -1958,84 +1993,157 @@ void *run_malleability(void *th_argv)
 	pthread_mutex_lock(&mutext_performance_metrics);
 	history_snapshot = elasticity_records_history;
 	pthread_mutex_unlock(&mutext_performance_metrics);
-	// if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
-	// {
-	// Set comissioning ON to avoid doing twice at same time.
-	// comissioning_on = true;
-	// Always check the performance trend.
-	// int slowest_server_id;
-	scaling_action action = make_scaling_decision(history_snapshot, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server, true);
 
-	// Only trigger the actual scaling operation if the threshold is met.
-	if (consecutive_commissioning_signals >= arguments->args->malleability_tolerance_commissioning)
-	{ // commissioning threshold.
-		comissioning_stage(arguments);
-		arguments = NULL;
-		// Clear all history metrics and pending interval bytes for remaining servers so pre-scaling I/O does not bleed into post-scaling intervals.
-		discard_transition_interval.store(true, std::memory_order_release);
-		pthread_mutex_lock(&mutext_performance_metrics);
-		pending_perf_bucket.clear();
-		for (auto &pair : elasticity_records_history)
+	if (application_profile_active.load(std::memory_order_acquire))
+	{
+		if (application_profile_t0_initialized.load(std::memory_order_acquire))
 		{
-			pair.second.clear();
-		}
-		pthread_mutex_unlock(&mutext_performance_metrics);
-	}
-
-	else if (consecutive_decommissioning_signals >= arguments->args->malleability_tolerance_decommissioning)
-	{ // decommissioning threshold.
-		int32_t min_servers_allowed = (arguments->args->lower_bound_servers > 1)
-						  ? arguments->args->lower_bound_servers
-						  : 1;
-		if ((int32_t)number_storage_servers.load() <= min_servers_allowed)
-		{
-			slog_malleability("SCALE_DOWN skipped: current active servers (%d) is at or below lower bound (%d).", number_storage_servers.load(), min_servers_allowed);
-			fprintf(stderr, "SCALE_DOWN skipped: current active servers (%d) is at or below lower bound (%d).\n", number_storage_servers.load(), min_servers_allowed);
-			consecutive_decommissioning_signals = 0;
-		}
-		else if (slowest_server.server_id != -1)
-		{
-			std::string key_to_remove = slowest_server.server_hostname;
-			int target_id = slowest_server.server_id;
-			int ret = decomissioning_stage(arguments, target_id);
-			if (ret)
+			double elapsed_sec = get_application_profile_elapsed_sec();
+			ssize_t due_idx = -1;
+			for (size_t i = 0; i < application_profile_events.size(); ++i)
 			{
-				discard_transition_interval.store(true, std::memory_order_release);
-				pthread_mutex_lock(&mutext_performance_metrics);
-				// remove the decommissioned server and discard pre-decommission interval bytes
-				size_t erased_elements = elasticity_records_history.erase(key_to_remove);
-				pending_perf_bucket.clear();
-				// clear the history metrics for all remaining servers
-				for (auto &pair : elasticity_records_history)
+				if (!application_profile_events[i].executed && elapsed_sec >= application_profile_events[i].trigger_sec)
 				{
-					pair.second.clear();
+					due_idx = (ssize_t)i;
 				}
-				pthread_mutex_unlock(&mutext_performance_metrics);
+			}
 
-				if (erased_elements > 0)
+			// Mark superseded earlier due events as executed so only the latest target applies.
+			for (ssize_t i = 0; i < due_idx; ++i)
+			{
+				application_profile_events[(size_t)i].executed = true;
+			}
+
+			if (due_idx >= 0)
+			{
+				ApplicationProfileEvent &ev = application_profile_events[(size_t)due_idx];
+				int32_t current_servers = (int32_t)number_storage_servers.load();
+				int32_t min_servers_allowed = (arguments->args->lower_bound_servers > 1) ? arguments->args->lower_bound_servers : 1;
+				int32_t desired_servers = ev.target_servers;
+
+				if (desired_servers < min_servers_allowed)
 				{
-					slog_malleability("Server %s has been deleted from the elasticity records history.", key_to_remove.c_str());
+					desired_servers = min_servers_allowed;
+				}
+				if (arguments->args->upper_bound_servers > 0 && desired_servers > arguments->args->upper_bound_servers)
+				{
+					desired_servers = arguments->args->upper_bound_servers;
+				}
+
+				if (current_servers == desired_servers)
+				{
+					ev.executed = true;
+					slog_malleability("[ApplicationProfile] Target servers already active at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").", elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
+					fprintf(stderr, "[ApplicationProfile] Target servers already active at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").\n", elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
+				}
+				else if (current_servers < desired_servers)
+				{
+					if (current_servers + 1 >= desired_servers)
+					{
+						ev.executed = true;
+					}
+					slog_malleability("[ApplicationProfile] Triggering SCALE_UP at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").", elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
+					fprintf(stderr, "[ApplicationProfile] Triggering SCALE_UP at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").\n", elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
+					comissioning_stage(arguments);
+					arguments = NULL;
+					clear_transition_performance_metrics(NULL);
 				}
 				else
 				{
-					slog_error("Server %s has NOT been deleted from the elasticity records history.", key_to_remove.c_str());
+					std::string key_to_remove;
+					int target_id = select_profile_decommission_candidate(history_snapshot, current_servers, key_to_remove);
+					if (target_id != -1)
+					{
+						if (current_servers - 1 <= desired_servers)
+						{
+							ev.executed = true;
+						}
+						slog_malleability("[ApplicationProfile] Triggering SCALE_DOWN of server %d at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").", target_id, elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
+						fprintf(stderr, "[ApplicationProfile] Triggering SCALE_DOWN of server %d at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").\n", target_id, elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
+						int ret = decomissioning_stage(arguments, target_id);
+						if (ret)
+						{
+							clear_transition_performance_metrics(&key_to_remove);
+						}
+					}
+					else
+					{
+						ev.executed = true;
+						slog_error("HERCULES_ERR_INVALID_SLOWEST_SERVER_ID");
+						fprintf(stderr, "HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
+					}
 				}
 			}
 		}
-		else
-		{
-			fprintf(stderr, "HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
-			slog_error("HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
-		}
-	}
-	else if (consecutive_hold_signals >= 10)
-	{ // stable threshold.
-		fprintf(stderr, "HOLD: System has been stable for 10 events, restarting counters.\n");
-		reset_malleability_event_counters();
 	}
 	else
 	{
-		slog_malleability("SCALE_DOWN: Waiting for more consecutive strakes. consecutive_decommissioning_signals=%d/%" PRId32 ", consecutive_commissioning_signals=%d/%" PRId32 ", consecutive_hold_signals=%d/10", consecutive_decommissioning_signals, arguments->args->malleability_tolerance_decommissioning, consecutive_commissioning_signals, arguments->args->malleability_tolerance_commissioning, consecutive_hold_signals);
+		// if (arguments->args->malleability == MALLEABILITY_CONF_ENABLED && comissioning_on.load(std::memory_order_acquire) == false)
+		// {
+		// Set comissioning ON to avoid doing twice at same time.
+		// comissioning_on = true;
+		// Always check the performance trend.
+		// int slowest_server_id;
+		scaling_action action = make_scaling_decision(history_snapshot, arguments->args->malleability_windows_size, arguments->args->malleability_performance_threshold, slowest_server, true);
+
+		// Only trigger the actual scaling operation if the threshold is met.
+		if (consecutive_commissioning_signals >= arguments->args->malleability_tolerance_commissioning)
+		{ // commissioning threshold.
+			int32_t prev_servers = (int32_t)number_storage_servers.load();
+			double trigger_sec = get_application_profile_elapsed_sec();
+			comissioning_stage(arguments);
+			arguments = NULL;
+			// Clear all history metrics and pending interval bytes for remaining servers so pre-scaling I/O does not bleed into post-scaling intervals.
+			clear_transition_performance_metrics(NULL);
+			int32_t new_servers = (int32_t)number_storage_servers.load();
+			if (application_profile_record_active.load(std::memory_order_acquire) && new_servers > prev_servers)
+			{
+				record_application_profile_event(cfg->application_profile_path, trigger_sec, new_servers);
+			}
+		}
+
+		else if (consecutive_decommissioning_signals >= arguments->args->malleability_tolerance_decommissioning)
+		{ // decommissioning threshold.
+			int32_t min_servers_allowed = (arguments->args->lower_bound_servers > 1)
+							  ? arguments->args->lower_bound_servers
+							  : 1;
+			if ((int32_t)number_storage_servers.load() <= min_servers_allowed)
+			{
+				slog_malleability("SCALE_DOWN skipped: current active servers (%d) is at or below lower bound (%d).", number_storage_servers.load(), min_servers_allowed);
+				fprintf(stderr, "SCALE_DOWN skipped: current active servers (%d) is at or below lower bound (%d).\n", number_storage_servers.load(), min_servers_allowed);
+				consecutive_decommissioning_signals = 0;
+			}
+			else if (slowest_server.server_id != -1)
+			{
+				std::string key_to_remove = slowest_server.server_hostname;
+				int target_id = slowest_server.server_id;
+				double trigger_sec = get_application_profile_elapsed_sec();
+				int ret = decomissioning_stage(arguments, target_id);
+				if (ret)
+				{
+					// remove the decommissioned server and discard pre-decommission interval bytes
+					clear_transition_performance_metrics(&key_to_remove);
+					if (application_profile_record_active.load(std::memory_order_acquire))
+					{
+						record_application_profile_event(cfg->application_profile_path, trigger_sec, (int32_t)number_storage_servers.load());
+					}
+				}
+			}
+			else
+			{
+				fprintf(stderr, "HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
+				slog_error("HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
+			}
+		}
+		else if (consecutive_hold_signals >= 10)
+		{ // stable threshold.
+			fprintf(stderr, "HOLD: System has been stable for 10 events, restarting counters.\n");
+			reset_malleability_event_counters();
+		}
+		else
+		{
+			slog_malleability("SCALE_DOWN: Waiting for more consecutive strakes. consecutive_decommissioning_signals=%d/%" PRId32 ", consecutive_commissioning_signals=%d/%" PRId32 ", consecutive_hold_signals=%d/10", consecutive_decommissioning_signals, arguments->args->malleability_tolerance_decommissioning, consecutive_commissioning_signals, arguments->args->malleability_tolerance_commissioning, consecutive_hold_signals);
+		}
 	}
 
 	comissioning_on.store(false, std::memory_order_release);
@@ -2053,11 +2161,22 @@ void *run_malleability(void *th_argv)
 void *comissioning_stage(MalleabilityArgs *arguments)
 {
 	consecutive_commissioning_signals = 0;
-	if (arguments == NULL)
+	if (arguments == NULL || arguments->args == NULL)
 	{
 		slog_error("HERCULES_ERR_COMISSIONING_STAGE_NULL_ARGS");
 		fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_NULL_ARGS\n");
 		comissioning_on.store(false, std::memory_order_release);
+		if (arguments != NULL)
+			free(arguments);
+		return NULL;
+	}
+
+	if (arguments->args->configuration_file_path[0] == '\0')
+	{
+		slog_error("HERCULES_ERR_COMISSIONING_STAGE_NO_CONF_FILE: Configuration file path is not defined.");
+		fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_NO_CONF_FILE: Configuration file path is not defined.\n");
+		comissioning_on.store(false, std::memory_order_release);
+		free(arguments);
 		return NULL;
 	}
 
@@ -2072,7 +2191,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		return NULL;
 	}
 
-	if (arguments->args && arguments->args->upper_bound_servers > 0 &&
+	if (arguments->args->upper_bound_servers > 0 &&
 	    (int32_t)imss_info_struct->num_storages >= arguments->args->upper_bound_servers)
 	{
 		slog_malleability("Commissioning skipped: current storages (%d) reached upper bound (%d)", imss_info_struct->num_storages, arguments->args->upper_bound_servers);
@@ -2105,14 +2224,107 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 	start_time_commissioning = std::chrono::steady_clock::now();
 	is_new_server_ready = false;
 
-	if (is_slurm)
+	// First look for a free (decommissioned) host in the initial pre-allocated host list
+	// before requesting a new node from Slurm.
+	node_to_use = NULL;
+	if (imss_copy.num_storages != -1 && number_of_hosts > 0 && imss_copy.ips != NULL)
+	{
+		fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
+		slog_debug("number_of_hosts=%d\n", number_of_hosts);
+		int found = 0;
+		// Iterates over all hosts defined on the "hostfile" in order to find a
+		// hostname that is not already under use.
+		for (int j = 0; j < number_of_hosts; ++j)
+		{
+			std::string candidate = trim_hostname(imss_copy.ips[j]);
+			if (candidate.empty())
+				continue;
+
+			found = 0;
+			// slog_debug("eps[%d] hostname=%s", j, imss_copy.ips[j]);
+			// fprintf(stderr, "eps[%d] hostname=%s\n", j, imss_copy.ips[j]);
+			for (int32_t i = 0; i < imss_info_struct->num_storages; ++i)
+			{
+				if (!imss_info_struct->ips || !imss_info_struct->ips[i])
+					continue;
+				// check if the host is already on the struct.
+				if (candidate == trim_hostname(imss_info_struct->ips[i]))
+				{
+					// this host is in the struct, so we have to skip it.
+					found = 1;
+					break;
+				}
+			}
+			if (!found)
+			{
+				// if we have not found this host on the curren imss_info_struct, we break the loop.
+				node_to_use = imss_copy.ips[j];
+				break;
+			}
+		}
+	}
+
+	if (node_to_use != NULL)
+	{
+		char command_to_exec[PATH_MAX * 2] = {0};
+		char *workdir = getenv("PWD");
+
+		sprintf(command_to_exec,
+			"cd %s && "
+			"HERCULES_THREAD_POOL=1 HERCULES_CONF=%s %s/build/hercules_server d %d %d "
+			"> %s/tmp/hercules_server_%d_log.txt 2>&1",
+			workdir,
+			arguments->args->configuration_file_path,
+			arguments->args->hercules_path,
+			new_server_id,
+			new_num_active,
+			arguments->args->hercules_path,
+			new_server_id);
+
+		char msg[PATH_MAX * 2] = {'\0'};
+		sprintf(msg, "Running command: %s, id server=%d, in node_to_use=%s\n", command_to_exec, new_server_id, node_to_use);
+		fprintf(stderr, "%s", msg);
+		slog_debug("%s", msg);
+
+		// Deploy the new hercules instance on the avaiable node.
+		pid_t pid = fork();
+
+		if (pid == -1)
+		{ // error
+			char msg_err[PATH_MAX] = {'\0'};
+			sprintf(msg_err, "HERCULES_ERR_FORK_COMISSIONING_STAGE: %s", node_to_use);
+			perror(msg_err);
+			slog_error("%s", msg_err);
+			comissioning_on.store(false, std::memory_order_release);
+			free(arguments);
+			return NULL;
+		}
+		else if (pid == 0)
+		{ // child
+			execlp("ssh", "ssh", "-f", node_to_use, command_to_exec, (char *)NULL);
+			slog_error("HERCULES_ERR_COMISSIONING_STAGE_CHILD_EXECLP");
+			fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_CHILD_EXECLP\n");
+			exit(-1);
+		}
+		else
+		{ // parent
+			slog_debug("Child process run with PID %d", pid);
+			// waitpid is not here to avoid blocking the parent process.
+			// int status;
+
+			// Recover the child process immediately. Since ssh uses '-f',
+			// the child process terminates immediately after fork, preventing zombie states.
+			int status;
+			waitpid(pid, &status, 0);
+		}
+	}
+	else if (is_slurm)
 	{
 		slog_malleability("Using Slurm on-demand dynamic node allocation (salloc) for data server %d", new_server_id);
-		fprintf(stderr, "[Hercules] Requesting Slurm on-demand node for data server %d (target active: %d)...\n",
-			new_server_id, new_num_active);
+		fprintf(stderr, "[Hercules] Requesting Slurm on-demand node for data server %d (target active: %d)...\n", new_server_id, new_num_active);
 
 		// hercules directory.
-		const char *hercules_dir = (arguments->args && arguments->args->hercules_path[0] != '\0')
+		const char *hercules_dir = (arguments->args->hercules_path[0] != '\0')
 					       ? arguments->args->hercules_path
 					       : getenv("HERCULES_PATH");
 		if (!hercules_dir || hercules_dir[0] == '\0')
@@ -2135,27 +2347,17 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		}
 
 		// configuration file.
-		const char *conf_file = (arguments->args && arguments->args->configuration_file_path[0] != '\0')
-					    ? arguments->args->configuration_file_path
-					    : getenv("HERCULES_CONF");
-		if (!conf_file || conf_file[0] == '\0')
-		{
-			slog_error("HERCULES_ERR_COMISSIONING_STAGE_NO_CONF_FILE: Configuration file path is not defined.");
-			fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_NO_CONF_FILE: Configuration file path is not defined.\n");
-			comissioning_on.store(false, std::memory_order_release);
-			free(arguments);
-			return NULL;
-		}
+		const char *conf_file = arguments->args->configuration_file_path;
 
 		// slurm partition.
-		const char *partition = (arguments->args && arguments->args->slurm_partition[0] != '\0')
+		const char *partition = (arguments->args->slurm_partition[0] != '\0')
 					    ? arguments->args->slurm_partition
 					    : getenv("HERCULES_SLURM_PARTITION");
 		if (!partition)
 			partition = getenv("SLURM_JOB_PARTITION");
 
 		// slurm account.
-		const char *account = (arguments->args && arguments->args->slurm_account[0] != '\0')
+		const char *account = (arguments->args->slurm_account[0] != '\0')
 					  ? arguments->args->slurm_account
 					  : getenv("HERCULES_SLURM_ACCOUNT");
 		if (!account)
@@ -2190,9 +2392,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		{
 			if (imss_info_struct->ips && imss_info_struct->ips[i] && imss_info_struct->ips[i][0] != '\0')
 			{
-				std::string host = imss_info_struct->ips[i];
-				while (!host.empty() && (host.back() == '\n' || host.back() == '\r' || host.back() == ' '))
-					host.pop_back();
+				std::string host = trim_hostname(imss_info_struct->ips[i]);
 				if (!host.empty())
 				{
 					// Normalize to short hostname matching Slurm NodeName format
@@ -2203,11 +2403,9 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		}
 
 		// Collect local metadata server hostname from data_hostname
-		if (arguments->args && arguments->args->data_hostname[0] != '\0')
+		if (arguments->args->data_hostname[0] != '\0')
 		{
-			std::string meta_host = arguments->args->data_hostname;
-			while (!meta_host.empty() && (meta_host.back() == '\n' || meta_host.back() == '\r' || meta_host.back() == ' '))
-				meta_host.pop_back();
+			std::string meta_host = trim_hostname(arguments->args->data_hostname);
 			if (!meta_host.empty())
 			{
 				size_t dot = meta_host.find('.');
@@ -2216,7 +2414,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		}
 
 		// Collect any additional metadata servers
-		if (arguments->args && arguments->args->meta_hostfile[0] != '\0')
+		if (arguments->args->meta_hostfile[0] != '\0')
 		{
 			preload_metadata_servers(arguments->args->meta_hostfile);
 		}
@@ -2227,7 +2425,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		// Collect client nodes to exclude from Slurm allocation so Slurm does not assign
 		// a node running client processes (when running in detached mode: attached == 0).
 		// In attached mode (attached == 1), clients share nodes with servers, so do not exclude.
-		if (arguments->args && arguments->args->attached == HERCULES_DETACHED && arguments->args->client_hostfile[0] != '\0')
+		if (arguments->args->attached == HERCULES_DETACHED && arguments->args->client_hostfile[0] != '\0')
 		{
 			// TODO: consider moving this to memory. For now we keep this here
 			// because some applications with malleabiliy could change the nodes where
@@ -2238,9 +2436,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 				char chost[256];
 				while (fgets(chost, sizeof(chost), cf))
 				{
-					std::string h = chost;
-					while (!h.empty() && (h.back() == '\n' || h.back() == '\r' || h.back() == ' ' || h.back() == '\t'))
-						h.pop_back();
+					std::string h = trim_hostname(chost);
 					if (!h.empty() && h[0] != '#')
 					{
 						size_t dot = h.find('.');
@@ -2295,7 +2491,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 	}
 	else
 	{
-		// Fallback to static hostfile search.
+		// Fallback to static hostfile search failed to find an unused host.
 		if (imss_copy.num_storages == -1)
 		{
 			fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_INVALID_HERCULES_STRUCT_COPY\n");
@@ -2305,110 +2501,11 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 			return NULL;
 		}
 
-		fprintf(stderr, "number_of_hosts=%d\n", number_of_hosts);
-		slog_debug("number_of_hosts=%d\n", number_of_hosts);
-		int found = 0;
-		node_to_use = NULL;
-		// Iterates over all hosts defined on the "hostfile" in order to find a
-		// hostname that is not already under use.
-		for (size_t j = 0; j < number_of_hosts; ++j)
-		{
-			found = 0;
-			// slog_debug("eps[%d] hostname=%s", j, imss_copy.ips[j]);
-			// fprintf(stderr, "eps[%d] hostname=%s\n", j, imss_copy.ips[j]);
-			for (size_t i = 0; i < imss_info_struct->num_storages; ++i)
-			{
-				// check if the host is already on the struct.
-				if (!strcmp(imss_info_struct->ips[i], imss_copy.ips[j]))
-				{
-					// this host is in the struct, so we have to skip it.
-					found = 1;
-					break;
-				}
-			}
-			if (!found)
-			{
-				// if we have not found this host on the curren imss_info_struct, we break the loop.
-				node_to_use = imss_copy.ips[j];
-				break;
-			}
-		}
-
-		if (node_to_use == NULL)
-		{
-			fprintf(stderr, "No avaiable nodes to launch more back-end data servers.\n");
-			slog_debug("No avaiable nodes to launch more back-end data servers.");
-			comissioning_on.store(false, std::memory_order_release);
-			free(arguments);
-			return NULL;
-		}
-
-		const char *conf_file_static = (arguments->args && arguments->args->configuration_file_path[0] != '\0')
-						   ? arguments->args->configuration_file_path
-						   : getenv("HERCULES_CONF");
-		if (!conf_file_static || conf_file_static[0] == '\0')
-		{
-			slog_error("HERCULES_ERR_COMISSIONING_STAGE_NO_CONF_FILE: Configuration file path is not defined.");
-			fprintf(stderr, "HERCULES_ERR_COMISSIONING_STAGE_NO_CONF_FILE: Configuration file path is not defined.\n");
-			comissioning_on.store(false, std::memory_order_release);
-			free(arguments);
-			return NULL;
-		}
-
-		char command_to_exec[PATH_MAX * 2] = {0};
-		char *workdir = getenv("PWD");
-
-		sprintf(command_to_exec,
-			"cd %s && "
-			"HERCULES_THREAD_POOL=1 HERCULES_CONF=%s %s/build/hercules_server d %d %d "
-			"> %s/tmp/hercules_server_%d_log.txt 2>&1",
-			workdir,
-			conf_file_static,
-			arguments->args->hercules_path,
-			new_server_id,
-			new_num_active,
-			arguments->args->hercules_path,
-			new_server_id);
-
-		char msg[PATH_MAX * 2] = {'\0'};
-		sprintf(msg, "Running command: %s, id server=%d, in node_to_use=%s\n", command_to_exec, new_server_id, node_to_use);
-		fprintf(stderr, "%s", msg);
-		slog_debug(msg);
-
-		// Deploy the new hercules instance on the avaiable node.
-		// system(command_to_exec);
-		// clone the process to run the command.
-		pid_t pid = fork();
-
-		if (pid == -1)
-		{ // error
-			char msg_err[PATH_MAX] = {'\0'};
-			sprintf(msg_err, "HERCULES_ERR_FORK_COMISSIONING_STAGE: %s", node_to_use);
-			perror(msg_err);
-			slog_error("%s", msg_err);
-			comissioning_on.store(false, std::memory_order_release);
-			free(arguments);
-			return NULL;
-		}
-		else if (pid == 0)
-		{ // child
-			// execlp("ssh", "ssh", node_to_use, command_to_exec, (char *)NULL);
-			execlp("ssh", "ssh", "-f", node_to_use, command_to_exec, (char *)NULL);
-			// the process is replaced by the ssh.
-			slog_error("HERCULES_ERR_COMISSIONING_STAGE_CHILD_EXECLP");
-			exit(-1);
-		}
-		else
-		{ // parent
-			slog_debug("Child process run with PID %d", pid);
-			// waitpid is not here to avoid blocking the parent process.
-			// int status;
-
-			// Recover the child process immediately. Since ssh uses '-f',
-			// the child process terminates immediately after fork, preventing zombie states.
-			int status;
-			waitpid(pid, &status, 0);
-		}
+		fprintf(stderr, "No avaiable nodes to launch more back-end data servers.\n");
+		slog_debug("No avaiable nodes to launch more back-end data servers.");
+		comissioning_on.store(false, std::memory_order_release);
+		free(arguments);
+		return NULL;
 	}
 
 	slog_debug("Waiting for the signal from the main thread (SETSERVER).");
@@ -3005,6 +3102,17 @@ void *get_performance_metrics(void *th_argv)
 		// }
 		// fprintf(stderr, "%s\t %d\t %f\t %f\t %f\t %d\n",received_metrics.server_hostname.c_str(), received_metrics.server_id, received_metrics.write_performance / MB, received_metrics.read_performance / MB, received_metrics.overall_performance / MB, number_of_history_records);
 		slog_debug("%s\t %d\t write=%lld (%lld MB, %.3fs)\t read=%lld (%lld MB, %.3fs)\t %d", key.c_str(), server_id, write_bytes, write_bytes / MB, write_time_sec, read_bytes, read_bytes / MB, read_time_sec, current_record);
+
+		if (!application_profile_t0_initialized.load(std::memory_order_acquire))
+		{
+			application_profile_t0 = std::chrono::steady_clock::now();
+			application_profile_t0_initialized.store(true, std::memory_order_release);
+			if (application_profile_active.load(std::memory_order_acquire) || application_profile_record_active.load(std::memory_order_acquire))
+			{
+				slog_info("[ApplicationProfile] Reference t0 initialized on first I/O metric.");
+				fprintf(stderr, "[ApplicationProfile] Reference t0 initialized on first I/O metric.\n");
+			}
+		}
 
 		// Sum concurrent client byte counts and track the maximum per-client cumulative transfer duration per direction.
 		PerformanceBucket &bucket = pending_perf_bucket[key];

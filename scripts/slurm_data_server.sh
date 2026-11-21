@@ -154,6 +154,6 @@ exec salloc -N 1 \
     --job-name="${CHILD_JOB_NAME}" \
     --time="${TIME_LIMIT}" \
     --cpus-per-task=1 \
-    "${HERCULES_PATH}/scripts/slurm_data_server.sh" --worker \
+    bash "${HERCULES_PATH}/scripts/slurm_data_server.sh" --worker \
         "${SERVER_ID}" "${NUM_ACTIVE}" "${CONF_PATH}" "${HERCULES_PATH}" \
         "${SERVER_BIN}" "${LOG_FILE}" "${LOG_DIR}" "${META_PID}"

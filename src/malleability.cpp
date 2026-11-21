@@ -6,6 +6,8 @@
 #include "policies.h"
 #include "slog.h"
 #include "workers.h"
+#include <algorithm>
+#include <cctype>
 #include <cinttypes>
 #include <cstring>
 #include <ctime>
@@ -29,6 +31,13 @@ std::atomic<int32_t> decom_new_view_id{-1};
 std::map<std::string, std::vector<ElasticityMetric>> elasticity_records_history;
 std::map<std::string, PerformanceBucket> pending_perf_bucket;
 std::atomic<bool> discard_transition_interval{false};
+
+// Shared state for application profile-driven malleability.
+std::vector<ApplicationProfileEvent> application_profile_events;
+std::atomic<bool> application_profile_active{false};
+std::atomic<bool> application_profile_record_active{false};
+std::atomic<bool> application_profile_t0_initialized{false};
+std::chrono::steady_clock::time_point application_profile_t0;
 
 // Synchronization for the periodic elasticity monitor thread.
 pthread_mutex_t mutex_elasticity_monitor = PTHREAD_MUTEX_INITIALIZER;
@@ -895,6 +904,38 @@ static scaling_action evaluate_performance_snapshot(p_argv *arguments, bool lock
 	return action;
 }
 
+double get_application_profile_elapsed_sec()
+{
+	if (!application_profile_t0_initialized.load(std::memory_order_acquire))
+	{
+		return 0.0;
+	}
+	return std::chrono::duration<double>(std::chrono::steady_clock::now() - application_profile_t0).count();
+}
+
+bool has_due_application_profile_event()
+{
+	if (!application_profile_active.load(std::memory_order_acquire) || !application_profile_t0_initialized.load(std::memory_order_acquire))
+	{
+		return false;
+	}
+
+	double elapsed_sec = get_application_profile_elapsed_sec();
+	bool has_due = false;
+
+	pthread_mutex_lock(&mutext_malleability);
+	for (const auto &ev : application_profile_events)
+	{
+		if (!ev.executed && elapsed_sec >= ev.trigger_sec)
+		{
+			has_due = true;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&mutext_malleability);
+	return has_due;
+}
+
 /**
  * @brief Background thread that periodically flushes interval byte buckets and triggers bandwidth elasticity evaluation.
  *
@@ -913,11 +954,64 @@ void *ElasticityMonitor(void *th_argv)
 
 	int32_t mall_mode = arguments->args->malleability;
 	int32_t mall_metric = arguments->args->malleability_metric;
-	bool monitor_enabled = (mall_mode == MALLEABILITY_CONF_PERF) || (mall_mode == MALLEABILITY_CONF_ENABLED && (mall_metric == MALLEABILITY_METRIC_BANDWIDTH || mall_metric == MALLEABILITY_METRIC_HYBRID));
+	ApplicationProfileMode prof_mode = arguments->args->application_profile_mode;
+	if (prof_mode == APP_PROFILE_MODE_OFF && arguments->args->application_profile_path[0] != '\0')
+	{
+		prof_mode = APP_PROFILE_MODE_PLAY;
+		arguments->args->application_profile_mode = APP_PROFILE_MODE_PLAY;
+	}
+	bool has_app_profile = (prof_mode != APP_PROFILE_MODE_OFF);
+	bool monitor_enabled = (mall_mode == MALLEABILITY_CONF_PERF) || (mall_mode == MALLEABILITY_CONF_ENABLED && (mall_metric == MALLEABILITY_METRIC_BANDWIDTH || mall_metric == MALLEABILITY_METRIC_HYBRID || has_app_profile));
 	if (!monitor_enabled)
 	{
 		slog_debug("ElasticityMonitor exiting: malleability=%d, metric=%d", mall_mode, mall_metric);
 		pthread_exit(NULL);
+	}
+
+	if (has_app_profile && mall_mode == MALLEABILITY_CONF_ENABLED)
+	{
+		pthread_mutex_lock(&mutext_malleability);
+		application_profile_active.store(false, std::memory_order_release);
+		application_profile_record_active.store(false, std::memory_order_release);
+
+		if (resolve_application_profile_path(arguments->args, NULL) == 0)
+		{
+			if (prof_mode == APP_PROFILE_MODE_PLAY)
+			{ // Load the application profile.
+				if (load_application_profile(arguments->args->application_profile_path, application_profile_events) == 0 && !application_profile_events.empty())
+				{
+					application_profile_active.store(true, std::memory_order_release);
+				}
+				else
+				{
+					slog_warn("HERCULES_WARN_APP_PROFILE_EMPTY: Application profile '%s' has no valid events. Fallback to threshold-based malleability.", arguments->args->application_profile_path);
+					fprintf(stderr, "WARNING: Application profile '%s' has no valid events. Fallback to threshold-based malleability.\n", arguments->args->application_profile_path);
+				}
+			}
+			else if (prof_mode == APP_PROFILE_MODE_RECORD)
+			{ // Records the application profile.
+				if (init_application_profile_recording(arguments->args) == 0)
+				{
+					application_profile_record_active.store(true, std::memory_order_release);
+				}
+			}
+			else if (prof_mode == APP_PROFILE_MODE_AUTO)
+			{ // Load the application profile or record a new one if does not exist.
+				if (access(arguments->args->application_profile_path, R_OK) == 0 && load_application_profile(arguments->args->application_profile_path, application_profile_events) == 0 && !application_profile_events.empty())
+				{
+					application_profile_active.store(true, std::memory_order_release);
+					slog_info("[ApplicationProfile] AUTO mode matched existing profile '%s' (%zu events), entering PLAY mode.", arguments->args->application_profile_path, application_profile_events.size());
+					fprintf(stderr, "[ApplicationProfile] AUTO mode matched existing profile '%s' (%zu events), entering PLAY mode.\n", arguments->args->application_profile_path, application_profile_events.size());
+				}
+				else if (init_application_profile_recording(arguments->args) == 0)
+				{
+					application_profile_record_active.store(true, std::memory_order_release);
+					slog_info("[ApplicationProfile] AUTO mode found no existing profile at '%s' -> entering RECORD mode.", arguments->args->application_profile_path);
+					fprintf(stderr, "[ApplicationProfile] AUTO mode found no existing profile at '%s' -> entering RECORD mode.\n", arguments->args->application_profile_path);
+				}
+			}
+		}
+		pthread_mutex_unlock(&mutext_malleability);
 	}
 
 	int32_t interval_ms = arguments->args->malleability_interval_ms;
@@ -960,8 +1054,20 @@ void *ElasticityMonitor(void *th_argv)
 			break;
 		}
 
-		// Flush accumulated interval bytes; skip evaluation when the interval was completely idle.
-		if (!flush_performance_interval(interval_ms, arguments->args->malleability_windows_size, arguments->args->imss_uri))
+		// Flush accumulated interval bytes; in profile mode log active intervals and check scheduled timestamps even on idle ticks.
+		int had_traffic = flush_performance_interval(interval_ms, arguments->args->malleability_windows_size, arguments->args->imss_uri);
+		if (application_profile_active.load(std::memory_order_acquire))
+		{
+			if (had_traffic)
+			{
+				evaluate_performance_snapshot(arguments, false, false);
+			}
+			if (!has_due_application_profile_event())
+			{
+				continue;
+			}
+		}
+		else if (!had_traffic)
 		{
 			continue;
 		}
@@ -1032,4 +1138,435 @@ void *ElasticityMonitor(void *th_argv)
 
 	slog_info("Ending ElasticityMonitor thread.");
 	pthread_exit(NULL);
+}
+
+/**
+ * @brief Trims leading and trailing ASCII whitespace in place.
+ *
+ * @param str Mutable string buffer to trim.
+ * @return char* Pointer to the first non-whitespace character in str.
+ */
+static char *trim_whitespace(char *str)
+{
+	if (str == NULL)
+	{
+		return NULL;
+	}
+
+	while (*str != '\0' && isspace((unsigned char)*str))
+	{
+		str++;
+	}
+
+	size_t len = strlen(str);
+	while (len > 0 && isspace((unsigned char)str[len - 1]))
+	{
+		str[len - 1] = '\0';
+		len--;
+	}
+
+	return str;
+}
+
+int load_application_profile(const char *path, std::vector<ApplicationProfileEvent> &events)
+{
+	events.clear();
+
+	if (path == NULL || path[0] == '\0')
+	{
+		slog_error("HERCULES_ERR_APP_PROFILE_PATH: Empty or NULL application profile path.");
+		fprintf(stderr, "HERCULES_ERR_APP_PROFILE_PATH: Empty or NULL application profile path.\n");
+		return -1;
+	}
+
+	FILE *fp = fopen(path, "r");
+	if (fp == NULL)
+	{
+		slog_error("HERCULES_ERR_APP_PROFILE_OPEN: Failed to open application profile '%s' (%s).", path, strerror(errno));
+		fprintf(stderr, "HERCULES_ERR_APP_PROFILE_OPEN: Failed to open application profile '%s' (%s).\n", path, strerror(errno));
+		return -1;
+	}
+
+	char line_buf[1024];
+	int line_num = 0;
+	bool seen_non_empty = false;
+
+	while (fgets(line_buf, sizeof(line_buf), fp) != NULL)
+	{
+		line_num++;
+
+		// Strip inline comments starting with '#'.
+		char *comment = strchr(line_buf, '#');
+		if (comment != NULL)
+		{
+			*comment = '\0';
+		}
+
+		char *trimmed = trim_whitespace(line_buf);
+		if (trimmed[0] == '\0')
+		{
+			continue;
+		}
+
+		char *saveptr = NULL;
+		char *tok_sec = strtok_r(trimmed, ",", &saveptr);
+		char *tok_target = strtok_r(NULL, ",", &saveptr);
+		char *tok_extra = strtok_r(NULL, ",", &saveptr);
+
+		tok_sec = trim_whitespace(tok_sec);
+		tok_target = trim_whitespace(tok_target);
+
+		// Treat an alphabetic first token on the first non-empty line as a CSV header.
+		if (!seen_non_empty)
+		{
+			seen_non_empty = true;
+			if (tok_sec != NULL && isalpha((unsigned char)tok_sec[0]))
+			{
+				continue;
+			}
+		}
+
+		if (tok_sec == NULL || tok_sec[0] == '\0' || tok_target == NULL || tok_target[0] == '\0' || tok_extra != NULL)
+		{
+			slog_warn("HERCULES_WARN_APP_PROFILE_SYNTAX: Malformed application profile entry at %s:%d, skipping.", path, line_num);
+			fprintf(stderr, "WARNING: Malformed application profile entry at %s:%d, skipping.\n", path, line_num);
+			continue;
+		}
+
+		double trigger_sec = 0.0;
+		if (!is_valid_double(tok_sec, &trigger_sec) || !isfinite(trigger_sec) || trigger_sec < 0.0)
+		{
+			slog_warn("HERCULES_WARN_APP_PROFILE_TIME: Invalid timestamp '%s' at %s:%d, skipping.", tok_sec, path, line_num);
+			fprintf(stderr, "WARNING: Invalid application profile timestamp '%s' at %s:%d, skipping.\n", tok_sec, path, line_num);
+			continue;
+		}
+
+		int parsed_target = 0;
+		if (!is_valid_integer(tok_target, &parsed_target) || parsed_target < 1)
+		{
+			slog_warn("HERCULES_WARN_APP_PROFILE_TARGET: Invalid target_servers '%s' at %s:%d, skipping.", tok_target, path, line_num);
+			fprintf(stderr, "WARNING: Invalid application profile target_servers '%s' at %s:%d, skipping.\n", tok_target, path, line_num);
+			continue;
+		}
+
+		ApplicationProfileEvent ev;
+		ev.trigger_sec = trigger_sec;
+		ev.target_servers = (int32_t)parsed_target;
+		ev.executed = false;
+		events.push_back(ev);
+	}
+
+	fclose(fp);
+
+	std::stable_sort(events.begin(), events.end(), [](const ApplicationProfileEvent &a, const ApplicationProfileEvent &b)
+			 { return a.trigger_sec < b.trigger_sec; });
+
+	slog_info("[ApplicationProfile] Loaded %zu scaling events from '%s'.", events.size(), path);
+	fprintf(stderr, "[ApplicationProfile] Loaded %zu scaling events from '%s'.\n", events.size(), path);
+	return 0;
+}
+
+/**
+ * @brief Computes a 64-bit FNV-1a hash over a NUL-terminated string.
+ *
+ * @param str Input string to hash.
+ * @return uint64_t 64-bit FNV-1a digest.
+ */
+static uint64_t fnv1a_64(const char *str)
+{
+	uint64_t hash = 14695981039346656037ULL;
+	if (str == NULL)
+	{
+		return hash;
+	}
+
+	const unsigned char *p = (const unsigned char *)str;
+	while (*p != '\0')
+	{
+		hash ^= (uint64_t)(*p);
+		hash *= 1099511628211ULL;
+		p++;
+	}
+	return hash;
+}
+
+/**
+ * @brief Extracts the basename of raw_name and sanitizes it for safe profile filenames.
+ *
+ * @param raw_name Input application name or path.
+ * @param out_name Output buffer receiving the sanitized token.
+ * @param out_size Size of out_name buffer in bytes.
+ */
+static void sanitize_app_name(const char *raw_name, char *out_name, size_t out_size)
+{
+	if (out_name == NULL || out_size == 0)
+	{
+		slog_error("HERCULES_ERR_APP_PROFILE_SANITIZE_BUF: Invalid output buffer in sanitize_app_name.");
+		fprintf(stderr, "HERCULES_ERR_APP_PROFILE_SANITIZE_BUF: Invalid output buffer in sanitize_app_name.\n");
+		return;
+	}
+
+	if (raw_name == NULL || raw_name[0] == '\0')
+	{
+		snprintf(out_name, out_size, "app");
+		return;
+	}
+
+	const char *base = strrchr(raw_name, '/');
+	const char *src = (base != NULL && base[1] != '\0') ? (base + 1) : raw_name;
+
+	size_t idx = 0;
+	while (*src != '\0' && idx + 1 < out_size)
+	{
+		unsigned char ch = (unsigned char)*src;
+		// verify is the string has only alphanumeric characters.
+		if (isalnum(ch) || ch == '-' || ch == '_')
+		{
+			out_name[idx++] = (char)ch;
+		}
+		else
+		{
+			out_name[idx++] = '_';
+		}
+		src++;
+	}
+	out_name[idx] = '\0';
+
+	if (idx == 0)
+	{
+		snprintf(out_name, out_size, "app");
+	}
+}
+
+uint64_t compute_application_profile_hash(const struct arguments *cfg, char *out_signature, size_t sig_size)
+{
+	if (cfg == NULL)
+	{
+		slog_error("HERCULES_ERR_APP_PROFILE_HASH_NULL_CFG: NULL arguments pointer in compute_application_profile_hash.");
+		fprintf(stderr, "HERCULES_ERR_APP_PROFILE_HASH_NULL_CFG: NULL arguments pointer in compute_application_profile_hash.\n");
+		if (out_signature != NULL && sig_size > 0)
+		{
+			out_signature[0] = '\0';
+		}
+		return 0;
+	}
+
+	char clean_app[128];
+	sanitize_app_name(cfg->application_name, clean_app, sizeof(clean_app));
+
+	int32_t clients = (cfg->num_clients > 0) ? cfg->num_clients : 1;
+	const char *policy = cfg->policy;
+
+	char sig_buf[1024];
+	snprintf(sig_buf, sizeof(sig_buf), "app=%s;clients=%" PRId32 ";init_servers=%" PRId64 ";min_servers=%" PRId32 ";max_servers=%" PRId32 ";block_kb=%zu;policy=%s;async=%" PRId32 ";attached=%d", clean_app, clients, cfg->num_data_servers, cfg->lower_bound_servers, cfg->upper_bound_servers, cfg->block_size, policy, cfg->async_io, (int)cfg->attached);
+
+	if (out_signature != NULL && sig_size > 0)
+	{
+		snprintf(out_signature, sig_size, "%s", sig_buf);
+	}
+
+	return fnv1a_64(sig_buf);
+}
+
+int resolve_application_profile_path(struct arguments *cfg, uint64_t *out_hash)
+{
+	if (cfg == NULL)
+	{
+		slog_error("HERCULES_ERR_APP_PROFILE_RESOLVE: NULL arguments pointer.");
+		fprintf(stderr, "HERCULES_ERR_APP_PROFILE_RESOLVE: NULL arguments pointer.\n");
+		return -1;
+	}
+
+	uint64_t hash = compute_application_profile_hash(cfg, NULL, 0);
+	if (out_hash != NULL)
+	{
+		*out_hash = hash;
+	}
+
+	// Preserve an explicitly configured profile path when provided.
+	if (cfg->application_profile_path[0] != '\0')
+	{
+		return 0;
+	}
+
+	char clean_app[128];
+	sanitize_app_name(cfg->application_name, clean_app, sizeof(clean_app));
+
+	char dir_buf[PATH_MAX];
+	const char *raw_dir = (cfg->application_profile_dir[0] != '\0') ? cfg->application_profile_dir : ".";
+	snprintf(dir_buf, sizeof(dir_buf), "%s", raw_dir);
+	size_t dir_len = strlen(dir_buf);
+	while (dir_len > 1 && dir_buf[dir_len - 1] == '/')
+	{
+		dir_buf[dir_len - 1] = '\0';
+		dir_len--;
+	}
+
+	int32_t clients = (cfg->num_clients > 0) ? cfg->num_clients : 1;
+	char file_name[384];
+	int fname_len = snprintf(file_name, sizeof(file_name), "%s_%" PRId32 "c_%" PRId64 "s_%016" PRIx64 ".csv", clean_app, clients, cfg->num_data_servers, hash);
+	if (fname_len < 0 || (size_t)fname_len >= sizeof(file_name))
+	{
+		slog_error("HERCULES_ERR_APP_PROFILE_FILENAME: Generated profile filename exceeds buffer limit.");
+		fprintf(stderr, "HERCULES_ERR_APP_PROFILE_FILENAME: Generated profile filename exceeds buffer limit.\n");
+		return -1;
+	}
+
+	bool has_trailing_slash = (dir_len > 0 && dir_buf[dir_len - 1] == '/');
+	size_t sep_len = has_trailing_slash ? 0 : 1;
+	if (dir_len + sep_len + (size_t)fname_len >= sizeof(cfg->application_profile_path))
+	{
+		slog_error("HERCULES_ERR_APP_PROFILE_PATH_LEN: Resolved profile path exceeds PATH_MAX.");
+		fprintf(stderr, "HERCULES_ERR_APP_PROFILE_PATH_LEN: Resolved profile path exceeds PATH_MAX.\n");
+		return -1;
+	}
+
+	memcpy(cfg->application_profile_path, dir_buf, dir_len);
+	size_t pos = dir_len;
+	if (!has_trailing_slash)
+	{
+		cfg->application_profile_path[pos++] = '/';
+	}
+	memcpy(cfg->application_profile_path + pos, file_name, (size_t)fname_len + 1);
+	return 0;
+}
+
+int init_application_profile_recording(const struct arguments *cfg)
+{
+	if (cfg == NULL || cfg->application_profile_path[0] == '\0')
+	{
+		slog_error("HERCULES_ERR_APP_PROFILE_RECORD_INIT: Invalid configuration or empty profile path.");
+		fprintf(stderr, "HERCULES_ERR_APP_PROFILE_RECORD_INIT: Invalid configuration or empty profile path.\n");
+		return -1;
+	}
+
+	char sig_buf[1024];
+	uint64_t hash = compute_application_profile_hash(cfg, sig_buf, sizeof(sig_buf));
+
+	FILE *fp = fopen(cfg->application_profile_path, "w");
+	if (fp == NULL)
+	{
+		slog_error("HERCULES_ERR_APP_PROFILE_RECORD_OPEN: Failed to create profile '%s' (%s).", cfg->application_profile_path, strerror(errno));
+		fprintf(stderr, "HERCULES_ERR_APP_PROFILE_RECORD_OPEN: Failed to create profile '%s' (%s).\n", cfg->application_profile_path, strerror(errno));
+		return -1;
+	}
+
+	fprintf(fp, "# app_signature: %s\n", sig_buf);
+	fprintf(fp, "# signature_hash: %016" PRIx64 "\n", hash);
+	fprintf(fp, "elapsed_sec, target_servers\n");
+	fflush(fp);
+	fclose(fp);
+
+	slog_info("[ApplicationProfile] Initialized profile recording at '%s' (hash=%016" PRIx64 ").", cfg->application_profile_path, hash);
+	fprintf(stderr, "[ApplicationProfile] Initialized profile recording at '%s' (hash=%016" PRIx64 ").\n", cfg->application_profile_path, hash);
+	return 0;
+}
+
+int record_application_profile_event(const char *path, double elapsed_sec, int32_t active_servers)
+{
+	if (path == NULL || path[0] == '\0' || !isfinite(elapsed_sec) || elapsed_sec < 0.0 || active_servers < 1)
+	{
+		slog_warn("HERCULES_WARN_APP_PROFILE_RECORD_ARGS: Invalid record parameters (elapsed=%.2f, servers=%" PRId32 ").", elapsed_sec, active_servers);
+		fprintf(stderr, "WARNING: Invalid application profile record parameters (elapsed=%.2f, servers=%" PRId32 ").\n", elapsed_sec, active_servers);
+		return -1;
+	}
+
+	FILE *fp = fopen(path, "a");
+	if (fp == NULL)
+	{
+		slog_error("HERCULES_ERR_APP_PROFILE_APPEND: Failed to append event to '%s' (%s).", path, strerror(errno));
+		fprintf(stderr, "HERCULES_ERR_APP_PROFILE_APPEND: Failed to append event to '%s' (%s).\n", path, strerror(errno));
+		return -1;
+	}
+
+	fprintf(fp, "%.2f, %" PRId32 "\n", elapsed_sec, active_servers);
+	fflush(fp);
+	fclose(fp);
+
+	slog_info("[ApplicationProfile] Recorded scaling event (t=%.2fs, active_servers=%" PRId32 ") to '%s'.", elapsed_sec, active_servers, path);
+	fprintf(stderr, "[ApplicationProfile] Recorded scaling event (t=%.2fs, active_servers=%" PRId32 ") to '%s'.\n", elapsed_sec, active_servers, path);
+	return 0;
+}
+
+/**
+ * @brief Discards transition-period performance buckets and resets elasticity history after a scaling operation.
+ *
+ * @param erased_host Optional decommissioned server hostname to remove from elasticity history.
+ */
+void clear_transition_performance_metrics(const std::string *erased_host)
+{
+	bool had_entry = false;
+	size_t erased_elements = 0;
+
+	discard_transition_interval.store(true, std::memory_order_release);
+	pthread_mutex_lock(&mutext_performance_metrics);
+	if (erased_host != NULL && !erased_host->empty())
+	{
+		had_entry = (elasticity_records_history.find(*erased_host) != elasticity_records_history.end());
+		erased_elements = elasticity_records_history.erase(*erased_host);
+	}
+	pending_perf_bucket.clear();
+	for (auto &pair : elasticity_records_history)
+	{
+		pair.second.clear();
+	}
+	pthread_mutex_unlock(&mutext_performance_metrics);
+
+	if (had_entry)
+	{
+		if (erased_elements > 0)
+		{
+			slog_malleability("Server %s has been deleted from the elasticity records history.", erased_host->c_str());
+		}
+		else
+		{
+			slog_error("Server %s has NOT been deleted from the elasticity records history.", erased_host->c_str());
+		}
+	}
+}
+
+/**
+ * @brief Selects the data server ID and hostname to decommission for an application profile scale-down step.
+ *
+ * @param history_snapshot Current per-server elasticity history snapshot.
+ * @param current_servers Number of currently active data servers.
+ * @param out_key Output hostname of the chosen server when available.
+ * @return int Target server ID to decommission, or -1 if no candidate exists.
+ */
+int select_profile_decommission_candidate(const std::map<std::string, std::vector<ElasticityMetric>> &history_snapshot, int32_t current_servers, std::string &out_key)
+{
+	int target_id = -1;
+	double min_perf = 0.0;
+	out_key.clear();
+
+	for (const auto &pair : history_snapshot)
+	{
+		if (pair.second.empty())
+		{
+			continue;
+		}
+		const ElasticityMetric &latest = pair.second.back();
+		if (latest.server_id < 0 || latest.server_id >= current_servers)
+		{
+			continue;
+		}
+		if (target_id == -1 || latest.overall_performance < min_perf)
+		{
+			target_id = latest.server_id;
+			min_perf = latest.overall_performance;
+			out_key = pair.first;
+		}
+	}
+
+	// Fall back to the highest active server ID when no recent I/O metric exists.
+	if (target_id == -1 && current_servers > 0)
+	{
+		target_id = current_servers - 1;
+		if (curr_global_imss_info != NULL && target_id >= 0 && target_id < curr_global_imss_info->num_storages && curr_global_imss_info->ips != NULL && curr_global_imss_info->ips[target_id] != NULL)
+		{
+			out_key = curr_global_imss_info->ips[target_id];
+		}
+	}
+
+	return target_id;
 }

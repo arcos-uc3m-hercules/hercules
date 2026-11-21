@@ -39,6 +39,14 @@ typedef enum
 	HERCULES_ATTACHED = 1
 } AttachedMode;
 
+typedef enum
+{
+	APP_PROFILE_MODE_OFF = 0,
+	APP_PROFILE_MODE_PLAY = 1,
+	APP_PROFILE_MODE_RECORD = 2,
+	APP_PROFILE_MODE_AUTO = 3
+} ApplicationProfileMode;
+
 struct arguments
 {
 	char type;			    /* type of server (TYPE_DATA_SERVER or TYPE_METADATA_SERVER) */
@@ -55,6 +63,9 @@ struct arguments
 	char hercules_checkpoint_path[PATH_MAX];
 	char hercules_snapshot_path[PATH_MAX];
 	char hercules_malleability_checkpoint_path[PATH_MAX];
+	char application_profile_path[PATH_MAX];
+	char application_profile_dir[PATH_MAX];
+	char application_name[256];
 	char snapshot_paths_list[PATH_MAX];
 	char ignore_paths_list[PATH_MAX];
 	char data_hostname[HOST_NAME_MAX];
@@ -82,6 +93,8 @@ struct arguments
 	int32_t malleability_mem_threshold_high;	/* high memory threshold percentage for early commissioning (default: 80) */
 	int32_t malleability_mem_threshold_low;		/* low memory threshold percentage for draining (default: 30) */
 	int32_t malleability_read_update_mode;		/* 0: disabled, 1: read-update mode */
+	ApplicationProfileMode application_profile_mode;
+	int32_t num_clients;
 	int32_t upper_bound_servers;
 	int32_t lower_bound_servers;
 	int32_t repl_factor;

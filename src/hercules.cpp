@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <sys/signal.h>
 #include <unistd.h>
 
@@ -688,6 +689,11 @@ int getConfiguration(struct arguments *args)
 		args->malleability = 0;
 
 	args->malleability_interval_ms = DEFAULT_MALLEABILITY_INTERVAL_MS;
+	args->application_profile_path[0] = '\0';
+	snprintf(args->application_profile_dir, sizeof(args->application_profile_dir), ".");
+	snprintf(args->application_name, sizeof(args->application_name), "app");
+	args->application_profile_mode = APP_PROFILE_MODE_OFF;
+	args->num_clients = 0;
 
 	switch (args->malleability)
 	{
@@ -964,6 +970,40 @@ int getConfiguration(struct arguments *args)
 	else
 		args->client_hostfile[0] = '\0';
 	args->client_hostfile[sizeof(args->client_hostfile) - 1] = '\0';
+
+	// If num_clients was not set via config, environment, or SLURM_NTASKS, count non-empty host lines in client_hostfile.
+	if (args->num_clients <= 0 && args->client_hostfile[0] != '\0')
+	{
+		FILE *cf = fopen(args->client_hostfile, "r");
+		if (cf != NULL)
+		{
+			int host_count = 0;
+			char line[256];
+			while (fgets(line, sizeof(line), cf) != NULL)
+			{
+				char *p = line;
+				// Skip leading whitespace and ignore empty lines or '#' comments.
+				while (*p != '\0' && isspace((unsigned char)*p))
+				{
+					p++;
+				}
+				if (*p != '\0' && *p != '#')
+				{
+					host_count++;
+				}
+			}
+			fclose(cf);
+			if (host_count > 0)
+			{
+				args->num_clients = host_count;
+			}
+		}
+	}
+	// Fallback to at least 1 client when no client count source is available.
+	if (args->num_clients <= 0)
+	{
+		args->num_clients = 1;
+	}
 
 	if (getenv("HERCULES_SLURM_PARTITION") != NULL)
 		strncpy(args->slurm_partition, getenv("HERCULES_SLURM_PARTITION"), sizeof(args->slurm_partition) - 1);
@@ -1350,6 +1390,170 @@ void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 		{
 			fprintf(stderr, "WARNING: Invalid MALLEABILITY_INTERVAL_MS: '%s' (valid range: 100-60000). Fallback to %" PRId32 ".\n", interval_ms_str, DEFAULT_MALLEABILITY_INTERVAL_MS);
 			args->malleability_interval_ms = DEFAULT_MALLEABILITY_INTERVAL_MS;
+		}
+	}
+
+	// Application profile directory, application name, client count, mode, and optional explicit path.
+	const char *profile_dir_str = getenv("HERCULES_APPLICATION_PROFILE_DIR");
+	if (profile_dir_str == NULL)
+	{
+		profile_dir_str = cfg_get(cfg, "APPLICATION_PROFILE_DIR");
+	}
+	if (profile_dir_str != NULL && profile_dir_str[0] != '\0')
+	{
+		snprintf(args->application_profile_dir, sizeof(args->application_profile_dir), "%s", profile_dir_str);
+	}
+	else
+	{
+		snprintf(args->application_profile_dir, sizeof(args->application_profile_dir), ".");
+	}
+
+	const char *app_name_str = getenv("HERCULES_APP_NAME");
+	if (app_name_str == NULL)
+	{
+		app_name_str = cfg_get(cfg, "APPLICATION_NAME");
+	}
+	if (app_name_str != NULL && app_name_str[0] != '\0')
+	{
+		snprintf(args->application_name, sizeof(args->application_name), "%s", app_name_str);
+	}
+	else
+	{
+		snprintf(args->application_name, sizeof(args->application_name), "app");
+	}
+
+	const char *num_clients_str = getenv("HERCULES_NUM_CLIENTS");
+	if (num_clients_str == NULL)
+	{
+		num_clients_str = cfg_get(cfg, "NUM_CLIENTS");
+	}
+	args->num_clients = 0;
+	if (num_clients_str != NULL && num_clients_str[0] != '\0')
+	{
+		int temp_clients = 0;
+		if (is_valid_integer(num_clients_str, &temp_clients) && temp_clients > 0)
+		{
+			args->num_clients = (int32_t)temp_clients;
+		}
+		else
+		{
+			slog_warn("HERCULES_WARN_INVALID_NUM_CLIENTS: Invalid NUM_CLIENTS value '%s' (must be > 0). Falling back to node/client counts.", num_clients_str);
+			fprintf(stderr, "WARNING: Invalid NUM_CLIENTS value '%s' (must be > 0). Falling back to node/client counts.\n", num_clients_str);
+			args->num_clients = 0;
+		}
+	}
+
+	// Derive total clients from NUM_NODES_FOR_CLIENTS * NUM_CLIENTS_PER_NODE when NUM_CLIENTS is unset.
+	if (args->num_clients <= 0)
+	{
+		const char *nnfc_str = getenv("HERCULES_NNFC");
+		if (nnfc_str == NULL)
+		{
+			nnfc_str = cfg_get(cfg, "NUM_NODES_FOR_CLIENTS");
+		}
+		const char *ncpn_str = getenv("HERCULES_NCPN");
+		if (ncpn_str == NULL)
+		{
+			ncpn_str = cfg_get(cfg, "NUM_CLIENTS_PER_NODE");
+		}
+		if (nnfc_str != NULL && ncpn_str != NULL)
+		{
+			int nnfc = 0;
+			int ncpn = 0;
+			if (is_valid_integer(nnfc_str, &nnfc) && is_valid_integer(ncpn_str, &ncpn) && nnfc > 0 && ncpn > 0 && nnfc <= INT32_MAX / ncpn)
+			{
+				args->num_clients = (int32_t)(nnfc * ncpn);
+			}
+			else
+			{
+				slog_warn("HERCULES_WARN_INVALID_CLIENT_GRID: Invalid NUM_NODES_FOR_CLIENTS='%s' or NUM_CLIENTS_PER_NODE='%s'. Falling back to SLURM_NTASKS/hostfile.", nnfc_str, ncpn_str);
+				fprintf(stderr, "WARNING: Invalid NUM_NODES_FOR_CLIENTS='%s' or NUM_CLIENTS_PER_NODE='%s'. Falling back to SLURM_NTASKS/hostfile.\n", nnfc_str, ncpn_str);
+			}
+		}
+	}
+
+	if (args->num_clients <= 0)
+	{
+		const char *slurm_ntasks_str = getenv("SLURM_NTASKS");
+		if (slurm_ntasks_str != NULL && slurm_ntasks_str[0] != '\0')
+		{
+			int temp_clients = 0;
+			if (is_valid_integer(slurm_ntasks_str, &temp_clients) && temp_clients > 0)
+			{
+				args->num_clients = (int32_t)temp_clients;
+			}
+			else
+			{
+				slog_warn("HERCULES_WARN_INVALID_SLURM_NTASKS: Invalid SLURM_NTASKS value '%s' (must be > 0). Falling back to hostfile/default.", slurm_ntasks_str);
+				fprintf(stderr, "WARNING: Invalid SLURM_NTASKS value '%s' (must be > 0). Falling back to hostfile/default.\n", slurm_ntasks_str);
+			}
+		}
+	}
+
+	const char *profile_mode_str = getenv("HERCULES_APPLICATION_PROFILE_MODE");
+	if (profile_mode_str == NULL)
+	{
+		profile_mode_str = cfg_get(cfg, "APPLICATION_PROFILE_MODE");
+	}
+	args->application_profile_mode = APP_PROFILE_MODE_OFF;
+	if (profile_mode_str != NULL && profile_mode_str[0] != '\0')
+	{
+		if (strcasecmp(profile_mode_str, "OFF") == 0 || strcmp(profile_mode_str, "0") == 0)
+		{
+			args->application_profile_mode = APP_PROFILE_MODE_OFF;
+		}
+		else if (strcasecmp(profile_mode_str, "PLAY") == 0 || strcmp(profile_mode_str, "1") == 0)
+		{
+			args->application_profile_mode = APP_PROFILE_MODE_PLAY;
+		}
+		else if (strcasecmp(profile_mode_str, "RECORD") == 0 || strcmp(profile_mode_str, "2") == 0)
+		{
+			args->application_profile_mode = APP_PROFILE_MODE_RECORD;
+		}
+		else if (strcasecmp(profile_mode_str, "AUTO") == 0 || strcmp(profile_mode_str, "3") == 0)
+		{
+			args->application_profile_mode = APP_PROFILE_MODE_AUTO;
+		}
+		else
+		{
+			slog_warn("HERCULES_WARN_INVALID_APP_PROFILE_MODE: Invalid APPLICATION_PROFILE_MODE '%s' (valid: OFF, PLAY, RECORD, AUTO). Fallback to OFF.", profile_mode_str);
+			fprintf(stderr, "WARNING: Invalid APPLICATION_PROFILE_MODE '%s' (valid: OFF, PLAY, RECORD, AUTO). Fallback to OFF.\n", profile_mode_str);
+			args->application_profile_mode = APP_PROFILE_MODE_OFF;
+		}
+	}
+
+	// Application profile path for deterministic time-triggered malleability operations.
+	const char *profile_path_str = getenv("HERCULES_APPLICATION_PROFILE");
+	if (profile_path_str == NULL)
+	{
+		profile_path_str = cfg_get(cfg, "APPLICATION_PROFILE");
+	}
+
+	args->application_profile_path[0] = '\0';
+	if (profile_path_str != NULL && profile_path_str[0] != '\0')
+	{
+		if (args->application_profile_mode == APP_PROFILE_MODE_OFF)
+		{
+			args->application_profile_mode = APP_PROFILE_MODE_PLAY;
+		}
+
+		if (args->application_profile_mode == APP_PROFILE_MODE_PLAY)
+		{
+			if (access(profile_path_str, R_OK) == 0)
+			{
+				snprintf(args->application_profile_path, sizeof(args->application_profile_path), "%s", profile_path_str);
+			}
+			else
+			{
+				slog_error("HERCULES_ERR_INVALID_APPLICATION_PROFILE: Application profile file '%s' does not exist or is not readable. Fallback to threshold-based malleability.", profile_path_str);
+				fprintf(stderr, "WARNING: Application profile file '%s' does not exist or is not readable. Fallback to threshold-based malleability.\n", profile_path_str);
+				args->application_profile_path[0] = '\0';
+				args->application_profile_mode = APP_PROFILE_MODE_OFF;
+			}
+		}
+		else
+		{
+			snprintf(args->application_profile_path, sizeof(args->application_profile_path), "%s", profile_path_str);
 		}
 	}
 
