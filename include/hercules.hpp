@@ -88,6 +88,8 @@ extern "C"
 	 */
 	void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg);
 
+	void fill_malleability_reorder_params(struct arguments *args, struct cfg_struct *cfg);
+
 	/**
 	 * @brief Get Snapshot configuration.
 	 */

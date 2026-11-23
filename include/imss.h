@@ -156,6 +156,7 @@ typedef struct
 	int32_t view_id;
 	int32_t num_servers;
 	int32_t server_ids[MAX_SERVERS_PER_VIEW];
+	int32_t slot_next_view[MAX_SERVERS_PER_VIEW]; // Per-slot destination view when that server is retired (-1 if the server is active).
 	int32_t decommissioned_server_id; // Server retired in this view (-1 if none).
 	int32_t next_view;                // Next view following decommissioning (-1 if none).
 } TopologyView;
@@ -311,7 +312,7 @@ extern "C"
 
 	TopologyView *GetTopologyView(imss_info *info, int32_t view_id);
 	int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *server_ids);
-	void RemapTopologyViewsOnSlotRemoval(imss_info *info, int32_t removed_slot);
+	void RemapTopologyViewsOnSlotRemoval(imss_info *info, int32_t removed_slot, int32_t target_view_id);
 	void InitDefaultTopologyView(imss_info *info);
 	int32_t get_malleability_changes(const char *dataset_uri, const char *failed_hostname);
 
@@ -643,7 +644,7 @@ RETURNS:	 0 - The requested block was successfully stored.
 	* @return Returns true if the buffer is full and must be flushed before appending.
 	*/
 	bool append_block_to_buffer(ServerBuffer &srv_buf, const char *data_uri, int32_t data_id, const void *block_data, uint64_t block_size);
-	void init_server_buffer(ServerBuffer &srv_buf);
+	void init_server_buffer(ServerBuffer &srv_buf, size_t initial_cap_hint = 0);
 	void reset_server_buffer(ServerBuffer &srv_buf);
 
 	/**
@@ -655,7 +656,7 @@ RETURNS:	 0 - The requested block was successfully stored.
 	/**
 	 * @brief flush one server's buffer: write to disk and notify the remote server that the data is ready.
 	 */
-	int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *malleability_checkpoint_path, const char *data_hostname, int number_of_servers);
+	int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *malleability_checkpoint_path, const char *data_hostname, int number_of_servers, uint64_t batch_seq = 0);
 
 	int32_t set_data_server_reduce(int from_data_server_id, int to_data_server_id, const void *buffer, size_t size, const char *key);
 

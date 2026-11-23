@@ -885,6 +885,7 @@ int32_t main(int32_t argc, char **argv)
 		my_imss.num_rw_storages = init_number_of_server;
 		my_imss.conn_port = bind_port;
 		my_imss.type = 'I'; // extremely important
+		my_imss.session_plcy = get_policy_number(POLICY);
 		// ReadHostfile(deployfile, &my_imss);
 
 		char key_plus_size[REQUEST_SIZE] = {0};

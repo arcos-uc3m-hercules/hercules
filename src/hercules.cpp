@@ -727,6 +727,10 @@ int getConfiguration(struct arguments *args)
 		break;
 	}
 
+	// Always parse data migration reorder mode and 
+	// checkpoint path so manual decommissioning works even when MALLEABILITY = 0.
+	fill_malleability_reorder_params(args, cfg);
+
 	// @deprecated
 	// if (getenv("HERCULES_MALLEABILITY_TYPE") != NULL)
 	// 	args->malleability_type = atoi(getenv("HERCULES_MALLEABILITY_TYPE"));
@@ -1129,6 +1133,86 @@ int getConfiguration(struct arguments *args)
 	return 1;
 }
 
+void fill_malleability_reorder_params(struct arguments *args, struct cfg_struct *cfg)
+{
+	if (args == NULL)
+	{
+		return;
+	}
+
+	// mode
+	const char *env_val = NULL;
+	const char *cfg_val = NULL;
+
+	enum CommunicationMode default_reorder_mode = MODE_NETWORK;
+	// check if the enviroment variable was defined
+	const char *raw_mode_str = getenv("HERCULES_MALLEABILITY_REORDER_MODE");
+	if (raw_mode_str == NULL && cfg != NULL)
+	{
+		// check if the value was define in the configuration file
+		raw_mode_str = cfg_get(cfg, "MALLEABILITY_REORDER_MODE");
+	}
+
+	if (raw_mode_str != NULL)
+	{
+		int temp_val = 0;
+
+		if (is_valid_integer(raw_mode_str, &temp_val))
+		{
+			if (temp_val == 0)
+			{
+				args->malleability_reorder_mode = MODE_NETWORK;
+			}
+			else if (temp_val == 1)
+			{
+				args->malleability_reorder_mode = MODE_DISK;
+			}
+			else if (temp_val == 2 || temp_val == (int)MODE_BUFF_NETWORK)
+			{
+				args->malleability_reorder_mode = MODE_BUFF_NETWORK;
+			}
+			else
+			{
+				slog_warn("HERCULES_WARN_INVALID_MALLEABILITY_REORDER_MODE: Invalid malleability reorder mode '%s', setting to %d", raw_mode_str, (int)default_reorder_mode);
+				fprintf(stderr, "WARNING: Invalid malleability reorder mode: %s, setting to %d\n", raw_mode_str, (int)default_reorder_mode);
+				args->malleability_reorder_mode = default_reorder_mode;
+			}
+		}
+		else
+		{
+			slog_warn("HERCULES_WARN_INVALID_MALLEABILITY_REORDER_MODE: Invalid malleability reorder mode '%s', setting to %d", raw_mode_str, (int)default_reorder_mode);
+			fprintf(stderr, "WARNING: Invalid malleability reorder mode: %s, setting to %d\n", raw_mode_str, (int)default_reorder_mode);
+			args->malleability_reorder_mode = default_reorder_mode;
+		}
+	}
+	else
+	{
+		args->malleability_reorder_mode = default_reorder_mode;
+	}
+
+	// malleability checkpoint path.
+	env_val = getenv("HERCULES_MALLEABILITY_CHECKPOINT_PATH");
+	if (env_val != NULL)
+	{
+		snprintf(args->hercules_malleability_checkpoint_path, sizeof(args->hercules_malleability_checkpoint_path), "%s", env_val);
+	}
+	else if (cfg != NULL && (cfg_val = cfg_get(cfg, "MALLEABILITY_CHECKPOINT_PATH")) != NULL)
+	{
+		snprintf(args->hercules_malleability_checkpoint_path, sizeof(args->hercules_malleability_checkpoint_path), "%s", cfg_val);
+	}
+	else
+	{
+		args->hercules_malleability_checkpoint_path[0] = '\0';
+	}
+
+	if (args->malleability_reorder_mode == CommunicationMode::MODE_DISK && strlen(args->hercules_malleability_checkpoint_path) == 0)
+	{
+		slog_warn("HERCULES_WARN_INVALID_MALLEABILITY_CHECKPOINT_PATH: Invalid malleability checkpoint path, required when malleability reorder mode is by Disk. Changing reorder mode to Network: %d", (int)default_reorder_mode);
+		fprintf(stderr, "WARNING: Invalid malleability checkpoint path, required when malleability reorder mode is by Disk. Changing reorder mode to Network: %d\n", (int)default_reorder_mode);
+		args->malleability_reorder_mode = default_reorder_mode;
+	}
+}
+
 void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 {
 
@@ -1201,75 +1285,6 @@ void fill_malleability_params(struct arguments *args, struct cfg_struct *cfg)
 	}
 	// Convert from MB to bytes.
 	args->malleability_performance_threshold *= MB;
-
-	// mode
-	const char *env_val = NULL;
-	const char *cfg_val = NULL;
-
-	enum CommunicationMode default_reorder_mode = MODE_NETWORK;
-	// check if the enviroment variable was defined
-	const char *raw_mode_str = getenv("HERCULES_MALLEABILITY_REORDER_MODE");
-	if (raw_mode_str == NULL)
-	{
-		// check if the value was define in the configuration file
-		raw_mode_str = cfg_get(cfg, "MALLEABILITY_REORDER_MODE");
-	}
-
-	if (raw_mode_str != NULL)
-	{
-		uint32_t temp_val = 0;
-
-		if (is_valid_uint32(raw_mode_str, &temp_val) != 0)
-		{
-			if (temp_val == 0)
-			{
-				args->malleability_reorder_mode = MODE_NETWORK;
-			}
-			else if (temp_val == 1)
-			{
-				args->malleability_reorder_mode = MODE_DISK;
-			}
-			else if (temp_val == 2 || temp_val == MODE_BUFF_NETWORK)
-			{
-				args->malleability_reorder_mode = MODE_BUFF_NETWORK;
-			}
-			else
-			{
-				fprintf(stderr, "WARNING: Invalid malleability reorder mode: %s, setting to %d\n", raw_mode_str, (int)default_reorder_mode);
-				args->malleability_reorder_mode = default_reorder_mode;
-			}
-		}
-		else
-		{
-			fprintf(stderr, "WARNING: Invalid malleability reorder mode: %s, setting to %d\n", raw_mode_str, (int)default_reorder_mode);
-			args->malleability_reorder_mode = default_reorder_mode;
-		}
-	}
-	else
-	{
-		args->malleability_reorder_mode = default_reorder_mode;
-	}
-
-	// malleability checkpoint path.
-	env_val = getenv("HERCULES_MALLEABILITY_CHECKPOINT_PATH");
-	if (env_val != NULL)
-	{
-		snprintf(args->hercules_malleability_checkpoint_path, sizeof(args->hercules_malleability_checkpoint_path), "%s", env_val);
-	}
-	else if ((cfg_val = cfg_get(cfg, "MALLEABILITY_CHECKPOINT_PATH")) != NULL)
-	{
-		snprintf(args->hercules_malleability_checkpoint_path, sizeof(args->hercules_malleability_checkpoint_path), "%s", cfg_val);
-	}
-	else
-	{
-		args->hercules_malleability_checkpoint_path[0] = '\0';
-	}
-
-	if (args->malleability_reorder_mode == CommunicationMode::MODE_DISK && strlen(args->hercules_malleability_checkpoint_path) <= 0)
-	{
-		fprintf(stderr, "Invalid malleability checkpoint path, required when malleability reorder mode is by Disk.\n Changing reorder mode to Network: %d", (int)default_reorder_mode);
-		args->malleability_reorder_mode = default_reorder_mode;
-	}
 
 	// Malleability metric (0: BANDWIDTH, 1: MEMORY, 2: HYBRID)
 	const char *metric_str = getenv("HERCULES_MALLEABILITY_METRIC");

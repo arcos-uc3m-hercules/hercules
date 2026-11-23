@@ -46,6 +46,23 @@ pthread_cond_t cond_elasticity_monitor = PTHREAD_COND_INITIALIZER;
 // Code to be sent if the requested to-be-read key does not exist.
 char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 
+const char *communication_mode_to_str(CommunicationMode mode)
+{
+	switch (mode)
+	{
+	case CommunicationMode::MODE_NETWORK:
+		return "NETWORK";
+	case CommunicationMode::MODE_DISK:
+		return "DISK";
+	case CommunicationMode::MODE_SHM:
+		return "SHM";
+	case CommunicationMode::MODE_BUFF_NETWORK:
+		return "BUFF_NETWORK";
+	default:
+		return "UNDEFINED";
+	}
+}
+
 /**
  * @brief Sends MSG_SHUTDOWN_SERVER to a single data server endpoint with a bounded timeout
  * and waits for its immediate MSG_OK_OP confirmation.
@@ -596,6 +613,12 @@ void finalize_decommission_on_surviving_server(p_argv *arguments)
 	{
 		slog_error("HERCULES_ERR_END_DECOM_RELEASE: failed to release resources for target_id=%d (ret=%d)", target_id, release_ret);
 		return;
+	}
+
+	// Remap surviving server's local TopologyViews before reusing the active view so slots stay aligned.
+	if (imss_->info.num_views > 0)
+	{
+		RemapTopologyViewsOnSlotRemoval(&imss_->info, target_id, imss_->info.current_view_id);
 	}
 
 	number_storage_servers.store((uint32_t)imss_->info.num_storages);
@@ -1569,4 +1592,263 @@ int select_profile_decommission_candidate(const std::map<std::string, std::vecto
 	}
 
 	return target_id;
+}
+
+/**
+ * @brief Executes manual server decommissioning on a dedicated worker thread so metadata request workers remain non-blocking.
+ */
+void *run_manual_decommission(void *th_argv)
+{
+	ManualDecommissionArgs *manual_args = (ManualDecommissionArgs *)th_argv;
+	if (manual_args == NULL || manual_args->malleability_args == NULL)
+	{
+		slog_error("HERCULES_ERR_MANUAL_DECOM_NULL_ARGS: invalid manual decommission thread arguments");
+		fprintf(stderr, "HERCULES_ERR_MANUAL_DECOM_NULL_ARGS: invalid manual decommission thread arguments\n");
+		comissioning_on.store(false, std::memory_order_release);
+		if (manual_args != NULL)
+		{
+			free(manual_args->malleability_args);
+			free(manual_args);
+		}
+		pthread_exit(NULL);
+	}
+
+	pthread_mutex_lock(&mutext_malleability);
+	comissioning_on.store(true, std::memory_order_release);
+	decomissioning_stage(manual_args->malleability_args, manual_args->target_server_id);
+	comissioning_on.store(false, std::memory_order_release);
+	pthread_mutex_unlock(&mutext_malleability);
+
+	free(manual_args->malleability_args);
+	free(manual_args);
+	pthread_exit(NULL);
+}
+
+static void *migration_pipeline_worker(void *arg)
+{
+	MigrationFlushPipeline *pipeline = static_cast<MigrationFlushPipeline *>(arg);
+	if (pipeline == NULL)
+	{
+		pthread_exit(NULL);
+	}
+
+	while (true)
+	{
+		pthread_mutex_lock(&pipeline->mutex);
+		while (pipeline->queue.empty() && !pipeline->stop_requested && !pipeline->failed)
+		{
+			pthread_cond_wait(&pipeline->cond_not_empty, &pipeline->mutex);
+		}
+
+		if (pipeline->failed || (pipeline->stop_requested && pipeline->queue.empty()))
+		{
+			pthread_mutex_unlock(&pipeline->mutex);
+			break;
+		}
+
+		MigrationFlushTask task = std::move(pipeline->queue.front());
+		pipeline->queue.pop_front();
+		pipeline->inflight_count++;
+		pthread_mutex_unlock(&pipeline->mutex);
+
+		int32_t rc = pipeline->flush_cb(task.target_conn_idx, task.buffer, task.batch_seq, pipeline->user_ctx);
+
+		pthread_mutex_lock(&pipeline->mutex);
+		pipeline->inflight_count--;
+		if (rc < 0)
+		{
+			pipeline->failed = true;
+			slog_error("HERCULES_ERR_MIGRATION_PIPELINE_FLUSH: flush callback failed for conn_idx=%d batch_seq=%" PRIu64 " (rc=%" PRId32 ")", task.target_conn_idx, task.batch_seq, rc);
+			fprintf(stderr, "HERCULES_ERR_MIGRATION_PIPELINE_FLUSH: flush callback failed for conn_idx=%d batch_seq=%" PRIu64 " (rc=%" PRId32 ")\n", task.target_conn_idx, task.batch_seq, rc);
+		}
+
+		reset_server_buffer(task.buffer);
+		if (!pipeline->failed && pipeline->free_buffers.size() < pipeline->max_inflight)
+		{
+			pipeline->free_buffers.push_back(std::move(task.buffer));
+		}
+
+		pthread_cond_broadcast(&pipeline->cond_not_full);
+		if (pipeline->failed)
+		{
+			pthread_cond_broadcast(&pipeline->cond_not_empty);
+		}
+		pthread_mutex_unlock(&pipeline->mutex);
+	}
+
+	pthread_exit(NULL);
+}
+
+/**
+ * @brief Initializes a bounded producer-consumer flush pipeline for double-buffered block migration.
+ */
+int migration_pipeline_init(MigrationFlushPipeline *pipeline, int num_workers, size_t max_inflight, MigrationFlushCallback flush_cb, void *user_ctx)
+{
+	if (pipeline == NULL)
+	{
+		slog_error("HERCULES_ERR_MIGRATION_PIPELINE_INIT: pipeline pointer is NULL");
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_PIPELINE_INIT: pipeline pointer is NULL\n");
+		return -1;
+	}
+
+	pipeline->initialized = false;
+	if (num_workers <= 0 || max_inflight == 0 || flush_cb == NULL)
+	{
+		slog_error("HERCULES_ERR_MIGRATION_PIPELINE_INIT: invalid arguments (num_workers=%d, max_inflight=%zu, flush_cb=%p)", num_workers, max_inflight, (const void *)flush_cb);
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_PIPELINE_INIT: invalid arguments (num_workers=%d, max_inflight=%zu, flush_cb=%p)\n", num_workers, max_inflight, (const void *)flush_cb);
+		return -1;
+	}
+
+	if (pthread_mutex_init(&pipeline->mutex, NULL) != 0)
+	{
+		slog_error("HERCULES_ERR_MIGRATION_PIPELINE_INIT: pthread_mutex_init failed");
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_PIPELINE_INIT: pthread_mutex_init failed\n");
+		return -1;
+	}
+	if (pthread_cond_init(&pipeline->cond_not_empty, NULL) != 0)
+	{
+		pthread_mutex_destroy(&pipeline->mutex);
+		slog_error("HERCULES_ERR_MIGRATION_PIPELINE_INIT: cond_not_empty init failed");
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_PIPELINE_INIT: cond_not_empty init failed\n");
+		return -1;
+	}
+	if (pthread_cond_init(&pipeline->cond_not_full, NULL) != 0)
+	{
+		pthread_cond_destroy(&pipeline->cond_not_empty);
+		pthread_mutex_destroy(&pipeline->mutex);
+		slog_error("HERCULES_ERR_MIGRATION_PIPELINE_INIT: cond_not_full init failed");
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_PIPELINE_INIT: cond_not_full init failed\n");
+		return -1;
+	}
+
+	pipeline->queue.clear();
+	pipeline->free_buffers.clear();
+	pipeline->workers.clear();
+	pipeline->max_inflight = max_inflight;
+	pipeline->inflight_count = 0;
+	pipeline->next_batch_seq = 0;
+	pipeline->stop_requested = false;
+	pipeline->failed = false;
+	pipeline->flush_cb = flush_cb;
+	pipeline->user_ctx = user_ctx;
+	pipeline->initialized = true;
+
+	for (int i = 0; i < num_workers; i++)
+	{
+		pthread_t tid;
+		if (pthread_create(&tid, NULL, migration_pipeline_worker, static_cast<void *>(pipeline)) != 0)
+		{
+			slog_error("HERCULES_ERR_MIGRATION_PIPELINE_THREAD_CREATE: failed to spawn worker %d/%d", i, num_workers);
+			fprintf(stderr, "HERCULES_ERR_MIGRATION_PIPELINE_THREAD_CREATE: failed to spawn worker %d/%d\n", i, num_workers);
+			migration_pipeline_finish(pipeline, true);
+			return -1;
+		}
+		pipeline->workers.push_back(tid);
+	}
+
+	return 0;
+}
+
+/**
+ * @brief Acquires a recycled ServerBuffer from the pipeline pool or initializes a fresh one.
+ */
+ServerBuffer migration_pipeline_acquire_buffer(MigrationFlushPipeline *pipeline, size_t max_size, size_t initial_cap_hint)
+{
+	if (pipeline != NULL && pipeline->initialized)
+	{
+		pthread_mutex_lock(&pipeline->mutex);
+		if (!pipeline->free_buffers.empty())
+		{
+			ServerBuffer recycled = std::move(pipeline->free_buffers.back());
+			pipeline->free_buffers.pop_back();
+			pthread_mutex_unlock(&pipeline->mutex);
+			recycled.max_size = max_size;
+			reset_server_buffer(recycled);
+			return recycled;
+		}
+		pthread_mutex_unlock(&pipeline->mutex);
+	}
+
+	ServerBuffer fresh;
+	fresh.max_size = max_size;
+	init_server_buffer(fresh, initial_cap_hint);
+	return fresh;
+}
+
+/**
+ * @brief Submits a filled ServerBuffer to the asynchronous flush pipeline with bounded backpressure.
+ */
+int migration_pipeline_submit(MigrationFlushPipeline *pipeline, int target_conn_idx, ServerBuffer &&srv_buf)
+{
+	if (pipeline == NULL || !pipeline->initialized)
+	{
+		slog_error("HERCULES_ERR_MIGRATION_PIPELINE_SUBMIT: pipeline not initialized");
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_PIPELINE_SUBMIT: pipeline not initialized\n");
+		return -1;
+	}
+
+	if (srv_buf.offset == 0 || srv_buf.block_count == 0)
+	{
+		return 0;
+	}
+
+	pthread_mutex_lock(&pipeline->mutex);
+	while ((pipeline->queue.size() + pipeline->inflight_count) >= pipeline->max_inflight && !pipeline->failed && !pipeline->stop_requested)
+	{
+		pthread_cond_wait(&pipeline->cond_not_full, &pipeline->mutex);
+	}
+
+	if (pipeline->failed || pipeline->stop_requested)
+	{
+		pthread_mutex_unlock(&pipeline->mutex);
+		return -1;
+	}
+
+	MigrationFlushTask task;
+	task.target_conn_idx = target_conn_idx;
+	task.batch_seq = pipeline->next_batch_seq++;
+	task.buffer = std::move(srv_buf);
+	pipeline->queue.push_back(std::move(task));
+	pthread_cond_signal(&pipeline->cond_not_empty);
+	pthread_mutex_unlock(&pipeline->mutex);
+	return 0;
+}
+
+/**
+ * @brief Abords pending flush tasks, joins all worker threads, and releases pipeline resources.
+ */
+int migration_pipeline_finish(MigrationFlushPipeline *pipeline, bool abort_pending)
+{
+	if (pipeline == NULL || !pipeline->initialized)
+	{
+		return 0;
+	}
+
+	pthread_mutex_lock(&pipeline->mutex);
+	pipeline->stop_requested = true;
+	if (abort_pending)
+	{
+		pipeline->failed = true;
+	}
+	pthread_cond_broadcast(&pipeline->cond_not_empty);
+	pthread_cond_broadcast(&pipeline->cond_not_full);
+	pthread_mutex_unlock(&pipeline->mutex);
+
+	for (pthread_t tid : pipeline->workers)
+	{
+		pthread_join(tid, NULL);
+	}
+
+	bool had_error = pipeline->failed;
+	pipeline->queue.clear();
+	pipeline->free_buffers.clear();
+	pipeline->workers.clear();
+	pipeline->inflight_count = 0;
+	pipeline->initialized = false;
+
+	pthread_cond_destroy(&pipeline->cond_not_full);
+	pthread_cond_destroy(&pipeline->cond_not_empty);
+	pthread_mutex_destroy(&pipeline->mutex);
+
+	return had_error ? -1 : 0;
 }

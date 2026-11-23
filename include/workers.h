@@ -10,7 +10,9 @@
 #include "utils.h"
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <map>
+#include <pthread.h>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -185,6 +187,12 @@ typedef struct
 	char curr_req[PATH_MAX];
 } MalleabilityArgs;
 
+typedef struct
+{
+	MalleabilityArgs *malleability_args;
+	int target_server_id;
+} ManualDecommissionArgs;
+
 MalleabilityArgs *fill_malleability_args(p_argv *arguments);
 
 // Thread method attending client data requests.
@@ -241,6 +249,7 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 // Malleability functions.
 void *get_performance_metrics(void *th_argv);
 void *run_malleability(void *th_argv);
+void *run_manual_decommission(void *th_argv);
 void *comissioning_stage(MalleabilityArgs *arguments);
 int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove);
 int handle_memory_pre_saturation(p_argv *arguments, int saturated_server_id);
@@ -250,6 +259,38 @@ bool is_block_in_flight(const std::string &key, int32_t current_server_id);
 int32_t collect_active_rw_servers(imss_info *info, int32_t *active_server_ids);
 void finalize_decommission_on_surviving_server(p_argv *arguments);
 void attend_pending_migrating_reads(p_argv *arguments);
+typedef int32_t (*MigrationFlushCallback)(int target_conn_idx, const ServerBuffer &srv_buf, uint64_t batch_seq, void *user_ctx);
+
+typedef struct
+{
+	int target_conn_idx;
+	uint64_t batch_seq;
+	ServerBuffer buffer;
+} MigrationFlushTask;
+
+typedef struct
+{
+	pthread_mutex_t mutex;
+	pthread_cond_t cond_not_empty;
+	pthread_cond_t cond_not_full;
+	std::deque<MigrationFlushTask> queue;
+	std::vector<ServerBuffer> free_buffers;
+	std::vector<pthread_t> workers;
+	size_t max_inflight;
+	size_t inflight_count;
+	uint64_t next_batch_seq;
+	bool stop_requested;
+	bool failed;
+	bool initialized;
+	MigrationFlushCallback flush_cb;
+	void *user_ctx;
+} MigrationFlushPipeline;
+
+int migration_pipeline_init(MigrationFlushPipeline *pipeline, int num_workers, size_t max_inflight, MigrationFlushCallback flush_cb, void *user_ctx);
+ServerBuffer migration_pipeline_acquire_buffer(MigrationFlushPipeline *pipeline, size_t max_size, size_t initial_cap_hint);
+int migration_pipeline_submit(MigrationFlushPipeline *pipeline, int target_conn_idx, ServerBuffer &&srv_buf);
+int migration_pipeline_finish(MigrationFlushPipeline *pipeline, bool abort_pending);
+const char *communication_mode_to_str(CommunicationMode mode);
 bool is_migration_write_request(const p_argv *arguments, CommunicationMode transfer_mode);
 bool handle_stale_migration_write(p_argv *arguments, CommunicationMode transfer_mode, const std::string &key, size_t msg_length);
 int ShutdownServer();

@@ -645,7 +645,7 @@ extern "C"
 			return -ECANCELED;
 		}
 
-		char *response_buffer = (char *)malloc(msg_length * sizeof(char));
+		char *response_buffer = (char *)calloc(msg_length + 1, sizeof(char));
 		if (response_buffer == NULL)
 		{
 			perror("ERR_HERCULES_GET_DATA_ACK_MEMORY_ALLOCATION");
@@ -654,12 +654,26 @@ extern "C"
 			return -ECANCELED;
 		}
 		size_t size_received_data = recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async);
+		if (size_received_data == 0)
+		{
+			slog_error("ERR_HERCULES_GET_DATA_ACK_RECV_DATA");
+			fprintf(stderr, "ERR_HERCULES_GET_DATA_ACK_RECV_DATA\n");
+			free(response_buffer);
+			return -ECANCELED;
+		}
 
-		if (!strncmp(response_buffer, MSG_SPACE_OP, strlen(response_buffer)))
+		if (!strncmp(response_buffer, MSG_SPACE_OP, strlen(MSG_SPACE_OP)))
 		{
 			free(response_buffer);
 			// pthread_mutex_unlock(&lock_network);
 			return -EAGAIN;
+		}
+		if (!strncmp(response_buffer, MSG_ERROR_OP, strlen(MSG_ERROR_OP)))
+		{
+			slog_error("ERR_HERCULES_WAIT_ACK_SERVER_ERROR: server replied '%s'", response_buffer);
+			fprintf(stderr, "ERR_HERCULES_WAIT_ACK_SERVER_ERROR: server replied '%s'\n", response_buffer);
+			free(response_buffer);
+			return -EIO;
 		}
 		slog_debug("msg=%s", response_buffer);
 		free(response_buffer);

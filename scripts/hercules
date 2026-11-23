@@ -490,7 +490,11 @@ if [[ "$SLURM" -eq "1" ]]; then
         exit 1
     fi
     ## If slurm is enabled, we concat the job id to the configuration file.
-    CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
+    if [[ "${FILE}" == *"_${SLURM_JOB_ID}" ]]; then
+        CURR_HERCULES_CONF_FILE="${FILE}"
+    else
+        CURR_HERCULES_CONF_FILE="${FILE}_${SLURM_JOB_ID}"
+    fi
     if [[ ( "${STATUS}" = "start" || "${STATUS}" = "add" ) ]]; then
         # Copy if the file does not exist (only on start/add).
         if [[ ! -f "${CURR_HERCULES_CONF_FILE}" ]]; then

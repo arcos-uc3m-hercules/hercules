@@ -8,6 +8,7 @@
 #include "slog.h"
 #include "ucs/type/status.h"
 #include "workers.h"
+#include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <chrono>
@@ -1805,7 +1806,7 @@ int32_t open_imss(char *imss_uri, uint32_t *num_active_storages)
 	new_imss.conns.eps = (ucp_ep_h *)calloc(new_imss.info.num_storages, sizeof(ucp_ep_h));
 	new_imss.conns.ep_contexts = (client_ep_context_t **)calloc(new_imss.info.num_storages, sizeof(client_ep_context_t *));
 
-	if (!new_imss.conns.peer_addr || !new_imss.conns.eps || !new_imss.conns.id)
+	if (!new_imss.conns.peer_addr || !new_imss.conns.eps || !new_imss.conns.id || !new_imss.conns.ep_contexts)
 	{
 		perror("HERCULES_ERR_OPEN_IMSS_MEMORY_ALLOC");
 		slog_error("HERCULES_ERR_OPEN_IMSS_MEMORY_ALLOC");
@@ -3687,7 +3688,7 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 				ReleaseSpecificDataServerNetworkResources(local_imss_, 1, i, remaining);
 				// Mark the removed slot as -1 and shift higher IDs down across existing views
 				// to stay aligned with the compacted ips and eps arrays.
-				RemapTopologyViewsOnSlotRemoval(&local_imss_->info, i);
+				RemapTopologyViewsOnSlotRemoval(&local_imss_->info, i, -1);
 				if (curr_dataset != NULL)
 				{
 					PrintIntervals(curr_dataset);
@@ -3803,17 +3804,20 @@ int32_t parse_malleability_message(void *result, const char *failed_hostname)
 				local_imss_->info.views[prev_view_id].decommissioned_server_id = -1;
 				local_imss_->info.views[prev_view_id].next_view = new_view_id;
 			}
-			// Link any older views that contain decommissioned slots (-1) and have no next_view yet
+			// Link any older views that contain decommissioned slots (-1) to the newly created destination view
 			for (int32_t v = 0; v < new_view_id; v++)
 			{
-				if (local_imss_->info.views[v].next_view == -1)
+				for (int32_t s = 0; s < local_imss_->info.views[v].num_servers && s < MAX_SERVERS_PER_VIEW; s++)
 				{
-					for (int32_t s = 0; s < local_imss_->info.views[v].num_servers; s++)
+					if (local_imss_->info.views[v].server_ids[s] == -1) // -1 if the server has been decommissioned.
 					{
-						if (local_imss_->info.views[v].server_ids[s] == -1)
+						if (local_imss_->info.views[v].slot_next_view[s] == -1)
+						{
+							local_imss_->info.views[v].slot_next_view[s] = new_view_id;
+						}
+						if (local_imss_->info.views[v].next_view == -1)
 						{
 							local_imss_->info.views[v].next_view = new_view_id;
-							break;
 						}
 					}
 				}
@@ -5040,8 +5044,14 @@ int32_t get_data_location(char *dataset_uri, int32_t dataset_id, int32_t data_id
 		if (server == -1)
 		{
 			// Slot -1 means RemapTopologyViewsOnSlotRemoval cleared a retired server here;
-			// advance to the drained next_view (or current active view as fallback).
-			if (view->next_view != -1 && view->next_view != view->view_id)
+			// advance to the per-slot migration target view, drained next_view, or current active view.
+			if (logical_server >= 0 && logical_server < MAX_SERVERS_PER_VIEW &&
+			    view->slot_next_view[logical_server] != -1 &&
+			    view->slot_next_view[logical_server] != view->view_id)
+			{
+				next_vid = view->slot_next_view[logical_server];
+			}
+			else if (view->next_view != -1 && view->next_view != view->view_id)
 			{
 				next_vid = view->next_view;
 			}
@@ -6199,10 +6209,13 @@ int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *ser
 	view->view_id = new_view_id;
 	view->num_servers = num_servers;
 
-	for (int32_t i = 0; i < view->num_servers; i++)
+	// Populate active server slots, pad unused tail slots with -1, and clear per-slot migration targets.
+	for (int32_t i = 0; i < MAX_SERVERS_PER_VIEW; i++)
 	{
-		view->server_ids[i] = server_ids[i];
+		view->server_ids[i] = (i < view->num_servers) ? server_ids[i] : -1;
+		view->slot_next_view[i] = -1;
 	}
+	// A newly created view has no retired server or successor view yet.
 	view->decommissioned_server_id = -1;
 	view->next_view = -1;
 
@@ -6214,9 +6227,10 @@ int32_t AddTopologyView(imss_info *info, int32_t num_servers, const int32_t *ser
 
 /**
  * @brief Updates existing topology views when a server slot is removed and compacted out of ips/eps.
- * Replaces references to removed_slot with -1 and shifts higher surviving server IDs down by 1.
+ * Replaces references to removed_slot with -1, records target_view_id for the newly retired slot,
+ * and shifts higher surviving server IDs down by 1.
  */
-void RemapTopologyViewsOnSlotRemoval(imss_info *info, int32_t removed_slot)
+void RemapTopologyViewsOnSlotRemoval(imss_info *info, int32_t removed_slot, int32_t target_view_id)
 {
 	if (info == NULL || removed_slot < 0 || info->num_views <= 0)
 	{
@@ -6229,11 +6243,17 @@ void RemapTopologyViewsOnSlotRemoval(imss_info *info, int32_t removed_slot)
 	{
 		TopologyView *view = &info->views[v];
 		// Mark the retired slot as -1 and compact surviving server indices above removed_slot.
-		for (int32_t i = 0; i < view->num_servers; i++)
+		for (int32_t i = 0; i < view->num_servers && i < MAX_SERVERS_PER_VIEW; i++)
 		{
 			if (view->server_ids[i] == removed_slot)
 			{
 				view->server_ids[i] = -1;
+				// Record the destination view specifically for the slot retired in this transition
+				// without overwriting earlier retired slots' destinations.
+				if (target_view_id >= 0 && target_view_id < info->num_views && target_view_id != view->view_id)
+				{
+					view->slot_next_view[i] = target_view_id;
+				}
 			}
 			else if (view->server_ids[i] > removed_slot)
 			{
@@ -6251,7 +6271,7 @@ void RemapTopologyViewsOnSlotRemoval(imss_info *info, int32_t removed_slot)
 			view->decommissioned_server_id--;
 		}
 	}
-	slog_malleability("[RemapTopologyViewsOnSlotRemoval] Remapped views for removed slot %d", removed_slot);
+	slog_malleability("[RemapTopologyViewsOnSlotRemoval] Remapped views for removed slot %d (target_view_id=%d)", removed_slot, target_view_id);
 }
 
 void InitDefaultTopologyView(imss_info *info)
@@ -8108,43 +8128,36 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 
 int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const char *data_hostname, int number_of_servers)
 {
-
 	if (srv_buf.offset == 0 || srv_buf.block_count == 0)
 		return 1; // nothing to do
+
+	char key_[REQUEST_SIZE] = {0};
+	int chars_written = snprintf(key_, REQUEST_SIZE, "SETBUFFNETWORK %u %" PRIu32, srv_buf.block_count, (uint32_t)MALLEABILITY_SET_BYPASS);
+	if (chars_written < 0 || chars_written >= REQUEST_SIZE)
+	{
+		perror("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_FORMATING");
+		slog_error("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_FORMATING: request formatting error for server %d", server_id);
+		fprintf(stderr, "HERCULES_ERR_FLUSH_DATA_TO_NETWORK_FORMATING: request formatting error for server %d\n", server_id);
+		return -1;
+	}
+
+	pthread_mutex_lock(&lock_network);
+	if (server_id < 0 || server_id >= curr_imss.info.num_storages || curr_imss.conns.eps == NULL || curr_imss.conns.eps[server_id] == NULL || curr_imss.info.ips == NULL || curr_imss.info.ips[server_id] == NULL)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_INVALID_EP: server_id=%d num_storages=%d", server_id, curr_imss.info.num_storages);
+		fprintf(stderr, "HERCULES_ERR_FLUSH_DATA_TO_NETWORK_INVALID_EP: server_id=%d num_storages=%d\n", server_id, curr_imss.info.num_storages);
+		return -1;
+	}
 
 	const unsigned char *buffer = srv_buf.data.data();
 	size_t size_to_send = srv_buf.offset;
 
-	pthread_mutex_lock(&lock_network);
-	char key_[REQUEST_SIZE] = {0};
 	// Server receiving the current data buffer.
-	uint32_t n_server_ = server_id;
-
-	ucp_ep_h ep;
-
-	int chars_written = snprintf(key_, REQUEST_SIZE,
-				     "SETBUFFNETWORK %u %d",
-				     srv_buf.block_count,
-				     number_of_servers);
-
-	if (chars_written < 0 || chars_written >= REQUEST_SIZE)
-	{
-		pthread_mutex_unlock(&lock_network);
-		perror("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_FORMATING");
-		slog_error("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_FORMATING: request formatting error for server %d", server_id);
-		return -1;
-	}
-
-	if (n_server_ >= (uint32_t)curr_imss.info.num_storages || curr_imss.conns.eps == NULL || curr_imss.conns.eps[n_server_] == NULL || curr_imss.info.ips == NULL || curr_imss.info.ips[n_server_] == NULL)
-	{
-		pthread_mutex_unlock(&lock_network);
-		slog_error("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_INVALID_EP: server_id=%u num_storages=%d", n_server_, curr_imss.info.num_storages);
-		fprintf(stderr, "HERCULES_ERR_FLUSH_DATA_TO_NETWORK_INVALID_EP: server_id=%u num_storages=%d\n", n_server_, curr_imss.info.num_storages);
-		return -1;
-	}
+	uint32_t n_server_ = (uint32_t)server_id;
+	ucp_ep_h ep = curr_imss.conns.eps[n_server_];
 
 	slog_malleability("[IMSS] SENT TO SERVER %d (%s) with Request: %s", n_server_, curr_imss.info.ips[n_server_], key_);
-	ep = curr_imss.conns.eps[n_server_];
 	if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -8163,7 +8176,14 @@ int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const 
 	}
 	slog_malleability("[IMSS][completed] SENT TO SERVER %d with Request: %s (%zu)", n_server_, key_, size_to_send);
 
-	wait_ack(ucp_worker_data, local_data_uid, ep, SYNC);
+	int ack_ret = wait_ack(ucp_worker_data, local_data_uid, ep, SYNC);
+	if (ack_ret < 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_FLUSH_DATA_TO_NETWORK_ACK: wait_ack failed for server %d (ret=%d)", server_id, ack_ret);
+		fprintf(stderr, "HERCULES_ERR_FLUSH_DATA_TO_NETWORK_ACK: wait_ack failed for server %d (ret=%d)\n", server_id, ack_ret);
+		return -1;
+	}
 
 	pthread_mutex_unlock(&lock_network);
 	return 1;
@@ -8176,6 +8196,13 @@ int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const 
  */
 bool append_block_to_buffer(ServerBuffer &srv_buf, const char *data_uri, int32_t data_id, const void *block_data, uint64_t block_size)
 {
+	if (data_uri == NULL || block_data == NULL)
+	{
+		slog_error("HERCULES_ERR_APPEND_BLOCK_NULL_ARGS: invalid arguments (data_uri=%p, block_data=%p)", (const void *)data_uri, block_data);
+		fprintf(stderr, "HERCULES_ERR_APPEND_BLOCK_NULL_ARGS: invalid arguments (data_uri=%p, block_data=%p)\n", (const void *)data_uri, block_data);
+		return false;
+	}
+
 	const uint32_t uri_len = static_cast<uint32_t>(strlen(data_uri));
 	const size_t record_size = sizeof(uri_len) + uri_len + sizeof(data_id) + sizeof(block_size) + block_size;
 
@@ -8183,34 +8210,61 @@ bool append_block_to_buffer(ServerBuffer &srv_buf, const char *data_uri, int32_t
 	if (srv_buf.offset + record_size > srv_buf.max_size && srv_buf.offset > 0)
 		return true;
 
-	// Write directly at the offset position.
-	uint8_t *p = srv_buf.data.data() + srv_buf.offset;
+	// Keep vector size aligned with offset
+	if (srv_buf.data.size() != srv_buf.offset)
+	{
+		srv_buf.data.resize(srv_buf.offset);
+	}
 
-	memcpy(p, &uri_len, sizeof(uri_len));
-	p += sizeof(uri_len);
-	memcpy(p, data_uri, uri_len);
-	p += uri_len;
-	memcpy(p, &data_id, sizeof(data_id));
-	p += sizeof(data_id);
-	memcpy(p, &block_size, sizeof(block_size));
-	p += sizeof(block_size);
-	memcpy(p, block_data, block_size);
+	// Grow capacity geometrically on demand, capped at max_size unless a single record exceeds max_size.
+	const size_t required_size = srv_buf.offset + record_size;
+	if (required_size > srv_buf.data.capacity())
+	{
+		size_t current_cap = srv_buf.data.capacity();
+		size_t doubled_cap = (current_cap <= SIZE_MAX / 2) ? (current_cap * 2) : required_size;
+		size_t new_cap = std::max(required_size, doubled_cap);
+		if (required_size <= srv_buf.max_size && new_cap > srv_buf.max_size)
+		{
+			new_cap = srv_buf.max_size;
+		}
+		srv_buf.data.reserve(new_cap);
+	}
+
+	auto append_bytes = [&](const void *src, size_t len)
+	{
+		if (len > 0)
+		{
+			const uint8_t *bytes = static_cast<const uint8_t *>(src);
+			srv_buf.data.insert(srv_buf.data.end(), bytes, bytes + len);
+		}
+	};
+
+	append_bytes(&uri_len, sizeof(uri_len));
+	append_bytes(data_uri, uri_len);
+	append_bytes(&data_id, sizeof(data_id));
+	append_bytes(&block_size, sizeof(block_size));
+	append_bytes(block_data, block_size);
 
 	srv_buf.offset += record_size;
 	srv_buf.block_count++;
 	return false; // no flush needed
 }
 
-void init_server_buffer(ServerBuffer &srv_buf)
+void init_server_buffer(ServerBuffer &srv_buf, size_t initial_cap_hint)
 {
-	srv_buf.data.resize(srv_buf.max_size);
+	// Use caller-provided per-server estimate when available, otherwise reserve up to 4 MiB without zero-filling.
+	const size_t default_cap = static_cast<size_t>(4ULL * 1024ULL * 1024ULL);
+	const size_t target_cap = (initial_cap_hint > 0) ? initial_cap_hint : default_cap;
+	const size_t initial_cap = std::min(srv_buf.max_size, target_cap);
+	srv_buf.data.clear();
+	srv_buf.data.reserve(initial_cap);
 	srv_buf.block_count = 0;
 	srv_buf.offset = 0;
 }
 
 void reset_server_buffer(ServerBuffer &srv_buf)
 {
-	// srv_buf.data.clear();
+	srv_buf.data.clear();
 	srv_buf.block_count = 0;
 	srv_buf.offset = 0;
 }
@@ -8218,10 +8272,42 @@ void reset_server_buffer(ServerBuffer &srv_buf)
 /**
  * @brief Writes the "srv_buf" to persistent storage and notify the server "server_id" that the data is ready to be read.
  */
-int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *malleability_checkpoint_path, const char *data_hostname, int number_of_servers)
+int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *malleability_checkpoint_path, const char *data_hostname, int number_of_servers, uint64_t batch_seq)
 {
-	if (srv_buf.offset == 0)
+	if (srv_buf.offset == 0 || srv_buf.block_count == 0)
 		return 1; // nothing to do
+
+	if (server_id < 0 || malleability_checkpoint_path == NULL || data_hostname == NULL)
+	{
+		slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER_INVALID_ARGS: invalid arguments (server_id=%d, checkpoint_path=%p, data_hostname=%p)", server_id, (const void *)malleability_checkpoint_path, (const void *)data_hostname);
+		fprintf(stderr, "HERCULES_ERR_FLUSH_SERVER_BUFFER_INVALID_ARGS: invalid arguments (server_id=%d, checkpoint_path=%p, data_hostname=%p)\n", server_id, (const void *)malleability_checkpoint_path, (const void *)data_hostname);
+		return -1;
+	}
+
+	// Validate the destination endpoint upfront before building paths or touching disk.
+	pthread_mutex_lock(&lock_network);
+	if (server_id >= curr_imss.info.num_storages || curr_imss.conns.eps == NULL || curr_imss.conns.eps[server_id] == NULL)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER_INVALID_EP: server_id=%d num_storages=%d", server_id, curr_imss.info.num_storages);
+		fprintf(stderr, "HERCULES_ERR_FLUSH_SERVER_BUFFER_INVALID_EP: server_id=%d num_storages=%d\n", server_id, curr_imss.info.num_storages);
+		return -1;
+	}
+	ucp_ep_h ep = curr_imss.conns.eps[server_id];
+	pthread_mutex_unlock(&lock_network);
+
+	// unique path for this server and batch sequence.
+	std::string file_path = std::string(malleability_checkpoint_path) + "/server_" + std::to_string(server_id) + "_" + data_hostname + "_" + std::to_string(batch_seq) + ".bin";
+
+	char key_[REQUEST_SIZE] = {0};
+	int chars_written = snprintf(key_, REQUEST_SIZE, "SETDISK %u %s %" PRIu32, srv_buf.block_count, file_path.c_str(), (uint32_t)MALLEABILITY_SET_BYPASS);
+	if (chars_written < 0 || chars_written >= REQUEST_SIZE)
+	{
+		perror("HERCULES_ERR_FLUSH_SERVER_BUFFER_FORMATING");
+		slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER_FORMATING: request formatting error for server %d", server_id);
+		fprintf(stderr, "HERCULES_ERR_FLUSH_SERVER_BUFFER_FORMATING: request formatting error for server %d\n", server_id);
+		return -1;
+	}
 
 	// makes the directory.
 	if (mkdir(malleability_checkpoint_path, 0755) != 0 && errno != EEXIST)
@@ -8231,14 +8317,12 @@ int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *ma
 		return -1;
 	}
 
-	// unique path for this server.
-	std::string file_path = std::string(malleability_checkpoint_path) + "/server_" + std::to_string(server_id) + "_" + data_hostname + ".bin";
-
 	// writes to disk
 	int fd = open(file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd < 0)
 	{
 		slog_error("flush_server_buffer: cannot open '%s': %s", file_path.c_str(), strerror(errno));
+		fprintf(stderr, "HERCULES_ERR_FLUSH_SERVER_BUFFER_OPEN: cannot open '%s': %s\n", file_path.c_str(), strerror(errno));
 		return -1;
 	}
 
@@ -8265,29 +8349,12 @@ int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *ma
 
 	close(fd);
 
-	slog_live("[DISK] server %d to '%s'  blocks=%u  total_bytes=%zu", server_id, file_path.c_str(), srv_buf.block_count, srv_buf.data.size());
+	slog_live("[DISK] server %d to '%s'  blocks=%u  total_bytes=%zu", server_id, file_path.c_str(), srv_buf.block_count, srv_buf.offset);
 
 	// notify the remote serverd
 	pthread_mutex_lock(&lock_network);
 
-	char key_[REQUEST_SIZE] = {0};
-	int chars_written = snprintf(key_, REQUEST_SIZE,
-				     "SETDISK %u %s %d",
-				     srv_buf.block_count,
-				     file_path.c_str(),
-				     number_of_servers);
-
-	if (chars_written < 0 || chars_written >= REQUEST_SIZE)
-	{
-		pthread_mutex_unlock(&lock_network);
-		perror("HERCULES_ERR_FLUSH_SERVER_BUFFER_FORMATING");
-		slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER_FORMATING: request formatting error for server %d", server_id);
-		return -1;
-	}
-
-	ucp_ep_h ep = curr_imss.conns.eps[server_id];
-
-	slog_debug("Sending request %s", data_hostname, key_);
+	slog_debug("[%s] Sending request %s", data_hostname, key_);
 	if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
 	{
 		pthread_mutex_unlock(&lock_network);
@@ -8296,7 +8363,14 @@ int32_t flush_server_buffer(int server_id, const ServerBuffer &srv_buf, char *ma
 		return -1;
 	}
 
-	wait_ack(ucp_worker_data, local_data_uid, ep, SYNC);
+	int ack_ret = wait_ack(ucp_worker_data, local_data_uid, ep, SYNC);
+	if (ack_ret < 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_FLUSH_SERVER_BUFFER_ACK: wait_ack failed for server %d (ret=%d)", server_id, ack_ret);
+		fprintf(stderr, "HERCULES_ERR_FLUSH_SERVER_BUFFER_ACK: wait_ack failed for server %d (ret=%d)\n", server_id, ack_ret);
+		return -1;
+	}
 
 	pthread_mutex_unlock(&lock_network);
 	return 1;
@@ -8405,30 +8479,51 @@ std::vector<DiskBlock> deserialise_server_buffer(const char *file_path)
 {
 	std::vector<DiskBlock> blocks;
 
-	int fd = open(file_path, O_RDONLY);
-	if (fd < 0)
+	if (file_path == NULL)
 	{
-		slog_error("deserialise_server_buffer: cannot open '%s': %s",
-			   file_path, strerror(errno));
+		slog_error("HERCULES_ERR_DESERIALISE_SERVER_BUFFER_NULL_PATH: file_path is NULL");
+		fprintf(stderr, "HERCULES_ERR_DESERIALISE_SERVER_BUFFER_NULL_PATH: file_path is NULL\n");
 		return blocks;
 	}
 
-	// lamda to read exactly n bytes, returns false on EOF or error.
-	auto read_exact = [&](void *buf, size_t n) -> bool
+	int fd = open(file_path, O_RDONLY);
+	if (fd < 0)
 	{
+		slog_error("deserialise_server_buffer: cannot open '%s': %s", file_path, strerror(errno));
+		fprintf(stderr, "deserialise_server_buffer: cannot open '%s': %s\n", file_path, strerror(errno));
+		return blocks;
+	}
+
+	// Reads exactly n bytes: returns 1 on success, 0 on clean EOF at done == 0, -1 on truncated read or I/O error.
+	auto read_exact = [&](void *buf, size_t n) -> int
+	{
+		if (n == 0)
+		{
+			return 1;
+		}
 		size_t done = 0;
 		while (done < n)
 		{
 			ssize_t r = read(fd, (char *)buf + done, n - done);
-			if (r <= 0)
+			if (r == 0)
 			{
-				if (r < 0 && errno == EINTR)
-					continue;
-				return false;
+				return (done == 0) ? 0 : -1;
 			}
-			done += r;
+			if (r < 0)
+			{
+				if (errno == EINTR)
+					continue;
+				return -1;
+			}
+			done += (size_t)r;
 		}
-		return true;
+		return 1;
+	};
+
+	auto log_truncated = [&](const char *field)
+	{
+		slog_error("HERCULES_ERR_DESERIALISE_SERVER_BUFFER_TRUNCATED: truncated %s in '%s'", field, file_path);
+		fprintf(stderr, "HERCULES_ERR_DESERIALISE_SERVER_BUFFER_TRUNCATED: truncated %s in '%s'\n", field, file_path);
 	};
 
 	while (true)
@@ -8437,27 +8532,47 @@ std::vector<DiskBlock> deserialise_server_buffer(const char *file_path)
 
 		// reads the uri length
 		uint32_t uri_len = 0;
-		if (!read_exact(&uri_len, sizeof(uri_len)))
+		int uri_len_rc = read_exact(&uri_len, sizeof(uri_len));
+		if (uri_len_rc == 0)
+		{
 			break;
+		}
+		if (uri_len_rc < 0)
+		{
+			log_truncated("record header");
+			break;
+		}
 
 		// reads the data_uri
 		blk.data_uri.resize(uri_len);
-		if (!read_exact(blk.data_uri.data(), uri_len))
+		if (read_exact(blk.data_uri.data(), uri_len) != 1)
+		{
+			log_truncated("data_uri");
 			break;
+		}
 
 		// reads the block id
-		if (!read_exact(&blk.block_id, sizeof(blk.block_id)))
+		if (read_exact(&blk.block_id, sizeof(blk.block_id)) != 1)
+		{
+			log_truncated("block_id");
 			break;
+		}
 
 		// reads the block size
 		uint64_t data_size = 0;
-		if (!read_exact(&data_size, sizeof(data_size)))
+		if (read_exact(&data_size, sizeof(data_size)) != 1)
+		{
+			log_truncated("data_size");
 			break;
+		}
 
 		// reads the block data
 		blk.data.resize(data_size);
-		if (!read_exact(blk.data.data(), data_size))
+		if (read_exact(blk.data.data(), data_size) != 1)
+		{
+			log_truncated("block payload");
 			break;
+		}
 
 		// puts the entry into the vector of DiskBlocks.
 		blocks.push_back(std::move(blk));

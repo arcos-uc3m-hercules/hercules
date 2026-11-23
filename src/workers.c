@@ -626,12 +626,11 @@ int Shutdown_server()
 
 	while (1)
 	{
+		pthread_mutex_lock(&mutex_malleability);
 		slog_debug("There are %d pending requests", pending_requests.size());
-		slog_info("malleability_status=%d", malleability_status.load());
+		slog_info("malleability_status=%d", malleability_status.load(std::memory_order_acquire));
 		if (malleability_status.load(std::memory_order_acquire) == MALLEABILITY_COMPLETE)
 		{
-			pthread_mutex_lock(&mutex_malleability);
-
 			if (pending_requests.size() == 0)
 			{
 				// no more request are pending.
@@ -647,7 +646,6 @@ int Shutdown_server()
 		}
 		else
 		{ // lock until malleability completes.
-			pthread_mutex_lock(&mutex_malleability);
 			pthread_cond_wait(&global_run_malleability_cond, &mutex_malleability);
 			pthread_mutex_unlock(&mutex_malleability);
 		}
@@ -684,6 +682,37 @@ int Shutdown_server()
 	pthread_cond_signal(&global_run_checkpoint_cond);
 	pthread_mutex_unlock(&mutex_checkpoint);
 	return 0;
+}
+
+extern imss curr_imss;
+
+typedef struct
+{
+	CommunicationMode mode;
+	char *checkpoint_path;
+	const char *data_hostname;
+	int dest_num_servers;
+} MigrationFlushContext;
+
+static int32_t migration_flush_worker_cb(int target_conn_idx, const ServerBuffer &srv_buf, uint64_t batch_seq, void *user_ctx)
+{
+	MigrationFlushContext *ctx = static_cast<MigrationFlushContext *>(user_ctx);
+	if (ctx == NULL)
+	{
+		slog_error("HERCULES_ERR_MIGRATION_FLUSH_CB_NULL_CTX");
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_FLUSH_CB_NULL_CTX\n");
+		return -1;
+	}
+
+	if (ctx->mode == CommunicationMode::MODE_DISK)
+	{
+		return flush_server_buffer(target_conn_idx, srv_buf, ctx->checkpoint_path, ctx->data_hostname, ctx->dest_num_servers, batch_seq);
+	}
+	if (ctx->mode == CommunicationMode::MODE_BUFF_NETWORK)
+	{
+		return flush_data_to_network(target_conn_idx, srv_buf, ctx->data_hostname, ctx->dest_num_servers);
+	}
+	return -1;
 }
 
 uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool server_status, CommunicationMode mode, char *malleability_checkpoint_path)
@@ -728,13 +757,41 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 	// Get all the keys of this server.
 	std::vector<std::string> block_keys = global_hierarchical_map->HierarchicalMapGetAllDirectories();
 
-	slog_debug("Sending %" PRId64, global_hierarchical_map->GetStorageUsage());
-	fprintf(stderr, "[%s] Sending %" PRId64 " bytes\n", data_hostname, global_hierarchical_map->GetStorageUsage());
+	uint64_t storage_usage = global_hierarchical_map->GetStorageUsage();
+	slog_debug("Sending %" PRIu64, storage_usage);
+	fprintf(stderr, "[%s] Sending %" PRIu64 " bytes\n", data_hostname, storage_usage);
 	int number_of_blocks_sent = 0;
 	uint64_t total_data_moved = 0;
 
+	// Estimate per-destination buffer capacity assuming uniform distribution plus 12.5%  for headers.
+	size_t per_server_buffer_hint = 0;
+	if (storage_usage > 0 && dest_view->num_servers > 0)
+	{
+		uint64_t per_server_bytes = storage_usage / static_cast<uint64_t>(dest_view->num_servers);
+		uint64_t headroom = (per_server_bytes >> 3) + (64ULL * 1024ULL);
+		uint64_t estimated_bytes = (per_server_bytes <= UINT64_MAX - headroom) ? (per_server_bytes + headroom) : SERVER_BUFFER_MAX_SIZE;
+		per_server_buffer_hint = static_cast<size_t>(std::min<uint64_t>(estimated_bytes, SERVER_BUFFER_MAX_SIZE));
+	}
+
 	// One buffer per target connection index, allocated lazily.
 	std::unordered_map<int, ServerBuffer> server_buffers;
+
+	const bool use_pipeline = (mode == CommunicationMode::MODE_DISK || mode == CommunicationMode::MODE_BUFF_NETWORK);
+	MigrationFlushPipeline flush_pipeline;
+	flush_pipeline.initialized = false;
+	MigrationFlushContext flush_ctx = {mode, malleability_checkpoint_path, data_hostname, dest_view->num_servers};
+	if (use_pipeline)
+	{
+		// Overlap buffer construction with network/disk flushes (2 workers for DISK to overlap local write+fsync with remote SETDISK ACK).
+		int num_flush_workers = (mode == CommunicationMode::MODE_DISK) ? 2 : 1;
+		size_t max_inflight = (mode == CommunicationMode::MODE_DISK) ? 4 : 2;
+		if (migration_pipeline_init(&flush_pipeline, num_flush_workers, max_inflight, migration_flush_worker_cb, &flush_ctx) < 0)
+		{
+			slog_error("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_PIPELINE_INIT: failed to initialize migration flush pipeline");
+			fprintf(stderr, "HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_PIPELINE_INIT: failed to initialize migration flush pipeline\n");
+			return -1;
+		}
+	}
 
 	for (const std::string &key : block_keys)
 	{
@@ -776,6 +833,16 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 				// target_conn_idx is the connection index (0 .. dest_view->num_servers - 1) in curr_imss.conns.eps.
 				// next_server is the persistent physical server ID in dest_view->server_ids.
 				int32_t target_conn_idx = find_server(dest_view->num_servers, block_number, data_uri.c_str(), SET, TYPE_DATA_SERVER, curr_global_imss_info->session_plcy);
+				if (target_conn_idx < 0 || target_conn_idx >= dest_view->num_servers || target_conn_idx >= MAX_SERVERS_PER_VIEW || target_conn_idx >= curr_imss.info.num_storages)
+				{
+					slog_error("HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_INVALID_TARGET: target_conn_idx=%d, dest_view->num_servers=%d, num_storages=%d", target_conn_idx, dest_view->num_servers, curr_imss.info.num_storages);
+					fprintf(stderr, "HERCULES_ERR_ITERATE_AND_SEND_BLOCKS_INVALID_TARGET: target_conn_idx=%d, dest_view->num_servers=%d, num_storages=%d\n", target_conn_idx, dest_view->num_servers, curr_imss.info.num_storages);
+					if (use_pipeline)
+					{
+						migration_pipeline_finish(&flush_pipeline, true);
+					}
+					return -1;
+				}
 				int next_server = dest_view->server_ids[target_conn_idx];
 
 				// TODO: check replication factor.
@@ -789,37 +856,29 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 					continue;
 				}
 
-				ServerBuffer &srv_buf = server_buffers[target_conn_idx]; // only used for MODE_DISK and MODE_BUFF_NETWORK
-				if (mode == CommunicationMode::MODE_DISK || mode == CommunicationMode::MODE_BUFF_NETWORK)
+				if (use_pipeline)
 				{
+					ServerBuffer &srv_buf = server_buffers[target_conn_idx]; // only used for MODE_DISK and MODE_BUFF_NETWORK
 					if (srv_buf.data.capacity() == 0)
-						init_server_buffer(srv_buf); // reserve max_size on first use
+						srv_buf = migration_pipeline_acquire_buffer(&flush_pipeline, SERVER_BUFFER_MAX_SIZE, per_server_buffer_hint);
 
-					// Flush the buffer first if the next block would exceed max_size.
+					// Flush the buffer asynchronously if the next block would exceed max_size and immediately build the next batch.
 					if (append_block_to_buffer(srv_buf, data_uri.c_str(), (int32_t)block_number, inner_value.data, (uint64_t)inner_value.size))
 					{
-						slog_debug("Buffer full for connection %d (server %d, %zu bytes), flushing before appending.", target_conn_idx, next_server, srv_buf.data.size());
+						slog_debug("Buffer full for connection %d (server %d, %zu bytes), submitting to flush pipeline.", target_conn_idx, next_server, srv_buf.offset);
 
-						// Flush the full buffer using endpoint connection index.
-						int rc = 0;
-						if (mode == CommunicationMode::MODE_DISK)
-						{
-							rc = flush_server_buffer(target_conn_idx, srv_buf, malleability_checkpoint_path, data_hostname, dest_view->num_servers);
-						}
-						if (mode == CommunicationMode::MODE_BUFF_NETWORK)
-						{
-							rc = flush_data_to_network(target_conn_idx, srv_buf, data_hostname, dest_view->num_servers);
-						}
+						ServerBuffer full_buf = std::move(srv_buf);
+						srv_buf = migration_pipeline_acquire_buffer(&flush_pipeline, full_buf.max_size, per_server_buffer_hint);
 
-						if (rc < 0)
+						if (migration_pipeline_submit(&flush_pipeline, target_conn_idx, std::move(full_buf)) < 0)
 						{
 							slog_error("HERCULES_ERR_FLUSH_MID_LOOP, conn_idx=%d, server=%d", target_conn_idx, next_server);
+							fprintf(stderr, "HERCULES_ERR_FLUSH_MID_LOOP, conn_idx=%d, server=%d\n", target_conn_idx, next_server);
+							migration_pipeline_finish(&flush_pipeline, true);
 							return -1;
 						}
 
-						reset_server_buffer(srv_buf);
-
-						// Now append the block that triggered the flush.
+						// Now append the block that triggered the flush while the previous batch flushes concurrently.
 						append_block_to_buffer(srv_buf, data_uri.c_str(), (int32_t)block_number, inner_value.data, (uint64_t)inner_value.size);
 					}
 				}
@@ -846,27 +905,25 @@ uint64_t iterate_and_send_blocks(char *data_hostname, uint32_t server_id, bool s
 		}
 	}
 
-	// Flush all per-server buffers to disk or network and notify the corresponding server.
-	if (mode == CommunicationMode::MODE_DISK || mode == CommunicationMode::MODE_BUFF_NETWORK)
+	// Submit all remaining per-server buffers to the flush pipeline and wait for all transfers to complete.
+	if (use_pipeline)
 	{
 		for (auto &[conn_idx, srv_buf] : server_buffers)
 		{
-			int rc = 0;
-			if (mode == CommunicationMode::MODE_DISK)
+			if (migration_pipeline_submit(&flush_pipeline, conn_idx, std::move(srv_buf)) < 0)
 			{
-				rc = flush_server_buffer(conn_idx, srv_buf, malleability_checkpoint_path, data_hostname, dest_view->num_servers);
-			}
-			if (mode == CommunicationMode::MODE_BUFF_NETWORK)
-			{
-				rc = flush_data_to_network(conn_idx, srv_buf, data_hostname, dest_view->num_servers);
-			}
-
-			if (rc < 0)
-			{
-				slog_error("HERCULES_ERR_FLUSH_MID_LOOP, conn_idx=%d", conn_idx);
-				fprintf(stderr, "HERCULES_ERR_FLUSH_MID_LOOP, conn_idx=%d\n", conn_idx);
+				slog_error("HERCULES_ERR_FLUSH_POST_LOOP, conn_idx=%d", conn_idx);
+				fprintf(stderr, "HERCULES_ERR_FLUSH_POST_LOOP, conn_idx=%d\n", conn_idx);
+				migration_pipeline_finish(&flush_pipeline, true);
 				return -1;
 			}
+		}
+
+		if (migration_pipeline_finish(&flush_pipeline, false) < 0)
+		{
+			slog_error("HERCULES_ERR_FLUSH_PIPELINE_FINISH: one or more asynchronous migration flushes failed");
+			fprintf(stderr, "HERCULES_ERR_FLUSH_PIPELINE_FINISH: one or more asynchronous migration flushes failed\n");
+			return -1;
 		}
 	}
 	slog_malleability("Calling second garbage collector.");
@@ -1028,7 +1085,6 @@ int wait_drain_data_server(int server_id, struct timespec stop_signal_ts)
 	} while (true);
 }
 
-extern imss curr_imss;
 void *move_blocks_2_server(void *th_argv)
 {
 
@@ -1092,11 +1148,16 @@ void *move_blocks_2_server(void *th_argv)
 
 	char *malleability_checkpoint_path = arguments->args->hercules_malleability_checkpoint_path;
 	CommunicationMode mode = arguments->args->malleability_reorder_mode;
-	if (mode == CommunicationMode::MODE_DISK && strlen(malleability_checkpoint_path) <= 0)
+	if (mode == CommunicationMode::MODE_DISK && strlen(malleability_checkpoint_path) == 0)
 	{
-		fprintf(stderr, "Invalid malleability checkpoint path, required when malleability reorder mode is by Disk.\n Changing reorder mode to Network: %d", (int)CommunicationMode::MODE_NETWORK);
+		slog_warn("HERCULES_WARN_INVALID_MALLEABILITY_CHECKPOINT_PATH: Invalid malleability checkpoint path, required when malleability reorder mode is by Disk. Changing reorder mode to Network: %d", (int)CommunicationMode::MODE_NETWORK);
+		fprintf(stderr, "WARNING: Invalid malleability checkpoint path, required when malleability reorder mode is by Disk. Changing reorder mode to Network: %d\n", (int)CommunicationMode::MODE_NETWORK);
 		mode = CommunicationMode::MODE_NETWORK;
 	}
+
+	const char *mode_str = communication_mode_to_str(mode);
+	slog_malleability("[%s] Starting block migration (server_id=%" PRIu32 ", mode=%s(%d))", arguments->args->data_hostname, server_id, mode_str, (int)mode);
+	fprintf(stderr, "[%s] Starting block migration (server_id=%" PRIu32 ", mode=%s(%d))\n", arguments->args->data_hostname, server_id, mode_str, (int)mode);
 
 	auto start_time_req = std::chrono::steady_clock::now();
 	total_data_moved = iterate_and_send_blocks(arguments->args->data_hostname, server_id, arguments->status, mode, malleability_checkpoint_path);
@@ -1107,7 +1168,7 @@ void *move_blocks_2_server(void *th_argv)
 	slog_malleability("Sending ACK to metadata server");
 	// Send the request.
 	char ack_msg_to_send[PATH_MAX] = {0};
-	sprintf(ack_msg_to_send, "%s %s %" PRIu64 " %f, %" PRIu64, MSG_DECOM_DATASERVERS, arguments->args->data_hostname, total_data_moved, time_taken_req.count(), global_hierarchical_map->GetStorageUsage());
+	snprintf(ack_msg_to_send, sizeof(ack_msg_to_send), "%s %s %" PRIu64 " %f %" PRIu64 " %s", MSG_DECOM_DATASERVERS, arguments->args->data_hostname, total_data_moved, time_taken_req.count(), global_hierarchical_map->GetStorageUsage(), mode_str);
 	StatACK(ack_msg_to_send, 0);
 
 	// fprintf(stderr, "ACK to metadata server sent.\n");
@@ -1180,7 +1241,7 @@ size_t update_ips_list(int id_server_to_remove)
 	// Keep metadata server TopologyViews aligned with compacted ips/server_states slot indices.
 	if (imss_info_struct->num_views > 0)
 	{
-		RemapTopologyViewsOnSlotRemoval(imss_info_struct, id_server_to_remove);
+		RemapTopologyViewsOnSlotRemoval(imss_info_struct, id_server_to_remove, imss_info_struct->current_view_id);
 	}
 
 	collect_active_rw_servers(imss_info_struct, NULL);
@@ -2592,19 +2653,46 @@ double calculate_trend_slope(const std::vector<double> &y)
 
 int send_add_server_to_all_data_servers(ucp_worker_h ucp_worker, uint32_t thread_id, const char *node_to_use, uint32_t num_active_servers, int32_t id_server_to_modify)
 {
-	char request[REQUEST_SIZE] = {0};
-	int ret = 0;
-	for (size_t i = 0; i < num_active_servers; i++)
+	if (node_to_use == NULL)
 	{
-		if (i == (size_t)id_server_to_modify)
+		slog_error("HERCULES_ERR_SEND_ADD_SERVER_NULL_NODE: cannot broadcast ADDSERVER with NULL hostname");
+		fprintf(stderr, "HERCULES_ERR_SEND_ADD_SERVER_NULL_NODE: cannot broadcast ADDSERVER with NULL hostname\n");
+		return -1;
+	}
+
+	if (num_active_servers > MAX_SERVERS_PER_VIEW)
+	{
+		slog_warn("HERCULES_WARN_SEND_ADD_SERVER_CLAMP: num_active_servers (%" PRIu32 ") exceeds MAX_SERVERS_PER_VIEW (%d), clamping broadcast loop", num_active_servers, MAX_SERVERS_PER_VIEW);
+		fprintf(stderr, "HERCULES_WARN_SEND_ADD_SERVER_CLAMP: num_active_servers (%" PRIu32 ") exceeds MAX_SERVERS_PER_VIEW (%d), clamping broadcast loop\n", num_active_servers, MAX_SERVERS_PER_VIEW);
+	}
+
+	char request[REQUEST_SIZE] = {0};
+	int chars_written = snprintf(request, sizeof(request), "ADDSERVER %s %" PRIu32 " %" PRId32, node_to_use, num_active_servers, id_server_to_modify);
+	if (chars_written < 0 || (size_t)chars_written >= sizeof(request))
+	{
+		slog_error("HERCULES_ERR_SEND_ADD_SERVER_TRUNCATED: ADDSERVER request truncated for node '%s' (chars_written=%d, max=%zu)", node_to_use, chars_written, sizeof(request));
+		fprintf(stderr, "HERCULES_ERR_SEND_ADD_SERVER_TRUNCATED: ADDSERVER request truncated for node '%s' (chars_written=%d, max=%zu)\n", node_to_use, chars_written, sizeof(request));
+		return -1;
+	}
+
+	int ret = 0;
+	for (size_t i = 0; i < num_active_servers && i < MAX_SERVERS_PER_VIEW; i++)
+	{
+		if (id_server_to_modify >= 0 && i == (size_t)id_server_to_modify)
 		{
 			slog_debug("Skipping newly added server ID %zu", i);
 			fprintf(stderr, "[Metadata] Skipping newly added server ID %zu\n", i);
 			continue;
 		}
-		sprintf(request, "ADDSERVER %s %" PRIu32 " %" PRId32 "", node_to_use, num_active_servers, id_server_to_modify);
-		slog_debug("Sending %s to server ID %zu (%s), number of active storage servers=%" PRIu32, request, i, (curr_global_imss_info && curr_global_imss_info->ips) ? curr_global_imss_info->ips[i] : "unknown", num_active_servers);
-		fprintf(stderr, "Sending %s to server ID %zu (%s), number of active storage servers=%" PRIu32 "\n", request, i, (curr_global_imss_info && curr_global_imss_info->ips) ? curr_global_imss_info->ips[i] : "unknown", num_active_servers);
+		if (data_endpoints[i] == NULL)
+		{
+			slog_warn("HERCULES_WARN_SEND_ADD_SERVER_NULL_EP: skipping server ID %zu because data_endpoints[%zu] is NULL", i, i);
+			fprintf(stderr, "HERCULES_WARN_SEND_ADD_SERVER_NULL_EP: skipping server ID %zu because data_endpoints[%zu] is NULL\n", i, i);
+			continue;
+		}
+		const char *target_host = (curr_global_imss_info && curr_global_imss_info->ips && curr_global_imss_info->ips[i]) ? curr_global_imss_info->ips[i] : "unknown";
+		slog_debug("Sending %s to server ID %zu (%s), number of active storage servers=%" PRIu32, request, i, target_host, num_active_servers);
+		fprintf(stderr, "Sending %s to server ID %zu (%s), number of active storage servers=%" PRIu32 "\n", request, i, target_host, num_active_servers);
 		ret = send_req(ucp_worker, data_endpoints[i], local_addr[thread_id], local_addr_len[thread_id], request);
 		if (ret == 0)
 		{
@@ -3490,6 +3578,13 @@ int process_add_server(p_argv *arguments, const char *req)
 		return -1;
 	}
 
+	if (num_servers == 0 || added_server_id >= num_servers)
+	{
+		slog_error("HERCULES_ERR_PROCESS_ADD_SERVER_INVALID_RANGE: rejected adding server %s (id=%" PRIu32 ", num_servers=%" PRIu32 "): expected num_servers > 0 and id < num_servers", added_hostname, added_server_id, num_servers);
+		fprintf(stderr, "HERCULES_ERR_PROCESS_ADD_SERVER_INVALID_RANGE: rejected adding server %s (id=%" PRIu32 ", num_servers=%" PRIu32 "): expected num_servers > 0 and id < num_servers\n", added_hostname, added_server_id, num_servers);
+		return -1;
+	}
+
 	if (imss_found_in == -1)
 	{ // request the metadata.
 		slog_debug("imss structure not found, requesting to the metadata server");
@@ -3517,6 +3612,9 @@ int process_add_server(p_argv *arguments, const char *req)
 		}
 		curr_global_imss_info = &imss_->info;
 		server_args->num_data_servers = num_servers;
+		pthread_mutex_lock(&lock_network);
+		curr_imss = *imss_;
+		pthread_mutex_unlock(&lock_network);
 	}
 	else
 	{ // update current struct.
@@ -3598,6 +3696,13 @@ int process_add_server(p_argv *arguments, const char *req)
 			server_args->num_data_servers = num_servers;
 			curr_global_imss_info = &imss_->info;
 			return 1;
+		}
+
+		if (ucp_worker_data == NULL)
+		{
+			slog_error("HERCULES_ERR_ADDSERVER_NULL_UCP_WORKER_DATA: ucp_worker_data is NULL while adding server %s (id=%" PRIu32 ")", added_hostname, added_server_id);
+			fprintf(stderr, "HERCULES_ERR_ADDSERVER_NULL_UCP_WORKER_DATA: ucp_worker_data is NULL while adding server %s (id=%" PRIu32 ")\n", added_hostname, added_server_id);
+			return -1;
 		}
 
 		// Ensure capacity for the new server index within global tracking arrays
@@ -3700,8 +3805,17 @@ int process_add_server(p_argv *arguments, const char *req)
 
 		imss_->conns.id[added_server_id] = added_server_id;
 
-		client_create_ep_data(arguments->ucp_worker, &data_endpoints[added_server_id], imss_->conns.peer_addr[added_server_id], set_server_err_call_arg);
-		imss_->conns.eps[added_server_id] = data_endpoints[added_server_id];
+		// Create the inter-backend peer endpoint on ucp_worker_data so migration sends and cleanup use the matching UCX worker.
+		client_ep_context_t **ep_ctx_slot = (imss_->conns.ep_contexts != NULL) ? &imss_->conns.ep_contexts[added_server_id] : NULL;
+		ucs_status_t ep_status = client_create_ep_data_with_context(ucp_worker_data, &imss_->conns.eps[added_server_id], imss_->conns.peer_addr[added_server_id], set_server_err_call_arg, ep_ctx_slot);
+		if (ep_status != UCS_OK)
+		{
+			imss_->conns.eps[added_server_id] = NULL;
+			slog_error("HERCULES_ERR_ADDSERVER_CREATE_EP: failed to create UCX endpoint for server %s (id=%" PRIu32 ", status=%s)", added_hostname, added_server_id, ucs_status_string(ep_status));
+			fprintf(stderr, "HERCULES_ERR_ADDSERVER_CREATE_EP: failed to create UCX endpoint for server %s (id=%" PRIu32 ", status=%s)\n", added_hostname, added_server_id, ucs_status_string(ep_status));
+			return -1;
+		}
+		data_endpoints[added_server_id] = imss_->conns.eps[added_server_id];
 
 		global_malleability_t = clock() - global_malleability_t;
 		global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
@@ -3732,6 +3846,9 @@ int process_add_server(p_argv *arguments, const char *req)
 		imss_info_struct->num_storages = num_servers;
 		server_args->num_data_servers = num_servers;
 		curr_global_imss_info = &imss_->info;
+		pthread_mutex_lock(&lock_network);
+		curr_imss = *imss_;
+		pthread_mutex_unlock(&lock_network);
 		slog_debug("number_storage_servers=%d, num_storages=%d\n", number_storage_servers.load(), imss_info_struct->num_storages);
 	}
 
@@ -5455,7 +5572,25 @@ int handle_write_operation(
 				return -1;
 			}
 
-			memcpy(static_cast<char *>(buffer) + block_offset, data_from_disk, size_asigned_to_block);
+			if (msg_length > size_asigned_to_block || (size_t)block_offset > size_asigned_to_block - msg_length)
+			{
+				slog_error("HERCULES_ERR_WRITE_DISK_BOUNDS: block_offset=%zu + msg_length=%zu exceeds size_asigned_to_block=%zu", (size_t)block_offset, msg_length, size_asigned_to_block);
+				fprintf(stderr, "HERCULES_ERR_WRITE_DISK_BOUNDS: block_offset=%zu + msg_length=%zu exceeds size_asigned_to_block=%zu\n", (size_t)block_offset, msg_length, size_asigned_to_block);
+				if (reused_memory == 0)
+				{
+					free(buffer);
+				}
+				else
+				{
+					StsQueue.push(mem_pool, buffer);
+				}
+				return -1;
+			}
+
+			if (msg_length > 0)
+			{
+				memcpy(static_cast<char *>(buffer) + block_offset, data_from_disk, msg_length);
+			}
 		}
 
 		pthread_mutex_lock(&memory_protect);
@@ -5481,13 +5616,17 @@ int handle_write_operation(
 			// Include the new record in the tracking structure.
 			if (insert_successful != 0)
 			{
-				if (insert_successful == 2) // TODO_ check where to move this confirmation messages.
+				// Batched SETDISK / SETBUFFNETWORK sends one response after processing all blocks.
+				if (transfer_mode != CommunicationMode::MODE_DISK && transfer_mode != CommunicationMode::MODE_BUFF_NETWORK)
 				{
-					SendConfirmationMessage(arguments, MSG_SPACE_OP);
-				}
-				else
-				{
-					SendConfirmationMessage(arguments, MSG_ERROR_OP);
+					if (insert_successful == 2) // TODO: check where to move this confirmation messages.
+					{
+						SendConfirmationMessage(arguments, MSG_SPACE_OP);
+					}
+					else
+					{
+						SendConfirmationMessage(arguments, MSG_ERROR_OP);
+					}
 				}
 
 				perror("HERCULES_ERR_WORKER_MAPPUT");
@@ -5870,19 +6009,40 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			{
 				fprintf(stderr, "Invalid request, expected %d but %d were read.\n", expected_recv_args, recv_args);
 				slog_error("Invalid request, expected %d but %d were read.", expected_recv_args, recv_args);
+				SendConfirmationMessage(arguments, MSG_ERROR_OP);
 				return -1;
 			}
 
 			std::vector<DiskBlock> list_of_blocks = deserialise_server_buffer(file_path);
+			if (unlink(file_path) != 0 && errno != ENOENT)
+			{
+				slog_warn("HERCULES_WARN_SETDISK_UNLINK: failed to remove temporary file '%s': %s", file_path, strerror(errno));
+				fprintf(stderr, "HERCULES_WARN_SETDISK_UNLINK: failed to remove temporary file '%s': %s\n", file_path, strerror(errno));
+			}
+
+			bool batch_failed = false;
+			if (list_of_blocks.size() != srv_buf.block_count)
+			{
+				slog_error("HERCULES_ERR_SETDISK_BLOCK_COUNT_MISMATCH: expected %u blocks but deserialised %zu from '%s'", srv_buf.block_count, list_of_blocks.size(), file_path);
+				fprintf(stderr, "HERCULES_ERR_SETDISK_BLOCK_COUNT_MISMATCH: expected %u blocks but deserialised %zu from '%s'\n", srv_buf.block_count, list_of_blocks.size(), file_path);
+				batch_failed = true;
+			}
 
 			for (const DiskBlock &blk : list_of_blocks)
 			{
 				key = blk.data_uri + "$" + std::to_string(blk.block_id);
 				slog_debug("Writting %s, size=%zu ", key.c_str(), blk.data.size());
-				if (handle_write_operation(arguments, key, blk.data.size(), block_offset, snapshot_op, server_n_used_in_frontend, is_shared_memory, shm_key, hierarchical_map, map.get(), mem_pool, truncate, CommunicationMode::MODE_DISK, blk.data.data(), false, snapshot_enabled) < 0)
+				if (handle_write_operation(arguments, key, blk.data.size(), block_offset, snapshot_op, MALLEABILITY_SET_BYPASS, is_shared_memory, shm_key, hierarchical_map, map.get(), mem_pool, truncate, CommunicationMode::MODE_DISK, blk.data.data(), false, snapshot_enabled) < 0)
 				{
-					slog_error("store_block failed for uri='%s' block=%d", blk.data_uri.c_str(), blk.block_id);
+					slog_error("HERCULES_ERR_SETDISK_STORE_BLOCK: store_block failed for uri='%s' block=%d", blk.data_uri.c_str(), blk.block_id);
+					fprintf(stderr, "HERCULES_ERR_SETDISK_STORE_BLOCK: store_block failed for uri='%s' block=%d\n", blk.data_uri.c_str(), blk.block_id);
+					batch_failed = true;
 				}
+			}
+			if (batch_failed)
+			{
+				SendConfirmationMessage(arguments, MSG_ERROR_OP);
+				return -1;
 			}
 			SendConfirmationMessage(arguments, MSG_OK_OP);
 			return 0;
@@ -5899,19 +6059,35 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			{
 				fprintf(stderr, "Invalid request, expected %d but %d were read.\n", expected_recv_args, recv_args);
 				slog_error("Invalid request, expected %d but %d were read.", expected_recv_args, recv_args);
+				SendConfirmationMessage(arguments, MSG_ERROR_OP);
 				return -1;
 			}
 
 			std::vector<DiskBlock> list_of_blocks = deserialise_network_buffer(arguments->ucp_worker, arguments->worker_uid, arguments->server_ep, srv_buf.block_count);
 
+			bool batch_failed = false;
+			if (list_of_blocks.size() != srv_buf.block_count)
+			{
+				slog_error("HERCULES_ERR_SETBUFFNETWORK_BLOCK_COUNT_MISMATCH: expected %u blocks but deserialised %zu", srv_buf.block_count, list_of_blocks.size());
+				fprintf(stderr, "HERCULES_ERR_SETBUFFNETWORK_BLOCK_COUNT_MISMATCH: expected %u blocks but deserialised %zu\n", srv_buf.block_count, list_of_blocks.size());
+				batch_failed = true;
+			}
+
 			for (const DiskBlock &blk : list_of_blocks)
 			{
 				key = blk.data_uri + "$" + std::to_string(blk.block_id);
 				slog_debug("Writting %s, size=%zu ", key.c_str(), blk.data.size());
-				if (handle_write_operation(arguments, key, blk.data.size(), block_offset, snapshot_op, server_n_used_in_frontend, is_shared_memory, shm_key, hierarchical_map, map.get(), mem_pool, truncate, transfer_mode, blk.data.data(), false, snapshot_enabled) < 0)
+				if (handle_write_operation(arguments, key, blk.data.size(), block_offset, snapshot_op, MALLEABILITY_SET_BYPASS, is_shared_memory, shm_key, hierarchical_map, map.get(), mem_pool, truncate, transfer_mode, blk.data.data(), false, snapshot_enabled) < 0)
 				{
-					slog_malleability("store_block failed for uri='%s' block=%d", blk.data_uri.c_str(), blk.block_id);
+					slog_error("HERCULES_ERR_SETBUFFNETWORK_STORE_BLOCK: store_block failed for uri='%s' block=%d", blk.data_uri.c_str(), blk.block_id);
+					fprintf(stderr, "HERCULES_ERR_SETBUFFNETWORK_STORE_BLOCK: store_block failed for uri='%s' block=%d\n", blk.data_uri.c_str(), blk.block_id);
+					batch_failed = true;
 				}
+			}
+			if (batch_failed)
+			{
+				SendConfirmationMessage(arguments, MSG_ERROR_OP);
+				return -1;
 			}
 			SendConfirmationMessage(arguments, MSG_OK_OP);
 			return 0;
@@ -6290,6 +6466,210 @@ void *Snapshot(void *th_argv)
 	pthread_exit(NULL);
 }
 
+struct PendingSetServerEntry
+{
+	int server_id;
+	std::string ip;
+	std::string hostname;
+	std::string raw_req;
+};
+
+static std::map<int, PendingSetServerEntry> pending_setserver_registrations;
+static pthread_mutex_t setserver_registration_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int register_single_data_server(p_argv *arguments, int server_id_request, const char *connect_ip, const char *added_hostname, const char *raw_req)
+{
+	if (arguments == NULL || arguments->args == NULL || connect_ip == NULL || added_hostname == NULL || raw_req == NULL)
+	{
+		slog_error("HERCULES_ERR_STAT_WORKER_HELPER_SETSERVER_NULL: invalid NULL argument registering server id=%d", server_id_request);
+		fprintf(stderr, "HERCULES_ERR_STAT_WORKER_HELPER_SETSERVER_NULL: invalid NULL argument registering server id=%d\n", server_id_request);
+		return -1;
+	}
+
+	if (curr_global_imss_info == NULL || server_id_request < 0 || server_id_request >= MAX_SERVERS_PER_VIEW || curr_global_imss_info->num_storages >= MAX_SERVERS_PER_VIEW)
+	{
+		slog_error("HERCULES_ERR_STAT_WORKER_CLUSTER_FULL: Cannot add server %s (id=%d). MAX_SERVERS_PER_VIEW (%d) reached (current storages=%d).", added_hostname, server_id_request, MAX_SERVERS_PER_VIEW, curr_global_imss_info ? curr_global_imss_info->num_storages : -1);
+		fprintf(stderr, "HERCULES_ERR_STAT_WORKER_CLUSTER_FULL: Cannot add server %s (id=%d). MAX_SERVERS_PER_VIEW (%d) reached (current storages=%d).\n", added_hostname, server_id_request, MAX_SERVERS_PER_VIEW, curr_global_imss_info ? curr_global_imss_info->num_storages : -1);
+		return -1;
+	}
+
+	imss new_imss;
+	new_imss.conns.peer_addr = (ucp_address_t **)calloc(1, sizeof(ucp_address_t *));
+	if (!new_imss.conns.peer_addr)
+	{
+		slog_fatal("HERCULES_ERR_STAT_WORKER_HELPER_MALLOC: failed to allocate peer_addr");
+		fprintf(stderr, "HERCULES_ERR_STAT_WORKER_HELPER_MALLOC: failed to allocate peer_addr\n");
+		return -1;
+	}
+
+	int oob_sock = -1;
+	size_t addr_len = 0;
+	int ret = 0;
+	uint64_t target_port = arguments->args->data_port ? arguments->args->data_port : 8500;
+	slog_debug("connecting to %s:%" PRIu64, connect_ip, target_port);
+	oob_sock = connect_common(connect_ip, target_port, AF_INET);
+	if (oob_sock < 0)
+	{
+		char err_msg[MAX_ERR_MSG_LEN] = {0};
+		snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%d - %s:%" PRIu64, server_id_request, connect_ip, target_port);
+		slog_error("%s", err_msg);
+		fprintf(stderr, "%s\n", err_msg);
+		perror(err_msg);
+		free(new_imss.conns.peer_addr);
+		return -1;
+	}
+
+	char request[REQUEST_SIZE] = {0};
+	snprintf(request, sizeof(request), "%" PRIu32 " GET %s", arguments->args->id, "HELLO!JOIN");
+
+	if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
+	{
+		perror("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
+		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
+		fprintf(stderr, "HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST\n");
+		close(oob_sock);
+		free(new_imss.conns.peer_addr);
+		return -1;
+	}
+
+	ret = recv(oob_sock, &addr_len, sizeof(addr_len), MSG_WAITALL);
+	if (ret <= 0 || addr_len == 0)
+	{
+		perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
+		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
+		fprintf(stderr, "HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN\n");
+		close(oob_sock);
+		free(new_imss.conns.peer_addr);
+		return -1;
+	}
+
+	new_imss.conns.peer_addr[0] = (ucp_address *)malloc(addr_len);
+	if (new_imss.conns.peer_addr[0] == NULL)
+	{
+		perror("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
+		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
+		fprintf(stderr, "HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC\n");
+		close(oob_sock);
+		free(new_imss.conns.peer_addr);
+		return -1;
+	}
+
+	ret = recv(oob_sock, new_imss.conns.peer_addr[0], addr_len, MSG_WAITALL);
+	if (ret <= 0)
+	{
+		perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
+		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
+		fprintf(stderr, "HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR\n");
+		close(oob_sock);
+		free(new_imss.conns.peer_addr[0]);
+		free(new_imss.conns.peer_addr);
+		return -1;
+	}
+
+	if (close(oob_sock) < 0)
+	{
+		perror("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
+		slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
+		fprintf(stderr, "HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK\n");
+	}
+
+	ucs_status_t ep_status = client_create_ep_data(arguments->ucp_worker, &data_endpoints[server_id_request], new_imss.conns.peer_addr[0], set_server_err_call_arg);
+
+	auto end_time_commisioning = std::chrono::steady_clock::now();
+	std::chrono::duration<double> time_taken_comm = end_time_commisioning - start_time_commissioning;
+
+	free(new_imss.conns.peer_addr[0]);
+	free(new_imss.conns.peer_addr);
+
+	if (ep_status != UCS_OK || data_endpoints[server_id_request] == NULL)
+	{
+		data_endpoints[server_id_request] = NULL;
+		slog_error("HERCULES_ERR_STAT_WORKER_HELPER_CREATE_EP: failed to create UCX endpoint for server id=%d (%s), status=%d", server_id_request, added_hostname, (int)ep_status);
+		fprintf(stderr, "HERCULES_ERR_STAT_WORKER_HELPER_CREATE_EP: failed to create UCX endpoint for server id=%d (%s), status=%d\n", server_id_request, added_hostname, (int)ep_status);
+		return -1;
+	}
+
+	// pthread_mutex_lock(&mutext_malleability);
+	imss_info *imss_info_struct = curr_global_imss_info;
+	// num_storages is increased inside AddIPS.
+	fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
+	if (AddIPS(imss_info_struct, const_cast<char *>(added_hostname), strlen(added_hostname), -1) < 0)
+	{
+		close_ucx_endpoint(arguments->ucp_worker, data_endpoints[server_id_request]);
+		data_endpoints[server_id_request] = NULL;
+		slog_error("HERCULES_ERR_STAT_WORKER_HELPER_ADDIPS: failed to add server %s (id=%d) to imss_info", added_hostname, server_id_request);
+		fprintf(stderr, "HERCULES_ERR_STAT_WORKER_HELPER_ADDIPS: failed to add server %s (id=%d) to imss_info\n", added_hostname, server_id_request);
+		return -1;
+	}
+	slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
+	number_storage_servers.store(imss_info_struct->num_storages);
+	arguments->args->num_data_servers = number_storage_servers.load();
+	sync_data_hostfile(arguments->args->data_hostfile, imss_info_struct, number_storage_servers.load());
+	slog_debug("number_storage_servers=%d\n", number_storage_servers.load());
+	// pthread_mutex_unlock(&mutext_malleability);
+
+	fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, time_taken_comm.count());
+	slog_debug("Server %d connected in %.4f seconds", server_id_request, time_taken_comm.count());
+
+	id_server_to_modify = server_id_request;
+	last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
+	curr_global_imss_info->server_states[server_id_request] = SERVER_ACTIVE_RW;
+	int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
+	int32_t active_count = collect_active_rw_servers(curr_global_imss_info, active_server_ids);
+	if (active_count > 0)
+	{
+		AddTopologyView(curr_global_imss_info, active_count, active_server_ids);
+	}
+	// Send the request to all servers telling they have to updated the list of aviable nodes.
+	send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, added_hostname, number_storage_servers.load(), id_server_to_modify);
+
+	// Turn off malleability status and process queued client writes.
+	pthread_mutex_lock(&mutex_malleability);
+	malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+	pthread_mutex_unlock(&mutex_malleability);
+	Attend_pending_requests();
+
+	// signal to the Comissioning thread.
+	fprintf(stderr, "signal to the Comissioning thread\n");
+	pthread_mutex_lock(&server_ready_mutex);
+	is_new_server_ready = true;
+	pthread_cond_signal(&server_ready_cond);
+	pthread_mutex_unlock(&server_ready_mutex);
+	fprintf(stderr, "Ending request %s\n", raw_req);
+
+	return 0;
+}
+
+static void drain_pending_setserver_registrations_locked(p_argv *arguments)
+{
+	while (curr_global_imss_info != NULL)
+	{
+		int expected_id = curr_global_imss_info->num_storages;
+		auto it = pending_setserver_registrations.find(expected_id);
+		if (it == pending_setserver_registrations.end())
+		{
+			break;
+		}
+		PendingSetServerEntry entry = it->second;
+		pending_setserver_registrations.erase(it);
+		slog_malleability("Draining deferred SETSERVER registration for server id=%d (%s:%s)", entry.server_id, entry.ip.c_str(), entry.hostname.c_str());
+		fprintf(stderr, "Draining deferred SETSERVER registration for server id=%d (%s:%s)\n", entry.server_id, entry.ip.c_str(), entry.hostname.c_str());
+		if (register_single_data_server(arguments, entry.server_id, entry.ip.c_str(), entry.hostname.c_str(), entry.raw_req.c_str()) < 0)
+		{
+			slog_error("HERCULES_ERR_STAT_WORKER_DRAIN_SETSERVER: Failed draining server id=%d (%s)", entry.server_id, entry.hostname.c_str());
+			fprintf(stderr, "HERCULES_ERR_STAT_WORKER_DRAIN_SETSERVER: Failed draining server id=%d (%s)\n", entry.server_id, entry.hostname.c_str());
+			break;
+		}
+	}
+}
+
+static void drain_pending_setserver_registrations(p_argv *arguments)
+{
+	pthread_mutex_lock(&setserver_registration_mutex);
+	drain_pending_setserver_registrations_locked(arguments);
+	pthread_mutex_unlock(&setserver_registration_mutex);
+}
+
 int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 {
 	ucs_status_t status;
@@ -6575,157 +6955,120 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			return -1;
 		}
 
-		if (server_id_request < 0 || server_id_request >= MAX_SERVERS_PER_VIEW ||
-		    (curr_global_imss_info != NULL && curr_global_imss_info->num_storages >= MAX_SERVERS_PER_VIEW))
+		if (server_id_request < 0 || server_id_request >= MAX_SERVERS_PER_VIEW)
 		{
-			slog_error("HERCULES_ERR_STAT_WORKER_CLUSTER_FULL: Cannot add server %s (id=%d). MAX_SERVERS_PER_VIEW (%d) reached (current storages=%d).", uri_, server_id_request, MAX_SERVERS_PER_VIEW, curr_global_imss_info ? curr_global_imss_info->num_storages : -1);
-			fprintf(stderr, "HERCULES_ERR_STAT_WORKER_CLUSTER_FULL: Cannot add server %s (id=%d). MAX_SERVERS_PER_VIEW (%d) reached (current storages=%d).\n", uri_, server_id_request, MAX_SERVERS_PER_VIEW, curr_global_imss_info ? curr_global_imss_info->num_storages : -1);
+			slog_error("HERCULES_ERR_STAT_WORKER_INVALID_ID: Cannot add server %s (id=%d) outside [0, %d).", uri_, server_id_request, MAX_SERVERS_PER_VIEW);
+			fprintf(stderr, "HERCULES_ERR_STAT_WORKER_INVALID_ID: Cannot add server %s (id=%d) outside [0, %d).\n", uri_, server_id_request, MAX_SERVERS_PER_VIEW);
 			return -1;
 		}
 
-		imss new_imss;
-		new_imss.conns.peer_addr = (ucp_address_t **)calloc(1, sizeof(ucp_address_t *));
-		if (!new_imss.conns.peer_addr)
+		pthread_mutex_lock(&setserver_registration_mutex);
+
+		if (curr_global_imss_info != NULL && curr_global_imss_info->num_storages >= MAX_SERVERS_PER_VIEW)
 		{
-			slog_fatal("HERCULES_ERR_STAT_WORKER_HELPER_MALLOC: failed to allocate peer_addr");
-			fprintf(stderr, "HERCULES_ERR_STAT_WORKER_HELPER_MALLOC: failed to allocate peer_addr\n");
+			slog_error("HERCULES_ERR_STAT_WORKER_CLUSTER_FULL: Cannot add server %s (id=%d). MAX_SERVERS_PER_VIEW (%d) reached (current storages=%d).", uri_, server_id_request, MAX_SERVERS_PER_VIEW, curr_global_imss_info->num_storages);
+			fprintf(stderr, "HERCULES_ERR_STAT_WORKER_CLUSTER_FULL: Cannot add server %s (id=%d). MAX_SERVERS_PER_VIEW (%d) reached (current storages=%d).\n", uri_, server_id_request, MAX_SERVERS_PER_VIEW, curr_global_imss_info->num_storages);
+			pthread_mutex_unlock(&setserver_registration_mutex);
 			return -1;
 		}
 
-		int oob_sock = -1;
-		size_t addr_len = 0;
-		int ret = 0;
-		const char *connect_ip = number;
-		char *added_hostname = uri_;
-		uint64_t target_port = (arguments->args && arguments->args->data_port) ? arguments->args->data_port : 8500;
-		slog_debug("connecting to %s:%" PRIu64, connect_ip, target_port);
-		oob_sock = connect_common(connect_ip, target_port, AF_INET);
-		if (oob_sock < 0)
+		// Defer registrations arriving before IMSS_INFO or ahead of the next dense server slot.
+		if (curr_global_imss_info == NULL || server_id_request > curr_global_imss_info->num_storages)
 		{
-			char err_msg[MAX_ERR_MSG_LEN] = {0};
-			snprintf(err_msg, sizeof(err_msg), "HERCULES_ERR_STAT_WORKER_HELPER_CONNECT_COMMON - i=%d - %s:%" PRIu64, server_id_request, connect_ip, target_port);
-			slog_error("%s", err_msg);
-			perror(err_msg);
-			free(new_imss.conns.peer_addr);
-			return -1;
+			PendingSetServerEntry entry;
+			entry.server_id = server_id_request;
+			entry.ip = number;
+			entry.hostname = uri_;
+			entry.raw_req = req;
+			pending_setserver_registrations[server_id_request] = entry;
+			int expected_id = (curr_global_imss_info != NULL) ? curr_global_imss_info->num_storages : -1;
+			slog_malleability("Deferring out-of-order SETSERVER for server id=%d (%s:%s), expected=%d", server_id_request, number, uri_, expected_id);
+			fprintf(stderr, "Deferring out-of-order SETSERVER for server id=%d (%s:%s), expected=%d\n", server_id_request, number, uri_, expected_id);
+			pthread_mutex_unlock(&setserver_registration_mutex);
+			return 0;
 		}
 
-		char request[REQUEST_SIZE] = {0};
-		sprintf(request, "%" PRIu32 " GET %s", arguments->args->id, "HELLO!JOIN");
-		// slog_live("ip_address=%s:%d", new_imss.info.ips[i], new_imss.info.conn_port);
-
-		if (send(oob_sock, request, REQUEST_SIZE, 0) < 0)
+		if (server_id_request < curr_global_imss_info->num_storages)
 		{
-			perror("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
-			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_SEND_REQUEST");
-			return -1;
-		}
-
-		ret = recv(oob_sock, &addr_len, sizeof(addr_len), MSG_WAITALL);
-		if (ret < 0)
-		{
-			perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
-			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_ADDR_LEN");
-			close(oob_sock);
-			return -1;
-		}
-
-		new_imss.conns.peer_addr[0] = (ucp_address *)malloc(addr_len);
-		if (new_imss.conns.peer_addr[0] == NULL)
-		{
-			perror("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
-			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_MEMORY_ALLOC");
-			close(oob_sock);
-			exit(-1);
-		}
-
-		ret = recv(oob_sock, new_imss.conns.peer_addr[0], addr_len, MSG_WAITALL);
-		if (ret < 0)
-		{
-			perror("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
-			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_RECV_PEER_ADDR");
-			close(oob_sock);
-			return -1;
-		}
-
-		if (close(oob_sock) < 0)
-		{
-			perror("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
-			slog_error("HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK");
-		}
-
-		client_create_ep_data(arguments->ucp_worker, &data_endpoints[server_id_request], new_imss.conns.peer_addr[0], set_server_err_call_arg);
-
-		auto end_time_commisioning = std::chrono::steady_clock::now();
-		std::chrono::duration<double> time_taken_comm = end_time_commisioning - start_time_commissioning;
-
-		free(new_imss.conns.peer_addr[0]);
-		free(new_imss.conns.peer_addr);
-
-		// pthread_mutex_lock(&mutext_malleability);
-		imss_info *imss_info_struct = curr_global_imss_info;
-		// num_storages is increased inside AddIPS.
-		fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
-		AddIPS(imss_info_struct, added_hostname, strlen(added_hostname), -1);
-		slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
-		number_storage_servers.store(imss_info_struct->num_storages);
-		if (arguments && arguments->args)
-		{
-			arguments->args->num_data_servers = number_storage_servers.load();
-			sync_data_hostfile(arguments->args->data_hostfile, imss_info_struct, number_storage_servers.load());
-		}
-		else
-		{
-			slog_error("HERCULES_ERR_STAT_WORKER_NULL_ARGS: Thread arguments or args structure is NULL");
-			fprintf(stderr, "HERCULES_ERR_STAT_WORKER_NULL_ARGS: Thread arguments or args structure is NULL\n");
-		}
-		slog_debug("number_storage_servers=%d\n", number_storage_servers.load());
-		// pthread_mutex_unlock(&mutext_malleability);
-
-		fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, time_taken_comm.count());
-		slog_debug("Server %d connected in %.4f seconds", server_id_request, time_taken_comm.count());
-
-		id_server_to_modify = server_id_request;
-		last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
-		if (curr_global_imss_info != NULL)
-		{
-			curr_global_imss_info->server_states[server_id_request] = SERVER_ACTIVE_RW;
-			int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
-			int32_t active_count = collect_active_rw_servers(curr_global_imss_info, active_server_ids);
-			if (active_count > 0)
+			const char *existing_host = curr_global_imss_info->ips[server_id_request];
+			if (existing_host != NULL && strcmp(existing_host, uri_) == 0)
 			{
-				AddTopologyView(curr_global_imss_info, active_count, active_server_ids);
+				slog_warn("Duplicate SETSERVER ignored for already registered server id=%d (%s)", server_id_request, uri_);
+				fprintf(stderr, "Duplicate SETSERVER ignored for already registered server id=%d (%s)\n", server_id_request, uri_);
+				pthread_mutex_unlock(&setserver_registration_mutex);
+				return 0;
 			}
+			slog_error("HERCULES_ERR_STAT_WORKER_SLOT_COLLISION: SETSERVER id=%d (%s) collides with registered host %s", server_id_request, uri_, existing_host ? existing_host : "<null>");
+			fprintf(stderr, "HERCULES_ERR_STAT_WORKER_SLOT_COLLISION: SETSERVER id=%d (%s) collides with registered host %s\n", server_id_request, uri_, existing_host ? existing_host : "<null>");
+			pthread_mutex_unlock(&setserver_registration_mutex);
+			return -1;
 		}
-		// Send the request to all servers telling they have to updated the list of aviable nodes.
-		send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, added_hostname, number_storage_servers.load(), id_server_to_modify);
 
-		// Turn off malleability status and process queued client writes.
-		pthread_mutex_lock(&mutex_malleability);
-		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
-		pthread_mutex_unlock(&mutex_malleability);
-		Attend_pending_requests();
-
-		// signal to the Comissioning thread.
-		fprintf(stderr, "signal to the Comissioning thread\n");
-		pthread_mutex_lock(&server_ready_mutex);
-		is_new_server_ready = true;
-		pthread_cond_signal(&server_ready_cond);
-		pthread_mutex_unlock(&server_ready_mutex);
-		fprintf(stderr, "Ending request %s\n", req);
-
-		return 0;
+		int reg_ret = register_single_data_server(arguments, server_id_request, number, uri_, req);
+		if (reg_ret == 0)
+		{
+			drain_pending_setserver_registrations_locked(arguments);
+		}
+		pthread_mutex_unlock(&setserver_registration_mutex);
+		return reg_ret;
 	}
 	else if (!strcmp(mode, MSG_REMOVE_SERVER))
 	{
-		slog_debug("Running decomissioning stage, number=%s", number);
+		int target_server_id = -1;
+		if (!is_valid_integer(number, &target_server_id) || target_server_id < 0)
+		{
+			slog_error("HERCULES_ERR_MANUAL_DECOM_INVALID_ID: invalid server ID '%s' in %s request", number, MSG_REMOVE_SERVER);
+			fprintf(stderr, "HERCULES_ERR_MANUAL_DECOM_INVALID_ID: invalid server ID '%s' in %s request\n", number, MSG_REMOVE_SERVER);
+			return -1;
+		}
+
+		bool expected_comm = false;
+		if (active_commissioning_pid.load() != 0 || !comissioning_on.compare_exchange_strong(expected_comm, true, std::memory_order_acq_rel))
+		{
+			slog_warn("HERCULES_WARN_MANUAL_DECOM_BUSY: malleability operation already in progress, ignoring remove request for server %d", target_server_id);
+			fprintf(stderr, "HERCULES_WARN_MANUAL_DECOM_BUSY: malleability operation already in progress, ignoring remove request for server %d\n", target_server_id);
+			return 0;
+		}
+
+		slog_debug("Running decomissioning stage asynchronously for server %d", target_server_id);
 		MalleabilityArgs *malleability_args = fill_malleability_args(arguments);
 		if (malleability_args == NULL)
 		{
+			slog_error("HERCULES_ERR_MANUAL_DECOM_MALLOC_ARGS: failed to allocate MalleabilityArgs for server %d", target_server_id);
+			fprintf(stderr, "HERCULES_ERR_MANUAL_DECOM_MALLOC_ARGS: failed to allocate MalleabilityArgs for server %d\n", target_server_id);
+			comissioning_on.store(false, std::memory_order_release);
 			return -1;
 		}
-		decomissioning_stage(malleability_args, atoi(number));
-		free(malleability_args);
+
+		ManualDecommissionArgs *manual_args = (ManualDecommissionArgs *)malloc(sizeof(ManualDecommissionArgs));
+		if (manual_args == NULL)
+		{
+			slog_error("HERCULES_ERR_MANUAL_DECOM_MALLOC_WRAPPER: failed to allocate ManualDecommissionArgs for server %d", target_server_id);
+			fprintf(stderr, "HERCULES_ERR_MANUAL_DECOM_MALLOC_WRAPPER: failed to allocate ManualDecommissionArgs for server %d\n", target_server_id);
+			comissioning_on.store(false, std::memory_order_release);
+			free(malleability_args);
+			return -1;
+		}
+		manual_args->malleability_args = malleability_args;
+		manual_args->target_server_id = target_server_id;
+
+		pthread_t decommission_thread;
+		if (pthread_create(&decommission_thread, NULL, run_manual_decommission, (void *)manual_args) != 0)
+		{
+			perror("HERCULES_ERR_MANUAL_DECOM_THREAD_CREATE");
+			slog_error("HERCULES_ERR_MANUAL_DECOM_THREAD_CREATE: failed to spawn decommission thread for server %d", target_server_id);
+			fprintf(stderr, "HERCULES_ERR_MANUAL_DECOM_THREAD_CREATE: failed to spawn decommission thread for server %d\n", target_server_id);
+			comissioning_on.store(false, std::memory_order_release);
+			free(malleability_args);
+			free(manual_args);
+			return -1;
+		}
+		if (pthread_detach(decommission_thread) != 0)
+		{
+			perror("HERCULES_ERR_MANUAL_DECOM_THREAD_DETACH");
+			slog_error("HERCULES_ERR_MANUAL_DECOM_THREAD_DETACH: failed to detach decommission thread for server %d", target_server_id);
+			fprintf(stderr, "HERCULES_ERR_MANUAL_DECOM_THREAD_DETACH: failed to detach decommission thread for server %d\n", target_server_id);
+		}
 		return 0;
 	}
 
@@ -7310,6 +7653,12 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				// Update the pointer.
 				// arguments->pt += block_size_recv;
 				slog_debug("Dataset %s has been created.", key.c_str());
+
+				if (operation == IMSS_INFO)
+				{
+					lck.unlock();
+					drain_pending_setserver_registrations(arguments);
+				}
 			}
 			// If it was already stored:
 			else
