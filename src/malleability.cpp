@@ -43,6 +43,9 @@ std::chrono::steady_clock::time_point application_profile_t0;
 pthread_mutex_t mutex_elasticity_monitor = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond_elasticity_monitor = PTHREAD_COND_INITIALIZER;
 
+// Per-sender completion and error counters for MODE_NETWORK_ASYNC migration barriers.
+AsyncMigrationTracker global_async_migration_tracker = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, {}};
+
 // Code to be sent if the requested to-be-read key does not exist.
 char err_code[] = "$ERRIMSS_NO_KEY_AVAIL$";
 
@@ -58,6 +61,8 @@ const char *communication_mode_to_str(CommunicationMode mode)
 		return "SHM";
 	case CommunicationMode::MODE_BUFF_NETWORK:
 		return "BUFF_NETWORK";
+	case CommunicationMode::MODE_NETWORK_ASYNC:
+		return "NETWORK_ASYNC";
 	default:
 		return "UNDEFINED";
 	}
@@ -512,7 +517,8 @@ bool is_migration_write_request(const p_argv *arguments, CommunicationMode trans
 	{
 		return false;
 	}
-	return (strncmp(arguments->curr_req, "SETNETWORK", 10) == 0 ||
+	return (strncmp(arguments->curr_req, MSG_SETNETWORK_ASYNC, strlen(MSG_SETNETWORK_ASYNC)) == 0 ||
+		strncmp(arguments->curr_req, "SETNETWORK", 10) == 0 ||
 		transfer_mode == CommunicationMode::MODE_BUFF_NETWORK ||
 		(transfer_mode == CommunicationMode::MODE_DISK && strncmp(arguments->curr_req, "SETDISK", 7) == 0));
 }
@@ -527,13 +533,20 @@ bool is_migration_write_request(const p_argv *arguments, CommunicationMode trans
  * @param transfer_mode Communication mode.
  * @param key Block key URI.
  * @param msg_length Length of the incoming network message or disk block size to drain.
+ * @param recv_tag Optional UCX receive tag overriding arguments->worker_uid for async migration.
  * @return true if request was handled as a stale migration write, false otherwise.
  */
-bool handle_stale_migration_write(p_argv *arguments, CommunicationMode transfer_mode, const std::string &key, size_t msg_length)
+bool handle_stale_migration_write(p_argv *arguments, CommunicationMode transfer_mode, const std::string &key, size_t msg_length, uint64_t recv_tag)
 {
 	if (!is_migration_write_request(arguments, transfer_mode))
 	{
 		return false;
+	}
+
+	uint64_t data_recv_tag = arguments->worker_uid;
+	if (recv_tag != 0)
+	{
+		data_recv_tag = recv_tag;
 	}
 
 	if (transfer_mode == CommunicationMode::MODE_NETWORK)
@@ -543,7 +556,7 @@ bool handle_stale_migration_write(p_argv *arguments, CommunicationMode transfer_
 		void *drain_buf = malloc(msg_length);
 		if (drain_buf != NULL)
 		{
-			recv_data(arguments->ucp_worker, arguments->server_ep, drain_buf, msg_length, arguments->worker_uid, 0);
+			recv_data(arguments->ucp_worker, arguments->server_ep, drain_buf, msg_length, data_recv_tag, 0);
 			free(drain_buf);
 		}
 	}
@@ -1851,4 +1864,169 @@ int migration_pipeline_finish(MigrationFlushPipeline *pipeline, bool abort_pendi
 	pthread_mutex_destroy(&pipeline->mutex);
 
 	return had_error ? -1 : 0;
+}
+
+/**
+ * @brief Initializes a standalone AsyncMigrationTracker instance.
+ * @param tracker Tracker instance to initialize.
+ */
+void async_migration_tracker_init(AsyncMigrationTracker *tracker)
+{
+	if (tracker == NULL)
+	{
+		return;
+	}
+	pthread_mutex_init(&tracker->mutex, NULL);
+	pthread_cond_init(&tracker->cond, NULL);
+	tracker->senders.clear();
+}
+
+/**
+ * @brief Releases synchronization primitives owned by a standalone AsyncMigrationTracker instance.
+ * @param tracker Tracker instance to destroy.
+ */
+void async_migration_tracker_destroy(AsyncMigrationTracker *tracker)
+{
+	if (tracker == NULL)
+	{
+		return;
+	}
+	pthread_mutex_lock(&tracker->mutex);
+	tracker->senders.clear();
+	pthread_mutex_unlock(&tracker->mutex);
+	pthread_cond_destroy(&tracker->cond);
+	pthread_mutex_destroy(&tracker->mutex);
+}
+
+/**
+ * @brief Clears per-sender asynchronous migration counters at the start of a decommission cycle.
+ * @param tracker Tracker instance to reset.
+ */
+void async_migration_tracker_reset(AsyncMigrationTracker *tracker)
+{
+	if (tracker == NULL)
+	{
+		return;
+	}
+	pthread_mutex_lock(&tracker->mutex);
+	tracker->senders.clear();
+	pthread_cond_broadcast(&tracker->cond);
+	pthread_mutex_unlock(&tracker->mutex);
+}
+
+/**
+ * @brief Records the completion status of one SETNETWORK_ASYNC block for sender_uid and wakes waiting barriers.
+ * @param tracker Tracker instance.
+ * @param sender_uid Source server UCX worker UID.
+ * @param success True if the block was stored or safely drained as stale; false on write/protocol error.
+ */
+void async_migration_tracker_record(AsyncMigrationTracker *tracker, uint64_t sender_uid, bool success)
+{
+	if (tracker == NULL)
+	{
+		return;
+	}
+	pthread_mutex_lock(&tracker->mutex);
+	AsyncMigrationSenderCounts &counts = tracker->senders[sender_uid];
+	if (success)
+	{
+		counts.completed++;
+	}
+	else
+	{
+		counts.errors++;
+	}
+	pthread_cond_broadcast(&tracker->cond);
+	pthread_mutex_unlock(&tracker->mutex);
+}
+
+/**
+ * @brief Waits until sender_uid reaches expected_blocks completed/errored async writes or timeout_sec expires.
+ * Cleans up the sender entry upon return so subsequent migrations start with fresh counters.
+ * @param tracker Tracker instance.
+ * @param sender_uid Source server UCX worker UID.
+ * @param expected_blocks Number of blocks dispatched by sender_uid to this destination.
+ * @param timeout_sec Maximum wait duration in seconds (minimum 1).
+ * @param out_completed Optional output pointer for completed block count.
+ * @param out_errors Optional output pointer for errored block count.
+ * @return 0 if completed == expected_blocks with zero errors, -1 on storage/count error, -2 on timeout.
+ */
+int async_migration_tracker_wait(AsyncMigrationTracker *tracker, uint64_t sender_uid, uint64_t expected_blocks, int timeout_sec, uint64_t *out_completed, uint64_t *out_errors)
+{
+	if (tracker == NULL)
+	{
+		if (out_completed != NULL)
+		{
+			*out_completed = 0;
+		}
+		if (out_errors != NULL)
+		{
+			*out_errors = 0;
+		}
+		return -1;
+	}
+
+	int effective_timeout = timeout_sec;
+	if (effective_timeout < 1)
+	{
+		effective_timeout = 1;
+	}
+
+	struct timespec deadline;
+	clock_gettime(CLOCK_REALTIME, &deadline);
+	deadline.tv_sec += effective_timeout;
+
+	pthread_mutex_lock(&tracker->mutex);
+	bool timed_out = false;
+	while (true)
+	{
+		uint64_t completed = 0;
+		uint64_t errors = 0;
+		auto it = tracker->senders.find(sender_uid);
+		if (it != tracker->senders.end())
+		{
+			completed = it->second.completed;
+			errors = it->second.errors;
+		}
+
+		if (completed + errors >= expected_blocks)
+		{
+			if (out_completed != NULL)
+			{
+				*out_completed = completed;
+			}
+			if (out_errors != NULL)
+			{
+				*out_errors = errors;
+			}
+			tracker->senders.erase(sender_uid);
+			pthread_mutex_unlock(&tracker->mutex);
+			if (errors == 0 && completed == expected_blocks)
+			{
+				return 0;
+			}
+			return -1;
+		}
+
+		if (timed_out)
+		{
+			if (out_completed != NULL)
+			{
+				*out_completed = completed;
+			}
+			if (out_errors != NULL)
+			{
+				*out_errors = errors;
+			}
+			tracker->senders.erase(sender_uid);
+			pthread_mutex_unlock(&tracker->mutex);
+			return -2;
+		}
+
+		int rc = pthread_cond_timedwait(&tracker->cond, &tracker->mutex, &deadline);
+		if (rc == ETIMEDOUT)
+		{
+			timed_out = true;
+		}
+	}
 }

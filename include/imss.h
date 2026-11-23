@@ -78,6 +78,7 @@ enum CommunicationMode
 	MODE_DISK,
 	MODE_SHM,
 	MODE_BUFF_NETWORK,
+	MODE_NETWORK_ASYNC,
 	MODE_UNDEFINED
 };
 
@@ -630,6 +631,9 @@ RETURNS:	 0 - The requested block was successfully stored.
 	 * @brief Send data to a server by network.
 	 */
 	int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server, uint32_t num_of_servers);
+	uint64_t make_async_migration_tag(uint64_t worker_uid, uint64_t seq);
+	int32_t set_data_server_async(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server, uint32_t num_of_servers, uint64_t data_tag, int max_window);
+	int32_t send_migration_barrier(int next_server, uint64_t expected_blocks);
 	int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const char *data_hostname, int number_of_servers);
 
 	/**

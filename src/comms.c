@@ -291,6 +291,7 @@ extern "C"
 
 		if (status != UCS_OK)
 		{
+			async_send_errors.fetch_add(1, std::memory_order_relaxed);
 			slog_error("Async server send failed with status: %s", ucs_status_string(status));
 			fprintf(stderr, "Async server send failed with status: %s\n", ucs_status_string(status));
 		}

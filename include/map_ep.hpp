@@ -5,9 +5,11 @@
 #include <ucp/api/ucp.h>
 #include "queue.h"
 #include <atomic>
+#include <cstdint>
 
 // TODO: move this to the correct header.
 extern std::atomic<size_t> outstanding_sends;
+extern std::atomic<uint64_t> async_send_errors;
 
 typedef std::map<ucp_ep_h, StsHeader*> map_ep_t;
 

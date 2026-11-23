@@ -12,6 +12,7 @@
 
 // TODO: move this to the correct header.
 std::atomic<size_t> outstanding_sends(0);
+std::atomic<uint64_t> async_send_errors(0);
 
 
 void* map_ep_create() {

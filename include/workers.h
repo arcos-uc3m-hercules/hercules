@@ -12,13 +12,14 @@
 #include <cstdint>
 #include <deque>
 #include <map>
-#include <pthread.h>
 #include <memory>
 #include <mutex>
+#include <pthread.h>
 #include <set>
 #include <string>
 #include <sys/types.h>
 #include <time.h>
+#include <unordered_map>
 #include <vector>
 
 // Backend operations.
@@ -286,13 +287,34 @@ typedef struct
 	void *user_ctx;
 } MigrationFlushPipeline;
 
+typedef struct
+{
+	uint64_t completed;
+	uint64_t errors;
+} AsyncMigrationSenderCounts;
+
+typedef struct
+{
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
+	std::unordered_map<uint64_t, AsyncMigrationSenderCounts> senders;
+} AsyncMigrationTracker;
+
+extern AsyncMigrationTracker global_async_migration_tracker;
+
 int migration_pipeline_init(MigrationFlushPipeline *pipeline, int num_workers, size_t max_inflight, MigrationFlushCallback flush_cb, void *user_ctx);
 ServerBuffer migration_pipeline_acquire_buffer(MigrationFlushPipeline *pipeline, size_t max_size, size_t initial_cap_hint);
 int migration_pipeline_submit(MigrationFlushPipeline *pipeline, int target_conn_idx, ServerBuffer &&srv_buf);
 int migration_pipeline_finish(MigrationFlushPipeline *pipeline, bool abort_pending);
 const char *communication_mode_to_str(CommunicationMode mode);
+bool handle_stale_migration_write(p_argv *arguments, CommunicationMode transfer_mode, const std::string &key, size_t msg_length, uint64_t recv_tag);
 bool is_migration_write_request(const p_argv *arguments, CommunicationMode transfer_mode);
-bool handle_stale_migration_write(p_argv *arguments, CommunicationMode transfer_mode, const std::string &key, size_t msg_length);
+
+void async_migration_tracker_init(AsyncMigrationTracker *tracker);
+void async_migration_tracker_destroy(AsyncMigrationTracker *tracker);
+void async_migration_tracker_reset(AsyncMigrationTracker *tracker);
+void async_migration_tracker_record(AsyncMigrationTracker *tracker, uint64_t sender_uid, bool success);
+int async_migration_tracker_wait(AsyncMigrationTracker *tracker, uint64_t sender_uid, uint64_t expected_blocks, int timeout_sec, uint64_t *out_completed, uint64_t *out_errors);
 int ShutdownServer();
 // void Decomissioning_stage(p_argv *arguments, int id_server_to_remove);
 void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift);

@@ -8126,6 +8126,160 @@ int32_t set_data_server(const char *data_uri, int32_t data_id, const void *buffe
 	return 1;
 }
 
+uint64_t make_async_migration_tag(uint64_t worker_uid, uint64_t seq)
+{
+	uint64_t uid_bits = (worker_uid ^ (worker_uid >> 32)) & 0x7FFFFFFFULL;
+	uint64_t tag = 0x8000000000000000ULL | (uid_bits << 32) | (seq & 0xFFFFFFFFULL);
+	if (tag == worker_uid)
+	{
+		tag ^= 0x0000000100000000ULL;
+	}
+	return tag;
+}
+
+int32_t set_data_server_async(const char *data_uri, int32_t data_id, const void *buffer, size_t size, off_t offset, int next_server, uint32_t num_of_servers, uint64_t data_tag, int max_window)
+{
+	(void)num_of_servers;
+	if (data_uri == NULL || (size > 0 && buffer == NULL))
+	{
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_ASYNC_INVALID_ARGS: data_uri=%p buffer=%p size=%zu", (const void *)data_uri, buffer, size);
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_SERVER_ASYNC_INVALID_ARGS: data_uri=%p buffer=%p size=%zu\n", (const void *)data_uri, buffer, size);
+		return -1;
+	}
+
+	char key_[REQUEST_SIZE] = {0};
+	int chars_written = snprintf(key_, REQUEST_SIZE, "%s %zu %ld %s$%d %" PRIu32 " %" PRIu64, MSG_SETNETWORK_ASYNC, size, (long)offset, data_uri, data_id, (uint32_t)MALLEABILITY_SET_BYPASS, data_tag);
+	if (chars_written < 0 || chars_written >= REQUEST_SIZE)
+	{
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_ASYNC_REQ_FORMATTING_ERROR: chars_written=%d", chars_written);
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_SERVER_ASYNC_REQ_FORMATTING_ERROR: chars_written=%d\n", chars_written);
+		return -1;
+	}
+
+	int progress_threshold = 0;
+	if (max_window > 1)
+	{
+		progress_threshold = max_window - 1;
+	}
+
+	pthread_mutex_lock(&lock_network);
+	if (next_server < 0 || next_server >= curr_imss.info.num_storages || curr_imss.conns.eps == NULL || curr_imss.conns.eps[next_server] == NULL)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_ASYNC_INVALID_EP: next_server=%d num_storages=%d", next_server, curr_imss.info.num_storages);
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_SERVER_ASYNC_INVALID_EP: next_server=%d num_storages=%d\n", next_server, curr_imss.info.num_storages);
+		return -1;
+	}
+
+	ucp_ep_h ep = curr_imss.conns.eps[next_server];
+
+	// Bound the in-flight async sends before queuing the next block.
+	async_data_worker_progress(progress_threshold);
+
+	if (async_send_errors.load(std::memory_order_relaxed) > 0)
+	{
+		async_data_worker_progress(0);
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_ASYNC_PRIOR_ERROR: async_send_errors=%" PRIu64, async_send_errors.load(std::memory_order_relaxed));
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_SERVER_ASYNC_PRIOR_ERROR: async_send_errors=%" PRIu64 "\n", async_send_errors.load(std::memory_order_relaxed));
+		return -1;
+	}
+
+	slog_live("[IMSS] ASYNC BLOCK %d SENT TO SERVER %d (%s) with Request: %s (%zu)", data_id, next_server, curr_imss.info.ips[next_server], key_, size);
+	if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
+	{
+		async_data_worker_progress(0);
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_ASYNC_SEND_REQ: server=%d req='%s'", next_server, key_);
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_SERVER_ASYNC_SEND_REQ: server=%d req='%s'\n", next_server, key_);
+		return -1;
+	}
+
+	ServerSendRequest *new_send = new ServerSendRequest();
+	outstanding_sends++;
+	void *ucx_req_handle = isend_data2(ucp_worker_data, ep, buffer, size, data_tag, new_send);
+	if (UCS_PTR_IS_PTR(ucx_req_handle))
+	{
+		// Request is in flight asynchronously; UCX completion callback will decrement outstanding_sends and free new_send. Advance worker progress once while continuing the block loop.
+		ucp_worker_progress(ucp_worker_data);
+	}
+	else if (!UCS_PTR_IS_ERR(ucx_req_handle))
+	{
+		// Send completed inline (handle is NULL), so UCX will not fire the completion callback; isend_data2 already freed new_send.
+		if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+		{
+			outstanding_sends--;
+		}
+	}
+	else
+	{
+		// UCX rejected or failed to start the async send (error handle); isend_data2 already freed new_send.
+		if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+		{
+			outstanding_sends--;
+		}
+		async_send_errors.fetch_add(1, std::memory_order_relaxed);
+		async_data_worker_progress(0);
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_ASYNC_ISEND: server=%d data_id=%d tag=%" PRIu64, next_server, data_id, data_tag);
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_SERVER_ASYNC_ISEND: server=%d data_id=%d tag=%" PRIu64 "\n", next_server, data_id, data_tag);
+		return -1;
+	}
+
+	pthread_mutex_unlock(&lock_network);
+	return 1;
+}
+
+/**
+ * @brief Synchronizes asynchronous block migration with a destination server before releasing source buffers.
+ * Sends a MIGRATION_BARRIER request containing expected_blocks and waits for a synchronous ACK confirming
+ * that the destination received and stored all migrated blocks without errors.
+ * @param next_server Destination connection index in curr_imss.conns.eps.
+ * @param expected_blocks Total number of async blocks dispatched to this destination during migration.
+ * @return 0 on remote barrier confirmation, -1 on validation, send, or remote storage error.
+ */
+int32_t send_migration_barrier(int next_server, uint64_t expected_blocks)
+{
+	char key_[REQUEST_SIZE] = {0};
+	int chars_written = snprintf(key_, REQUEST_SIZE, "%s %" PRIu64, MSG_MIGRATION_BARRIER, expected_blocks);
+	if (chars_written < 0 || chars_written >= REQUEST_SIZE)
+	{
+		slog_error("HERCULES_ERR_MIGRATION_BARRIER_FORMAT: server=%d chars_written=%d", next_server, chars_written);
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_BARRIER_FORMAT: server=%d chars_written=%d\n", next_server, chars_written);
+		return -1;
+	}
+
+	pthread_mutex_lock(&lock_network);
+	if (next_server < 0 || next_server >= curr_imss.info.num_storages || curr_imss.conns.eps == NULL || curr_imss.conns.eps[next_server] == NULL)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_MIGRATION_BARRIER_INVALID_EP: server=%d num_storages=%d", next_server, curr_imss.info.num_storages);
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_BARRIER_INVALID_EP: server=%d num_storages=%d\n", next_server, curr_imss.info.num_storages);
+		return -1;
+	}
+
+	ucp_ep_h ep = curr_imss.conns.eps[next_server];
+	if (send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_) == 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_MIGRATION_BARRIER_SEND_REQ: server=%d expected_blocks=%" PRIu64, next_server, expected_blocks);
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_BARRIER_SEND_REQ: server=%d expected_blocks=%" PRIu64 "\n", next_server, expected_blocks);
+		return -1;
+	}
+
+	int ack_ret = wait_ack(ucp_worker_data, local_data_uid, ep, SYNC);
+	if (ack_ret < 0)
+	{
+		pthread_mutex_unlock(&lock_network);
+		slog_error("HERCULES_ERR_MIGRATION_BARRIER_ACK: server=%d expected_blocks=%" PRIu64 " ret=%d", next_server, expected_blocks, ack_ret);
+		fprintf(stderr, "HERCULES_ERR_MIGRATION_BARRIER_ACK: server=%d expected_blocks=%" PRIu64 " ret=%d\n", next_server, expected_blocks, ack_ret);
+		return -1;
+	}
+
+	pthread_mutex_unlock(&lock_network);
+	return 0;
+}
+
 int32_t flush_data_to_network(int server_id, const ServerBuffer &srv_buf, const char *data_hostname, int number_of_servers)
 {
 	if (srv_buf.offset == 0 || srv_buf.block_count == 0)

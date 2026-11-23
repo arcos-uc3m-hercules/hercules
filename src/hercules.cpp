@@ -1171,6 +1171,10 @@ void fill_malleability_reorder_params(struct arguments *args, struct cfg_struct 
 			{
 				args->malleability_reorder_mode = MODE_BUFF_NETWORK;
 			}
+			else if (temp_val == (int)MODE_NETWORK_ASYNC)
+			{
+				args->malleability_reorder_mode = MODE_NETWORK_ASYNC;
+			}
 			else
 			{
 				slog_warn("HERCULES_WARN_INVALID_MALLEABILITY_REORDER_MODE: Invalid malleability reorder mode '%s', setting to %d", raw_mode_str, (int)default_reorder_mode);
