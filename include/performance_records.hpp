@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <map>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string>
@@ -94,6 +95,7 @@ extern std::map<std::string, PerformanceBucket> pending_perf_bucket;
 // Flags the next interval flush to discard in-flight metrics left over from a scaling transition.
 extern std::atomic<bool> discard_transition_interval;
 extern std::vector<ApplicationProfileEvent> application_profile_events;
+extern pthread_mutex_t mutex_application_profile;
 extern std::atomic<bool> application_profile_active;
 extern std::atomic<bool> application_profile_record_active;
 extern std::atomic<bool> application_profile_t0_initialized;

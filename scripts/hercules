@@ -160,6 +160,10 @@ WakeUpServers() {
         echo "[+] Hercules: Starting data servers on ${data_hosts[@]}"
     fi
     start=`date +%s.%N`
+    LAUNCH_NS=$(date +%s%N 2>/dev/null || echo "")
+    if ! [[ "${LAUNCH_NS}" =~ ^[0-9]+$ ]]; then
+        LAUNCH_NS=""
+    fi
     for node in ${data_hosts[@]}
     do
         # get the real id from the index array.
@@ -175,7 +179,7 @@ WakeUpServers() {
                     echo "[ + ] Starting data server $REAL_ID in $node..."
                     echo "Running cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND}"
                 fi
-                ( cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND} || echo "STATUS = ERROR_LAUNCH_FAILED" > "${START_FILE}" ) ) &
+                ( cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} HERCULES_SERVER_LAUNCH_NS=${LAUNCH_NS} ${COMMAND} || echo "STATUS = ERROR_LAUNCH_FAILED" > "${START_FILE}" ) ) &
             else
                 if [[ "${VERBOSE}" -eq "1" ]]; then
                     echo "[ + ] Removing temporal files on ${node}"
@@ -185,7 +189,7 @@ WakeUpServers() {
                     echo "[ + ] Starting data server $REAL_ID in $node..."
                     echo "Running ssh ${node} cd ${HERCULES_BASH_PATH} && HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH=${HERCULES_BUILD_PATH} ${COMMAND}"
                 fi
-                ( ssh ${node} "cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}' ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE} )" ) &
+                ( ssh ${node} "cd ${HERCULES_BASH_PATH} && ( HERCULES_CONF=${CURR_HERCULES_CONF_FILE} HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}' HERCULES_SERVER_LAUNCH_NS='${LAUNCH_NS}' ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE} )" ) &
             fi
         else
             ## Deletes the file that we use to make sure that the server has started.
@@ -197,7 +201,7 @@ WakeUpServers() {
             if [[ "${VERBOSE}" -eq "1" ]]; then
                 echo "[+] Starting data server $REAL_ID on $node..."
             fi
-            srun --nodelist="${node}" --ntasks=1 --nodes=1 --cpus-per-task=4 --mem=0 --overlap --jobid="${SLURM_JOB_ID}" bash -c "export HERCULES_CONF=${CURR_HERCULES_CONF_FILE}; export HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}'; ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE}" &
+            srun --nodelist="${node}" --ntasks=1 --nodes=1 --cpus-per-task=4 --mem=0 --overlap --jobid="${SLURM_JOB_ID}" bash -c "export HERCULES_CONF=${CURR_HERCULES_CONF_FILE}; export HERCULES_BUILD_PATH='${HERCULES_BUILD_PATH}'; export HERCULES_SERVER_LAUNCH_NS='${LAUNCH_NS}'; ${COMMAND} || echo 'STATUS = ERROR_LAUNCH_FAILED' > ${START_FILE}" &
         fi
         i=$(($i+1))
     done

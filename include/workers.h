@@ -9,6 +9,7 @@
 // #include "hercules.hpp"
 #include "utils.h"
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -331,5 +332,15 @@ void *move_blocks_2_server(void *th_argv);
 
 int preload_metadata_servers(const char *meta_hostfile);
 void abort_active_commissioning();
+
+
+/* Methods to measure data server connection times.*/
+void record_commissioning_start(int server_id, std::chrono::steady_clock::time_point start_tp);
+void clear_commissioning_start(int server_id);
+void clear_active_commissioning_start();
+void record_initial_startup_anchor(int expected_servers);
+void record_deferred_initial_startup_anchor(int server_id);
+void parse_setserver_timing_fields(const char *extra_str, double *out_slurm_alloc_sec, double *out_server_init_sec, long *out_launch_ns);
+void log_server_connection_timing(int server_id, const char *hostname, std::chrono::steady_clock::time_point t_reg_start, std::chrono::steady_clock::time_point t_ep_ready, double slurm_alloc_sec, double server_init_sec, long launch_ns);
 
 #endif

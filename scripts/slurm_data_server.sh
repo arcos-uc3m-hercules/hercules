@@ -13,6 +13,12 @@ if [[ "$1" == "--worker" ]]; then
     LOG_DIR="$8"
     META_PID="$9"
 
+    SALLOC_GRANTED_NS=$(date +%s%N 2>/dev/null || echo "")
+    SLURM_ALLOC_SEC="NA"
+    if [[ "${HERCULES_SALLOC_START_NS}" =~ ^[0-9]+$ && "${SALLOC_GRANTED_NS}" =~ ^[0-9]+$ ]]; then
+        SLURM_ALLOC_SEC=$(awk -v start="${HERCULES_SALLOC_START_NS}" -v end="${SALLOC_GRANTED_NS}" 'BEGIN { d = (end - start) / 1000000000.0; if (d < 0) d = 0.0; printf "%.4f", d }')
+    fi
+
     # Clear any binding variables inside the new allocation shell
     unset SLURM_CPU_BIND SLURM_CPU_BIND_LIST SLURM_CPU_BIND_TYPE SLURM_CPU_BIND_VERBOSE SLURM_MEM_BIND SLURM_MEM_BIND_TYPE SLURM_MEM_BIND_LIST
 
@@ -51,6 +57,9 @@ if [[ "$1" == "--worker" ]]; then
         TARGET_NODE=$(hostname -s)
     fi
     echo "[Slurm] Allocated node: ${TARGET_NODE} for data server ID ${SERVER_ID}" >> "${LOG_FILE}"
+    SLURM_ALLOC_CSV="SLURM_ALLOC_TIMING,${SLURM_JOB_ID:-NA},${SERVER_ID},${TARGET_NODE},${SLURM_ALLOC_SEC}"
+    echo "${SLURM_ALLOC_CSV}" >> "${LOG_FILE}"
+    echo "${SLURM_ALLOC_CSV}" >&2
 
     # Launch server with --cpu-bind=none so srun does not attempt to bind
     # task 0 to CPU 0 when the step is assigned a different core on the allocated node.
@@ -59,6 +68,7 @@ if [[ "$1" == "--worker" ]]; then
         env HERCULES_CONF="${CONF_PATH}" \
             HERCULES_THREAD_POOL=1 \
             HERCULES_DATA_HOSTNAME="${TARGET_NODE}" \
+            HERCULES_SLURM_ALLOC_SEC="${SLURM_ALLOC_SEC}" \
         "${SERVER_BIN}" d "${SERVER_ID}" "${NUM_ACTIVE}" >> "${LOG_FILE}" 2>&1
     SRUN_RC=$?
     exit ${SRUN_RC}
@@ -146,6 +156,9 @@ if [[ -n "${PARENT_SLURM_JOB_ID}" ]]; then
 else
     CHILD_JOB_NAME="hercules-ds-${SERVER_ID}"
 fi
+
+# Record request timestamp on the metadata host before blocking in salloc
+export HERCULES_SALLOC_START_NS=$(date +%s%N 2>/dev/null || echo "")
 
 exec salloc -N 1 \
     "${SALLOC_EXCLUDE[@]}" \

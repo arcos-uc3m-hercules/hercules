@@ -145,6 +145,11 @@ int is_valid_double(const char *str, double *out_val)
         return 0;
     }
 
+    // Reject NaN and infinity values accepted by strtod
+    if (!isfinite(val)) {
+        return 0;
+    }
+
     // Verify that at least one valid character was processed
     if (endptr == str) {
         return 0;
@@ -157,4 +162,32 @@ int is_valid_double(const char *str, double *out_val)
 
     *out_val = val;
     return 1;
+}
+
+double parse_non_negative_double(const char *str, double default_val)
+{
+    if (str == NULL || str[0] == '\0') {
+        return default_val;
+    }
+
+    double parsed_val = 0.0;
+    if (is_valid_double(str, &parsed_val) && parsed_val >= 0.0) {
+        return parsed_val;
+    }
+
+    return default_val;
+}
+
+long parse_positive_long(const char *str, long default_val)
+{
+    if (str == NULL || str[0] == '\0') {
+        return default_val;
+    }
+
+    long parsed_val = 0;
+    if (is_valid_long(str, &parsed_val) && parsed_val > 0) {
+        return parsed_val;
+    }
+
+    return default_val;
 }

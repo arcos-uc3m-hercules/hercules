@@ -1,6 +1,6 @@
-#include "imss.h"
 #include "arg_parser.h"
 #include "hierarchical_records.hpp"
+#include "imss.h"
 #include "map_ep.hpp"
 #include "memalloc.h"
 #include "metadata_stat.h"
@@ -118,6 +118,11 @@ void print_usage(const char *msg);
 
 int32_t main(int32_t argc, char **argv)
 {
+	struct timespec server_start_mono = {0, 0};
+	struct timespec server_start_rt = {0, 0};
+	clock_gettime(CLOCK_MONOTONIC, &server_start_mono);
+	clock_gettime(CLOCK_REALTIME, &server_start_rt);
+
 	signal(SIGUSR1, handle_signal_server);
 	signal(SIGUSR2, handle_signal_server);
 
@@ -776,7 +781,7 @@ int32_t main(int32_t argc, char **argv)
 			{
 				ready(tmp_file_path, "ERROR");
 				perror("HERCULES_ERR_ELASTICITY_MONITOR_DEPLOY");
-				slog_error("HERCULES_ERR_ELASTICITY_MONITOR_DEPLOY");				
+				slog_error("HERCULES_ERR_ELASTICITY_MONITOR_DEPLOY");
 				pthread_exit(NULL);
 			}
 		}
@@ -928,6 +933,24 @@ int32_t main(int32_t argc, char **argv)
 
 	if (args.type == TYPE_DATA_SERVER)
 	{
+		struct timespec setserver_now_mono = {0, 0};
+		clock_gettime(CLOCK_MONOTONIC, &setserver_now_mono);
+		double server_init_sec = (setserver_now_mono.tv_sec - server_start_mono.tv_sec) + (setserver_now_mono.tv_nsec - server_start_mono.tv_nsec) / 1e9;
+		if (server_init_sec < 0.0)
+		{
+			server_init_sec = 0.0;
+		}
+
+		const char *slurm_alloc_env = getenv("HERCULES_SLURM_ALLOC_SEC");
+		double slurm_alloc_sec = parse_non_negative_double(slurm_alloc_env, -1.0);
+
+		// Fall back to the process start CLOCK_REALTIME timestamp if
+		//  HERCULES_SERVER_LAUNCH_NS is unset or invalid
+		// (e.g., manual start without scripts/hercules).
+		long fallback_launch_ns = (long)server_start_rt.tv_sec * 1000000000L + (long)server_start_rt.tv_nsec;
+		const char *launch_ns_env = getenv("HERCULES_SERVER_LAUNCH_NS");
+		long launch_ns = parse_positive_long(launch_ns_env, fallback_launch_ns);
+
 		for (int i = 0; i < args.num_metadata_servers; i++)
 		{
 			// ucp_worker_attr_t worker_attr;
@@ -936,7 +959,7 @@ int32_t main(int32_t argc, char **argv)
 			// status = ucp_worker_query(ucp_worker_meta, &worker_attr);
 			char request[REQUEST_SIZE] = {0};
 			const char *ip_to_send = (client_ip[0] != '\0') ? client_ip : args.data_hostname;
-			sprintf(request, "%d SETSERVER %s %s", args.id, ip_to_send, args.data_hostname);
+			snprintf(request, sizeof(request), "%d SETSERVER %s %s %.6f %.6f %ld", args.id, ip_to_send, args.data_hostname, slurm_alloc_sec, server_init_sec, launch_ns);
 			slog_debug("[main] Request - %s", request);
 			// if (send_req(ucp_worker_meta, stat_eps[i], worker_attr.address, worker_attr.address_length, request) == 0)
 			if (send_req(ucp_worker_meta, stat_eps[i], local_addr_meta, local_addr_len_meta, request) == 0)

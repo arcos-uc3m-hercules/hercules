@@ -34,6 +34,7 @@ std::atomic<bool> discard_transition_interval{false};
 
 // Shared state for application profile-driven malleability.
 std::vector<ApplicationProfileEvent> application_profile_events;
+pthread_mutex_t mutex_application_profile = PTHREAD_MUTEX_INITIALIZER;
 std::atomic<bool> application_profile_active{false};
 std::atomic<bool> application_profile_record_active{false};
 std::atomic<bool> application_profile_t0_initialized{false};
@@ -42,6 +43,18 @@ std::chrono::steady_clock::time_point application_profile_t0;
 // Synchronization for the periodic elasticity monitor thread.
 pthread_mutex_t mutex_elasticity_monitor = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond_elasticity_monitor = PTHREAD_COND_INITIALIZER;
+
+// Thread-safe timing state for server commissioning and initial startup integration.
+static pthread_mutex_t commissioning_timing_mutex = PTHREAD_MUTEX_INITIALIZER;
+static std::map<int, std::chrono::steady_clock::time_point> commissioning_start_times;
+static int active_commissioning_server_id = -1;
+static bool server_connect_header_logged = false;
+static bool initial_startup_anchor_set = false;
+static std::chrono::steady_clock::time_point initial_startup_anchor;
+static int initial_expected_servers = 0;
+static int initial_connected_servers = 0;
+static bool initial_summary_logged = false;
+static long initial_earliest_launch_ns = 0;
 
 // Per-sender completion and error counters for MODE_NETWORK_ASYNC migration barriers.
 AsyncMigrationTracker global_async_migration_tracker = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, {}};
@@ -959,7 +972,7 @@ bool has_due_application_profile_event()
 	double elapsed_sec = get_application_profile_elapsed_sec();
 	bool has_due = false;
 
-	pthread_mutex_lock(&mutext_malleability);
+	pthread_mutex_lock(&mutex_application_profile);
 	for (const auto &ev : application_profile_events)
 	{
 		if (!ev.executed && elapsed_sec >= ev.trigger_sec)
@@ -968,7 +981,7 @@ bool has_due_application_profile_event()
 			break;
 		}
 	}
-	pthread_mutex_unlock(&mutext_malleability);
+	pthread_mutex_unlock(&mutex_application_profile);
 	return has_due;
 }
 
@@ -1006,7 +1019,7 @@ void *ElasticityMonitor(void *th_argv)
 
 	if (has_app_profile && mall_mode == MALLEABILITY_CONF_ENABLED)
 	{
-		pthread_mutex_lock(&mutext_malleability);
+		pthread_mutex_lock(&mutex_application_profile);
 		application_profile_active.store(false, std::memory_order_release);
 		application_profile_record_active.store(false, std::memory_order_release);
 
@@ -1047,7 +1060,7 @@ void *ElasticityMonitor(void *th_argv)
 				}
 			}
 		}
-		pthread_mutex_unlock(&mutext_malleability);
+		pthread_mutex_unlock(&mutex_application_profile);
 	}
 
 	int32_t interval_ms = arguments->args->malleability_interval_ms;
@@ -1092,11 +1105,18 @@ void *ElasticityMonitor(void *th_argv)
 
 		// Flush accumulated interval bytes; in profile mode log active intervals and check scheduled timestamps even on idle ticks.
 		int had_traffic = flush_performance_interval(interval_ms, arguments->args->malleability_windows_size, arguments->args->imss_uri);
-		if (application_profile_active.load(std::memory_order_acquire))
+		bool profile_mode = application_profile_active.load(std::memory_order_acquire);
+		if (profile_mode)
 		{
 			if (had_traffic)
 			{
 				evaluate_performance_snapshot(arguments, false, false);
+			}
+			// Skip profile event dispatch while another malleability task is already active.
+			if (active_commissioning_pid.load() > 0 || comissioning_on.load(std::memory_order_acquire))
+			{
+				slog_debug("Malleability skipped (profile mode): another malleability task is already active (commissioning_on=%d, active_pid=%d).", comissioning_on.load(std::memory_order_relaxed), active_commissioning_pid.load());
+				continue;
 			}
 			if (!has_due_application_profile_event())
 			{
@@ -1119,7 +1139,10 @@ void *ElasticityMonitor(void *th_argv)
 			if (active_commissioning_pid.load() > 0 || comissioning_on.load(std::memory_order_acquire))
 			{
 				slog_debug("Malleability skipped: another malleability task is already active (commissioning_on=%d, active_pid=%d).", comissioning_on.load(std::memory_order_relaxed), active_commissioning_pid.load());
-				evaluate_performance_snapshot(arguments, false, false);
+				if (!profile_mode)
+				{
+					evaluate_performance_snapshot(arguments, false, false);
+				}
 				continue;
 			}
 
@@ -1127,7 +1150,10 @@ void *ElasticityMonitor(void *th_argv)
 			if (!comissioning_on.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
 			{
 				slog_debug("Malleability skipped: another thread claimed malleability evaluation.");
-				evaluate_performance_snapshot(arguments, false, false);
+				if (!profile_mode)
+				{
+					evaluate_performance_snapshot(arguments, false, false);
+				}
 				continue;
 			}
 
@@ -2027,6 +2053,255 @@ int async_migration_tracker_wait(AsyncMigrationTracker *tracker, uint64_t sender
 		if (rc == ETIMEDOUT)
 		{
 			timed_out = true;
+		}
+	}
+}
+
+/**
+ * @brief Records the commissioning launch timestamp for server_id before spawning the worker process.
+ */
+void record_commissioning_start(int server_id, std::chrono::steady_clock::time_point start_tp)
+{
+	pthread_mutex_lock(&commissioning_timing_mutex);
+	commissioning_start_times[server_id] = start_tp;
+	active_commissioning_server_id = server_id;
+	pthread_mutex_unlock(&commissioning_timing_mutex);
+}
+
+/**
+ * @brief Removes any pending commissioning start timestamp for server_id on failure or timeout.
+ */
+void clear_commissioning_start(int server_id)
+{
+	pthread_mutex_lock(&commissioning_timing_mutex);
+	if (server_id >= 0)
+	{
+		commissioning_start_times.erase(server_id);
+		if (active_commissioning_server_id == server_id)
+		{
+			active_commissioning_server_id = -1;
+		}
+	}
+	pthread_mutex_unlock(&commissioning_timing_mutex);
+}
+
+/**
+ * @brief Clears the currently tracked active commissioning start timestamp during abort/shutdown.
+ */
+void clear_active_commissioning_start()
+{
+	pthread_mutex_lock(&commissioning_timing_mutex);
+	if (active_commissioning_server_id >= 0)
+	{
+		commissioning_start_times.erase(active_commissioning_server_id);
+		active_commissioning_server_id = -1;
+	}
+	pthread_mutex_unlock(&commissioning_timing_mutex);
+}
+
+/**
+ * @brief Sets the initial cluster startup anchor and expected initial server count upon IMSS_INFO arrival.
+ */
+void record_initial_startup_anchor(int expected_servers)
+{
+	pthread_mutex_lock(&commissioning_timing_mutex);
+	if (initial_expected_servers <= 0 && expected_servers > 0)
+	{
+		initial_expected_servers = expected_servers;
+	}
+	if (!initial_startup_anchor_set)
+	{
+		initial_startup_anchor = std::chrono::steady_clock::now();
+		initial_startup_anchor_set = true;
+	}
+	pthread_mutex_unlock(&commissioning_timing_mutex);
+}
+
+/**
+ * @brief Sets the initial cluster startup anchor when an initial SETSERVER arrives out of order before IMSS_INFO.
+ */
+void record_deferred_initial_startup_anchor(int server_id)
+{
+	pthread_mutex_lock(&commissioning_timing_mutex);
+	if (!initial_startup_anchor_set && commissioning_start_times.find(server_id) == commissioning_start_times.end())
+	{
+		initial_startup_anchor = std::chrono::steady_clock::now();
+		initial_startup_anchor_set = true;
+	}
+	pthread_mutex_unlock(&commissioning_timing_mutex);
+}
+
+/**
+ * @brief Parses optional trailing timing tokens from a SETSERVER request string.
+ */
+void parse_setserver_timing_fields(const char *extra_str, double *out_slurm_alloc_sec, double *out_server_init_sec, long *out_launch_ns)
+{
+	*out_slurm_alloc_sec = -1.0;
+	*out_server_init_sec = -1.0;
+	*out_launch_ns = 0;
+	if (extra_str == NULL || extra_str[0] == '\0')
+	{
+		return;
+	}
+	char tok_slurm[64] = {0};
+	char tok_init[64] = {0};
+	char tok_launch[64] = {0};
+	int parsed = sscanf(extra_str, "%63s %63s %63s", tok_slurm, tok_init, tok_launch);
+	if (parsed >= 1)
+	{
+		*out_slurm_alloc_sec = parse_non_negative_double(tok_slurm, -1.0);
+	}
+	if (parsed >= 2)
+	{
+		*out_server_init_sec = parse_non_negative_double(tok_init, -1.0);
+	}
+	if (parsed >= 3)
+	{
+		*out_launch_ns = parse_positive_long(tok_launch, 0);
+	}
+}
+
+/**
+ * @brief Computes and logs full-integration CSV timing rows for both dynamically commissioned and initial data servers.
+ */
+void log_server_connection_timing(int server_id, const char *hostname, std::chrono::steady_clock::time_point t_reg_start, std::chrono::steady_clock::time_point t_ep_ready, double slurm_alloc_sec, double server_init_sec, long launch_ns)
+{
+	auto t_integration_end = std::chrono::steady_clock::now();
+	struct timespec ts_now_rt = {0, 0};
+	clock_gettime(CLOCK_REALTIME, &ts_now_rt);
+
+	double ep_connect_sec = std::chrono::duration<double>(t_ep_ready - t_reg_start).count();
+	if (ep_connect_sec < 0.0)
+	{
+		ep_connect_sec = 0.0;
+	}
+	double integration_sec = std::chrono::duration<double>(t_integration_end - t_reg_start).count();
+	if (integration_sec < 0.0)
+	{
+		integration_sec = 0.0;
+	}
+
+	bool emit_connect_header = false;
+	bool is_commissioned = false;
+	std::chrono::steady_clock::time_point comm_start_tp;
+	double since_startup_sec = 0.0;
+	bool emit_initial_summary = false;
+	int summary_expected = 0;
+	long summary_earliest_launch_ns = 0;
+
+	pthread_mutex_lock(&commissioning_timing_mutex);
+	if (!server_connect_header_logged)
+	{
+		server_connect_header_logged = true;
+		emit_connect_header = true;
+	}
+	if (!initial_startup_anchor_set)
+	{
+		initial_startup_anchor = t_reg_start;
+		initial_startup_anchor_set = true;
+	}
+	since_startup_sec = std::chrono::duration<double>(t_integration_end - initial_startup_anchor).count();
+	if (since_startup_sec < 0.0)
+	{
+		since_startup_sec = 0.0;
+	}
+	auto comm_it = commissioning_start_times.find(server_id);
+	if (comm_it != commissioning_start_times.end())
+	{
+		is_commissioned = true;
+		comm_start_tp = comm_it->second;
+		commissioning_start_times.erase(comm_it);
+		if (active_commissioning_server_id == server_id)
+		{
+			active_commissioning_server_id = -1;
+		}
+	}
+	else
+	{
+		if (launch_ns > 0 && (initial_earliest_launch_ns == 0 || launch_ns < initial_earliest_launch_ns))
+		{
+			initial_earliest_launch_ns = launch_ns;
+		}
+		initial_connected_servers++;
+		if (initial_expected_servers > 0 && initial_connected_servers == initial_expected_servers && !initial_summary_logged)
+		{
+			initial_summary_logged = true;
+			emit_initial_summary = true;
+			summary_expected = initial_expected_servers;
+			summary_earliest_launch_ns = initial_earliest_launch_ns;
+		}
+	}
+	pthread_mutex_unlock(&commissioning_timing_mutex);
+
+	char slurm_alloc_str[32] = {0};
+	if (slurm_alloc_sec >= 0.0)
+	{
+		snprintf(slurm_alloc_str, sizeof(slurm_alloc_str), "%.4f", slurm_alloc_sec);
+	}
+	else
+	{
+		snprintf(slurm_alloc_str, sizeof(slurm_alloc_str), "NA");
+	}
+
+	char server_init_str[32] = {0};
+	if (server_init_sec >= 0.0)
+	{
+		snprintf(server_init_str, sizeof(server_init_str), "%.4f", server_init_sec);
+	}
+	else
+	{
+		snprintf(server_init_str, sizeof(server_init_str), "NA");
+	}
+
+	if (emit_connect_header)
+	{
+		fprintf(stderr, "SERVER_CONNECT_TIMING_HEADER,event_type,server_id,hostname,total_sec,slurm_alloc_sec,server_init_sec,ep_connect_sec,integration_sec,since_startup_sec\n");
+		slog_info("SERVER_CONNECT_TIMING_HEADER,event_type,server_id,hostname,total_sec,slurm_alloc_sec,server_init_sec,ep_connect_sec,integration_sec,since_startup_sec");
+	}
+
+	// Differentiate dynamically commissioned servers from initial servers. Initial servers were launched externally (computed from launch_ns bounded below by local init+integration) and roll up into INITIAL_SERVERS_SUMMARY.
+	if (is_commissioned)
+	{
+		double total_sec = std::chrono::duration<double>(t_integration_end - comm_start_tp).count();
+		if (total_sec < 0.0)
+		{
+			total_sec = 0.0;
+		}
+		const char *event_type = (slurm_alloc_sec >= 0.0) ? "COMMISSION_SLURM" : "COMMISSION_SSH";
+		fprintf(stderr, "SERVER_CONNECT_TIMING,%s,%d,%s,%.4f,%s,%s,%.4f,%.4f,%.4f\n", event_type, server_id, hostname, total_sec, slurm_alloc_str, server_init_str, ep_connect_sec, integration_sec, since_startup_sec);
+		slog_info("SERVER_CONNECT_TIMING,%s,%d,%s,%.4f,%s,%s,%.4f,%.4f,%.4f", event_type, server_id, hostname, total_sec, slurm_alloc_str, server_init_str, ep_connect_sec, integration_sec, since_startup_sec);
+	}
+	else
+	{
+		long now_rt_ns = (long)ts_now_rt.tv_sec * 1000000000L + (long)ts_now_rt.tv_nsec;
+		double min_local_sec = (server_init_sec >= 0.0) ? (server_init_sec + integration_sec) : integration_sec;
+		double total_sec = min_local_sec;
+		if (launch_ns > 0)
+		{
+			double wall_from_launch_sec = (double)(now_rt_ns - launch_ns) / 1e9;
+			if (wall_from_launch_sec >= min_local_sec)
+			{
+				total_sec = wall_from_launch_sec;
+			}
+		}
+		fprintf(stderr, "SERVER_CONNECT_TIMING,INITIAL,%d,%s,%.4f,NA,%s,%.4f,%.4f,%.4f\n", server_id, hostname, total_sec, server_init_str, ep_connect_sec, integration_sec, since_startup_sec);
+		slog_info("SERVER_CONNECT_TIMING,INITIAL,%d,%s,%.4f,NA,%s,%.4f,%.4f,%.4f", server_id, hostname, total_sec, server_init_str, ep_connect_sec, integration_sec, since_startup_sec);
+		if (emit_initial_summary)
+		{
+			double min_summary = (total_sec > since_startup_sec) ? total_sec : since_startup_sec;
+			double summary_total_wall = min_summary;
+			if (summary_earliest_launch_ns > 0)
+			{
+				double wall_all = (double)(now_rt_ns - summary_earliest_launch_ns) / 1e9;
+				if (wall_all >= min_summary)
+				{
+					summary_total_wall = wall_all;
+				}
+			}
+			fprintf(stderr, "INITIAL_SERVERS_SUMMARY_HEADER,num_initial_servers,total_wall_sec,from_metadata_anchor_sec\n");
+			slog_info("INITIAL_SERVERS_SUMMARY_HEADER,num_initial_servers,total_wall_sec,from_metadata_anchor_sec");
+			fprintf(stderr, "INITIAL_SERVERS_SUMMARY,%d,%.4f,%.4f\n", summary_expected, summary_total_wall, since_startup_sec);
+			slog_info("INITIAL_SERVERS_SUMMARY,%d,%.4f,%.4f", summary_expected, summary_total_wall, since_startup_sec);
 		}
 	}
 }

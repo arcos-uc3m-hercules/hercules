@@ -67,10 +67,6 @@ int32_t id_server_to_modify = -1;
 int32_t last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
 char *node_to_use = NULL;
 std::atomic<int32_t> acks_received{0};
-// malleability time measure.
-clock_t global_malleability_t;
-double global_malleability_time_taken = 0.0;
-std::chrono::time_point<std::chrono::steady_clock> start_time_commissioning;
 
 // Initial buffer address.
 // char *buffer_address;
@@ -227,6 +223,7 @@ void abort_active_commissioning()
 		kill(cpid, SIGTERM);
 		waitpid(cpid, NULL, WNOHANG);
 	}
+	clear_active_commissioning_start();
 	pthread_mutex_lock(&server_ready_mutex);
 	pthread_cond_signal(&server_ready_cond);
 	pthread_mutex_unlock(&server_ready_mutex);
@@ -2143,6 +2140,16 @@ void *run_malleability(void *th_argv)
 		if (application_profile_t0_initialized.load(std::memory_order_acquire))
 		{
 			double elapsed_sec = get_application_profile_elapsed_sec();
+			int32_t current_servers = (int32_t)number_storage_servers.load();
+			int32_t min_servers_allowed = (arguments->args->lower_bound_servers > 1) ? arguments->args->lower_bound_servers : 1;
+			bool has_due_event = false;
+			double ev_trigger_sec = 0.0;
+			int32_t desired_servers = -1;
+			int action_type = 0;
+			int target_id = -1;
+			std::string key_to_remove;
+
+			pthread_mutex_lock(&mutex_application_profile);
 			ssize_t due_idx = -1;
 			for (size_t i = 0; i < application_profile_events.size(); ++i)
 			{
@@ -2160,10 +2167,10 @@ void *run_malleability(void *th_argv)
 
 			if (due_idx >= 0)
 			{
+				has_due_event = true;
 				ApplicationProfileEvent &ev = application_profile_events[(size_t)due_idx];
-				int32_t current_servers = (int32_t)number_storage_servers.load();
-				int32_t min_servers_allowed = (arguments->args->lower_bound_servers > 1) ? arguments->args->lower_bound_servers : 1;
-				int32_t desired_servers = ev.target_servers;
+				ev_trigger_sec = ev.trigger_sec;
+				desired_servers = ev.target_servers;
 
 				if (desired_servers < min_servers_allowed)
 				{
@@ -2177,8 +2184,7 @@ void *run_malleability(void *th_argv)
 				if (current_servers == desired_servers)
 				{
 					ev.executed = true;
-					slog_malleability("[ApplicationProfile] Target servers already active at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").", elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
-					fprintf(stderr, "[ApplicationProfile] Target servers already active at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").\n", elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
+					action_type = 0;
 				}
 				else if (current_servers < desired_servers)
 				{
@@ -2186,36 +2192,57 @@ void *run_malleability(void *th_argv)
 					{
 						ev.executed = true;
 					}
-					slog_malleability("[ApplicationProfile] Triggering SCALE_UP at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").", elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
-					fprintf(stderr, "[ApplicationProfile] Triggering SCALE_UP at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").\n", elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
-					comissioning_stage(arguments);
-					arguments = NULL;
-					clear_transition_performance_metrics(NULL);
+					action_type = 1;
 				}
 				else
 				{
-					std::string key_to_remove;
-					int target_id = select_profile_decommission_candidate(history_snapshot, current_servers, key_to_remove);
+					target_id = select_profile_decommission_candidate(history_snapshot, current_servers, key_to_remove);
 					if (target_id != -1)
 					{
 						if (current_servers - 1 <= desired_servers)
 						{
 							ev.executed = true;
 						}
-						slog_malleability("[ApplicationProfile] Triggering SCALE_DOWN of server %d at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").", target_id, elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
-						fprintf(stderr, "[ApplicationProfile] Triggering SCALE_DOWN of server %d at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").\n", target_id, elapsed_sec, ev.trigger_sec, current_servers, desired_servers);
-						int ret = decomissioning_stage(arguments, target_id);
-						if (ret)
-						{
-							clear_transition_performance_metrics(&key_to_remove);
-						}
+						action_type = -1;
 					}
 					else
 					{
 						ev.executed = true;
-						slog_error("HERCULES_ERR_INVALID_SLOWEST_SERVER_ID");
-						fprintf(stderr, "HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
+						action_type = -2;
 					}
+				}
+			}
+			pthread_mutex_unlock(&mutex_application_profile);
+
+			if (has_due_event)
+			{
+				if (action_type == 0)
+				{
+					slog_malleability("[ApplicationProfile] Target servers already active at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").", elapsed_sec, ev_trigger_sec, current_servers, desired_servers);
+					fprintf(stderr, "[ApplicationProfile] Target servers already active at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").\n", elapsed_sec, ev_trigger_sec, current_servers, desired_servers);
+				}
+				else if (action_type == 1)
+				{
+					slog_malleability("[ApplicationProfile] Triggering SCALE_UP at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").", elapsed_sec, ev_trigger_sec, current_servers, desired_servers);
+					fprintf(stderr, "[ApplicationProfile] Triggering SCALE_UP at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").\n", elapsed_sec, ev_trigger_sec, current_servers, desired_servers);
+					comissioning_stage(arguments);
+					arguments = NULL;
+					clear_transition_performance_metrics(NULL);
+				}
+				else if (action_type == -1)
+				{
+					slog_malleability("[ApplicationProfile] Triggering SCALE_DOWN of server %d at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").", target_id, elapsed_sec, ev_trigger_sec, current_servers, desired_servers);
+					fprintf(stderr, "[ApplicationProfile] Triggering SCALE_DOWN of server %d at t=%.2fs (trigger=%.2fs, current=%" PRId32 ", target=%" PRId32 ").\n", target_id, elapsed_sec, ev_trigger_sec, current_servers, desired_servers);
+					int ret = decomissioning_stage(arguments, target_id);
+					if (ret)
+					{
+						clear_transition_performance_metrics(&key_to_remove);
+					}
+				}
+				else
+				{
+					slog_error("HERCULES_ERR_INVALID_SLOWEST_SERVER_ID");
+					fprintf(stderr, "HERCULES_ERR_INVALID_SLOWEST_SERVER_ID\n");
 				}
 			}
 		}
@@ -2365,7 +2392,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 	int32_t new_num_active = imss_info_struct->num_storages + 1;
 	id_server_to_modify = new_server_id;
 
-	start_time_commissioning = std::chrono::steady_clock::now();
+	auto comm_start_time = std::chrono::steady_clock::now();
 	is_new_server_ready = false;
 
 	// First look for a free (decommissioned) host in the initial pre-allocated host list
@@ -2431,10 +2458,12 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		slog_debug("%s", msg);
 
 		// Deploy the new hercules instance on the avaiable node.
+		record_commissioning_start(new_server_id, comm_start_time);
 		pid_t pid = fork();
 
 		if (pid == -1)
 		{ // error
+			clear_commissioning_start(new_server_id);
 			char msg_err[PATH_MAX] = {'\0'};
 			sprintf(msg_err, "HERCULES_ERR_FORK_COMISSIONING_STAGE: %s", node_to_use);
 			perror(msg_err);
@@ -2606,9 +2635,11 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		snprintf(str_meta_pid, sizeof(str_meta_pid), "%d", getpid());
 
 		// Fork child process to run slurm_data_server.sh with the exclude list in the background
+		record_commissioning_start(new_server_id, comm_start_time);
 		pid_t pid = fork();
 		if (pid == -1)
 		{
+			clear_commissioning_start(new_server_id);
 			slog_error("HERCULES_ERR_FORK_SLURM_COMISSIONING: failed to fork for server %d", new_server_id);
 			perror("HERCULES_ERR_FORK_SLURM_COMISSIONING");
 			comissioning_on.store(false, std::memory_order_release);
@@ -2682,6 +2713,7 @@ void *comissioning_stage(MalleabilityArgs *arguments)
 		}
 		pthread_mutex_unlock(&server_ready_mutex);
 		abort_active_commissioning();
+		clear_commissioning_start(new_server_id);
 		comissioning_on.store(false, std::memory_order_release);
 		free(arguments);
 		return NULL;
@@ -3829,6 +3861,7 @@ int process_add_server(p_argv *arguments, const char *req)
 
 		uint64_t conn_port = (imss_->info.conn_port != 0) ? imss_->info.conn_port : (server_args->data_port ? server_args->data_port : 8500);
 		slog_debug("connecting to %s:%" PRIu64, added_hostname, conn_port);
+		auto peer_conn_start = std::chrono::steady_clock::now();
 		oob_sock = connect_common(added_hostname, conn_port, AF_INET);
 		if (oob_sock < 0)
 		{
@@ -3900,9 +3933,9 @@ int process_add_server(p_argv *arguments, const char *req)
 		}
 		data_endpoints[added_server_id] = imss_->conns.eps[added_server_id];
 
-		global_malleability_t = clock() - global_malleability_t;
-		global_malleability_time_taken = ((double)global_malleability_t) / (CLOCKS_PER_SEC);
-		slog_debug("Server %" PRIu32 " connected in %.4f seconds", added_server_id, global_malleability_time_taken);
+		auto peer_conn_end = std::chrono::steady_clock::now();
+		double peer_conn_sec = std::chrono::duration<double>(peer_conn_end - peer_conn_start).count();
+		slog_debug("PEER_CONNECT_TIMING,%d,%" PRIu32 ",%s,%.4f", server_args->id, added_server_id, added_hostname, peer_conn_sec);
 
 		// num_storages is increased inside AddIPS.
 		fprintf(stderr, "Adding %s on the data server %d (%s).\n", added_hostname, server_args->id, server_args->data_hostname);
@@ -6644,12 +6677,15 @@ struct PendingSetServerEntry
 	std::string ip;
 	std::string hostname;
 	std::string raw_req;
+	double slurm_alloc_sec;
+	double server_init_sec;
+	long launch_ns;
 };
 
 static std::map<int, PendingSetServerEntry> pending_setserver_registrations;
 static pthread_mutex_t setserver_registration_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int register_single_data_server(p_argv *arguments, int server_id_request, const char *connect_ip, const char *added_hostname, const char *raw_req)
+static int register_single_data_server(p_argv *arguments, int server_id_request, const char *connect_ip, const char *added_hostname, const char *raw_req, double slurm_alloc_sec, double server_init_sec, long launch_ns)
 {
 	if (arguments == NULL || arguments->args == NULL || connect_ip == NULL || added_hostname == NULL || raw_req == NULL)
 	{
@@ -6664,6 +6700,8 @@ static int register_single_data_server(p_argv *arguments, int server_id_request,
 		fprintf(stderr, "HERCULES_ERR_STAT_WORKER_CLUSTER_FULL: Cannot add server %s (id=%d). MAX_SERVERS_PER_VIEW (%d) reached (current storages=%d).\n", added_hostname, server_id_request, MAX_SERVERS_PER_VIEW, curr_global_imss_info ? curr_global_imss_info->num_storages : -1);
 		return -1;
 	}
+
+	auto t_reg_start = std::chrono::steady_clock::now();
 
 	imss new_imss;
 	new_imss.conns.peer_addr = (ucp_address_t **)calloc(1, sizeof(ucp_address_t *));
@@ -6747,9 +6785,6 @@ static int register_single_data_server(p_argv *arguments, int server_id_request,
 
 	ucs_status_t ep_status = client_create_ep_data(arguments->ucp_worker, &data_endpoints[server_id_request], new_imss.conns.peer_addr[0], set_server_err_call_arg);
 
-	auto end_time_commisioning = std::chrono::steady_clock::now();
-	std::chrono::duration<double> time_taken_comm = end_time_commisioning - start_time_commissioning;
-
 	free(new_imss.conns.peer_addr[0]);
 	free(new_imss.conns.peer_addr);
 
@@ -6760,6 +6795,8 @@ static int register_single_data_server(p_argv *arguments, int server_id_request,
 		fprintf(stderr, "HERCULES_ERR_STAT_WORKER_HELPER_CREATE_EP: failed to create UCX endpoint for server id=%d (%s), status=%d\n", server_id_request, added_hostname, (int)ep_status);
 		return -1;
 	}
+
+	auto t_ep_ready = std::chrono::steady_clock::now();
 
 	// pthread_mutex_lock(&mutext_malleability);
 	imss_info *imss_info_struct = curr_global_imss_info;
@@ -6780,9 +6817,6 @@ static int register_single_data_server(p_argv *arguments, int server_id_request,
 	slog_debug("number_storage_servers=%d\n", number_storage_servers.load());
 	// pthread_mutex_unlock(&mutext_malleability);
 
-	fprintf(stderr, "Server %d connected in %.4f seconds\n", server_id_request, time_taken_comm.count());
-	slog_debug("Server %d connected in %.4f seconds", server_id_request, time_taken_comm.count());
-
 	id_server_to_modify = server_id_request;
 	last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
 	curr_global_imss_info->server_states[server_id_request] = SERVER_ACTIVE_RW;
@@ -6800,6 +6834,8 @@ static int register_single_data_server(p_argv *arguments, int server_id_request,
 	malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
 	pthread_mutex_unlock(&mutex_malleability);
 	Attend_pending_requests();
+
+	log_server_connection_timing(server_id_request, added_hostname, t_reg_start, t_ep_ready, slurm_alloc_sec, server_init_sec, launch_ns);
 
 	// signal to the Comissioning thread.
 	fprintf(stderr, "signal to the Comissioning thread\n");
@@ -6826,7 +6862,7 @@ static void drain_pending_setserver_registrations_locked(p_argv *arguments)
 		pending_setserver_registrations.erase(it);
 		slog_malleability("Draining deferred SETSERVER registration for server id=%d (%s:%s)", entry.server_id, entry.ip.c_str(), entry.hostname.c_str());
 		fprintf(stderr, "Draining deferred SETSERVER registration for server id=%d (%s:%s)\n", entry.server_id, entry.ip.c_str(), entry.hostname.c_str());
-		if (register_single_data_server(arguments, entry.server_id, entry.ip.c_str(), entry.hostname.c_str(), entry.raw_req.c_str()) < 0)
+		if (register_single_data_server(arguments, entry.server_id, entry.ip.c_str(), entry.hostname.c_str(), entry.raw_req.c_str(), entry.slurm_alloc_sec, entry.server_init_sec, entry.launch_ns) < 0)
 		{
 			slog_error("HERCULES_ERR_STAT_WORKER_DRAIN_SETSERVER: Failed draining server id=%d (%s)", entry.server_id, entry.hostname.c_str());
 			fprintf(stderr, "HERCULES_ERR_STAT_WORKER_DRAIN_SETSERVER: Failed draining server id=%d (%s)\n", entry.server_id, entry.hostname.c_str());
@@ -7134,6 +7170,14 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			return -1;
 		}
 
+		double slurm_alloc_sec = -1.0;
+		double server_init_sec = -1.0;
+		long launch_ns = 0;
+		if (num_characters_read > 0 && req[num_characters_read] != '\0')
+		{
+			parse_setserver_timing_fields(&req[num_characters_read], &slurm_alloc_sec, &server_init_sec, &launch_ns);
+		}
+
 		pthread_mutex_lock(&setserver_registration_mutex);
 
 		if (curr_global_imss_info != NULL && curr_global_imss_info->num_storages >= MAX_SERVERS_PER_VIEW)
@@ -7147,11 +7191,16 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		// Defer registrations arriving before IMSS_INFO or ahead of the next dense server slot.
 		if (curr_global_imss_info == NULL || server_id_request > curr_global_imss_info->num_storages)
 		{
+			record_deferred_initial_startup_anchor(server_id_request);
+
 			PendingSetServerEntry entry;
 			entry.server_id = server_id_request;
 			entry.ip = number;
 			entry.hostname = uri_;
 			entry.raw_req = req;
+			entry.slurm_alloc_sec = slurm_alloc_sec;
+			entry.server_init_sec = server_init_sec;
+			entry.launch_ns = launch_ns;
 			pending_setserver_registrations[server_id_request] = entry;
 			int expected_id = (curr_global_imss_info != NULL) ? curr_global_imss_info->num_storages : -1;
 			slog_malleability("Deferring out-of-order SETSERVER for server id=%d (%s:%s), expected=%d", server_id_request, number, uri_, expected_id);
@@ -7176,7 +7225,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 			return -1;
 		}
 
-		int reg_ret = register_single_data_server(arguments, server_id_request, number, uri_, req);
+		int reg_ret = register_single_data_server(arguments, server_id_request, number, uri_, req, slurm_alloc_sec, server_init_sec, launch_ns);
 		if (reg_ret == 0)
 		{
 			drain_pending_setserver_registrations_locked(arguments);
@@ -7792,6 +7841,8 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 					pthread_mutex_lock(&mutext_malleability);
 					curr_global_imss_info = (imss_info *)buffer;
 					pthread_mutex_unlock(&mutext_malleability);
+					int expected_init = (curr_global_imss_info->num_rw_storages > 0) ? curr_global_imss_info->num_rw_storages : (int)arguments->args->num_data_servers;
+					record_initial_startup_anchor(expected_init);
 					slog_debug("Hercules Instance received, num of initial servers = %d", curr_global_imss_info->num_storages);
 				}
 				else
