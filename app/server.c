@@ -244,7 +244,18 @@ int32_t main(int32_t argc, char **argv)
 		slog_debug("imss_uri = %s, stat-port = %" PRId64 " num-servers = %" PRId64 " deploy-hostfile = %s block-size = %" PRIu64 " (kB) storage-size = %" PRIu64 " (gB), args.bufsize = %" PRId64 "", args.imss_uri, args.stat_port, args.num_data_servers, args.data_hostfile, args.block_size, args.storage_size, args.bufsize);
 		// bind port number.
 		bind_port = args.data_port;
-		init_number_of_server = atoi(argv[3]);
+		if (!is_valid_integer(argv[3], &init_number_of_server))
+		{
+			slog_error("HERCULES_ERR_SERVER_INVALID_INIT_SERVERS: invalid initial number of data servers '%s'", argv[3]);
+			fprintf(stderr, "HERCULES_ERR_SERVER_INVALID_INIT_SERVERS: invalid initial number of data servers '%s'\n", argv[3]);
+			return -1;
+		}
+		if (init_number_of_server <= 0)
+		{
+			slog_error("HERCULES_ERR_SERVER_INVALID_INIT_SERVERS: initial number of data servers must be > 0 (got %d)", init_number_of_server);
+			fprintf(stderr, "HERCULES_ERR_SERVER_INVALID_INIT_SERVERS: initial number of data servers must be > 0 (got %d)\n", init_number_of_server);
+			return -1;
+		}
 		char num_nodes_path[PATH_MAX] = {0};
 		snprintf(num_nodes_path, sizeof(num_nodes_path), "%s/tmp/hercules_num_act_nodes", args.hercules_path);
 		if (access(num_nodes_path, F_OK) != 0)
@@ -252,7 +263,7 @@ int32_t main(int32_t argc, char **argv)
 			FILE *f_nodes = fopen(num_nodes_path, "w");
 			if (f_nodes)
 			{
-				fprintf(f_nodes, "%d\n", init_number_of_server > 0 ? init_number_of_server : (int)args.num_data_servers);
+				fprintf(f_nodes, "%d\n", init_number_of_server);
 				fclose(f_nodes);
 			}
 		}
@@ -357,7 +368,7 @@ int32_t main(int32_t argc, char **argv)
 		// port that the metadata server is listening on.
 		stat_port = args.stat_port;
 		// number of servers conforming the HERCULES deployment.
-		num_servers = args.num_data_servers;
+		num_servers = init_number_of_server;
 		// Dynamic number of servers conforming the HERCULES deployment used by malleability.
 		number_storage_servers.store(num_servers);
 		// HERCULES' MPI deployment file.

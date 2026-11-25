@@ -7577,7 +7577,9 @@ static void handle_non_ok_write_reply(
 
 	if (reply_kind == WRITE_REPLY_SERVER_ERR || reply_kind == WRITE_REPLY_COMM_ERR)
 	{
-		if (retries < MAX_RETRIES && get_malleability_changes((char *)dataset_uri, node_hostname) == 1)
+		// Only mark the node as failed on actual transport errors; a server ERROR reply means the UCX endpoint is still alive.
+		const char *failed_host = (reply_kind == WRITE_REPLY_COMM_ERR) ? node_hostname : NULL;
+		if (retries < MAX_RETRIES && get_malleability_changes((char *)dataset_uri, failed_host) == 1)
 		{
 			*out_should_retry = true;
 			return;

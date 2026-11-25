@@ -2856,6 +2856,59 @@ int send_add_server_to_all_data_servers(ucp_worker_h ucp_worker, uint32_t thread
 	return 0;
 }
 
+/**
+ * @brief Populates curr_global_imss_info and number_storage_servers from metadata once if not yet initialized.
+ *
+ *
+ * @return 0 on success (already initialized or fetched), or -1 if metadata lookup failed.
+ */
+static int refresh_global_imss_info_locked(p_argv *temp_p_argv_for_calls)
+{
+	if (curr_global_imss_info != NULL)
+	{
+		return 0;
+	}
+
+	const char *target_uri = resolve_imss_uri(temp_p_argv_for_calls);
+	imss *local_imss_ = NULL;
+	int32_t imss_found_in = find_imss_pointer(target_uri, &local_imss_);
+	if (imss_found_in == -1)
+	{ // request the metadata.
+		slog_debug("imss structure not found, requesting to the metadata server");
+		fprintf(stderr, "[send_node_list_2_frontend] imss structure not found, requesting to the metadata server (URI: %s)\n", target_uri);
+		if (ensure_inter_backend_connected(target_uri) != 0)
+		{
+			slog_fatal("Error retrieving IMSS metadata from metadata server");
+			fprintf(stderr, "Error retrieving IMSS metadata from metadata server\n");
+			return -1;
+		}
+		find_imss_pointer(target_uri, &local_imss_);
+	}
+
+	if (local_imss_ != NULL)
+	{
+		curr_global_imss_info = &local_imss_->info;
+		number_storage_servers.store(local_imss_->info.num_storages);
+		fprintf(stderr, "[send_node_list_2_frontend] number_storage_servers=%" PRIu32 "\n", number_storage_servers.load());
+	}
+	return 0;
+}
+
+/**
+ * @brief Thread-safe wrapper to initialize curr_global_imss_info and number_storage_servers if still NULL.
+ */
+static int refresh_global_imss_info_if_needed(const p_argv *arguments)
+{
+	std::lock_guard<std::mutex> lock(mutex_hercules_struct);
+	if (curr_global_imss_info != NULL)
+	{
+		return 0;
+	}
+	p_argv temp_p_argv_for_calls;
+	fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
+	return refresh_global_imss_info_locked(&temp_p_argv_for_calls);
+}
+
 int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_used_in_frontend)
 {
 	// send an ACK to the client to continue.
@@ -2865,35 +2918,16 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_use
 	slog_debug("Making list of avaiable nodes.");
 
 	std::lock_guard<std::mutex> lock(mutex_hercules_struct);
-	const char *target_uri = resolve_imss_uri(&temp_p_argv_for_calls);
-
 	if (curr_global_imss_info == NULL)
 	{
-		imss *local_imss_ = NULL;
-		int32_t imss_found_in = find_imss_pointer(target_uri, &local_imss_);
-		if (imss_found_in == -1)
-		{ // request the metadata.
-			slog_debug("imss structure not found, requesting to the metadata server");
-			fprintf(stderr, "[send_node_list_2_frontend] imss structure not found, requesting to the metadata server (URI: %s)\n", target_uri);
-			if (ensure_inter_backend_connected(target_uri) != 0)
-			{
-				slog_fatal("Error retrieving IMSS metadata from metadata server");
-				fprintf(stderr, "Error retrieving IMSS metadata from metadata server\n");
-				return -1;
-			}
-			find_imss_pointer(target_uri, &local_imss_);
-		}
-
-		if (local_imss_ != NULL)
+		if (refresh_global_imss_info_locked(&temp_p_argv_for_calls) != 0)
 		{
-			curr_global_imss_info = &local_imss_->info;
-			number_storage_servers.store(local_imss_->info.num_storages);
-			fprintf(stderr, "[send_node_list_2_frontend] number_storage_servers=%" PRIu32 "\n", number_storage_servers.load());
-			if (server_n_used_in_frontend == number_storage_servers.load())
-			{
-				slog_debug("Client is right, aborting sending list.");
-				return 2;
-			}
+			return -1;
+		}
+		if (curr_global_imss_info != NULL && server_n_used_in_frontend == number_storage_servers.load())
+		{
+			slog_debug("Client is right, aborting sending list.");
+			return 2;
 		}
 	}
 
@@ -3480,7 +3514,7 @@ void *hercules_ucx_server(void *th_argv)
 			}
 			if (global_finish_threads == 1)
 			{
-				map_server_eps_destroy(map_server_eps);
+				map_server_eps_destroy(map_server_eps, arguments->ucp_worker);
 				fprintf(stderr, "Ending %s server thread.\n", server_name);
 				slog_info("Ending %s server thread.", server_name);
 				pthread_exit((void *)0);
@@ -3561,8 +3595,17 @@ void *hercules_ucx_server(void *th_argv)
 		ucp_worker_address_query(peer_addr, &attr);
 		slog_debug(" Receiving request from %" PRIu64 ".", attr.worker_uid);
 
+		client_ep_context_t *ep_ctx = NULL;
 		//  look for this peer_addr in the map and get the ep
-		ret = map_server_eps_search(map_server_eps, attr.worker_uid, &ep);
+		ret = map_server_eps_search_with_ctx(map_server_eps, attr.worker_uid, &ep, &ep_ctx);
+		if (ret > 0 && ep_ctx != NULL && ep_ctx->status != UCS_OK)
+		{
+			slog_warn("Cached server endpoint for UID %" PRIu64 " is in error state (%s); recreating.", attr.worker_uid, ucs_status_string(ep_ctx->status));
+			map_server_eps_erase(map_server_eps, attr.worker_uid, arguments->ucp_worker);
+			ep = NULL;
+			ep_ctx = NULL;
+			ret = -1;
+		}
 
 		// if (ret > 0)
 		// {
@@ -3609,9 +3652,17 @@ void *hercules_ucx_server(void *th_argv)
 			const size_t msg_len = strlen(ucx_server_err_call_arg) + 5 + UINT64_MAX_STR_LEN;
 			char tmp_msg[msg_len] = {0};
 			snprintf(tmp_msg, msg_len, "%s UID %" PRIu64, ucx_server_err_call_arg, attr.worker_uid);
-			client_create_ep_data(arguments->ucp_worker, &ep, peer_addr, tmp_msg);
-			// add the new ep to the map
-			map_server_eps_put(map_server_eps, attr.worker_uid, ep);
+			ucs_status_t ep_create_status = client_create_ep_data_with_context(arguments->ucp_worker, &ep, peer_addr, tmp_msg, &ep_ctx);
+			if (ep_create_status == UCS_OK)
+			{
+				// add the new ep and its context to the map
+				map_server_eps_put_with_ctx(map_server_eps, attr.worker_uid, ep, ep_ctx, arguments->ucp_worker);
+			}
+			else if (ep_ctx != NULL)
+			{
+				free(ep_ctx);
+				ep_ctx = NULL;
+			}
 		}
 		else
 		{
@@ -5494,6 +5545,11 @@ int handle_write_operation(
 		// if not, we need to tell it the new configuration.
 		if (ret == 0 && number_storage_servers.load() > 0)
 		{
+			if (!(server_n_used_in_frontend == number_storage_servers.load() || server_n_used_in_frontend == MALLEABILITY_SET_BYPASS))
+			{
+				// Refresh local metadata once before warning or draining in case this server has not yet synced curr_global_imss_info.
+				refresh_global_imss_info_if_needed(arguments);
+			}
 			if (!(server_n_used_in_frontend == number_storage_servers.load() || server_n_used_in_frontend == MALLEABILITY_SET_BYPASS))
 			{
 				slog_warn("[%s] HERCULES_WARN_MISMATCH_NUMBER_OF_SERVERS: frontend is not using the updated number of servers, number_storage_servers=%" PRIu32 ", server_n_used_in_frontend=%" PRIu32, arguments->args->data_hostname, number_storage_servers.load(), server_n_used_in_frontend);
