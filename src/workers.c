@@ -431,12 +431,49 @@ int ready(char *tmp_file_path, const char *msg);
 int SendConfirmationMessage(const p_argv *arguments, const char *msg)
 {
 	int ret = 0;
-	slog_debug("Sending msg \"%s\" (%lu) to %" PRIu32, msg, strlen(msg) + 1, arguments->worker_uid);
+	// slog_debug("Sending msg \"%s\" (%lu) to %" PRIu64, msg, strlen(msg) + 1, arguments->worker_uid);
 	// pthread_mutex_lock(&lock_network);
 	ret = NETWORK_TIMING(send_data(arguments->ucp_worker, arguments->server_ep, (const void *)msg, strlen(msg) + 1, arguments->worker_uid), "Send data", int);
 	// pthread_mutex_unlock(&lock_network);
 	slog_debug("Msg sent: %s", msg);
 	return ret;
+}
+
+/**
+ * @brief Drains an incoming non-blocking write data buffer on recv_tag to keep UCX queues aligned when deferring or rejecting async writes.
+ */
+static void drain_async_write_data(const p_argv *arguments, uint64_t recv_tag)
+{
+	if (arguments == NULL || arguments->ucp_worker == NULL)
+	{
+		slog_error("HERCULES_ERR_DRAIN_ASYNC_DATA: invalid arguments or ucp_worker");
+		fprintf(stderr, "HERCULES_ERR_DRAIN_ASYNC_DATA: invalid arguments or ucp_worker\n");
+		return;
+	}
+
+	size_t drain_len = get_recv_data_length(arguments->ucp_worker, recv_tag);
+	if (drain_len == 0)
+	{
+		// Consume a zero-length unexpected message if present so UCX does not leak the descriptor.
+		ucp_tag_recv_info_t info_tag;
+		ucp_tag_message_h msg_tag = ucp_tag_probe_nb(arguments->ucp_worker, recv_tag, tag_mask, 1, &info_tag);
+		if (msg_tag != NULL)
+		{
+			char empty_dummy = 0;
+			recv_data_2(arguments->ucp_worker, arguments->server_ep, &empty_dummy, 0, recv_tag, 0, info_tag, msg_tag);
+		}
+		return;
+	}
+
+	void *drain_buf = malloc(drain_len);
+	if (drain_buf == NULL)
+	{
+		slog_error("HERCULES_ERR_DRAIN_ASYNC_DATA_MEM: failed to allocate %zu bytes", drain_len);
+		fprintf(stderr, "HERCULES_ERR_DRAIN_ASYNC_DATA_MEM: failed to allocate %zu bytes\n", drain_len);
+		return;
+	}
+	recv_data(arguments->ucp_worker, arguments->server_ep, drain_buf, drain_len, recv_tag, 0);
+	free(drain_buf);
 }
 
 /**
@@ -3979,6 +4016,35 @@ int process_add_server(p_argv *arguments, const char *req)
 }
 
 /**
+ * @brief Configures SET/SET_ASYNC/SET_TRUNCATE/SET_TRUNCATE_ASYNC flags, extracts async_tag, and manages malleability status.
+ *
+ * When a non-blocking write (SET_ASYNC / SET_TRUNCATE_ASYNC) is queued during malleability,
+ * incoming client data is drained first so UCX queues stay aligned.
+ */
+static int prepare_set_operation(p_argv *arguments, const char *req, int is_async, bool is_truncate, int64_t *more, bool *truncate, bool *expect_pre_data_ack)
+{
+	*more = SET_OP;
+	*truncate = is_truncate;
+	if (is_async)
+	{
+		*expect_pre_data_ack = false;
+		uint64_t async_tag = 0;
+		if (sscanf(req, "%*s %*s %*s %*s %*s %" PRIu64, &async_tag) == 1 && async_tag != 0)
+		{
+			arguments->worker_uid = async_tag;
+		}
+	}
+
+	int ret = CheckForMalleability(arguments, arguments->curr_req);
+	if (ret != 0 && is_async)
+	{
+		// Async writes send block data immediately after send_req; drain before returning so UCX stays clean.
+		drain_async_write_data(arguments, arguments->worker_uid);
+	}
+	return ret;
+}
+
+/**
  * @brief Fills the variables with the corresponding value according to the action given the "mode".
  *
  * @param arguments Pointer to thread arguments and worker context structure.
@@ -3990,9 +4056,10 @@ int process_add_server(p_argv *arguments, const char *req)
  * @param snapshot_op int pointer to indicate if this is a snapshot operation.
  * @param mode_type pointer to CommunicationMode.
  * @param to_read_args int pointer stating if to_read arguments should be parsed.
+ * @param expect_pre_data_ack Output flag set false when the client sends data without a pre-data ACK (SET_ASYNC / SET_TRUNCATE_ASYNC).
  * @return int 0 on success, 1 in a special case where malleability is in progress, or -1 if mode is not valid.
  */
-int determine_operation_flags(p_argv *arguments, const char *req, const char *mode, int64_t *more, int *is_shared_memory, int *default_params, int *snapshot_op, bool *truncate, CommunicationMode *mode_type, int *to_read_args, bool *expect_ack)
+int determine_operation_flags(p_argv *arguments, const char *req, const char *mode, int64_t *more, int *is_shared_memory, int *default_params, int *snapshot_op, bool *truncate, CommunicationMode *mode_type, int *to_read_args, bool *expect_pre_data_ack)
 {
 	if (!strcmp(mode, "GET"))
 	{
@@ -4006,8 +4073,7 @@ int determine_operation_flags(p_argv *arguments, const char *req, const char *mo
 	}
 	else if (!strcmp(mode, "SET"))
 	{
-		*more = SET_OP;
-		int ret = CheckForMalleability(arguments, arguments->curr_req);
+		int ret = prepare_set_operation(arguments, req, 0, false, more, truncate, expect_pre_data_ack);
 		if (ret != 0)
 		{
 			return ret;
@@ -4015,9 +4081,7 @@ int determine_operation_flags(p_argv *arguments, const char *req, const char *mo
 	}
 	else if (!strcmp(mode, "SET_ASYNC"))
 	{
-		*more = SET_OP;
-		*expect_ack = false;
-		int ret = CheckForMalleability(arguments, arguments->curr_req);
+		int ret = prepare_set_operation(arguments, req, 1, false, more, truncate, expect_pre_data_ack);
 		if (ret != 0)
 		{
 			return ret;
@@ -4025,14 +4089,19 @@ int determine_operation_flags(p_argv *arguments, const char *req, const char *mo
 	}
 	else if (!strcmp(mode, "SET_TRUNCATE"))
 	{
-		*more = SET_OP;
-		*truncate = true;
+		int ret = prepare_set_operation(arguments, req, 0, true, more, truncate, expect_pre_data_ack);
+		if (ret != 0)
+		{
+			return ret;
+		}
 	}
 	else if (!strcmp(mode, "SET_TRUNCATE_ASYNC"))
 	{
-		*more = SET_OP;
-		*truncate = true;
-		*expect_ack = false;
+		int ret = prepare_set_operation(arguments, req, 1, true, more, truncate, expect_pre_data_ack);
+		if (ret != 0)
+		{
+			return ret;
+		}
 	}
 	else if (!strcmp(mode, "SETNETWORK"))
 	{
@@ -4045,7 +4114,7 @@ int determine_operation_flags(p_argv *arguments, const char *req, const char *mo
 		*more = SET_OP;
 		*mode_type = CommunicationMode::MODE_NETWORK;
 		*to_read_args = 1;
-		*expect_ack = false;
+		*expect_pre_data_ack = false;
 	}
 	else if (!strcmp(mode, "SETBUFFNETWORK"))
 	{
@@ -4954,19 +5023,14 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 				else if (UCS_PTR_IS_ERR(ucx_req_handle))
 				{
 					slog_error("Failed to initiate async send on server.");
-					fprintf(stderr, "Failed to initiate async send on server.");
-					if (outstanding_sends.load(std::memory_order_relaxed) > 0)
-					{
-						outstanding_sends--;
-					}
+					fprintf(stderr, "Failed to initiate async send on server.\n");
+					decrement_outstanding_sends();
+					return -1;
 				}
 				else
 				{
 					// It completed immediately. isend_data2 already cleaned up new_send and send_buffer via ~ServerSendRequest().
-					if (outstanding_sends.load(std::memory_order_relaxed) > 0)
-					{
-						outstanding_sends--;
-					}
+					decrement_outstanding_sends();
 				}
 			}
 		}
@@ -5066,19 +5130,13 @@ int handle_read_operation(p_argv *arguments, std::string &key, uint32_t op_type,
 		{
 			slog_error("Failed to initiate async send on server: %s", ucs_status_string(UCS_PTR_STATUS(ucx_req_handle)));
 			fprintf(stderr, "Failed to initiate async send on server: %s\n", ucs_status_string(UCS_PTR_STATUS(ucx_req_handle)));
-			if (outstanding_sends.load(std::memory_order_relaxed) > 0)
-			{
-				outstanding_sends--;
-			}
+			decrement_outstanding_sends();
 			return -1;
 		}
 		else
 		{
 			// It completed immediately. isend_data2 already cleaned up new_send and prefetch_buffer via ~ServerSendRequest().
-			if (outstanding_sends.load(std::memory_order_relaxed) > 0)
-			{
-				outstanding_sends--;
-			}
+			decrement_outstanding_sends();
 		}
 
 		break;
@@ -5373,7 +5431,7 @@ int handle_write_operation(
     bool truncate,
     CommunicationMode transfer_mode,
     const void *data_from_disk,
-    bool expect_ack,
+    bool expect_pre_data_ack,
     int snapshot_enabled,
     uint64_t recv_tag)
 {
@@ -5386,7 +5444,10 @@ int handle_write_operation(
 	{
 		data_recv_tag = recv_tag;
 	}
-	const bool suppress_async_migration_ack = (!expect_ack && is_migration_write_request(arguments, transfer_mode));
+	const bool is_async_migration = (!expect_pre_data_ack && is_migration_write_request(arguments, transfer_mode));
+	// Async client network writes skip the pre-data handshake and instead receive one post-write status reply.
+	// Async migration writes (SETNETWORK_ASYNC) suppress per-block replies and synchronize via MIGRATION_BARRIER.
+	const bool send_post_write_status = (!expect_pre_data_ack && transfer_mode == CommunicationMode::MODE_NETWORK && !is_async_migration);
 
 	slog_debug("[WRITE_OP] WRITE NORMAL CASE. Size %ld, offset=%ld", block_size_recv, block_offset);
 	int ret = 0;
@@ -5443,23 +5504,24 @@ int handle_write_operation(
 
 				p_argv temp_p_argv_for_calls;
 				fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
-				if (!expect_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
+				if (!expect_pre_data_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
 				{
-					// consumes the incoming data to avoid network corruption.
-					// TODO: check for optimizations here.
-					size_t drain_len = get_recv_data_length(arguments->ucp_worker, data_recv_tag);
-					if (drain_len > 0)
-					{
-						void *drain_buf = malloc(drain_len);
-						if (drain_buf != NULL)
-						{
-							recv_data(arguments->ucp_worker, arguments->server_ep, drain_buf, drain_len, data_recv_tag, 0);
-							free(drain_buf);
-						}
-					}
+					// Consume incoming async data before sending the single rejection reply so UCX stays aligned.
+					drain_async_write_data(arguments, data_recv_tag);
 				}
-				if (send_node_list_2_frontend(temp_p_argv_for_calls, server_n_used_in_frontend) != 2) // Update the server list in the frontend.
+				int send_ret = send_node_list_2_frontend(temp_p_argv_for_calls, server_n_used_in_frontend); // Update the server list in the frontend.
+				if (send_post_write_status)
+				{
+					if (send_ret == 2)
+					{
+						SendConfirmationMessage(arguments, MSG_ERROR_OP);
+					}
 					return -1;
+				}
+				if (send_ret != 2)
+				{
+					return -1;
+				}
 			}
 		}
 	}
@@ -5475,18 +5537,9 @@ int handle_write_operation(
 				fprintf(stderr, "[%s] New block write %s held on server %d: waiting for new server.\n", arguments->args->data_hostname, key.c_str(), arguments->args->id);
 
 				// Drains incoming data for UCX consistency.
-				if (!expect_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
+				if (!expect_pre_data_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
 				{
-					size_t drain_len = get_recv_data_length(arguments->ucp_worker, data_recv_tag);
-					if (drain_len > 0)
-					{
-						void *drain_buf = malloc(drain_len);
-						if (drain_buf != NULL)
-						{
-							recv_data(arguments->ucp_worker, arguments->server_ep, drain_buf, drain_len, data_recv_tag, 0);
-							free(drain_buf);
-						}
-					}
+					drain_async_write_data(arguments, data_recv_tag);
 				}
 
 				pthread_mutex_lock(&mutex_malleability);
@@ -5503,29 +5556,27 @@ int handle_write_operation(
 			slog_warn("[%s] New block write %s rejected: server %d is in READ_UPDATE mode.", arguments->args->data_hostname, key.c_str(), arguments->args->id);
 			fprintf(stderr, "[%s] New block write %s rejected: server %d is in READ_UPDATE mode.\n", arguments->args->data_hostname, key.c_str(), arguments->args->id);
 
-			if (!expect_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
+			if (!expect_pre_data_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
 			{
-				// Consumes the petition to keep UCX consistency.
-				size_t drain_len = get_recv_data_length(arguments->ucp_worker, data_recv_tag);
-				if (drain_len > 0)
-				{
-					void *drain_buf = malloc(drain_len);
-					if (drain_buf != NULL)
-					{
-						recv_data(arguments->ucp_worker, arguments->server_ep, drain_buf, drain_len, data_recv_tag, 0);
-						free(drain_buf);
-					}
-				}
+				// Consumes the incoming data to keep UCX consistency.
+				drain_async_write_data(arguments, data_recv_tag);
 			}
 
-			p_argv temp_p_argv_for_calls;
-			fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
-			// send the update list of nodes to the client.
-			send_node_list_2_frontend(temp_p_argv_for_calls, server_n_used_in_frontend);
+			if (!is_async_migration)
+			{
+				p_argv temp_p_argv_for_calls;
+				fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
+				// send the update list of nodes to the client.
+				int send_ret = send_node_list_2_frontend(temp_p_argv_for_calls, server_n_used_in_frontend);
+				if (send_post_write_status && (send_ret == 2 || send_ret < 0))
+				{
+					SendConfirmationMessage(arguments, MSG_ERROR_OP);
+				}
+			}
 			return -1;
 		}
 
-		if (transfer_mode == CommunicationMode::MODE_NETWORK && expect_ack)
+		if (transfer_mode == CommunicationMode::MODE_NETWORK && expect_pre_data_ack)
 			SendConfirmationMessage(arguments, MSG_OK_OP); // OK ack.
 
 		slog_debug("[WRITE_OP] NO key find %s", key.c_str());
@@ -5544,7 +5595,7 @@ int handle_write_operation(
 			{
 				perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
 				slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_INVALID_MSG_LENGTH");
-				if (!suppress_async_migration_ack)
+				if (send_post_write_status)
 				{
 					SendConfirmationMessage(arguments, MSG_ERROR_OP);
 				}
@@ -5586,7 +5637,7 @@ int handle_write_operation(
 			{
 				perror("HERCULES_ERR_MEMORY_ALLOCATION");
 				slog_error("HERCULES_ERR_MEMORY_ALLOCATION");
-				if (!expect_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
+				if (!expect_pre_data_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
 				{
 					// consumes the incoming data to avoid network corruption.
 					// TODO: check for optimizations here.
@@ -5597,7 +5648,7 @@ int handle_write_operation(
 						free(drain_buf);
 					}
 				}
-				if (!suppress_async_migration_ack)
+				if (send_post_write_status)
 				{
 					SendConfirmationMessage(arguments, MSG_ERROR_OP);
 				}
@@ -5610,7 +5661,7 @@ int handle_write_operation(
 			{
 				perror("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
 				slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NEW_BLOCK_RECV_DATA");
-				if (!suppress_async_migration_ack)
+				if (send_post_write_status)
 				{
 					SendConfirmationMessage(arguments, MSG_ERROR_OP);
 				}
@@ -5786,7 +5837,7 @@ int handle_write_operation(
 			if (insert_successful != 0)
 			{
 				// Batched SETDISK / SETBUFFNETWORK and SETNETWORK_ASYNC do not emit per-block error ACKs.
-				if (transfer_mode != CommunicationMode::MODE_DISK && transfer_mode != CommunicationMode::MODE_BUFF_NETWORK && !suppress_async_migration_ack)
+				if (transfer_mode != CommunicationMode::MODE_DISK && transfer_mode != CommunicationMode::MODE_BUFF_NETWORK && !is_async_migration)
 				{
 					if (insert_successful == 2) // TODO: check where to move this confirmation messages.
 					{
@@ -5828,6 +5879,10 @@ int handle_write_operation(
 					StsQueue.push(mem_pool, buffer);
 				}
 				buffer = NULL;
+				if (send_post_write_status)
+				{
+					SendConfirmationMessage(arguments, MSG_OK_OP);
+				}
 				return 0;
 			}
 
@@ -5848,7 +5903,7 @@ int handle_write_operation(
 	// if the block was already stored:
 	else
 	{
-		if (transfer_mode == CommunicationMode::MODE_NETWORK && expect_ack)
+		if (transfer_mode == CommunicationMode::MODE_NETWORK && expect_pre_data_ack)
 			SendConfirmationMessage(arguments, MSG_OK_OP); // OK ack.
 
 		slog_debug("[WRITE_OP] Key find %s", key.c_str());
@@ -5877,12 +5932,20 @@ int handle_write_operation(
 					{
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_INVALID_MSG_LENGTH");
+						if (send_post_write_status)
+						{
+							SendConfirmationMessage(arguments, MSG_ERROR_OP);
+						}
 						return -1;
 					}
 
 					// Stale migration check on existing block 0
 					if (handle_stale_migration_write(arguments, transfer_mode, key, msg_length, data_recv_tag))
 					{
+						if (send_post_write_status)
+						{
+							SendConfirmationMessage(arguments, MSG_OK_OP);
+						}
 						return 0;
 					}
 
@@ -5891,7 +5954,11 @@ int handle_write_operation(
 					{
 						perror("HERCULES_ERR_SRV_WORKER_MEMORY_ALLOCATION");
 						slog_error("HERCULES_ERR_SRV_WORKER_MEMORY_ALLOCATION");
-						if (!suppress_async_migration_ack)
+						if (!expect_pre_data_ack && transfer_mode == CommunicationMode::MODE_NETWORK)
+						{
+							drain_async_write_data(arguments, data_recv_tag);
+						}
+						if (send_post_write_status)
 						{
 							SendConfirmationMessage(arguments, MSG_ERROR_OP);
 						}
@@ -5916,7 +5983,7 @@ int handle_write_operation(
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_BLOCK_0_RECV_DATA");
 						free(buffer);
-						if (!suppress_async_migration_ack)
+						if (send_post_write_status)
 						{
 							SendConfirmationMessage(arguments, MSG_ERROR_OP);
 						}
@@ -6024,7 +6091,7 @@ int handle_write_operation(
 					{
 						slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
 						perror("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_INVALID_MSG_LENGTH");
-						if (!suppress_async_migration_ack)
+						if (send_post_write_status)
 						{
 							SendConfirmationMessage(arguments, MSG_ERROR_OP);
 						}
@@ -6035,6 +6102,10 @@ int handle_write_operation(
 					// Stale migration check on existing block:
 					if (handle_stale_migration_write(arguments, transfer_mode, key, msg_length, data_recv_tag))
 					{
+						if (send_post_write_status)
+						{
+							SendConfirmationMessage(arguments, MSG_OK_OP);
+						}
 						return 0;
 					}
 
@@ -6059,7 +6130,7 @@ int handle_write_operation(
 				{
 					slog_error("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
 					perror("HERCULES_ERR_DATA_WORKER_WRITE_NON_BLOCK_0_RECV_DATA");
-					if (!suppress_async_migration_ack)
+					if (send_post_write_status)
 					{
 						SendConfirmationMessage(arguments, MSG_ERROR_OP);
 					}
@@ -6109,6 +6180,16 @@ int handle_write_operation(
 		// SendConfirmationMessage(arguments, MSG_OK_OP);
 	}
 
+	if (send_post_write_status)
+	{
+		if (SendConfirmationMessage(arguments, MSG_OK_OP) == 0)
+		{
+			slog_error("HERCULES_ERR_SEND_ASYNC_WRITE_ACK: failed to send OK reply for %s", key.c_str());
+			fprintf(stderr, "HERCULES_ERR_SEND_ASYNC_WRITE_ACK: failed to send OK reply for %s\n", key.c_str());
+			return -1;
+		}
+	}
+
 	return 0;
 }
 
@@ -6150,8 +6231,8 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 	bool is_async_migration = (strcmp(mode, MSG_SETNETWORK_ASYNC) == 0);
 
 	// checks the mode and updates the given pointers.
-	bool expect_ack = true;
-	ret = determine_operation_flags(arguments, req, mode, &io_operation, &is_shared_memory, &default_params, &snapshot_op, &truncate, &mode_type, &to_read_args, &expect_ack);
+	bool expect_pre_data_ack = true;
+	ret = determine_operation_flags(arguments, req, mode, &io_operation, &is_shared_memory, &default_params, &snapshot_op, &truncate, &mode_type, &to_read_args, &expect_pre_data_ack);
 	if (ret != 0)
 	{
 		return ret;
@@ -6309,7 +6390,7 @@ int srv_worker_helper(p_argv *arguments, const char *req, void *map_server_eps)
 			    truncate,
 			    transfer_mode,
 			    NULL,
-			    expect_ack,
+			    expect_pre_data_ack,
 			    snapshot_enabled,
 			    recv_tag);
 			if (is_async_migration)

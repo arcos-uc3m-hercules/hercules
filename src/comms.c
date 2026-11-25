@@ -309,11 +309,7 @@ extern "C"
 		ucp_request_free(request);
 
 		delete completed_req;
-		size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
-		if (current_outstanding > 0)
-		{
-			outstanding_sends--;
-		}
+		decrement_outstanding_sends();
 	}
 
 	/**
@@ -346,11 +342,7 @@ extern "C"
 		}
 		ucp_request_free(request);
 
-		size_t current_outstanding = outstanding_sends.load(std::memory_order_relaxed);
-		if (current_outstanding > 0)
-		{
-			outstanding_sends--;
-		}
+		decrement_outstanding_sends();
 	}
 
 	/**
@@ -398,6 +390,22 @@ extern "C"
 		void *request = ucp_tag_recv_nbx(ucp_worker, allocated_buffer, buffer_len, tag, tag_mask, &recv_param);
 
 		return request;
+	}
+
+	/**
+	 * @brief Posts a non-blocking receive bound to an already-probed UCX message handle.
+	 */
+	void *irecv_data_2(ucp_worker_h ucp_worker, void *allocated_buffer, size_t buffer_len, ucp_tag_message_h msg_tag)
+	{
+		ucp_request_param_t recv_param;
+		recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+					  UCP_OP_ATTR_FIELD_DATATYPE |
+					  UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+		recv_param.cb.recv = recv_handler;
+		recv_param.datatype = ucp_dt_make_contig(1);
+
+		slog_debug("Posting asynchronous msg receive for len %zu", buffer_len);
+		return ucp_tag_msg_recv_nbx(ucp_worker, allocated_buffer, buffer_len, msg_tag, &recv_param);
 	}
 
 	/***
@@ -553,7 +561,7 @@ extern "C"
 			ucp_worker_progress(ucp_worker);
 
 			/* Check if the callback changes the status.*/
-			if (ep_context->status != UCS_OK)
+			if (ep_context != NULL && ep_context->status != UCS_OK)
 			{
 				slog_error("An error was detect in the endpoint: %s", ucs_status_string(ep_context->status));
 				return (size_t)-1;
@@ -567,6 +575,37 @@ extern "C"
 		slog_debug("message of size %ld is coming from %" PRIu64, info_tag.length, info_tag.sender_tag);
 
 		return info_tag.length;
+	}
+
+	/**
+	 * @brief Waits for an incoming message while checking endpoint error status and atomically removes its handle from the unexpected queue.
+	 */
+	size_t get_recv_data_length_with_cb_2(ucp_worker_h ucp_worker, uint64_t dest, client_ep_context_t *ep_context, ucp_tag_recv_info_t *info_tag, ucp_tag_message_h *msg_tag)
+	{
+		if (info_tag == NULL || msg_tag == NULL)
+		{
+			slog_error("HERCULES_ERR_GET_RECV_LEN_CB2_INVALID_ARGS: info_tag or msg_tag is NULL");
+			fprintf(stderr, "HERCULES_ERR_GET_RECV_LEN_CB2_INVALID_ARGS: info_tag or msg_tag is NULL\n");
+			return 0;
+		}
+
+		slog_debug("waiting for a message, remove=1");
+		do
+		{
+			ucp_worker_progress(ucp_worker);
+
+			if (ep_context != NULL && ep_context->status != UCS_OK)
+			{
+				slog_error("An error was detect in the endpoint: %s", ucs_status_string(ep_context->status));
+				*msg_tag = NULL;
+				return (size_t)-1;
+			}
+			// Pass remove = 1 to atomically remove the message from the unexpected queue.
+			*msg_tag = ucp_tag_probe_nb(ucp_worker, dest, tag_mask, 1, info_tag);
+		} while (*msg_tag == NULL);
+
+		slog_debug("message of size %ld is coming from %" PRIu64, info_tag->length, info_tag->sender_tag);
+		return info_tag->length;
 	}
 
 	size_t get_recv_data_length_2(ucp_worker_h ucp_worker, uint64_t dest, ucp_tag_recv_info_t *info_tag, ucp_tag_message_h *msg_tag)

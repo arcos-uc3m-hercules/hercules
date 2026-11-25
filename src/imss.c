@@ -58,7 +58,6 @@ int32_t N_SERVERS = -1; // Default
 extern u_int32_t ASYNC_GET_CONCURRENCY;
 extern u_int32_t ASYNC_SET_CONCURRENCY;
 const int32_t MAX_SERVERS = 100;
-const int MAX_RETRIES = 10;
 
 GArray *imssd = NULL;	   // Set of IMSS metadata and connection structures currently used.
 GArray *free_imssd = NULL; // Set of free entries within the 'imssd' vector.
@@ -118,12 +117,21 @@ uint64_t local_data_uid = 0;
 
 extern char POLICY[MAX_POLICY_LEN];
 
-// pthread_mutex_t lock_gtree = PTHREAD_MUTEX_INITIALIZER;
-
 SharedMemory *shared_memory;
 key_t shared_memory_key;
 
 std::mutex mutex_hercules_struct;
+
+static std::atomic<uint64_t> g_async_write_seq{1};
+
+enum WriteReplyKind
+{
+	WRITE_REPLY_COMM_ERR = -1,
+	WRITE_REPLY_OK = 0,
+	WRITE_REPLY_SPACE = 1,
+	WRITE_REPLY_DATASERVERS = 2,
+	WRITE_REPLY_SERVER_ERR = 3
+};
 
 struct arguments args;
 
@@ -6318,7 +6326,125 @@ static void record_backend_data_metric(const char *hostname, int server_id, int3
 	backend_performance_metrics[used_hostname_server].server_id = server_id;
 }
 
+/**
+ * @brief Thread-safe wrapper recording client-side data-block read or write transfer metrics.
+ */
+void record_client_data_metric(const char *hostname, int32_t server_id, int32_t data_id, int is_write, size_t data_bytes, double data_time_sec)
+{
+	pthread_mutex_lock(&lock_network);
+	record_backend_data_metric(hostname, server_id, data_id, (is_write != 0), data_bytes, data_time_sec);
+	pthread_mutex_unlock(&lock_network);
+}
+
+/**
+ * @brief Populates optional target server metadata for callers tracking per-server async batches.
+ */
+static void fill_read_target_info(char *out_hostname, size_t hostname_len, int32_t *out_server_id, const char *node_hostname, int32_t server_id)
+{
+	if (out_hostname != NULL && hostname_len > 0)
+	{
+		if (node_hostname != NULL)
+		{
+			strncpy(out_hostname, node_hostname, hostname_len - 1);
+			out_hostname[hostname_len - 1] = '\0';
+		}
+		else
+		{
+			out_hostname[0] = '\0';
+		}
+	}
+	if (out_server_id != NULL)
+	{
+		*out_server_id = server_id;
+	}
+}
+
+int32_t get_active_storage_server_count(int rw_only)
+{
+	pthread_mutex_lock(&lock_network);
+	int32_t count = 0;
+	if (rw_only && curr_imss.info.num_rw_storages > 0)
+	{
+		count = curr_imss.info.num_rw_storages;
+	}
+	else if (curr_imss.info.num_storages > 0)
+	{
+		count = (int32_t)curr_imss.info.num_storages;
+	}
+	else if (N_SERVERS > 0)
+	{
+		count = N_SERVERS;
+	}
+	pthread_mutex_unlock(&lock_network);
+	return count;
+}
+
+/**
+ * @brief Inspects a completed get_ndata response for error/malleability control messages and applies topology updates.
+ *
+ * @param dataset_uri Dataset URI associated with the read.
+ * @param buf Received response data.
+ * @param received_len Number of valid bytes received into buf.
+ * @return 0 if buf is user data, 1 if topology updated and the caller should retry, or -1 if missing (-ENOENT) or invalid dataset_uri.
+ */
+int32_t handle_async_read_control_response(const char *dataset_uri, const void *buf, size_t received_len)
+{
+	if (dataset_uri == NULL)
+	{
+		slog_error("HERCULES_ERR_READ_CTRL_NULL_URI: dataset_uri is NULL");
+		fprintf(stderr, "HERCULES_ERR_READ_CTRL_NULL_URI: dataset_uri is NULL\n");
+		return -1;
+	}
+
+	if (buf == NULL || received_len == 0)
+	{
+		slog_error("HERCULES_ERR_READ_CTRL_INVALID_ARGS: buf=%p, received_len=%zu", buf, received_len);
+		fprintf(stderr, "HERCULES_ERR_READ_CTRL_INVALID_ARGS: buf=%p, received_len=%zu\n", buf, received_len);
+		return 0;
+	}
+
+	const char *data = (const char *)buf;
+	const char *no_key_msg = "$ERRIMSS_NO_KEY_AVAIL$";
+	const size_t no_key_prefix_len = 22;
+	const size_t ds_prefix_len = strlen(MSG_MALLEABILITY_DATASERVERS);
+
+	if (received_len >= no_key_prefix_len && strncmp(data, no_key_msg, no_key_prefix_len) == 0)
+	{
+		slog_malleability("Read received NO_KEY_AVAIL for %s; checking malleability changes.", dataset_uri);
+		int changes_found = get_malleability_changes((char *)dataset_uri, NULL);
+		if (changes_found == 1)
+		{
+			return 1;
+		}
+		return -1;
+	}
+
+	if (received_len >= ds_prefix_len && strncmp(data, MSG_MALLEABILITY_DATASERVERS, ds_prefix_len) == 0)
+	{
+		char *ctrl_copy = (char *)malloc(received_len + 1);
+		if (ctrl_copy == NULL)
+		{
+			slog_error("HERCULES_ERR_READ_CTRL_MEM: failed to allocate %zu bytes", received_len + 1);
+			fprintf(stderr, "HERCULES_ERR_READ_CTRL_MEM: failed to allocate %zu bytes\n", received_len + 1);
+			return -1;
+		}
+		memcpy(ctrl_copy, data, received_len);
+		ctrl_copy[received_len] = '\0';
+		int32_t changes_found = parse_malleability_message(ctrl_copy, NULL);
+		slog_malleability("[handle_async_read_control_response] Parsed DATASERVERS control message (changes_found=%d)", changes_found);
+		free(ctrl_copy);
+		return 1;
+	}
+
+	return 0;
+}
+
 ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request, int deep)
+{
+	return get_ndata_with_target(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep, NULL, 0, NULL);
+}
+
+ssize_t get_ndata_with_target(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request, int deep, char *out_hostname, size_t hostname_len, int32_t *out_server_id)
 {
 	auto start_read_op = std::chrono::steady_clock::now();
 	slog_debug("dataset_uri=%s, dataset_id=%d, data_id=%d", dataset_uri, dataset_id, data_id);
@@ -6445,12 +6571,12 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			if (changes_found == 1)
 			{
 				slog_malleability("Changes found, trying to get block with new configuration");
-				return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
+				return get_ndata_with_target(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1, out_hostname, hostname_len, out_server_id);
 			}
 			else
 			{
 				slog_malleability("Changes not found, retry get block");
-				return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
+				return get_ndata_with_target(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1, out_hostname, hostname_len, out_server_id);
 			}
 			return -2;
 		}
@@ -6480,7 +6606,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 				int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 				if (changes_found == 1)
 				{
-					return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
+					return get_ndata_with_target(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1, out_hostname, hostname_len, out_server_id);
 				}
 			}
 			fprintf(stderr, "HERCULES_ERR_GET_NDATA_SEND_REQ\n");
@@ -6499,11 +6625,10 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 
 		std::chrono::duration<double> time_taken_data;
 		auto start_time_data = std::chrono::steady_clock::now();
-		msg_length = TIMING(get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context), "get_recv_data_length", size_t, process_rank);
-
-		// ucp_tag_recv_info_t info_tag;
-		// ucp_tag_message_h msg_tag;
-		// msg_length = TIMING(get_recv_data_length_2(ucp_worker_data, local_data_uid, &info_tag, &msg_tag), "get_recv_data_length_2", size_t, process_rank);
+		ucp_tag_recv_info_t info_tag;
+		ucp_tag_message_h msg_tag = NULL;
+		memset(&info_tag, 0, sizeof(info_tag));
+		msg_length = TIMING(get_recv_data_length_with_cb_2(ucp_worker_data, local_data_uid, this_context, &info_tag, &msg_tag), "get_recv_data_length", size_t, process_rank);
 		slog_info("[IMSS] Receiving data, msg_length=%lu", msg_length);
 		if (msg_length == (size_t)-1)
 		{
@@ -6520,7 +6645,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 				int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
 				if (changes_found == 1)
 				{
-					return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
+					return get_ndata_with_target(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1, out_hostname, hostname_len, out_server_id);
 				}
 			}
 			fprintf(stderr, "HERCULES_ERR_GET_NDATA_CONNECTION_LOST: The remote server has disconnected.\n");
@@ -6529,6 +6654,12 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 
 		if (msg_length == 0)
 		{
+			if (msg_tag != NULL)
+			{
+				// Consume and release the removed 0-byte UCX message handle before returning an error.
+				char empty_dummy = 0;
+				recv_data_2(ucp_worker_data, ep, &empty_dummy, 0, local_data_uid, SYNC, info_tag, msg_tag);
+			}
 			perror("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
 			slog_error("ERR_HERCULES_GET_NDATA_INVALID_MSG_LENGTH");
 			pthread_mutex_unlock(&lock_network);
@@ -6544,14 +6675,61 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			return -2;
 		}
 
+		// Control replies longer than the requested read size must never overflow the caller's read buffer.
+		if (!use_local && to_read > 0 && msg_length > (size_t)to_read)
+		{
+			char *ctrl_buf = (char *)malloc(msg_length + 1);
+			if (ctrl_buf == NULL)
+			{
+				slog_error("HERCULES_ERR_GET_NDATA_CTRL_MALLOC: failed to allocate %zu bytes", msg_length + 1);
+				fprintf(stderr, "HERCULES_ERR_GET_NDATA_CTRL_MALLOC: failed to allocate %zu bytes\n", msg_length + 1);
+				pthread_mutex_unlock(&lock_network);
+				return -2;
+			}
+			size_t ctrl_len = recv_data_2(ucp_worker_data, ep, ctrl_buf, msg_length, local_data_uid, SYNC, info_tag, msg_tag);
+			pthread_mutex_unlock(&lock_network);
+			if (ctrl_len == 0)
+			{
+				free(ctrl_buf);
+				slog_error("ERR_HERCULES_GETDATA_RECV: %s", key_);
+				fprintf(stderr, "ERR_HERCULES_GETDATA_RECV: %s\n", key_);
+				return -2;
+			}
+			ctrl_buf[ctrl_len] = '\0';
+			int32_t ctrl_ret = handle_async_read_control_response(dataset_uri, ctrl_buf, ctrl_len);
+			free(ctrl_buf);
+			if (ctrl_ret == 1)
+			{
+				if (deep > MAX_RETRIES + 1)
+				{
+					slog_error("max retries (%d) reached for '%s', giving up.", MAX_RETRIES, key_);
+					fprintf(stderr, "[get_ndata] max tries reached. Giving up with error.\n");
+					return -1;
+				}
+				return get_ndata_with_target(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1, out_hostname, hostname_len, out_server_id);
+			}
+			if (ctrl_ret < 0)
+			{
+				errno = ENOENT;
+				return -1;
+			}
+			slog_error("HERCULES_ERR_GET_NDATA_OVERSIZE: received %zu bytes for %zd-byte read %s", ctrl_len, to_read, key_);
+			fprintf(stderr, "HERCULES_ERR_GET_NDATA_OVERSIZE: received %zu bytes for %zd-byte read %s\n", ctrl_len, to_read, key_);
+			return -2;
+		}
+
 		size_t size_received_data = 0;
 		if (async == ASYNC)
 		{
 			slog_debug("async process");
 			// async get.
-			int get_concurrency = (ASYNC_GET_CONCURRENCY > 0) ? (int)ASYNC_GET_CONCURRENCY : curr_imss_storages;
+			int get_concurrency = curr_imss_storages;
+			if (ASYNC_GET_CONCURRENCY > 0)
+			{
+				get_concurrency = (int)ASYNC_GET_CONCURRENCY;
+			}
 			async_data_worker_progress(get_concurrency);
-			void *ucx_req_handle = irecv_data(ucp_worker_data, response_buffer, msg_length, local_data_uid);
+			void *ucx_req_handle = irecv_data_2(ucp_worker_data, response_buffer, msg_length, msg_tag);
 			if (buffer_request)
 			{
 				*buffer_request = ucx_req_handle;
@@ -6572,7 +6750,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 		else
 		{
 			// original
-			size_received_data = TIMING(recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async), "recv_data", size_t, process_rank);
+			size_received_data = TIMING(recv_data_2(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async, info_tag, msg_tag), "recv_data", size_t, process_rank);
 		}
 		auto end_time_data = std::chrono::steady_clock::now();
 		time_taken_data = end_time_data - start_time_data;
@@ -6593,18 +6771,15 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			// 	break;
 		}
 
-		// In async mode, the non-blocking receive is in flight. Return the scheduled size
-		// without inspecting response_buffer before UCX receive finishes.
+		// In async mode, the non-blocking receive completes later in imss_read_blocks_async(). Here we skip inspecting response_buffer.
 		if (async == ASYNC)
 		{
-			std::chrono::duration<double> op_time = std::chrono::steady_clock::now() - start_read_op;
-			record_backend_data_metric(node_hostname, server_id, data_id, false, size_received_data, op_time.count());
-
+			fill_read_target_info(out_hostname, hostname_len, out_server_id, node_hostname, server_id);
 			pthread_mutex_unlock(&lock_network);
 			return (ssize_t)size_received_data;
 		}
 
-		// Check if the requested key was correctly retrieved.
+		// Check whether the synchronous response was a control/error reply before treating it as data.
 		if (!strncmp((const char *)response_buffer, "$ERRIMSS_NO_KEY_AVAIL$", 22))
 		{ // key not avaiable on the remote server.
 			slog_debug("Block was not find.");
@@ -6620,7 +6795,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 				int changes_found = get_malleability_changes((char *)dataset_uri, NULL);
 				if (changes_found == 1)
 				{
-					return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
+					return get_ndata_with_target(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1, out_hostname, hostname_len, out_server_id);
 				}
 			}
 			char err_msg[MAX_ERR_MSG_LEN] = {0};
@@ -6659,7 +6834,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			}
 			int32_t changes_found = parse_malleability_message(response_buffer, NULL);
 			slog_malleability("changes_found=%d", changes_found);
-			return get_ndata(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1);
+			return get_ndata_with_target(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1, out_hostname, hostname_len, out_server_id);
 		}
 		else
 		{
@@ -6687,6 +6862,7 @@ ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *
 			// performance read metrics.
 			std::chrono::duration<double> op_time = std::chrono::steady_clock::now() - start_read_op;
 			record_backend_data_metric(node_hostname, server_id, data_id, false, size_received_data, op_time.count());
+			fill_read_target_info(out_hostname, hostname_len, out_server_id, node_hostname, server_id);
 
 			// free(response_buffer);
 			pthread_mutex_unlock(&lock_network);
@@ -7237,6 +7413,613 @@ int32_t wait_ack_set_data(char **response_buffer, ucp_ep_h ep, int async)
 	return (int32_t)size_received_data;
 }
 
+
+/**
+ * @brief Generates a request-scoped UCX tag distinct from base_uid so SET_ASYNC traffic never collides with SYNC local_data_uid replies.
+ */
+static uint64_t next_async_op_tag(uint64_t base_uid)
+{
+	uint64_t seq = g_async_write_seq.fetch_add(1, std::memory_order_relaxed);
+	if ((seq & 0xFFFFFFFFULL) == 0)
+	{
+		seq = g_async_write_seq.fetch_add(1, std::memory_order_relaxed);
+	}
+	uint64_t tag = base_uid ^ (seq * 0x9e3779b97f4a7c15ULL);
+	if (tag == 0 || tag == base_uid)
+	{
+		tag = base_uid ^ 0x517cc1b727220a95ULL ^ seq;
+	}
+	return tag;
+}
+
+/**
+ * @brief Receives and classifies a matched UCX write reply while lock_network is held.
+ *
+ * @param ep Server UCX endpoint.
+ * @param reply_tag UCX tag used by this request/reply exchange.
+ * @param info_tag Probe metadata containing incoming message length.
+ * @param msg_tag Removed UCX message handle to receive from.
+ * @param req_key Request string used for error diagnostics.
+ * @param out_ds_msg On WRITE_REPLY_DATASERVERS, set to a newly allocated copy of the server list message (caller must free).
+ * @param out_reply_len Optional output receiving the reply byte count.
+ * @return WRITE_REPLY_OK (0) when the server confirmed the write (MSG_OK_OP);
+ *         WRITE_REPLY_SPACE (1) when the server reported insufficient space (MSG_SPACE_OP);
+ *         WRITE_REPLY_DATASERVERS (2) when the server returned a DATASERVERS topology update;
+ *         WRITE_REPLY_SERVER_ERR (3) when the server returned MSG_ERROR_OP;
+ *         WRITE_REPLY_COMM_ERR (-1) on invalid 0-byte reply, allocation failure, or recv failure.
+ */
+static int recv_write_reply_msg_locked(
+    ucp_ep_h ep,
+    uint64_t reply_tag,
+    ucp_tag_recv_info_t info_tag,
+    ucp_tag_message_h msg_tag,
+    const char *req_key,
+    char **out_ds_msg,
+    size_t *out_reply_len)
+{
+	*out_ds_msg = NULL;
+	if (out_reply_len != NULL)
+	{
+		*out_reply_len = 0;
+	}
+
+	size_t msg_length = info_tag.length;
+	if (msg_length == 0)
+	{
+		if (msg_tag != NULL)
+		{
+			// Consume and release the removed 0-byte UCX message handle before returning an error.
+			char empty_dummy = 0;
+			recv_data_2(ucp_worker_data, ep, &empty_dummy, 0, reply_tag, SYNC, info_tag, msg_tag);
+		}
+		slog_error("HERCULES_ERR_SET_DATA_INVALID_REPLY_LEN: 0 bytes for '%s'", req_key);
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_INVALID_REPLY_LEN: 0 bytes for '%s'\n", req_key);
+		return WRITE_REPLY_COMM_ERR;
+	}
+
+	char *response_buffer = (char *)malloc(msg_length + 1);
+	if (response_buffer == NULL)
+	{
+		slog_error("HERCULES_ERR_SET_DATA_REPLY_MALLOC: failed to allocate %zu bytes", msg_length + 1);
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_REPLY_MALLOC: failed to allocate %zu bytes\n", msg_length + 1);
+		return WRITE_REPLY_COMM_ERR;
+	}
+
+	size_t recv_len = recv_data_2(ucp_worker_data, ep, response_buffer, msg_length, reply_tag, SYNC, info_tag, msg_tag);
+	if (recv_len == 0)
+	{
+		free(response_buffer);
+		slog_error("HERCULES_ERR_SET_DATA_RECV_REPLY_FAILED: %s", req_key);
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_RECV_REPLY_FAILED: %s\n", req_key);
+		return WRITE_REPLY_COMM_ERR;
+	}
+	response_buffer[recv_len] = '\0';
+	if (out_reply_len != NULL)
+	{
+		*out_reply_len = recv_len;
+	}
+
+	if (!strncmp(response_buffer, MSG_SPACE_OP, strlen(MSG_SPACE_OP)))
+	{
+		slog_error("No space left on server");
+		fprintf(stderr, "No space left on server\n");
+		free(response_buffer);
+		return WRITE_REPLY_SPACE;
+	}
+
+	if (!strncmp(MSG_MALLEABILITY_DATASERVERS, response_buffer, strlen(MSG_MALLEABILITY_DATASERVERS)))
+	{
+		slog_malleability(" result=%s, msg_length=%zu", response_buffer, recv_len);
+		*out_ds_msg = response_buffer;
+		return WRITE_REPLY_DATASERVERS;
+	}
+
+	if (!strncmp(response_buffer, MSG_ERROR_OP, strlen(MSG_ERROR_OP)))
+	{
+		slog_error("HERCULES_ERR_SET_DATA_SERVER_ERROR: %s returned ERROR", req_key);
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_SERVER_ERROR: %s returned ERROR\n", req_key);
+		free(response_buffer);
+		return WRITE_REPLY_SERVER_ERR;
+	}
+
+	free(response_buffer);
+	return WRITE_REPLY_OK;
+}
+
+/**
+ * @brief Applies topology updates and retry/error classification for non-OK write replies with lock_network released.
+ */
+static void handle_non_ok_write_reply(
+    int reply_kind,
+    char *ds_msg,
+    const char *dataset_uri,
+    const char *node_hostname,
+    const char *req_key,
+    int retries,
+    bool *out_should_retry,
+    int32_t *out_err_ret)
+{
+	*out_should_retry = false;
+	*out_err_ret = -ECANCELED;
+
+	if (reply_kind == WRITE_REPLY_SPACE)
+	{
+		if (retries < MAX_RETRIES && get_malleability_changes((char *)dataset_uri, node_hostname) == 1)
+		{
+			*out_should_retry = true;
+			return;
+		}
+		if (curr_imss.info.num_rw_storages == 0)
+		{
+			*out_err_ret = -ENOSPC;
+		}
+		else
+		{
+			*out_err_ret = -EAGAIN;
+		}
+		return;
+	}
+
+	if (reply_kind == WRITE_REPLY_DATASERVERS)
+	{
+		if (retries > MAX_RETRIES)
+		{
+			free(ds_msg);
+			slog_error("max retries (%d) reached for '%s', giving up.", MAX_RETRIES, req_key);
+			fprintf(stderr, "[set_data] max tries reached. Giving up with error.\n");
+			return;
+		}
+		parse_malleability_message(ds_msg, NULL);
+		free(ds_msg);
+		*out_should_retry = true;
+		return;
+	}
+
+	if (reply_kind == WRITE_REPLY_SERVER_ERR || reply_kind == WRITE_REPLY_COMM_ERR)
+	{
+		if (retries < MAX_RETRIES && get_malleability_changes((char *)dataset_uri, node_hostname) == 1)
+		{
+			*out_should_retry = true;
+			return;
+		}
+		if (retries >= MAX_RETRIES)
+		{
+			slog_error("max retries (%d) reached for '%s', giving up.", MAX_RETRIES, req_key);
+			fprintf(stderr, "HERCULES_ERR_SET_DATA_MAX_RETRIES: max retries (%d) reached for '%s'\n", MAX_RETRIES, req_key);
+		}
+	}
+}
+
+/**
+ * @brief Updates block bounds and interval mappings only once a block write is confirmed stored.
+ */
+static void finalize_write_interval_locked(const char *dataset_uri, int32_t data_id, int value_from_interval, int32_t routed_view_id)
+{
+	if (!TO_RECORD_INTERVALS || data_id <= 0)
+	{
+		return;
+	}
+
+	dataset_info *ds_ptr = NULL;
+	if (find_dataset_by_uri_hash_pool((char *)dataset_uri, &ds_ptr) != 1 || ds_ptr == NULL)
+	{
+		ds_ptr = curr_dataset;
+	}
+	if (ds_ptr == NULL)
+	{
+		slog_error("HERCULES_ERR_FINALIZE_INTERVAL: dataset not found for %s block %d", dataset_uri, data_id);
+		fprintf(stderr, "HERCULES_ERR_FINALIZE_INTERVAL: dataset not found for %s block %d\n", dataset_uri, data_id);
+		return;
+	}
+
+	if (data_id > ds_ptr->last_block_id)
+	{
+		slog_debug("setting %d as last block id", data_id);
+		ds_ptr->last_block_id = data_id;
+	}
+	if (ds_ptr->first_block_id == -1)
+	{
+		slog_debug("setting %d as first block id", data_id);
+		ds_ptr->first_block_id = data_id;
+	}
+
+	if (!value_from_interval)
+	{
+		slog_debug("[set_data] Recording block %d (view_id=%d) in dataset %s", data_id, routed_view_id, ds_ptr->uri_);
+		RecordBlockInterval(ds_ptr, data_id, routed_view_id);
+	}
+}
+
+/**
+ * @brief Looks up a storage server by hostname without keeping raw ep_context pointers.
+ */
+static void lookup_server_ep_status_locked(const char *dataset_uri, const char *server_hostname, int *out_found, ucs_status_t *out_status)
+{
+	*out_found = 0;
+	*out_status = UCS_OK;
+	if (server_hostname == NULL || server_hostname[0] == '\0')
+	{
+		slog_error("HERCULES_ERR_LOOKUP_SRV_EP_INVALID_HOST: empty or NULL server_hostname for dataset '%s'", dataset_uri ? dataset_uri : "(null)");
+		fprintf(stderr, "HERCULES_ERR_LOOKUP_SRV_EP_INVALID_HOST: empty or NULL server_hostname for dataset '%s'\n", dataset_uri ? dataset_uri : "(null)");
+		return;
+	}
+
+	imss *target_imss = &curr_imss;
+	dataset_info *ds_ptr = NULL;
+	if (find_dataset_by_uri_hash_pool((char *)dataset_uri, &ds_ptr) == 1 && ds_ptr != NULL && ds_ptr->imss_d >= 0 && imssd != NULL && ds_ptr->imss_d < (int32_t)imssd->len)
+	{
+		target_imss = &g_array_index(imssd, imss, ds_ptr->imss_d);
+	}
+
+	if (target_imss->info.ips == NULL)
+	{
+		slog_error("HERCULES_ERR_LOOKUP_SRV_EP_NULL_IPS: target_imss->info.ips is NULL while looking up '%s' (num_storages=%u)", server_hostname, target_imss->info.num_storages);
+		fprintf(stderr, "HERCULES_ERR_LOOKUP_SRV_EP_NULL_IPS: target_imss->info.ips is NULL while looking up '%s' (num_storages=%u)\n", server_hostname, target_imss->info.num_storages);
+		return;
+	}
+
+	for (uint32_t i = 0; i < target_imss->info.num_storages; ++i)
+	{
+		if (target_imss->info.ips[i] != NULL && strcmp(target_imss->info.ips[i], server_hostname) == 0)
+		{
+			*out_found = 1;
+			if (target_imss->conns.ep_contexts != NULL && target_imss->conns.ep_contexts[i] != NULL)
+			{
+				*out_status = target_imss->conns.ep_contexts[i]->status;
+			}
+			return;
+		}
+	}
+}
+
+/**
+ * @brief Sends a SET_ASYNC/SET_TRUNCATE_ASYNC request header and initiates non-blocking isend_data2 transfer.
+ */
+static int32_t submit_async_write(
+    ucp_ep_h ep,
+    const char *op_mode,
+    size_t size,
+    off_t offset,
+    const char *dataset_uri,
+    int32_t data_id,
+    int32_t curr_imss_storages,
+    uint32_t protocol_num_storages,
+    const void *buffer,
+    char *req_key,
+    uint64_t *out_async_tag)
+{
+	int set_concurrency = 2;
+	if (ASYNC_SET_CONCURRENCY > 0)
+	{
+		set_concurrency = (int)ASYNC_SET_CONCURRENCY;
+	}
+	else if (curr_imss_storages > 2)
+	{
+		set_concurrency = curr_imss_storages;
+	}
+	async_data_worker_progress(set_concurrency);
+
+	uint64_t async_tag = next_async_op_tag(local_data_uid);
+	snprintf(req_key, REQUEST_SIZE, "%s %lu %ld %s$%d %" PRIu32 " %" PRIu64, op_mode, size, offset, dataset_uri, data_id, protocol_num_storages, async_tag);
+	slog_debug("Sending async request '%s'", req_key);
+	slog_malleability("Sending async request '%s'", req_key);
+
+	size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, req_key), req_key, size_t, process_rank);
+	if (size_sent_req == 0)
+	{
+		slog_error("HERCULES_ERR_SET_REQ_SEND_REQ: %s", req_key);
+		fprintf(stderr, "HERCULES_ERR_SET_REQ_SEND_REQ: %s\n", req_key);
+		async_data_worker_progress(0);
+		return -1;
+	}
+
+	ServerSendRequest *new_send = new ServerSendRequest();
+	outstanding_sends++;
+	void *ucx_req_handle = isend_data2(ucp_worker_data, ep, (void *)buffer, size, async_tag, new_send);
+	if (UCS_PTR_IS_ERR(ucx_req_handle))
+	{
+		ucs_status_t send_err = UCS_PTR_STATUS(ucx_req_handle);
+		slog_error("HERCULES_ERR_ISEND_ASYNC: Failed to initiate async send (%s) for %s", ucs_status_string(send_err), req_key);
+		fprintf(stderr, "HERCULES_ERR_ISEND_ASYNC: Failed to initiate async send (%s) for %s\n", ucs_status_string(send_err), req_key);
+		decrement_outstanding_sends();
+		return -2;
+	}
+	if (!UCS_PTR_IS_PTR(ucx_req_handle))
+	{
+		// Completed immediately; callback is not invoked.
+		decrement_outstanding_sends();
+	}
+
+	*out_async_tag = async_tag;
+	return 0;
+}
+
+/**
+ * @brief Receives a single write status/control reply from a data server.
+ *
+ *
+ * @return WRITE_REPLY_OK on OK reply, or a non-OK WriteReplyKind (with optional heap-allocated *out_ds_msg
+ *         when returning WRITE_REPLY_DATASERVERS).
+ */
+static int receive_write_reply_locked(
+    ucp_ep_h ep,
+    client_ep_context_t *this_context,
+    uint64_t reply_tag,
+    const char *req_key,
+    char **out_ds_msg,
+    size_t *out_reply_len)
+{
+	*out_ds_msg = NULL;
+	if (out_reply_len != NULL)
+	{
+		*out_reply_len = 0;
+	}
+
+	ucp_tag_recv_info_t info_tag;
+	ucp_tag_message_h msg_tag = NULL;
+	memset(&info_tag, 0, sizeof(info_tag));
+	size_t msg_length = TIMING(get_recv_data_length_with_cb_2(ucp_worker_data, reply_tag, this_context, &info_tag, &msg_tag), "get_recv_data_length", size_t, process_rank);
+	if (msg_length == (size_t)-1)
+	{
+		slog_error("HERCULES_ERR_SET_DATA_GET_RECV_LENGTH_CONNECTION_LOST");
+		fprintf(stderr, "HERCULES_ERR_SET_DATA_GET_RECV_LENGTH_CONNECTION_LOST\n");
+		return WRITE_REPLY_COMM_ERR;
+	}
+
+	return recv_write_reply_msg_locked(ep, reply_tag, info_tag, msg_tag, req_key, out_ds_msg, out_reply_len);
+}
+
+int32_t start_async_write(AsyncWriteRequest *req)
+{
+	if (req == NULL)
+	{
+		slog_error("HERCULES_ERR_START_ASYNC_WRITE_NULL: AsyncWriteRequest pointer is NULL");
+		fprintf(stderr, "HERCULES_ERR_START_ASYNC_WRITE_NULL: AsyncWriteRequest pointer is NULL\n");
+		return -EINVAL;
+	}
+
+	req->in_use = 0;
+	req->metric_recorded = 0;
+
+	while (true)
+	{
+		TopologyView *view = NULL;
+		int32_t entry_value = -1;
+		int32_t n_server = TIMING(get_data_location(req->dataset_uri, req->dataset_id, req->data_id, SET, &view, &entry_value), "get_data_location", int32_t, process_rank);
+		if (n_server == -1)
+		{
+			slog_error("HERCULES_ERR_GET_DATA_LOCATION");
+			fprintf(stderr, "HERCULES_ERR_GET_DATA_LOCATION\n");
+			return -ECANCELED;
+		}
+		// "get_data_location" initializes thread-local curr_dataset; validate it here before accessing dataset fields below.
+		if (curr_dataset == NULL)
+		{
+			slog_error("HERCULES_ERR_START_ASYNC_WRITE_NULL_DATASET: curr_dataset is NULL for %s", req->dataset_uri);
+			fprintf(stderr, "HERCULES_ERR_START_ASYNC_WRITE_NULL_DATASET: curr_dataset is NULL for %s\n", req->dataset_uri);
+			return -ECANCELED;
+		}
+
+		pthread_mutex_lock(&lock_network);
+		int32_t curr_imss_storages = curr_imss.info.num_storages;
+		if (view != NULL && view->num_servers > 0)
+		{
+			curr_imss_storages = view->num_servers;
+		}
+		int32_t routed_view_id = curr_imss.info.current_view_id;
+		if (view != NULL)
+		{
+			routed_view_id = view->view_id;
+		}
+		int value_from_interval = 0;
+		if (entry_value != -1)
+		{
+			value_from_interval = 1;
+		}
+		bool is_overwrite = (value_from_interval != 0) || (req->data_id == 0);
+
+		if (!is_overwrite && curr_imss.info.num_rw_storages == 0 && curr_imss.info.num_storages > 0)
+		{
+			pthread_mutex_unlock(&lock_network);
+			slog_error("HERCULES_ERR_SET_DATA_NO_ACTIVE_SERVERS: Cannot write new block %d: all data servers are in READ_UPDATE mode. No space left on device.", req->data_id);
+			fprintf(stderr, "HERCULES_ERR_SET_DATA_NO_ACTIVE_SERVERS: Cannot write new block %d: all data servers are in READ_UPDATE mode. No space left on device.\n", req->data_id);
+			return -ENOSPC;
+		}
+
+		int32_t repl_factor = curr_dataset->repl_factor;
+		int32_t session_policy = curr_dataset->session_plcy;
+		uint32_t n_server_ = (uint32_t)n_server;
+		int server_id = (int)n_server_;
+		int use_local = 0;
+		if ((session_policy == LOCAL_ || session_policy == ZCOPY_) && server_id == matching_server_id)
+		{
+			use_local = 1;
+		}
+
+		// Multi-replica or LOCAL shared-memory writes run through the synchronous path.
+		if (repl_factor > 1 || use_local)
+		{
+			pthread_mutex_unlock(&lock_network);
+			int32_t sync_ret = set_data(req->dataset_uri, req->dataset_id, req->data_id, req->buffer, req->size, req->offset, SYNC, req->retries, req->op_type);
+			if (sync_ret < 0)
+			{
+				req->in_use = 0;
+				return sync_ret;
+			}
+			req->metric_recorded = 1;
+			req->in_use = 0;
+			return 1;
+		}
+
+		if (!is_overwrite && server_id >= 0 && server_id < MAX_SERVERS_PER_VIEW && curr_imss.info.server_states[server_id] == SERVER_READ_UPDATE)
+		{
+			pthread_mutex_unlock(&lock_network);
+			slog_error("HERCULES_ERR_SET_DATA_SERVER_READ_UPDATE: Target data server %d is in READ_UPDATE mode. No space left on device.", server_id);
+			fprintf(stderr, "HERCULES_ERR_SET_DATA_SERVER_READ_UPDATE: Target data server %d is in READ_UPDATE mode. No space left on device.\n", server_id);
+			return -ENOSPC;
+		}
+
+		if (server_id < 0 || server_id >= (int)curr_imss.info.num_storages || curr_imss.info.ips == NULL || curr_imss.info.ips[server_id] == NULL || curr_imss.conns.eps == NULL || curr_imss.conns.eps[n_server_] == NULL)
+		{
+			slog_error("Invalid server_id %d or NULL endpoint/IP in start_async_write (num_storages=%u)", server_id, curr_imss.info.num_storages);
+			fprintf(stderr, "HERCULES_ERR_START_ASYNC_WRITE_SERVER: Invalid server_id %d (num_storages=%u)\n", server_id, curr_imss.info.num_storages);
+			pthread_mutex_unlock(&lock_network);
+			if (req->retries >= MAX_RETRIES)
+			{
+				slog_error("max retries (%d) reached for block %d, giving up.", MAX_RETRIES, req->data_id);
+				return -ECANCELED;
+			}
+			if (get_malleability_changes(req->dataset_uri, NULL) == 1)
+			{
+				req->retries++;
+				continue;
+			}
+			return -ECANCELED;
+		}
+
+		size_t write_size = req->size;
+		if (req->data_id == 0)
+		{
+			write_size = sizeof(struct stat);
+		}
+		else if (write_size == 0)
+		{
+			write_size = curr_dataset->data_entity_size;
+		}
+
+		ucp_ep_h ep = curr_imss.conns.eps[n_server_];
+		client_ep_context_t *this_context = curr_imss.conns.ep_contexts[n_server_];
+		// Reset any stale prior endpoint error state before sending so poll_async_write() only reacts to failures triggered by this transfer.
+		if (this_context != NULL)
+		{
+			this_context->status = UCS_OK;
+		}
+
+		req->server_id = server_id;
+		strncpy(req->server_hostname, curr_imss.info.ips[server_id], sizeof(req->server_hostname) - 1);
+		req->server_hostname[sizeof(req->server_hostname) - 1] = '\0';
+		req->routed_view_id = routed_view_id;
+		req->value_from_interval = value_from_interval;
+		req->used_num_storages = (int32_t)curr_imss.info.num_storages;
+
+		const char *op_mode = get_protocol_command(req->op_type, ASYNC);
+		const char *target_uri = curr_dataset->uri_;
+		int32_t submit_ret = submit_async_write(
+		    ep,
+		    op_mode,
+		    write_size,
+		    req->offset,
+		    target_uri,
+		    req->data_id,
+		    curr_imss_storages,
+		    curr_imss.info.num_storages,
+		    req->buffer,
+		    req->req_key,
+		    &req->reply_tag);
+		pthread_mutex_unlock(&lock_network);
+
+		if (submit_ret == 0)
+		{
+			req->in_use = 1;
+			return 0;
+		}
+
+		if (req->retries < MAX_RETRIES && get_malleability_changes(req->dataset_uri, req->server_hostname) == 1)
+		{
+			req->retries++;
+			continue;
+		}
+		slog_error("HERCULES_ERR_START_ASYNC_WRITE_SUBMIT: failed submitting block %d to %s", req->data_id, req->server_hostname);
+		fprintf(stderr, "HERCULES_ERR_START_ASYNC_WRITE_SUBMIT: failed submitting block %d to %s\n", req->data_id, req->server_hostname);
+		return -ECANCELED;
+	}
+}
+
+/**
+ * @brief Non-blocking poll for an in-flight AsyncWriteRequest post-write status reply.
+ *
+ * @param req Pointer to an active AsyncWriteRequest submitted by start_async_write().
+ * @return 0 if the reply has not arrived yet and the target server endpoint is still healthy;
+ *         1 if the server replied OK (WRITE_REPLY_OK), interval metadata was finalized, and req->in_use was cleared;
+ *         2 if a recoverable error or topology change occurred (server decommissioned from active list, endpoint lost
+ *           connection and topology refreshed, or server returned a retryable malleability control reply),
+ *           with req->in_use cleared so the caller can increment req->retries and resubmit via start_async_write();
+ *         -EINVAL if req is NULL or not active (!req->in_use);
+ *         -ECANCELED or another negative errno (such as -ENOSPC propagated by handle_non_ok_write_reply()) on
+ *           unrecoverable failure or when MAX_RETRIES is exhausted (req->in_use cleared).
+ */
+int32_t poll_async_write(AsyncWriteRequest *req)
+{
+	if (req == NULL || !req->in_use)
+	{
+		slog_error("HERCULES_ERR_POLL_ASYNC_WRITE_INVALID: invalid or idle AsyncWriteRequest");
+		fprintf(stderr, "HERCULES_ERR_POLL_ASYNC_WRITE_INVALID: invalid or idle AsyncWriteRequest\n");
+		return -EINVAL;
+	}
+
+	pthread_mutex_lock(&lock_network);
+
+	ucp_tag_recv_info_t info_tag;
+	memset(&info_tag, 0, sizeof(info_tag));
+	ucp_tag_message_h msg_tag = ucp_tag_probe_nb(ucp_worker_data, req->reply_tag, tag_mask, 1, &info_tag);
+	if (msg_tag == NULL)
+	{
+		// Look up target server status by hostname rather than caching raw ep_context pointers,
+		// because concurrent malleability updates can close endpoints and compact or free ep_contexts.
+		int srv_found = 0;
+		ucs_status_t ep_status = UCS_OK;
+		lookup_server_ep_status_locked(req->dataset_uri, req->server_hostname, &srv_found, &ep_status);
+		if (!srv_found || ep_status != UCS_OK)
+		{
+			pthread_mutex_unlock(&lock_network);
+			req->in_use = 0;
+			if (!srv_found)
+			{
+				// Server vanished from the active list (decommissioned mid-batch); re-route onto the updated topology.
+				if (req->retries < MAX_RETRIES)
+				{
+					return 2;
+				}
+				slog_error("HERCULES_ERR_POLL_ASYNC_WRITE_SRV_REMOVED: server %s removed after max retries", req->server_hostname);
+				fprintf(stderr, "HERCULES_ERR_POLL_ASYNC_WRITE_SRV_REMOVED: server %s removed after max retries\n", req->server_hostname);
+				return -ECANCELED;
+			}
+			slog_error("HERCULES_ERR_POLL_ASYNC_WRITE_CONN_LOST: connection lost to %s (%s)", req->server_hostname, ucs_status_string(ep_status));
+			fprintf(stderr, "HERCULES_ERR_POLL_ASYNC_WRITE_CONN_LOST: connection lost to %s (%s)\n", req->server_hostname, ucs_status_string(ep_status));
+			if (req->retries < MAX_RETRIES && get_malleability_changes(req->dataset_uri, req->server_hostname) == 1)
+			{
+				return 2;
+			}
+			return -ECANCELED;
+		}
+
+		pthread_mutex_unlock(&lock_network);
+		return 0;
+	}
+
+	char *ds_msg = NULL;
+	int reply_kind = recv_write_reply_msg_locked(NULL, req->reply_tag, info_tag, msg_tag, req->req_key, &ds_msg, NULL);
+	if (reply_kind == WRITE_REPLY_OK)
+	{
+		finalize_write_interval_locked(req->dataset_uri, req->data_id, req->value_from_interval, req->routed_view_id);
+		pthread_mutex_unlock(&lock_network);
+		req->in_use = 0;
+		return 1;
+	}
+
+	pthread_mutex_unlock(&lock_network);
+	req->in_use = 0;
+
+	bool should_retry = false;
+	int32_t err_ret = -ECANCELED;
+	handle_non_ok_write_reply(reply_kind, ds_msg, req->dataset_uri, req->server_hostname, req->req_key, req->retries, &should_retry, &err_ret);
+	if (should_retry)
+	{
+		return 2;
+	}
+	return err_ret;
+}
+
 /**
  * @brief Method storing a specific data element on the data backend.
  * @return 1 on success, on error -1 is returned.
@@ -7269,6 +8052,11 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 	{
 		value_from_interval = true;
 	}
+	int32_t routed_view_id = curr_imss.info.current_view_id;
+	if (view != NULL)
+	{
+		routed_view_id = view->view_id;
+	}
 	bool is_overwrite = value_from_interval || (data_id == 0);
 
 	// If all data servers are in READ_UPDATE mode, reject new block writes with no space left -ENOSPC
@@ -7282,19 +8070,6 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 
 	slog_debug("curr_imss_storages=%d", curr_imss_storages);
 	slog_debug("curr_imss_storages=%d, curr_dataset->first_block_id=%d, curr_dataset->last_block_id=%d", curr_imss_storages, curr_dataset->first_block_id, curr_dataset->last_block_id);
-
-	// keep the last block id.
-	if (data_id > curr_dataset->last_block_id && data_id != 0 && TO_RECORD_INTERVALS)
-	{
-		slog_debug("setting %d as last block id", data_id);
-		curr_dataset->last_block_id = data_id;
-	}
-
-	if (curr_dataset->first_block_id == -1 && data_id != 0 && TO_RECORD_INTERVALS)
-	{
-		slog_debug("setting %d as first block id", data_id);
-		curr_dataset->first_block_id = data_id;
-	}
 
 	// char *node_hostname = NULL;
 	char node_hostname[512] = {"\0"};
@@ -7422,127 +8197,98 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		}
 		else
 		{ // non LOCAL policy.
-			snprintf(key_, REQUEST_SIZE, "%s %lu %ld %s$%d %" PRIu32, op_mode, size, offset, curr_dataset->uri_, data_id, curr_imss.info.num_storages);
-			slog_debug("Sending request '%s' to server %d (%s)", key_, server_id, node_hostname);
-			slog_malleability("Sending request '%s' to server %d (%s)", key_, server_id, node_hostname);
-
-			if (async == ASYNC)
-			{
-				int set_concurrency = (ASYNC_SET_CONCURRENCY > 0) ? (int)ASYNC_SET_CONCURRENCY : curr_imss_storages;
-				async_data_worker_progress(set_concurrency);
-			}
-
-			// clock_t t = clock();
 			auto start_time_req = std::chrono::steady_clock::now();
-			size_t size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), key_, size_t, process_rank);
-			if (size_sent_req == 0)
-			{
-				slog_error("HERCULES_ERR_SET_REQ_SEND_REQ");
-				if (async == ASYNC)
-				{
-					async_data_worker_progress(0);
-				}
-				pthread_mutex_unlock(&lock_network);
-				if (deep > MAX_RETRIES)
-				{
-					slog_error("max retries (%d) reached for '%s', giving up.", MAX_RETRIES, key_);
-					// return -ECANCELED;
-				}
-				else
-				{
-					int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
-					if (changes_found == 1)
-						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
-				}
-				fprintf(stderr, "HERCULES_ERR_SET_REQ_SEND_REQ\n");
-				return -ECANCELED;
-			}
-
+			size_t size_sent_req = 0;
 			size_t size_sent_data = 0;
 			if (async == ASYNC)
-			{
-				ServerSendRequest *new_send = new ServerSendRequest();
-				outstanding_sends++;
-				void *ucx_req_handle = isend_data2(ucp_worker_data, ep, (void *)buffer, size, local_data_uid, new_send);
-				if (UCS_PTR_IS_PTR(ucx_req_handle))
+			{ // async
+				uint64_t async_tag = 0;
+				int32_t submit_ret = submit_async_write(
+				    ep,
+				    op_mode,
+				    size,
+				    offset,
+				    curr_dataset->uri_,
+				    data_id,
+				    curr_imss_storages,
+				    curr_imss.info.num_storages,
+				    buffer,
+				    key_,
+				    &async_tag);
+
+				if (submit_ret != 0)
 				{
-					// In-flight async send. Callback will decrement outstanding_sends upon completion.
-					size_sent_data = size;
-				}
-				else if (!UCS_PTR_IS_ERR(ucx_req_handle))
-				{
-					// Completed immediately. Callback is NOT called.
-					size_sent_data = size;
-					if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+					pthread_mutex_unlock(&lock_network);
+					if (deep <= MAX_RETRIES && get_malleability_changes((char *)dataset_uri, node_hostname) == 1)
 					{
-						outstanding_sends--;
+						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
 					}
+					return -ECANCELED;
 				}
-				else
+				size_sent_data = size;
+
+				// Consume the single post-write status reply on async_tag so UCX tags never accumulate or collide with SYNC RPCs.
+				char *ds_msg = NULL;
+				int reply_kind = receive_write_reply_locked(ep, this_context, async_tag, key_, &ds_msg, NULL);
+				if (reply_kind != WRITE_REPLY_OK)
 				{
-					slog_error("Failed to initiate async send");
-					if (outstanding_sends.load(std::memory_order_relaxed) > 0)
+					pthread_mutex_unlock(&lock_network);
+					bool should_retry = false;
+					int32_t err_ret = -ECANCELED;
+					handle_non_ok_write_reply(reply_kind, ds_msg, dataset_uri, node_hostname, key_, deep, &should_retry, &err_ret);
+					if (should_retry)
 					{
-						outstanding_sends--;
+						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
 					}
+					return err_ret;
 				}
+
+				std::chrono::duration<double> op_time = std::chrono::steady_clock::now() - start_write_op;
+				record_backend_data_metric(node_hostname, n_server_, data_id, true, size_sent_data, op_time.count());
 			}
 			else
-			{
-				// Receive ACK with fault tolerance checks
-				msg_length = TIMING(get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context), "get_recv_data_length", size_t, process_rank);
-				if (msg_length == (size_t)-1)
+			{ // sync
+				snprintf(key_, REQUEST_SIZE, "%s %lu %ld %s$%d %" PRIu32, op_mode, size, offset, curr_dataset->uri_, data_id, curr_imss.info.num_storages);
+				slog_debug("Sending request '%s' to server %d (%s)", key_, server_id, node_hostname);
+				slog_malleability("Sending request '%s' to server %d (%s)", key_, server_id, node_hostname);
+
+				size_sent_req = TIMING(send_req(ucp_worker_data, ep, local_addr_data, local_addr_len_data, key_), key_, size_t, process_rank);
+				if (size_sent_req == 0)
 				{
-					slog_error("HERCULES_ERR_SET_DATA_GET_RECV_LENGTH_CONNECTION_LOST");
+					slog_error("HERCULES_ERR_SET_REQ_SEND_REQ");
 					pthread_mutex_unlock(&lock_network);
 					if (deep > MAX_RETRIES)
 					{
 						slog_error("max retries (%d) reached for '%s', giving up.", MAX_RETRIES, key_);
-						// return -ECANCELED;
 					}
-					else
+					else if (get_malleability_changes((char *)dataset_uri, node_hostname) == 1)
 					{
-						int changes_found = get_malleability_changes((char *)dataset_uri, node_hostname);
-						if (changes_found == 1)
-							return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
+						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
 					}
-					fprintf(stderr, "HERCULES_ERR_SET_DATA_GET_RECV_LENGTH_CONNECTION_LOST\n");
+					fprintf(stderr, "HERCULES_ERR_SET_REQ_SEND_REQ\n");
 					return -ECANCELED;
 				}
 
-				char *response_buffer = (char *)malloc(msg_length + 1);
-				recv_data(ucp_worker_data, ep, response_buffer, msg_length, local_data_uid, async);
-				response_buffer[msg_length] = '\0';
+				// Receive pre-data ACK with fault tolerance checks
+				char *ds_msg = NULL;
+				size_t ack_len = 0;
+				int reply_kind = receive_write_reply_locked(ep, this_context, local_data_uid, key_, &ds_msg, &ack_len);
+				if (reply_kind != WRITE_REPLY_OK)
+				{
+					pthread_mutex_unlock(&lock_network);
+					bool should_retry = false;
+					int32_t err_ret = -ECANCELED;
+					handle_non_ok_write_reply(reply_kind, ds_msg, dataset_uri, node_hostname, key_, deep, &should_retry, &err_ret);
+					if (should_retry)
+					{
+						return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
+					}
+					return err_ret;
+				}
 
-				size_sent_req += msg_length;
+				size_sent_req += ack_len;
 				auto end_time_req = std::chrono::steady_clock::now();
 				std::chrono::duration<double> time_taken_req = end_time_req - start_time_req;
-
-				if (!strncmp(response_buffer, MSG_SPACE_OP, strlen(MSG_SPACE_OP)))
-				{
-					slog_error("No space left on server");
-					fprintf(stderr, "No space left on server\n");
-					free(response_buffer);
-					pthread_mutex_unlock(&lock_network);
-					return -EAGAIN;
-				}
-				else if (!strncmp(MSG_MALLEABILITY_DATASERVERS, (const char *)response_buffer, strlen(MSG_MALLEABILITY_DATASERVERS)))
-				{
-					slog_malleability(" result=%s, msg_length=%d", response_buffer, msg_length);
-					pthread_mutex_unlock(&lock_network);
-					if (deep > MAX_RETRIES + 1)
-					{
-						slog_error("max retries (%d) reached for '%s', giving up.", MAX_RETRIES, key_);
-						fprintf(stderr, "[set_data] max tries reached. Giving up with error.\n");
-						return -ECANCELED;
-					}
-					int32_t changes_found = parse_malleability_message(response_buffer, NULL);
-					free(response_buffer);
-					response_buffer = NULL;
-					return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
-				}
-
-				free(response_buffer);
 
 				auto start_time_data = std::chrono::steady_clock::now();
 				// Perform actual data transfer
@@ -7565,14 +8311,8 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		}
 	}
 
-	// Recording other blocks if not already present.
-	// For consecutive blocks it extends the interval, for not consecutive blocks it
-	// creates a new interval.
-	if (TO_RECORD_INTERVALS && data_id > 0 && !value_from_interval)
-	{
-		slog_debug("[set_data] Recording block %d (view_id=%d) in dataset %s", data_id, curr_imss.info.current_view_id, curr_dataset->uri_);
-		RecordBlockInterval(curr_dataset, data_id, curr_imss.info.current_view_id);
-	}
+	// Recording other blocks if not already present once the write succeeded.
+	finalize_write_interval_locked(dataset_uri, data_id, value_from_interval ? 1 : 0, routed_view_id);
 
 	pthread_mutex_unlock(&lock_network);
 	return 1;

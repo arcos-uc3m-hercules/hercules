@@ -364,10 +364,10 @@ void attend_pending_migrating_reads(p_argv *arguments)
 		uint64_t block_size_rtvd = 0;
 		int32_t ret = hierarchical_map->HierarchicalMapGet(req.key, &address_, &block_size_rtvd);
 
-		if (ret != 0 && address_ != NULL)
+		if (ret != 0 && address_ != NULL && block_size_rtvd > req.block_offset)
 		{
 			// Clamps read size to avoid out-of-bounds access past the retrieved block.
-			uint64_t available_bytes = (block_size_rtvd > req.block_offset) ? (block_size_rtvd - req.block_offset) : 0;
+			uint64_t available_bytes = block_size_rtvd - req.block_offset;
 			size_t to_read = (req.to_read <= 0 || req.to_read > available_bytes) ? available_bytes : req.to_read;
 			if (req.is_shared_memory)
 			{ // shared memory.
@@ -804,13 +804,13 @@ int flush_performance_interval(int32_t interval_ms, int32_t analysis_window_size
 	}
 
 	pthread_mutex_lock(&mutext_performance_metrics);
-	// Drop accumulated transition metrics on the first tick after a scaling operation finishes.
-	if (discard_transition_interval.exchange(false, std::memory_order_acq_rel))
-	{
-		pending_perf_bucket.clear();
-		pthread_mutex_unlock(&mutext_performance_metrics);
-		return 0;
-	}
+	// // Drop accumulated transition metrics on the first tick after a scaling operation finishes.
+	// if (discard_transition_interval.exchange(false, std::memory_order_acq_rel))
+	// {
+	// 	pending_perf_bucket.clear();
+	// 	pthread_mutex_unlock(&mutext_performance_metrics);
+	// 	return 0;
+	// }
 
 	std::set<std::string> active_rw_hosts;
 	std::map<std::string, int> active_rw_ids;
@@ -1185,16 +1185,7 @@ void *ElasticityMonitor(void *th_argv)
 		}
 		else if (arguments->args->malleability == MALLEABILITY_CONF_PERF)
 		{
-			scaling_action action = evaluate_performance_snapshot(arguments, true, true);
-
-			// Discard in-flight transition metrics accumulated during a scaling operation so the next interval starts cleanly on the new topology.
-			if (action != scaling_action::HOLD)
-			{
-				discard_transition_interval.store(true, std::memory_order_release);
-				pthread_mutex_lock(&mutext_performance_metrics);
-				pending_perf_bucket.clear();
-				pthread_mutex_unlock(&mutext_performance_metrics);
-			}
+			evaluate_performance_snapshot(arguments, true, true);
 		}
 	}
 

@@ -26,6 +26,9 @@
 #define ASYNC 1 // first replica is written synchronously, the rest asynchronously
 
 #define INITIAL_RECURSION 0
+#ifndef MAX_RETRIES
+#define MAX_RETRIES 10
+#endif
 
 // Type of IMSS instance to be deployed.
 #define DETACHED 0
@@ -583,6 +586,23 @@ RETURNS:	 0 - Release operation took place successfully.
 	 * error.
 	 */
 	ssize_t get_ndata(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request, int deep);
+	/**
+	 * @brief Retrieves a data block and optionally returns the target storage hostname and server ID used.
+	 */
+	ssize_t get_ndata_with_target(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset, int async, void **buffer_request, int deep, char *out_hostname, size_t hostname_len, int32_t *out_server_id);
+	/**
+	 * @brief Inspects a completed async read data buffer for error/malleability control replies and updates topology.
+	 */
+	int32_t handle_async_read_control_response(const char *dataset_uri, const void *buf, size_t received_len);
+	/**
+	 * @brief Thread-safe wrapper recording client-side data-block I/O metrics upon operation completion.
+	 */
+	void record_client_data_metric(const char *hostname, int32_t server_id, int32_t data_id, int is_write, size_t data_bytes, double data_time_sec);
+	/**
+	 * @brief Returns the current number of active storage servers.
+	 * @param rw_only Non-zero to query active read/write servers (falling back to connected servers if 0); zero for all connected servers.
+	 */
+	int32_t get_active_storage_server_count(int rw_only);
 	ssize_t get_ndata_prefetch(char *dataset_uri, int32_t dataset_id, int32_t data_id, void **buffer_prefetch, size_t total_read_size, size_t num_blocks_to_read);
 
 	ssize_t start_block_request(char *dataset_uri, int32_t dataset_id, int32_t data_id, void *buffer, ssize_t to_read, off_t offset);
@@ -623,7 +643,40 @@ offset     - Offset within the block.
 RETURNS:	 0 - The requested block was successfully stored.
 -1 - In case of error.
 	 */
+	typedef struct AsyncWriteRequest
+	{
+		uint64_t reply_tag;
+		int32_t dataset_id;
+		int32_t data_id;
+		int32_t server_id;
+		int32_t routed_view_id;
+		int32_t value_from_interval;
+		int32_t used_num_storages;
+		hercules_modes_t op_type;
+		size_t size;
+		off_t offset;
+		const void *buffer;
+		char dataset_uri[URI_];
+		char req_key[REQUEST_SIZE];
+		char server_hostname[512];
+		int retries;
+		int in_use;
+		int metric_recorded;
+	} AsyncWriteRequest;
+
 	int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int async, int deep, hercules_modes_t op_type);
+
+	/**
+	 * @brief Submits an asynchronous single-block write request without blocking for the post-write reply.
+	 * @return 0 if in flight on req->reply_tag, 1 if completed synchronously, or negative errno on failure.
+	 */
+	int32_t start_async_write(AsyncWriteRequest *req);
+
+	/**
+	 * @brief Non-blocking poll for an in-flight AsyncWriteRequest post-write status reply.
+	 * @return 0 if still in progress, 1 if completed OK, 2 if caller should retry after topology update, or negative errno.
+	 */
+	int32_t poll_async_write(AsyncWriteRequest *req);
 
 	int32_t set_data_mall(char *dataset_uri, int32_t dataset_id, int32_t data_id, const void *buffer, size_t size, off_t offset, int32_t num_storages);
 

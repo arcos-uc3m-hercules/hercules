@@ -301,6 +301,7 @@ extern "C"
 	void *isend_data2(ucp_worker_h ucp_worker, ucp_ep_h ep, const void *msg, size_t msg_len, uint64_t from, ServerSendRequest *tracking_struct);
 	size_t get_recv_data_length(ucp_worker_h ucp_worker, uint64_t dest);
 	size_t get_recv_data_length_with_cb(ucp_worker_h ucp_worker, uint64_t dest, client_ep_context_t *ep_context);
+	size_t get_recv_data_length_with_cb_2(ucp_worker_h ucp_worker, uint64_t dest, client_ep_context_t *ep_context, ucp_tag_recv_info_t *info_tag, ucp_tag_message_h *msg_tag);
 	size_t get_recv_data_length_2(ucp_worker_h ucp_worker, uint64_t dest, ucp_tag_recv_info_t *info_tag, ucp_tag_message_h *msg_tag);
 	void *start_recv_data_async(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest);
 	size_t recv_data(ucp_worker_h ucp_worker, ucp_ep_h ep, void *msg, size_t msg_length, uint64_t dest, int async);
@@ -308,6 +309,7 @@ extern "C"
 	size_t recv_data_opt(ucp_worker_h ucp_worker, ucp_ep_h ep, void **msg, size_t msg_length, uint64_t dest, int async);
 	// size_t recv_req(ucp_worker_h ucp_worker, ucp_ep_h ep, char *msg);
 	void *irecv_data(ucp_worker_h ucp_worker, void *allocated_buffer, size_t buffer_len, uint64_t tag);
+	void *irecv_data_2(ucp_worker_h ucp_worker, void *allocated_buffer, size_t buffer_len, ucp_tag_message_h msg_tag);
 	ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request, send_req_t *ctx);
 	void stream_recv_cb(void *request, ucs_status_t status, size_t length, void *user_data);
 	void send_handler_data(void *request, ucs_status_t status, void *ctx);

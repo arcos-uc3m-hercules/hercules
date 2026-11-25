@@ -11,6 +11,17 @@
 extern std::atomic<size_t> outstanding_sends;
 extern std::atomic<uint64_t> async_send_errors;
 
+/**
+ * @brief Atomically decrements outstanding_sends.
+ */
+static inline void decrement_outstanding_sends()
+{
+	size_t current = outstanding_sends.load(std::memory_order_relaxed);
+	while (current > 0 && !outstanding_sends.compare_exchange_weak(current, current - 1, std::memory_order_relaxed))
+	{
+	}
+}
+
 typedef std::map<ucp_ep_h, StsHeader*> map_ep_t;
 
 

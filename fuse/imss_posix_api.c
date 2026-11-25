@@ -10,6 +10,7 @@
 #include "prefetch_cache.hpp"
 #include "slog.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <errno.h>
 #include <fcntl.h>
@@ -122,6 +123,31 @@ extern int32_t N_META_SERVERS;
 extern uint32_t rank;
 extern int backend_init_status;
 extern pthread_once_t backend_init_once;
+
+struct AsyncReadSlot
+{
+	void *ucx_handle;
+	size_t final_offset_in_buf;
+	size_t bytes_to_read;
+	size_t offset_in_blk;
+	size_t block_id;
+	size_t received_len;
+	int retries;
+	int32_t server_id;
+	char server_hostname[512];
+	bool in_use;
+};
+
+struct AsyncBatchServerStat
+{
+	int32_t server_id;
+	size_t bytes;
+};
+
+struct AsyncWriteSlot
+{
+	AsyncWriteRequest req;
+};
 
 #ifdef __cplusplus
 extern "C"
@@ -336,6 +362,11 @@ extern "C"
 		}
 
 		slog_debug("[imss_truncate] path=%s, requested length=%ld, current size=%ld", path, length, elem.stats.st_size);
+
+		if (ASYNC_IO == ASYNC)
+		{
+			async_data_worker_progress(0);
+		}
 
 		if (elem.stats.st_size == length)
 		{
@@ -986,37 +1017,132 @@ extern "C"
 		*out_bytes_to_read = std::min(max_in_blk, remaining);
 	}
 
+	/**
+	 * @brief Resets and frees a completed or failed UCX receive request handle.
+	 */
+	static inline void release_async_recv_handle(void **ucx_handle)
+	{
+		if (ucx_handle != NULL && *ucx_handle != NULL)
+		{
+			((struct ucx_context *)(*ucx_handle))->completed = 0;
+			ucp_request_free(*ucx_handle);
+			*ucx_handle = NULL;
+		}
+	}
+
+	/**
+	 * @brief Accumulates completed bytes into per-server batch statistics.
+	 */
+	static inline void accumulate_async_batch_entry(std::map<std::string, AsyncBatchServerStat> &stats, const char *server_hostname, int32_t server_id, size_t bytes_done)
+	{
+		if (bytes_done == 0 || server_hostname == NULL || server_hostname[0] == '\0')
+		{
+			return;
+		}
+		AsyncBatchServerStat &entry = stats[server_hostname];
+		entry.server_id = server_id;
+		entry.bytes += bytes_done;
+	}
+
+	/**
+	 * @brief Records a completed async read slot into per-server batch statistics.
+	 */
+	static inline void accumulate_async_batch_stat(std::map<std::string, AsyncBatchServerStat> &stats, const AsyncReadSlot &slot, size_t bytes_done)
+	{
+		accumulate_async_batch_entry(stats, slot.server_hostname, slot.server_id, bytes_done);
+	}
+
+	/**
+	 * @brief Attributes batch wall-clock duration proportionally by per-server byte volume.
+	 */
+	static inline void flush_async_batch_metrics(const std::map<std::string, AsyncBatchServerStat> &stats, double batch_elapsed, int is_write)
+	{
+		size_t total_metric_bytes = 0;
+		for (const auto &kv : stats)
+		{
+			total_metric_bytes += kv.second.bytes;
+		}
+		if (total_metric_bytes == 0)
+		{
+			return;
+		}
+		for (const auto &kv : stats)
+		{
+			double srv_time = batch_elapsed * ((double)kv.second.bytes / (double)total_metric_bytes);
+			record_client_data_metric(kv.first.c_str(), kv.second.server_id, 1, is_write, kv.second.bytes, srv_time);
+		}
+	}
+
+	/**
+	 * @brief Launches or retries a single block read in an async read slot.
+	 *
+	 * @return 0 if in flight via slot.ucx_handle, 1 if completed synchronously, or -1 on error.
+	 */
+	static int issue_async_read_slot(const char *path, int ds, void *buf, AsyncReadSlot &slot)
+	{
+		slot.ucx_handle = NULL;
+		slot.received_len = 0;
+		slot.server_id = -1;
+		slot.server_hostname[0] = '\0';
+
+		char *target_dest = (char *)buf + slot.final_offset_in_buf;
+		ssize_t ret = TIMING(get_ndata_with_target((char *)path, ds, (int32_t)slot.block_id, target_dest, (ssize_t)slot.bytes_to_read, (off_t)slot.offset_in_blk, ASYNC, &slot.ucx_handle, INITIAL_RECURSION, slot.server_hostname, sizeof(slot.server_hostname), &slot.server_id), "get_ndata", ssize_t, -1);
+		if (ret < 0)
+		{
+			slog_error("HERCULES_ERR_READ_ASYNC: get_ndata_with_target failed for block %zu (ret=%zd)", slot.block_id, ret);
+			fprintf(stderr, "HERCULES_ERR_READ_ASYNC: get_ndata_with_target failed for block %zu (ret=%zd)\n", slot.block_id, ret);
+			release_async_recv_handle(&slot.ucx_handle);
+			slot.in_use = false;
+			return -1;
+		}
+
+		slot.received_len = (size_t)ret;
+		if (slot.ucx_handle == NULL)
+		{
+			// Completed synchronously (e.g., LOCAL shared-memory policy).
+			slot.in_use = false;
+			return 1;
+		}
+
+		slot.in_use = true;
+		return 0;
+	}
+
 	static ssize_t imss_read_blocks_async(const char *path, int ds, void *buf,
 					      size_t total_size, off_t offset,
 					      size_t start_blk, size_t num_blocks_to_read)
 	{
-		size_t max_concurrent = (ASYNC_GET_CONCURRENCY > 0)
-					    ? (size_t)ASYNC_GET_CONCURRENCY
-					    : ((N_SERVERS > 0) ? (size_t)N_SERVERS : 2);
-		size_t num_slots = std::min(num_blocks_to_read, max_concurrent);
-		slog_debug("[ASYNC READ] Using max_concurrent=%zu (ASYNC_GET_CONCURRENCY=%u, N_SERVERS=%d), num_slots=%zu for %zu blocks", max_concurrent, ASYNC_GET_CONCURRENCY, N_SERVERS, num_slots, num_blocks_to_read);
-
-		struct AsyncReadSlot
+		auto batch_start = std::chrono::steady_clock::now();
+		int32_t active_servers = get_active_storage_server_count(0);
+		size_t max_concurrent = 2;
+		if (ASYNC_GET_CONCURRENCY > 0)
 		{
-			void *ucx_handle;
-			size_t final_offset_in_buf;
-			size_t bytes_to_read;
-			size_t block_id;
-			bool in_use;
-		};
+			max_concurrent = (size_t)ASYNC_GET_CONCURRENCY;
+		}
+		else if (active_servers > 0)
+		{
+			max_concurrent = (size_t)active_servers;
+		}
+		size_t num_slots = std::min(num_blocks_to_read, max_concurrent);
+		slog_debug("[ASYNC READ] Using max_concurrent=%zu (ASYNC_GET_CONCURRENCY=%u, active_servers=%d), num_slots=%zu for %zu blocks", max_concurrent, ASYNC_GET_CONCURRENCY, active_servers, num_slots, num_blocks_to_read);
 
 		std::vector<AsyncReadSlot> slots(num_slots);
 		for (size_t i = 0; i < num_slots; ++i)
 		{
 			slots[i].in_use = false;
 			slots[i].ucx_handle = NULL;
+			slots[i].retries = 0;
+			slots[i].server_id = -1;
+			slots[i].server_hostname[0] = '\0';
 		}
 
+		std::map<std::string, AsyncBatchServerStat> batch_server_bytes;
 		size_t blocks_launched = 0;
 		size_t blocks_completed = 0;
 		size_t total_bytes_scheduled = 0;
 		ssize_t total_bytes_completed = 0;
 		int fatal_error = 0;
+		ssize_t err_return = -EIO;
 
 		while (blocks_completed < num_blocks_to_read && !fatal_error)
 		{
@@ -1043,60 +1169,136 @@ extern "C"
 						}
 
 						slots[i].final_offset_in_buf = total_bytes_scheduled;
+						slots[i].offset_in_blk = offset_in_blk;
 						slots[i].bytes_to_read = bytes_to_read;
 						slots[i].block_id = block_id;
-						slots[i].ucx_handle = NULL;
+						slots[i].retries = 0;
 
-						char *target_dest = (char *)buf + total_bytes_scheduled;
+						total_bytes_scheduled += bytes_to_read;
+						blocks_launched++;
 
-						ssize_t ret = TIMING(get_ndata((char *)path, ds, block_id,
-									       target_dest, bytes_to_read,
-									       offset_in_blk, ASYNC,
-									       &slots[i].ucx_handle, INITIAL_RECURSION),
-								     "get_ndata", ssize_t, -1);
-
-						if (ret < 0)
+						int launch_ret = issue_async_read_slot(path, ds, buf, slots[i]);
+						if (launch_ret < 0)
 						{
-							slog_error("Failed to launch async get_ndata for block %zu", block_id);
+							slog_error("HERCULES_ERR_READ_ASYNC: Failed to launch async get_ndata for block %zu", block_id);
+							fprintf(stderr, "HERCULES_ERR_READ_ASYNC: Failed to launch async get_ndata for block %zu\n", block_id);
+							if (errno == ENOENT)
+							{
+								err_return = -ENOENT;
+							}
 							fatal_error = 1;
 							break;
 						}
-
-						slots[i].in_use = true;
-						total_bytes_scheduled += bytes_to_read;
-						blocks_launched++;
-						slog_debug("block %zu requested asynchronously", block_id);
+						if (launch_ret == 1)
+						{
+							total_bytes_completed += (ssize_t)slots[i].received_len;
+							accumulate_async_batch_stat(batch_server_bytes, slots[i], slots[i].received_len);
+							blocks_completed++;
+						}
+						else
+						{
+							slog_debug("block %zu requested asynchronously", block_id);
+						}
 					}
 				}
 			}
 
 			// Check for and process completed requests
-			for (size_t i = 0; i < num_slots; ++i)
+			for (size_t i = 0; i < num_slots && !fatal_error; ++i)
 			{
 				if (slots[i].in_use)
 				{
 					ucs_status_t status = ucp_request_check_status(slots[i].ucx_handle);
 					if (status == UCS_OK)
 					{
-						slog_debug("block %zu complete", slots[i].block_id);
-						((struct ucx_context *)slots[i].ucx_handle)->completed = 0;
-						ucp_request_free(slots[i].ucx_handle);
-						slots[i].ucx_handle = NULL;
-
-						total_bytes_completed += slots[i].bytes_to_read;
-						slots[i].in_use = false;
-						blocks_completed++;
+						// Receive finished cleanly: free UCX handle and check if the received data is block content or a server control reply.
+						release_async_recv_handle(&slots[i].ucx_handle);
+						int32_t ctrl_ret = handle_async_read_control_response(path, (char *)buf + slots[i].final_offset_in_buf, slots[i].received_len);
+						if (ctrl_ret == 0)
+						{
+							// Received regular block data: record completed bytes and per-server batch metrics, then free slot.
+							slog_debug("block %zu complete (%zu bytes)", slots[i].block_id, slots[i].received_len);
+							total_bytes_completed += (ssize_t)slots[i].received_len;
+							accumulate_async_batch_stat(batch_server_bytes, slots[i], slots[i].received_len);
+							slots[i].in_use = false;
+							blocks_completed++;
+						}
+						else if (ctrl_ret == 1 && slots[i].retries < MAX_RETRIES)
+						{
+							// Server returned NO_KEY_AVAIL or DATASERVERS and topology updated; re-issue the read on the new target.
+							slots[i].retries++;
+							int retry_ret = issue_async_read_slot(path, ds, buf, slots[i]);
+							if (retry_ret < 0)
+							{
+								// Failed to launch the retry read; log error and abort the batch.
+								slog_error("HERCULES_ERR_READ_ASYNC: Retry failed after control reply for block %zu", slots[i].block_id);
+								fprintf(stderr, "HERCULES_ERR_READ_ASYNC: Retry failed after control reply for block %zu\n", slots[i].block_id);
+								fatal_error = 1;
+							}
+							else if (retry_ret == 1)
+							{
+								// Retry completed synchronously without a UCX handle; accumulate stats and finish block.
+								total_bytes_completed += (ssize_t)slots[i].received_len;
+								accumulate_async_batch_stat(batch_server_bytes, slots[i], slots[i].received_len);
+								blocks_completed++;
+							}
+							// When retry_ret == 0, the retried async read is in flight and slots[i].in_use stays true.
+						}
+						else
+						{
+							// Either the block does not exist (ctrl_ret < 0) or retries are exhausted; abort the batch.
+							slog_error("HERCULES_ERR_READ_ASYNC: Missing block %zu or retries exhausted (ctrl_ret=%d, retries=%d)", slots[i].block_id, ctrl_ret, slots[i].retries);
+							fprintf(stderr, "HERCULES_ERR_READ_ASYNC: Missing block %zu or retries exhausted (ctrl_ret=%d, retries=%d)\n", slots[i].block_id, ctrl_ret, slots[i].retries);
+							if (ctrl_ret < 0)
+							{
+								// Missing block error: propagate -ENOENT instead of the default -EIO.
+								errno = ENOENT;
+								err_return = -ENOENT;
+							}
+							slots[i].in_use = false;
+							fatal_error = 1;
+						}
 					}
 					else if (status != UCS_INPROGRESS)
 					{
-						slog_error("Async read failed for block %zu: %s", slots[i].block_id, ucs_status_string(status));
-						fprintf(stderr, "HERCULES_ERR_READ_ASYNC: Async read failed for block %zu: %s\n", slots[i].block_id, ucs_status_string(status));
-						((struct ucx_context *)slots[i].ucx_handle)->completed = 0;
-						ucp_request_free(slots[i].ucx_handle);
-						slots[i].ucx_handle = NULL;
-						slots[i].in_use = false;
-						fatal_error = 1;
-						break;
+						// UCX receive failed (e.g., server disconnected mid-transfer); release handle before handling recovery.
+						release_async_recv_handle(&slots[i].ucx_handle);
+						if (slots[i].retries < MAX_RETRIES)
+						{
+							// Retries remain: refresh topology from metadata (passing failed host if known) and re-issue the read.
+							const char *failed_host = NULL;
+							if (slots[i].server_hostname[0] != '\0')
+							{
+								// Provide the failing hostname so endpoint state for this server is rebuilt or removed.
+								failed_host = slots[i].server_hostname;
+							}
+							slog_malleability("Async read error (%s) for block %zu on server %s; refreshing topology and retrying (%d/%d).", ucs_status_string(status), slots[i].block_id, slots[i].server_hostname, slots[i].retries + 1, MAX_RETRIES);
+							get_malleability_changes((char *)path, failed_host);
+							slots[i].retries++;
+							int retry_ret = issue_async_read_slot(path, ds, buf, slots[i]);
+							if (retry_ret < 0)
+							{
+								// Retry after topology refresh failed to launch; log error and abort the batch.
+								slog_error("HERCULES_ERR_READ_ASYNC: Topology retry failed for block %zu", slots[i].block_id);
+								fprintf(stderr, "HERCULES_ERR_READ_ASYNC: Topology retry failed for block %zu\n", slots[i].block_id);
+								fatal_error = 1;
+							}
+							else if (retry_ret == 1)
+							{
+								// Retry completed synchronously; accumulate stats and mark block completed.
+								total_bytes_completed += (ssize_t)slots[i].received_len;
+								accumulate_async_batch_stat(batch_server_bytes, slots[i], slots[i].received_len);
+								blocks_completed++;
+							}
+						}
+						else
+						{
+							// Transport error persisted past MAX_RETRIES; log error, free slot, and abort the batch.
+							slog_error("Async read failed for block %zu: %s", slots[i].block_id, ucs_status_string(status));
+							fprintf(stderr, "HERCULES_ERR_READ_ASYNC: Async read failed for block %zu: %s\n", slots[i].block_id, ucs_status_string(status));
+							slots[i].in_use = false;
+							fatal_error = 1;
+						}
 					}
 				}
 			}
@@ -1116,18 +1318,16 @@ extern "C"
 					{
 						ucp_worker_progress(ucp_worker_data);
 					}
-					((struct ucx_context *)slots[i].ucx_handle)->completed = 0;
-					ucp_request_free(slots[i].ucx_handle);
-					slots[i].ucx_handle = NULL;
+					release_async_recv_handle(&slots[i].ucx_handle);
 					slots[i].in_use = false;
 				}
 			}
+			return err_return;
 		}
 
-		if (fatal_error)
-		{
-			return -EIO;
-		}
+		// Attribute batch wall-clock duration proportionally by server byte volume so ElasticityMonitor sums exact parallel active duration.
+		double batch_elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - batch_start).count();
+		flush_async_batch_metrics(batch_server_bytes, batch_elapsed, 0);
 
 		return total_bytes_completed;
 	}
@@ -1838,46 +2038,244 @@ extern "C"
 		return ret;
 	}
 
+	/**
+	 * @brief Submits or retries a single async write slot and updates completion/error state.
+	 */
+	static int32_t launch_async_write_slot(
+	    AsyncWriteSlot &slot,
+	    std::map<std::string, AsyncBatchServerStat> &batch_server_bytes,
+	    size_t *blocks_completed,
+	    size_t *total_bytes_written,
+	    ssize_t *err_return,
+	    int *fatal_error)
+	{
+		int32_t ret = TIMING(start_async_write(&slot.req), "set_data", int32_t, -1);
+		if (ret < 0)
+		{
+			slog_error("[imss_write] Failed to launch async write for block %d (ret=%d)", slot.req.data_id, ret);
+			fprintf(stderr, "[imss_write] Error writing to Hercules: %s\n", strerror(-ret));
+			*err_return = ret;
+			*fatal_error = 1;
+			return ret;
+		}
+		if (ret == 1)
+		{
+			if (!slot.req.metric_recorded)
+			{
+				accumulate_async_batch_entry(batch_server_bytes, slot.req.server_hostname, slot.req.server_id, slot.req.size);
+			}
+			*total_bytes_written += slot.req.size;
+			(*blocks_completed)++;
+		}
+		return ret;
+	}
+
+	static ssize_t imss_write_blocks_async(
+	    const char *path,
+	    int ds,
+	    const void *buf,
+	    size_t total_size,
+	    off_t offset,
+	    size_t start_blk,
+	    size_t num_blocks_to_write)
+	{
+		auto batch_start = std::chrono::steady_clock::now();
+		int32_t active_servers = get_active_storage_server_count(1);
+		size_t max_concurrent = 2;
+		if (ASYNC_SET_CONCURRENCY > 0)
+		{
+			max_concurrent = (size_t)ASYNC_SET_CONCURRENCY;
+		}
+		else if (active_servers > 2)
+		{
+			max_concurrent = (size_t)active_servers;
+		}
+		size_t num_slots = std::min(num_blocks_to_write, max_concurrent);
+		slog_debug("[ASYNC WRITE] Using max_concurrent=%zu (ASYNC_SET_CONCURRENCY=%u, active_servers=%d), num_slots=%zu for %zu blocks", max_concurrent, ASYNC_SET_CONCURRENCY, active_servers, num_slots, num_blocks_to_write);
+
+		std::vector<AsyncWriteSlot> slots(num_slots);
+		for (size_t i = 0; i < num_slots; ++i)
+		{
+			memset(&slots[i], 0, sizeof(AsyncWriteSlot));
+		}
+
+		std::map<std::string, AsyncBatchServerStat> batch_server_bytes;
+		size_t blocks_launched = 0;
+		size_t blocks_completed = 0;
+		size_t total_bytes_scheduled = 0;
+		size_t total_bytes_written = 0;
+		ssize_t err_return = -ECANCELED;
+		int fatal_error = 0;
+
+		while (blocks_completed < num_blocks_to_write && !fatal_error)
+		{
+			if (blocks_launched < num_blocks_to_write)
+			{
+				for (size_t i = 0; i < num_slots; ++i)
+				{
+					if (!slots[i].req.in_use && blocks_launched < num_blocks_to_write)
+					{
+						size_t block_id = 0;
+						size_t offset_in_blk = 0;
+						size_t bytes_to_write = 0;
+
+						imss_calc_block_slice(blocks_launched, start_blk, offset,
+								      total_size, total_bytes_scheduled,
+								      &block_id, &offset_in_blk, &bytes_to_write);
+
+						if (bytes_to_write == 0)
+						{
+							blocks_launched++;
+							blocks_completed++;
+							continue;
+						}
+
+						memset(&slots[i].req, 0, sizeof(AsyncWriteRequest));
+						slots[i].req.dataset_id = ds;
+						slots[i].req.data_id = (int32_t)block_id;
+						slots[i].req.size = bytes_to_write;
+						slots[i].req.offset = (off_t)offset_in_blk;
+						slots[i].req.op_type = SET_OP;
+						slots[i].req.buffer = (const char *)buf + total_bytes_scheduled;
+						strncpy(slots[i].req.dataset_uri, path, sizeof(slots[i].req.dataset_uri) - 1);
+
+						total_bytes_scheduled += bytes_to_write;
+						blocks_launched++;
+
+						if (launch_async_write_slot(slots[i], batch_server_bytes, &blocks_completed, &total_bytes_written, &err_return, &fatal_error) < 0)
+						{
+							break;
+						}
+					}
+				}
+			}
+
+			for (size_t i = 0; i < num_slots && !fatal_error; ++i)
+			{
+				if (slots[i].req.in_use)
+				{
+					int32_t poll_ret = poll_async_write(&slots[i].req);
+					if (poll_ret == 1)
+					{
+						accumulate_async_batch_entry(batch_server_bytes, slots[i].req.server_hostname, slots[i].req.server_id, slots[i].req.size);
+						total_bytes_written += slots[i].req.size;
+						blocks_completed++;
+					}
+					else if (poll_ret == 2)
+					{
+						if (slots[i].req.retries < MAX_RETRIES)
+						{
+							slots[i].req.retries++;
+							launch_async_write_slot(slots[i], batch_server_bytes, &blocks_completed, &total_bytes_written, &err_return, &fatal_error);
+						}
+						else
+						{
+							slog_error("[imss_write] Max retries (%d) reached for async block %d", MAX_RETRIES, slots[i].req.data_id);
+							fprintf(stderr, "[imss_write] Max retries (%d) reached for async block %d\n", MAX_RETRIES, slots[i].req.data_id);
+							err_return = -ECANCELED;
+							fatal_error = 1;
+						}
+					}
+					else if (poll_ret < 0)
+					{
+						slog_error("[imss_write] Async write failed for block %d (ret=%d)", slots[i].req.data_id, poll_ret);
+						fprintf(stderr, "[imss_write] Error writing to Hercules: %s\n", strerror(-poll_ret));
+						err_return = poll_ret;
+						fatal_error = 1;
+					}
+				}
+			}
+
+			ucp_worker_progress(ucp_worker_data);
+		}
+
+		// Drain remaining in-flight write replies on error without submitting further retries.
+		if (fatal_error)
+		{
+			for (size_t i = 0; i < num_slots; ++i)
+			{
+				while (slots[i].req.in_use)
+				{
+					ucp_worker_progress(ucp_worker_data);
+					if (poll_async_write(&slots[i].req) != 0)
+					{
+						slots[i].req.in_use = 0;
+					}
+				}
+			}
+			async_data_worker_progress(0);
+			return err_return;
+		}
+
+		async_data_worker_progress(0);
+		double batch_elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - batch_start).count();
+		flush_async_batch_metrics(batch_server_bytes, batch_elapsed, 1);
+
+		return (ssize_t)total_bytes_written;
+	}
+
+	static ssize_t imss_write_blocks_sync(
+	    const char *path,
+	    int ds,
+	    const void *buf,
+	    size_t total_size,
+	    off_t offset,
+	    size_t start_blk,
+	    size_t num_blocks_to_write)
+	{
+		size_t total_bytes_written = 0;
+		for (size_t i = 0; i < num_blocks_to_write; ++i)
+		{
+			size_t block_id = 0;
+			size_t offset_in_blk = 0;
+			size_t bytes_to_copy = 0;
+
+			imss_calc_block_slice(i, start_blk, offset, total_size, total_bytes_written,
+					      &block_id, &offset_in_blk, &bytes_to_copy);
+			if (bytes_to_copy == 0)
+			{
+				break;
+			}
+
+			const void *data_ptr = (const char *)buf + total_bytes_written;
+			int32_t ret_set_data = TIMING(set_data((char *)path, ds, (int32_t)block_id, data_ptr, bytes_to_copy, (off_t)offset_in_blk, SYNC, INITIAL_RECURSION, SET_OP), "set_data", int32_t, -1);
+			if (ret_set_data < 0)
+			{
+				slog_error("[imss_write] Error writing to Hercules.");
+				fprintf(stderr, "[imss_write] Error writing to Hercules: %s\n", strerror(-ret_set_data));
+				return ret_set_data;
+			}
+			total_bytes_written += bytes_to_copy;
+		}
+		return (ssize_t)total_bytes_written;
+	}
+
 	ssize_t imss_write(const char *path, const void *buf, size_t size, off_t off)
 	{
 		ENSURE_BACKEND();
 		ssize_t ret;
-		clock_t t, tm, tmm;
+		clock_t t, tmm;
 		tmm = 0;
 
 		t = clock();
 		// MULTIPLE_WRITE (default 0: NORMAL WRITE)
 		if (MULTIPLE_WRITE == 2)
 		{
+			if (ASYNC_IO == ASYNC)
+			{
+				async_data_worker_progress(0);
+			}
 			ret = imss_split_writev(path, (const char *)buf, size, off);
 			return ret;
 		}
 
-		// Compute offsets to write
-		int64_t curr_blk, end_blk, start_offset, end_offset, block_offset, i_blk, num_of_blk;
-		int64_t start_blk = off / IMSS_DATA_BSIZE + 1; // Add one to skip block 0
-		start_offset = off % IMSS_DATA_BSIZE;
-		end_blk = ceil((double)(off + size) / IMSS_DATA_BSIZE);
+		if (size == 0)
+		{
+			return 0;
+		}
 
-		end_offset = (off + size) % IMSS_DATA_BSIZE; // writev stuff
-		curr_blk = start_blk;
-
-		num_of_blk = end_blk - start_blk;
-
-		// Needed variables
-		size_t byte_count = 0;
-		ssize_t bytes_stored = 0;
-		int first_block_stored = 0;
 		int ds = 0;
-		int64_t to_copy = 0;
-		uint64_t bytes_to_copy = 0;
-		uint64_t space_in_block;
-		uint32_t filled = 0;
-		struct stat header;
-		// char *data_pointer = (char *)buf; // points to the buffer containing all bytes to be stored
-		const void *data_pointer = buf; // points to the buffer containing all bytes to be stored
-		const char *rpath = path;	// this pointer should not be free.
-		int middle = 0;
+		const char *rpath = path; // this pointer should not be free.
 
 		int fd = -1;
 		struct stat stats;
@@ -1889,86 +2287,26 @@ extern "C"
 		else if (fd == -1)
 			return -ENOENT;
 
-		slog_debug("size=%ld, IMSS_DATA_BSIZE=%ld, stats.st_size=%ld, start_blk=%ld, start_offset=%ld, end_offset=%ld, end_blk=%ld, curr_blk=%ld, ds=%d, off=%ld", size, IMSS_DATA_BSIZE, stats.st_size, start_blk, start_offset, end_offset, end_blk, curr_blk, ds, off);
+		size_t start_blk = (size_t)off / IMSS_DATA_BSIZE + 1; // Add one to skip block 0
+		size_t end_blk = ((size_t)off + size - 1) / IMSS_DATA_BSIZE + 1;
+		size_t num_blocks = end_blk - start_blk + 1;
 
-		// if (MULTIPLE_WRITE == 1)
-		// {
-		// 	slog_debug("[imss_write] MULTIPLE_WRITE %d", MULTIPLE_WRITE);
-		// 	if ((end_blk - curr_blk) > 1)
-		// 	{
-		// 		writev_multiple((const char *)buf, ds, curr_blk, end_blk, start_offset, end_offset, IMSS_DATA_BSIZE, size);
+		slog_debug("size=%zu, IMSS_DATA_BSIZE=%ld, stats.st_size=%ld, start_blk=%zu, end_blk=%zu, num_blocks=%zu, ds=%d, off=%ld", size, IMSS_DATA_BSIZE, stats.st_size, start_blk, end_blk, num_blocks, ds, off);
 
-		// 		// Update header count if the file has become bigger
-		// 		if (size + off > stats.st_size)
-		// 		{
-		// 			stats.st_size = size + off;
-		// 			stats.st_blocks = end_blk - 1;
-		// 			pthread_mutex_lock(&lock);
-		// 			map_update(map, rpath, ds, stats);
-		// 			pthread_mutex_unlock(&lock);
-		// 		}
-		// 		// free(rpath);
-		// 		return size;
-		// 	}
-		// }
-
-		i_blk = 0;
-		// WRITE NORMAL CASE
-		while (curr_blk <= end_blk)
-		{
-			if (!first_block_stored)
-			{
-				// first block, special case
-				// may be the only block to store, possible offset
-				space_in_block = IMSS_DATA_BSIZE - start_offset;
-				slog_debug("first block %ld: start_offset=%ld, stats.st_size=%ld, space_in_block=%ld", curr_blk, start_offset, stats.st_size, space_in_block);
-				bytes_to_copy = (size < space_in_block) ? size : space_in_block;
-				block_offset = start_offset;
-				first_block_stored = 1;
-			}
-			else if (curr_blk == end_blk)
-			{
-				// last block, special case: might be skipped
-				if (size == bytes_stored)
-					break;
-
-				slog_debug("last block %ld/%ld, bytes_stored=%ld", curr_blk, end_blk, bytes_stored);
-				bytes_to_copy = size - bytes_stored;
-			}
-			else
-			{
-				// middle block: complete block, no offset
-				slog_debug("middle block %ld", curr_blk);
-				bytes_to_copy = IMSS_DATA_BSIZE;
-			}
-
-			// store block
-			slog_debug("writting %" PRIu64 " kilobytes (%" PRIu64 " bytes) with an offset of %" PRIu64 " kilobytes (%" PRIu64 " bytes)", bytes_to_copy / 1024, bytes_to_copy, block_offset / 1024, block_offset);
-
-			// Send data to data server.
-			int32_t ret_set_data = TIMING(set_data((char *)path, ds, curr_blk, data_pointer, bytes_to_copy, block_offset, ASYNC_IO, INITIAL_RECURSION, SET_OP), "set_data", int32_t, -1);
-			if (ret_set_data < 0)
-			{
-				slog_error("[imss_write] Error writing to Hercules.\n");
-				fprintf(stderr, "[imss_write] Error writing to Hercules: %s\n", strerror(-ret_set_data));
-				error_print = ret_set_data;
-				if (ASYNC_IO == ASYNC)
-				{
-					async_data_worker_progress(0);
-				}
-				return ret_set_data;
-			}
-
-			bytes_stored += bytes_to_copy;
-			data_pointer = (char *)data_pointer + bytes_to_copy;
-			block_offset = 0; // first block has been stored, next blocks don't have an offset
-			++curr_blk;
-			ucp_worker_progress(ucp_worker_data);
-		}
-
+		ssize_t bytes_stored = 0;
 		if (ASYNC_IO == ASYNC)
 		{
-			async_data_worker_progress(0);
+			bytes_stored = imss_write_blocks_async(path, ds, buf, size, off, start_blk, num_blocks);
+		}
+		else
+		{
+			bytes_stored = imss_write_blocks_sync(path, ds, buf, size, off, start_blk, num_blocks);
+		}
+
+		if (bytes_stored < 0)
+		{
+			error_print = (int32_t)bytes_stored;
+			return bytes_stored;
 		}
 
 		// Mark intervals dirty; sync with metadata server on close/flush.
@@ -1977,9 +2315,8 @@ extern "C"
 		// Update header count if the file has become bigger.
 		if (size + off > stats.st_size)
 		{
-			// if(size + off != stats.st_size){
 			stats.st_size = size + off;
-			stats.st_blocks = curr_blk - 1;
+			stats.st_blocks = end_blk;
 			elem.stats = stats;
 			slog_debug("[imss_write] Updating stat, st_size=%ld, st_nlink=%lu", stats.st_size, stats.st_nlink);
 			HierarchicalMapUpdate(hierarchical_map, rpath, ds, &elem.stats, elem.aux);
@@ -2458,6 +2795,11 @@ extern "C"
 		slog_debug("stats.st_nlink=%lu, file size=%lu", stats.st_nlink, stats.st_size);
 		// memcpy(head, &stats, sizeof(struct stat));
 
+		if (ASYNC_IO == ASYNC)
+		{
+			async_data_worker_progress(0);
+		}
+
 		// Updates the size of the file in the block 0.
 		int32_t ret_set_data = set_data((char *)path, ds, 0, (char *)&stats, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
 		if (ret_set_data < 0)
@@ -2810,6 +3152,11 @@ extern "C"
 		// Write initial block
 		memcpy(buff, &ds_stat, sizeof(struct stat));
 
+		if (ASYNC_IO == ASYNC)
+		{
+			async_data_worker_progress(0);
+		}
+
 		pthread_mutex_lock(&lock);
 		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
 		pthread_mutex_unlock(&lock);
@@ -2968,6 +3315,11 @@ extern "C"
 		memcpy(buff, &stats, sizeof(struct stat));
 		buff[sizeof(struct stat)] = {'\0'};
 
+		if (ASYNC_IO == ASYNC)
+		{
+			async_data_worker_progress(0);
+		}
+
 		pthread_mutex_lock(&lock);
 		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
 		pthread_mutex_unlock(&lock);
@@ -3075,6 +3427,11 @@ extern "C"
 
 		// Write initial block
 		memcpy(buff, &ds_stat, sizeof(struct stat));
+
+		if (ASYNC_IO == ASYNC)
+		{
+			async_data_worker_progress(0);
+		}
 
 		pthread_mutex_lock(&lock);
 		int32_t ret_set_data = set_data((char *)path, file_desc, 0, (char *)buff, 0, 0, SYNC, INITIAL_RECURSION, SET_OP);
