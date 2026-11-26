@@ -1686,10 +1686,10 @@ int reset_local_server_read_update_state(int server_id)
 
 int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id)
 {
-	if (unsaturated_server_id < 0 || unsaturated_server_id >= MAX_SERVERS_PER_VIEW)
+	if (arguments == NULL || arguments->args == NULL)
 	{
-		slog_error("HERCULES_ERR_HANDLE_MEM_UNSATURATED_INVALID_ID: %d", unsaturated_server_id);
-		fprintf(stderr, "HERCULES_ERR_HANDLE_MEM_UNSATURATED_INVALID_ID: %d\n", unsaturated_server_id);
+		slog_error("HERCULES_ERR_HANDLE_MEM_UNSATURATED_NULL_ARGS");
+		fprintf(stderr, "HERCULES_ERR_HANDLE_MEM_UNSATURATED_NULL_ARGS\n");
 		return -1;
 	}
 
@@ -1701,32 +1701,54 @@ int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id)
 		return -1;
 	}
 
+	if (unsaturated_server_id < 0 || unsaturated_server_id >= imss_info_struct->num_storages || unsaturated_server_id >= MAX_SERVERS_PER_VIEW)
+	{
+		slog_error("HERCULES_ERR_HANDLE_MEM_UNSATURATED_INVALID_ID: %d (num_storages=%d)", unsaturated_server_id, imss_info_struct->num_storages);
+		fprintf(stderr, "HERCULES_ERR_HANDLE_MEM_UNSATURATED_INVALID_ID: %d (num_storages=%d)\n", unsaturated_server_id, imss_info_struct->num_storages);
+		return -1;
+	}
+
+	struct arguments *cfg = arguments->args;
 	int32_t active_count = 0;
 	int32_t total_storages = 0;
+	bool was_read_update = false;
+
 	pthread_mutex_lock(&mutex_malleability);
 
+	was_read_update = (imss_info_struct->server_states[unsaturated_server_id] == SERVER_READ_UPDATE);
 	imss_info_struct->server_states[unsaturated_server_id] = SERVER_ACTIVE_RW;
-	slog_info("Server %d recovered to SERVER_ACTIVE_RW after memory unsaturation.", unsaturated_server_id);
-	fprintf(stderr, "[Metadata Server] Server %d recovered to SERVER_ACTIVE_RW after memory unsaturation.\n", unsaturated_server_id);
 
 	int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
 	active_count = collect_active_rw_servers(imss_info_struct, active_server_ids);
-
 	total_storages = imss_info_struct->num_storages;
-	if (active_count > 0)
-	{
-		AddTopologyView(imss_info_struct, active_count, active_server_ids);
-		number_storage_servers.store((uint32_t)imss_info_struct->num_storages);
-		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
-		slog_info("TopologyView updated on memory unsaturation: view_id=%d, active_servers=%d/%d", imss_info_struct->current_view_id, active_count, total_storages);
-	}
 
-	id_server_to_modify = unsaturated_server_id;
-	last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
+	if (was_read_update)
+	{
+		// Server recovered from hard saturation:
+		// rebuild active topology view, clear malleability lock, and notify peers/clients.
+		slog_info("Server %d recovered to SERVER_ACTIVE_RW after memory unsaturation.", unsaturated_server_id);
+		fprintf(stderr, "[Metadata Server] Server %d recovered to SERVER_ACTIVE_RW after memory unsaturation.\n", unsaturated_server_id);
+		if (active_count > 0)
+		{
+			AddTopologyView(imss_info_struct, active_count, active_server_ids);
+			number_storage_servers.store((uint32_t)imss_info_struct->num_storages);
+			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+			slog_info("TopologyView updated on memory unsaturation: view_id=%d, active_servers=%d/%d", imss_info_struct->current_view_id, active_count, total_storages);
+		}
+		id_server_to_modify = unsaturated_server_id;
+		last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
+	}
+	else
+	{
+		// Server only hit the proactive high threshold (never entered READ_UPDATE)
+		// before draining below low threshold; skip topology rebuild.
+		slog_info("Server %d reported memory drain below low threshold while already SERVER_ACTIVE_RW (%d/%d active).", unsaturated_server_id, active_count, total_storages);
+		fprintf(stderr, "[Metadata Server] Server %d reported memory drain below low threshold (%d/%d active).\n", unsaturated_server_id, active_count, total_storages);
+	}
 
 	pthread_mutex_unlock(&mutex_malleability);
 
-	if (arguments != NULL && total_storages > 0)
+	if (was_read_update && total_storages > 0)
 	{
 		char state_req[REQUEST_SIZE] = {0};
 		snprintf(state_req, sizeof(state_req), "%s %d %d %d", MSG_UPDATE_SERVER_STATE, unsaturated_server_id, SERVER_ACTIVE_RW, total_storages);
@@ -1742,9 +1764,57 @@ int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id)
 				}
 			}
 		}
+
+		Attend_pending_requests();
 	}
 
-	Attend_pending_requests();
+	int32_t min_servers_allowed = (cfg->lower_bound_servers > 1) ? cfg->lower_bound_servers : 1;
+	if (cfg->malleability == MALLEABILITY_CONF_ENABLED && cfg->malleability_metric != MALLEABILITY_METRIC_BANDWIDTH && total_storages > min_servers_allowed)
+	{
+		if (active_count == total_storages)
+		{ // if all servers are in RW state, we can remove an unsaturated server.
+			bool expected = false;
+			if (active_commissioning_pid.load() == 0 && comissioning_on.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+			{
+				MalleabilityArgs *th_args = fill_malleability_args(arguments);
+				if (th_args == NULL)
+				{
+					slog_error("HERCULES_ERR_MEM_DECOM_EVAL_NULL_ARGS: failed to allocate MalleabilityArgs");
+					fprintf(stderr, "HERCULES_ERR_MEM_DECOM_EVAL_NULL_ARGS: failed to allocate MalleabilityArgs\n");
+					comissioning_on.store(false, std::memory_order_release);
+					return -1;
+				}
+
+				pthread_t decom_eval_thread;
+				if (pthread_create(&decom_eval_thread, NULL, run_memory_decommission_evaluation, (void *)th_args) != 0)
+				{
+					perror("HERCULES_ERR_MEM_DECOM_EVAL_THREAD_CREATE");
+					slog_error("HERCULES_ERR_MEM_DECOM_EVAL_THREAD_CREATE");
+					fprintf(stderr, "HERCULES_ERR_MEM_DECOM_EVAL_THREAD_CREATE\n");
+					comissioning_on.store(false, std::memory_order_release);
+					free(th_args);
+					return -1;
+				}
+				if (pthread_detach(decom_eval_thread) != 0)
+				{
+					perror("HERCULES_ERR_MEM_DECOM_EVAL_THREAD_DETACH");
+					slog_error("HERCULES_ERR_MEM_DECOM_EVAL_THREAD_DETACH");
+					fprintf(stderr, "HERCULES_ERR_MEM_DECOM_EVAL_THREAD_DETACH\n");
+				}
+			}
+			else
+			{
+				slog_info("[Metadata Server] Memory scale-down evaluation skipped: another malleability task is active (comissioning_on=%d, active_pid=%d).", comissioning_on.load(std::memory_order_acquire), active_commissioning_pid.load());
+				fprintf(stderr, "[Metadata Server] Memory scale-down evaluation skipped: another malleability task is active.\n");
+			}
+		}
+		else
+		{
+			slog_info("[Metadata Server] Memory scale-down skipped: only %d/%d servers are SERVER_ACTIVE_RW.", active_count, total_storages);
+			fprintf(stderr, "[Metadata Server] Memory scale-down skipped: only %d/%d servers are SERVER_ACTIVE_RW.\n", active_count, total_storages);
+		}
+	}
+
 	return 0;
 }
 
@@ -1793,32 +1863,11 @@ static int check_decommission_admission(MalleabilityArgs *arguments, int id_serv
 	ucp_worker_address_query(local_addr[arguments->thread_id], &attr);
 	uint64_t meta_worker_uid = attr.worker_uid;
 
-	// Query target server for its exact storage usage
-	size_t sent_bytes = send_req(arguments->ucp_worker, data_endpoints[id_server_to_remove], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], MSG_QUERY_STORAGE_USAGE);
-	if (sent_bytes == 0)
-	{
-		slog_warn("HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_SEND: unable to send %s to server %d", MSG_QUERY_STORAGE_USAGE, id_server_to_remove);
-		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_SEND: unable to send %s to server %d\n", MSG_QUERY_STORAGE_USAGE, id_server_to_remove);
-		return 0;
-	}
-
-	char resp[MAX_RESPONSE_MSG_LEN] = {0};
-	const double timeout_sec = 2.0;
-	int ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, data_endpoints[id_server_to_remove], resp, sizeof(resp), timeout_sec);
-	if (ret != 0)
-	{
-		slog_warn("HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_RECV: server %d did not respond to %s (ret=%d)", id_server_to_remove, MSG_QUERY_STORAGE_USAGE, ret);
-		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_RECV: server %d did not respond to %s (ret=%d)\n", id_server_to_remove, MSG_QUERY_STORAGE_USAGE, ret);
-		return 0;
-	}
-
+	// Query target server for its exact storage usage.
 	int64_t target_storage_usage = 0;
-	char status_str[MAX_RESPONSE_MSG_LEN] = {0};
-	int parsed = sscanf(resp, "%s %" PRId64, status_str, &target_storage_usage);
-	if (parsed < 2 || strcmp(status_str, MSG_OK_OP) != 0 || target_storage_usage < 0)
+	const double timeout_sec = 2.0;
+	if (query_server_storage_usage(arguments, id_server_to_remove, meta_worker_uid, timeout_sec, &target_storage_usage) != 0)
 	{
-		slog_warn("HERCULES_ERR_ADMISSION_CHECK_INVALID_RESPONSE: invalid response '%s' from server %d", resp, id_server_to_remove);
-		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_INVALID_RESPONSE: invalid response '%s' from server %d\n", resp, id_server_to_remove);
 		return 0;
 	}
 
@@ -1850,7 +1899,7 @@ static int check_decommission_admission(MalleabilityArgs *arguments, int id_serv
 			return 0;
 		}
 
-		sent_bytes = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], check_req);
+		size_t sent_bytes = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], check_req);
 		if (sent_bytes == 0)
 		{
 			slog_warn("HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_SEND: Admission check vetoed: unable to send %s to surviving server %d", MSG_CHECK_ACCEPT_DATA, i);
@@ -1858,8 +1907,8 @@ static int check_decommission_admission(MalleabilityArgs *arguments, int id_serv
 			return 0;
 		}
 
-		memset(resp, 0, sizeof(resp));
-		ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, data_endpoints[i], resp, sizeof(resp), timeout_sec);
+		char resp[MAX_RESPONSE_MSG_LEN] = {0};
+		int ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, data_endpoints[i], resp, sizeof(resp), timeout_sec);
 		if (ret != 0 || strcmp(resp, MSG_OK_OP) != 0)
 		{
 			slog_malleability("Decommission of server %d VETOED: surviving server %d rejected %" PRId64 " bytes (resp='%s', ret=%d).", id_server_to_remove, i, delta_bytes, resp, ret);
@@ -4445,6 +4494,7 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		slog_debug("mode=%s, number_storage_servers=%" PRIu32 ", new_id=%" PRIu32 "", mode, number_storage_servers.load(), new_id);
 
 		arguments->args->id = new_id;
+		SERVER_ID.store((int)new_id, std::memory_order_release);
 		slog_debug("new id on args=%d", arguments->args->id);
 
 		pthread_t thread;

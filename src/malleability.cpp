@@ -660,6 +660,7 @@ void finalize_decommission_on_surviving_server(p_argv *arguments)
 	{
 		args.id--;
 	}
+	SERVER_ID.store(arguments->args->id, std::memory_order_release);
 	arguments->args->num_data_servers = (uint32_t)imss_->info.num_storages;
 	args.num_data_servers = (uint32_t)imss_->info.num_storages;
 
@@ -1725,6 +1726,242 @@ void *run_manual_decommission(void *th_argv)
 
 	free(manual_args->malleability_args);
 	free(manual_args);
+	pthread_exit(NULL);
+}
+
+/**
+ * @brief Queries a single data server for its current occupied storage bytes.
+ *
+ * @param arguments Malleability thread arguments holding the UCX worker and thread index.
+ * @param server_id Target data server slot ID.
+ * @param meta_worker_uid Local UCX worker address UID for receiving the reply.
+ * @param timeout_sec Timeout in seconds waiting for the server reply.
+ * @param out_usage_bytes Output pointer populated with occupied bytes on success.
+ * @return 0 on success, -1 on invalid arguments, transport error, timeout, or malformed reply.
+ */
+int query_server_storage_usage(MalleabilityArgs *arguments, int server_id, uint64_t meta_worker_uid, double timeout_sec, int64_t *out_usage_bytes)
+{
+	if (arguments == NULL || arguments->ucp_worker == NULL || out_usage_bytes == NULL)
+	{
+		slog_error("HERCULES_ERR_QUERY_STORAGE_NULL_ARGS");
+		fprintf(stderr, "HERCULES_ERR_QUERY_STORAGE_NULL_ARGS\n");
+		return -1;
+	}
+
+	if (local_addr == NULL || local_addr_len == NULL || local_addr[arguments->thread_id] == NULL)
+	{
+		slog_error("HERCULES_ERR_QUERY_STORAGE_NULL_LOCAL_ADDR");
+		fprintf(stderr, "HERCULES_ERR_QUERY_STORAGE_NULL_LOCAL_ADDR\n");
+		return -1;
+	}
+
+	if (server_id < 0 || server_id >= MAX_SERVERS_PER_VIEW || data_endpoints[server_id] == NULL)
+	{
+		slog_error("HERCULES_ERR_QUERY_STORAGE_INVALID_SERVER: invalid server_id=%d or NULL endpoint", server_id);
+		fprintf(stderr, "HERCULES_ERR_QUERY_STORAGE_INVALID_SERVER: invalid server_id=%d or NULL endpoint\n", server_id);
+		return -1;
+	}
+
+	size_t sent_bytes = send_req(arguments->ucp_worker, data_endpoints[server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], MSG_QUERY_STORAGE_USAGE);
+	if (sent_bytes == 0)
+	{
+		slog_warn("HERCULES_ERR_QUERY_STORAGE_SEND: unable to send %s to server %d", MSG_QUERY_STORAGE_USAGE, server_id);
+		fprintf(stderr, "HERCULES_ERR_QUERY_STORAGE_SEND: unable to send %s to server %d\n", MSG_QUERY_STORAGE_USAGE, server_id);
+		return -1;
+	}
+
+	char resp[MAX_RESPONSE_MSG_LEN] = {0};
+	int ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, data_endpoints[server_id], resp, sizeof(resp), timeout_sec);
+	if (ret != 0)
+	{
+		slog_warn("HERCULES_ERR_QUERY_STORAGE_RECV: server %d did not respond to %s (ret=%d)", server_id, MSG_QUERY_STORAGE_USAGE, ret);
+		fprintf(stderr, "HERCULES_ERR_QUERY_STORAGE_RECV: server %d did not respond to %s (ret=%d)\n", server_id, MSG_QUERY_STORAGE_USAGE, ret);
+		return -1;
+	}
+
+	int64_t usage_bytes = 0;
+	char status_str[MAX_RESPONSE_MSG_LEN] = {0};
+	int parsed = sscanf(resp, "%31s %" PRId64, status_str, &usage_bytes);
+	if (parsed < 2 || strcmp(status_str, MSG_OK_OP) != 0 || usage_bytes < 0)
+	{
+		slog_warn("HERCULES_ERR_QUERY_STORAGE_INVALID_RESP: invalid response '%s' from server %d", resp, server_id);
+		fprintf(stderr, "HERCULES_ERR_QUERY_STORAGE_INVALID_RESP: invalid response '%s' from server %d\n", resp, server_id);
+		return -1;
+	}
+
+	*out_usage_bytes = usage_bytes;
+	return 0;
+}
+
+/**
+ * @brief Selects the data server holding the least stored data for memory-driven decommissioning.
+ *
+ * Vetoes scale-down (-1) if fewer than two servers are active, if inputs are invalid,
+ * or if any active server is not in SERVER_ACTIVE_RW state. Ties prefer the highest server ID.
+ *
+ * @param usages Array of occupied bytes per server [0 .. num_servers - 1].
+ * @param states Array of server_state_t values per server [0 .. num_servers - 1].
+ * @param num_servers Total number of active storage servers.
+ * @return Server ID with the lowest occupied_bytes, or -1 if ineligible.
+ */
+int select_least_loaded_server(const int64_t *usages, const int32_t *states, int num_servers)
+{
+	if (usages == NULL || states == NULL || num_servers <= 1)
+	{
+		return -1;
+	}
+
+	for (int i = 0; i < num_servers; i++)
+	{
+		if (states[i] != SERVER_ACTIVE_RW || usages[i] < 0)
+		{
+			return -1;
+		}
+	}
+
+	int best_id = 0;
+	int64_t min_usage = usages[0];
+	for (int i = 1; i < num_servers; i++)
+	{
+		if (usages[i] <= min_usage)
+		{
+			min_usage = usages[i];
+			best_id = i;
+		}
+	}
+
+	return best_id;
+}
+
+/**
+ * @brief Evaluates cluster state and storage occupancy under mutext_malleability and
+ *        decommissions the least-loaded server admission checks pass.
+ *
+ * @param malleability_args Validated worker arguments (caller holds mutext_malleability and frees args).
+ */
+static void evaluate_memory_decommission_locked(MalleabilityArgs *malleability_args)
+{
+	struct arguments *cfg = malleability_args->args;
+	imss_info *imss_info_struct = curr_global_imss_info;
+	if (imss_info_struct == NULL)
+	{
+		slog_error("HERCULES_ERR_MEM_DECOM_EVAL_NULL_IMSS");
+		fprintf(stderr, "HERCULES_ERR_MEM_DECOM_EVAL_NULL_IMSS\n");
+		return;
+	}
+
+	if (malleability_status.load(std::memory_order_acquire) != MALLEABILITY_OFF)
+	{
+		slog_malleability("Memory scale-down evaluation skipped: malleability_status is not MALLEABILITY_OFF.");
+		return;
+	}
+
+	int old_num_servers = (int)number_storage_servers.load();
+	int32_t min_servers_allowed = (cfg->lower_bound_servers > 1) ? cfg->lower_bound_servers : 1;
+	if (old_num_servers <= min_servers_allowed || old_num_servers > MAX_SERVERS_PER_VIEW)
+	{
+		slog_malleability("Memory scale-down skipped: active servers (%d) at or below lower bound (%d).", old_num_servers, min_servers_allowed);
+		fprintf(stderr, "[Metadata Server] Memory scale-down skipped: active servers (%d) at or below lower bound (%d).\n", old_num_servers, min_servers_allowed);
+		return;
+	}
+
+	int32_t states[MAX_SERVERS_PER_VIEW];
+	bool all_active_rw = true;
+	pthread_mutex_lock(&mutex_malleability);
+	// Counts the number of servers in RW mode.
+	for (int i = 0; i < old_num_servers; i++)
+	{
+		states[i] = imss_info_struct->server_states[i];
+		if (states[i] != SERVER_ACTIVE_RW)
+		{
+			all_active_rw = false;
+		}
+	}
+	pthread_mutex_unlock(&mutex_malleability);
+
+	if (!all_active_rw)
+	{
+		slog_malleability("Memory scale-down skipped: not all %d servers are in SERVER_ACTIVE_RW state.", old_num_servers);
+		fprintf(stderr, "[Metadata Server] Memory scale-down skipped: not all %d servers are in SERVER_ACTIVE_RW state.\n", old_num_servers);
+		return;
+	}
+
+	ucp_worker_address_attr_t attr;
+	memset(&attr, 0, sizeof(attr));
+	attr.field_mask = UCP_WORKER_ADDRESS_ATTR_FIELD_UID;
+	ucp_worker_address_query(local_addr[malleability_args->thread_id], &attr);
+	uint64_t meta_worker_uid = attr.worker_uid;
+
+	int64_t usages[MAX_SERVERS_PER_VIEW];
+	for (int i = 0; i < old_num_servers; i++)
+	{
+		if (query_server_storage_usage(malleability_args, i, meta_worker_uid, 2.0, &usages[i]) != 0)
+		{
+			slog_warn("Memory scale-down aborted: failed to query storage usage from server %d.", i);
+			fprintf(stderr, "[Metadata Server] Memory scale-down aborted: failed to query storage usage from server %d.\n", i);
+			return;
+		}
+	}
+
+	int target_id = select_least_loaded_server(usages, states, old_num_servers);
+	if (target_id < 0)
+	{
+		slog_malleability("Memory scale-down skipped: no eligible least-loaded server among %d servers.", old_num_servers);
+		return;
+	}
+
+	std::string removed_host;
+	if (imss_info_struct->ips != NULL && imss_info_struct->ips[target_id] != NULL)
+	{
+		removed_host = imss_info_struct->ips[target_id];
+	}
+
+	slog_malleability("Memory scale-down selected least-loaded server %d (%s) with %" PRId64 " occupied bytes among %d servers.", target_id, removed_host.empty() ? "unknown" : removed_host.c_str(), usages[target_id], old_num_servers);
+	fprintf(stderr, "[Metadata Server] Memory scale-down selected least-loaded server %d (%s) with %" PRId64 " occupied bytes among %d servers.\n", target_id, removed_host.empty() ? "unknown" : removed_host.c_str(), usages[target_id], old_num_servers);
+
+	// Capture elapsed time prior to decommissioning so application profile recording reflects when the decision triggered.
+	double trigger_sec = get_application_profile_elapsed_sec();
+	// Execute decommissioning.
+	int decom_ret = decomissioning_stage(malleability_args, target_id);
+	if (decom_ret == 1)
+	{
+		// Purge stale bandwidth history for the removed host so future intervals stay clean.
+		if (!removed_host.empty())
+		{
+			clear_transition_performance_metrics(&removed_host);
+		}
+		// Persist the updated server count in the application profile when profile recording is active.
+		if (application_profile_record_active.load(std::memory_order_acquire))
+		{
+			record_application_profile_event(cfg->application_profile_path, trigger_sec, (int32_t)number_storage_servers.load());
+		}
+	}
+}
+
+/**
+ * @brief Asynchronous metadata worker that evaluates cluster storage usage after unsaturation
+ *        and decommissions the least-loaded server if admission checks pass.
+ *
+ * @param th_argv MalleabilityArgs.
+ * @return Always returns NULL upon thread exit.
+ */
+void *run_memory_decommission_evaluation(void *th_argv)
+{
+	MalleabilityArgs *malleability_args = (MalleabilityArgs *)th_argv;
+	if (malleability_args == NULL || malleability_args->args == NULL || malleability_args->ucp_worker == NULL || local_addr == NULL || local_addr_len == NULL || local_addr[malleability_args->thread_id] == NULL)
+	{
+		slog_error("HERCULES_ERR_MEM_DECOM_EVAL_INVALID_ARGS");
+		fprintf(stderr, "HERCULES_ERR_MEM_DECOM_EVAL_INVALID_ARGS\n");
+		comissioning_on.store(false, std::memory_order_release);
+		free(malleability_args);
+		pthread_exit(NULL);
+	}
+
+	pthread_mutex_lock(&mutext_malleability);
+	evaluate_memory_decommission_locked(malleability_args);
+	comissioning_on.store(false, std::memory_order_release);
+	pthread_mutex_unlock(&mutext_malleability);
+	free(malleability_args);
 	pthread_exit(NULL);
 }
 

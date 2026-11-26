@@ -69,7 +69,7 @@ if [[ "$1" == "--worker" ]]; then
             HERCULES_THREAD_POOL=1 \
             HERCULES_DATA_HOSTNAME="${TARGET_NODE}" \
             HERCULES_SLURM_ALLOC_SEC="${SLURM_ALLOC_SEC}" \
-        "${SERVER_BIN}" d "${SERVER_ID}" "${NUM_ACTIVE}" >> "${LOG_FILE}" 2>&1
+        "${SERVER_BIN}" d "${SERVER_ID}" "${NUM_ACTIVE}" >> "${LOG_FILE}" 2> >(tee -a "${LOG_FILE}" >&2)
     SRUN_RC=$?
     exit ${SRUN_RC}
 fi

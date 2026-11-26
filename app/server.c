@@ -22,7 +22,6 @@
 proccess_type_t process_type = proccess_type_t::BACKEND;
 extern int number_of_hosts;
 extern imss_info imss_copy;
-extern int SERVER_ID;
 // Pointer to the tree's root node.
 // extern GNode *tree_root;
 // extern pthread_mutex_t tree_mut;
@@ -643,7 +642,7 @@ int32_t main(int32_t argc, char **argv)
 	/***************************************************************/
 	IMSS_ROOT = args.imss_uri;
 	IMSS_ROOT_LEN = strlen(IMSS_ROOT);
-	SERVER_ID = args.id;
+	SERVER_ID.store(args.id, std::memory_order_release);
 	BLOCK_SIZE = args.block_size * 1024;
 
 	// Map tracking saved records.

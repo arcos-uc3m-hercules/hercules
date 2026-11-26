@@ -71,6 +71,7 @@ extern bool checkpoint_local_finished;
 
 extern pthread_mutex_t memory_protect;
 extern pthread_mutex_t mutext_malleability;
+extern pthread_mutex_t mutex_malleability;
 extern pthread_mutex_t mutext_performance_metrics;
 extern pthread_mutex_t mutex_snapshot_consumer;
 extern pthread_cond_t global_run_snapshot_consumer_cond;
@@ -78,6 +79,7 @@ extern pthread_mutex_t mutex_elasticity_monitor;
 extern pthread_cond_t cond_elasticity_monitor;
 
 extern std::atomic<bool> comissioning_on;
+extern std::atomic<int> malleability_status;
 extern std::atomic<pid_t> active_commissioning_pid;
 extern int global_finish_threads;
 extern ucp_worker_h *ucp_worker_threads;
@@ -253,6 +255,9 @@ scaling_action make_scaling_decision(const std::map<std::string, std::vector<Ela
 void *get_performance_metrics(void *th_argv);
 void *run_malleability(void *th_argv);
 void *run_manual_decommission(void *th_argv);
+int query_server_storage_usage(MalleabilityArgs *arguments, int server_id, uint64_t meta_worker_uid, double timeout_sec, int64_t *out_usage_bytes);
+int select_least_loaded_server(const int64_t *usages, const int32_t *states, int num_servers);
+void *run_memory_decommission_evaluation(void *th_argv);
 void *comissioning_stage(MalleabilityArgs *arguments);
 int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove);
 int handle_memory_pre_saturation(p_argv *arguments, int saturated_server_id);

@@ -1,17 +1,18 @@
 /**
  * @file hierarchical_records.hpp
  * @author Genaro Sánchez-Gallegos, Javier Garcia-Blas, Jesus Carretero
- * @brief 
+ * @brief
  * @version 0.4
  * @date 2026-10-29
- * 
+ *
  * @copyright Copyright (c) 2025
- * 
+ *
  */
 #ifndef H_H_MAP_RECORDS
 #define H_H_MAP_RECORDS
 
 #include "records.hpp"
+#include <atomic>
 #include <cstdint>
 #include <map>
 
@@ -21,7 +22,7 @@ typedef std::map<std::string, std::shared_ptr<map_records>> HierarchicalMap;
 
 class HierarchicalRecords
 {
-public:
+      public:
 	HierarchicalRecords(const std::string &root);
 	~HierarchicalRecords();
 	void HierarchicalMapDestroy(void *map);
@@ -46,7 +47,7 @@ public:
 	int32_t HierarchicalMapSearchInGarbageCollector(const std::string &key);
 	int32_t HierarchicalMapCleanGarbageCollector();
 
-private:
+      private:
 	HierarchicalMap *hiermap;
 
 	std::shared_ptr<map_records> get_child_unsafe(const char *k);
@@ -54,6 +55,8 @@ private:
 	int InsertDirectory(const std::string &key);
 	int CheckIfDirectory(const std::string &key, void *address);
 };
+
+extern std::atomic<int> SERVER_ID;
 
 #ifdef __cplusplus
 extern "C"
@@ -70,6 +73,7 @@ extern "C"
 	extern int64_t memory_saturation_bytes;
 	extern int notified_memory_saturation;
 	extern int notified_memory_commission;
+	extern int notified_memory_high_watermark;
 
 	// Memory usage.
 	void init_memory_thresholds();

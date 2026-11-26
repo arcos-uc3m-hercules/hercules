@@ -19,7 +19,7 @@
 #include <inttypes.h>
 
 extern struct arguments args;
-int SERVER_ID;
+std::atomic<int> SERVER_ID(0);
 // for sincronization in the map.
 std::mutex hierarchical_map_lock;
 // for garbage collector.
@@ -773,6 +773,7 @@ extern "C"
 	int64_t memory_saturation_bytes = 0;
 	int notified_memory_saturation = 0;
 	int notified_memory_commission = 0;
+	int notified_memory_high_watermark = 0;
 	static const double HARD_MEMORY_SATURATION_PERCENT = 99.0;
 
 	void init_memory_thresholds()
@@ -800,8 +801,9 @@ extern "C"
 		pthread_mutex_lock(&mutex_quantity_occupied);
 		is_server_read_update = ru;
 		pthread_mutex_unlock(&mutex_quantity_occupied);
-		slog_warn("[Server %d] Server READ_UPDATE status set to %d", SERVER_ID, ru);
-		fprintf(stderr, "[Server %d] Server READ_UPDATE status set to %d\n", SERVER_ID, ru);
+		const int current_server_id = SERVER_ID.load(std::memory_order_acquire);
+		slog_warn("[Server %d] Server READ_UPDATE status set to %d", current_server_id, ru);
+		fprintf(stderr, "[Server %d] Server READ_UPDATE status set to %d\n", current_server_id, ru);
 	}
 
 	/**
@@ -822,16 +824,22 @@ extern "C"
 	}
 
 	/**
-	 * @brief Evaluates whether accepting additional data would push this server to 
-	 * or above its memory high threshold.
+	 * @brief Evaluates whether accepting additional data would push this server to
+	 * or above its memory high threshold (or if it is already pre-saturated / read-update).
 	 * @param required_space Requested memory in bytes.
-	 * @return 1 if memory can be safely accepted without breaching threshold, 0 otherwise.
+	 * @return 1 if memory can be safely accepted without triggering pre-saturation, 0 otherwise.
 	 */
 	int CheckAcceptData(int64_t required_space)
 	{
+		if (required_space < 0)
+		{
+			slog_error("HERCULES_ERR_CHECK_ACCEPT_DATA_INVALID_SPACE: negative required_space=%" PRId64, required_space);
+			fprintf(stderr, "HERCULES_ERR_CHECK_ACCEPT_DATA_INVALID_SPACE: negative required_space=%" PRId64 "\n", required_space);
+			return 0;
+		}
 		int ret = 1;
 		pthread_mutex_lock(&mutex_quantity_occupied);
-		if (is_server_read_update || (quantity_occupied + required_space >= memory_threshold_high_bytes))
+		if (is_server_read_update || notified_memory_commission || (quantity_occupied + required_space >= memory_threshold_high_bytes))
 		{
 			ret = 0;
 		}
@@ -856,7 +864,7 @@ extern "C"
 		pthread_mutex_lock(&mutex_quantity_occupied);
 		if (is_server_read_update)
 		{
-			slog_warn("[Server %d] Write allocation rejected: server is in READ_UPDATE mode.", SERVER_ID);
+			slog_warn("[Server %d] Write allocation rejected: server is in READ_UPDATE mode.", SERVER_ID.load(std::memory_order_acquire));
 			pthread_mutex_unlock(&mutex_quantity_occupied);
 			return 0;
 		}
@@ -875,6 +883,7 @@ extern "C"
 				if (!notified_memory_commission && quantity_occupied >= memory_threshold_high_bytes)
 				{
 					notified_memory_commission = 1;
+					notified_memory_high_watermark = 1;
 					send_pre_sat = true;
 				}
 				if (!notified_memory_saturation && quantity_occupied >= memory_saturation_bytes)
@@ -893,22 +902,23 @@ extern "C"
 
 		if (send_pre_sat || send_sat)
 		{
+			const int current_server_id = SERVER_ID.load(std::memory_order_acquire);
 			const double usage_pct = static_cast<double>(occupied_snapshot) * 100.0 / static_cast<double>(max_size_snapshot);
 			if (send_pre_sat)
 			{
-				slog_warn("[Server %d] Proactive memory high threshold reached: %.2f%% (threshold=%d%%). Requesting early commissioning.", SERVER_ID, usage_pct, memory_threshold_high);
-				fprintf(stderr, "[Server %d] Proactive memory high threshold reached: %.2f%% (threshold=%d%%). Requesting early commissioning.\n", SERVER_ID, usage_pct, memory_threshold_high);
+				slog_warn("[Server %d] Proactive memory high threshold reached: %.2f%% (threshold=%d%%). Requesting early commissioning.", current_server_id, usage_pct, memory_threshold_high);
+				fprintf(stderr, "[Server %d] Proactive memory high threshold reached: %.2f%% (threshold=%d%%). Requesting early commissioning.\n", current_server_id, usage_pct, memory_threshold_high);
 				char notify_msg[REQUEST_SIZE] = {0};
-				snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_PRE_SATURATION, SERVER_ID, usage_pct);
+				snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_PRE_SATURATION, current_server_id, usage_pct);
 				send_meta_req_sync(notify_msg, 0);
 			}
 
 			if (send_sat)
 			{
-				slog_warn("[Server %d] Memory hard saturation reached: %.2f%% (>= %.1f%%). Notifying metadata server.", SERVER_ID, usage_pct, HARD_MEMORY_SATURATION_PERCENT);
-				fprintf(stderr, "[Server %d] Memory hard saturation reached: %.2f%% (>= %.1f%%). Notifying metadata server.\n", SERVER_ID, usage_pct, HARD_MEMORY_SATURATION_PERCENT);
+				slog_warn("[Server %d] Memory hard saturation reached: %.2f%% (>= %.1f%%). Notifying metadata server.", current_server_id, usage_pct, HARD_MEMORY_SATURATION_PERCENT);
+				fprintf(stderr, "[Server %d] Memory hard saturation reached: %.2f%% (>= %.1f%%). Notifying metadata server.\n", current_server_id, usage_pct, HARD_MEMORY_SATURATION_PERCENT);
 				char notify_msg[REQUEST_SIZE] = {0};
-				snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_SATURATION, SERVER_ID, usage_pct);
+				snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_SATURATION, current_server_id, usage_pct);
 				send_meta_req_sync(notify_msg, 0);
 			}
 		}
@@ -925,6 +935,7 @@ extern "C"
 	{
 		int ret = 1;
 		bool send_unsat = false;
+		bool was_saturated = false;
 		int64_t occupied_snapshot = 0;
 		uint64_t max_size_snapshot = 0;
 
@@ -939,16 +950,18 @@ extern "C"
 		{
 			quantity_occupied = quantity_occupied - freed_space;
 			slog_debug("memory occupied=%lu GB, freed_space=%lu", quantity_occupied / GB, freed_space);
-			if (SERVER_TYPE == TYPE_DATA_SERVER && max_storage_size > 0 && (notified_memory_commission || notified_memory_saturation || is_server_read_update))
+			if (SERVER_TYPE == TYPE_DATA_SERVER && max_storage_size > 0 && (notified_memory_commission || notified_memory_saturation || is_server_read_update || notified_memory_high_watermark))
 			{
 				if (notified_memory_commission && quantity_occupied < memory_threshold_high_bytes)
 				{
 					notified_memory_commission = 0;
 				}
-				if ((notified_memory_saturation || is_server_read_update) && quantity_occupied <= memory_threshold_low_bytes)
+				if ((notified_memory_saturation || is_server_read_update || notified_memory_high_watermark) && quantity_occupied <= memory_threshold_low_bytes)
 				{
+					was_saturated = (notified_memory_saturation != 0 || is_server_read_update != 0);
 					notified_memory_saturation = 0;
 					notified_memory_commission = 0;
+					notified_memory_high_watermark = 0;
 					is_server_read_update = 0;
 					send_unsat = true;
 					occupied_snapshot = quantity_occupied;
@@ -960,19 +973,28 @@ extern "C"
 
 		if (send_unsat)
 		{
+			const int current_server_id = SERVER_ID.load(std::memory_order_acquire);
 			const double usage_pct = static_cast<double>(occupied_snapshot) * 100.0 / static_cast<double>(max_size_snapshot);
-			if (reset_local_server_read_update_state(SERVER_ID) != 0)
+			if (was_saturated)
 			{
-				slog_error("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_RESET_STATE: failed to reset local read-update state for server %d", SERVER_ID);
-				fprintf(stderr, "HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_RESET_STATE: failed to reset local read-update state for server %d\n", SERVER_ID);
-				return -1;
+				if (reset_local_server_read_update_state(current_server_id) != 0)
+				{
+					slog_error("HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_RESET_STATE: failed to reset local read-update state for server %d", current_server_id);
+					fprintf(stderr, "HERCULES_ERR_DECREASE_MEMORY_OCCUPIED_RESET_STATE: failed to reset local read-update state for server %d\n", current_server_id);
+					return -1;
+				}
+				slog_warn("[Server %d] Server READ_UPDATE status set to 0", current_server_id);
+				fprintf(stderr, "[Server %d] Server READ_UPDATE status set to 0\n", current_server_id);
+				slog_info("[%s] Memory unsaturated below low threshold: %.2f%% (threshold=%d%%). Transitioning back to ACTIVE_RW.", args.data_hostname, usage_pct, memory_threshold_low);
+				fprintf(stderr, "[%s] Memory unsaturated below low threshold: %.2f%% (threshold=%d%%). Transitioning back to ACTIVE_RW.\n", args.data_hostname, usage_pct, memory_threshold_low);
 			}
-			slog_warn("[Server %d] Server READ_UPDATE status set to 0", SERVER_ID);
-			fprintf(stderr, "[Server %d] Server READ_UPDATE status set to 0\n", SERVER_ID);
-			slog_info("[%s] Memory unsaturated below low threshold: %.2f%% (threshold=%d%%). Transitioning back to ACTIVE_RW.", args.data_hostname, usage_pct, memory_threshold_low);
-			fprintf(stderr, "[%s] Memory unsaturated below low threshold: %.2f%% (threshold=%d%%). Transitioning back to ACTIVE_RW.\n", args.data_hostname, usage_pct, memory_threshold_low);
+			else
+			{
+				slog_info("[%s] Memory drained below low threshold: %.2f%% (threshold=%d%%). Notifying metadata server for scale-down evaluation.", args.data_hostname, usage_pct, memory_threshold_low);
+				fprintf(stderr, "[%s] Memory drained below low threshold: %.2f%% (threshold=%d%%). Notifying metadata server for scale-down evaluation.\n", args.data_hostname, usage_pct, memory_threshold_low);
+			}
 			char notify_msg[REQUEST_SIZE] = {0};
-			snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_UNSATURATED, SERVER_ID, usage_pct);
+			snprintf(notify_msg, sizeof(notify_msg), "%s %d %.2f", MSG_MEMORY_UNSATURATED, current_server_id, usage_pct);
 			send_meta_req_sync(notify_msg, 0);
 		}
 		return ret;
