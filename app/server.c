@@ -684,7 +684,7 @@ int32_t main(int32_t argc, char **argv)
 	if (args.type == TYPE_DATA_SERVER)
 	{
 		region_locks = (pthread_mutex_t *)calloc(hercules_thread_pool_size, sizeof(pthread_mutex_t));
-		extra_threads = 4; // dispatcher + garbage collector + checkpoint + snapshot.
+		extra_threads = 5; // dispatcher + garbage collector + elasticity monitor + checkpoint + snapshot.
 	}
 	else
 	{
@@ -777,7 +777,7 @@ int32_t main(int32_t argc, char **argv)
 				pthread_exit(NULL);
 			}
 		}
-		else if (i == 2 && args.type != TYPE_DATA_SERVER)
+		else if (i == 2)
 		{ // elasticity monitor.
 			slog_debug("[SERVER] Creating elasticity monitor thread.");
 			// Explicitly zero non-object fields on stack-allocated p_argv before spawning the monitor thread.
@@ -796,7 +796,7 @@ int32_t main(int32_t argc, char **argv)
 				pthread_exit(NULL);
 			}
 		}
-		else if (i == 2 && args.type == TYPE_DATA_SERVER)
+		else if (i == 3 && args.type == TYPE_DATA_SERVER)
 		{ // checkpoint.
 			slog_debug("[SERVER] Creating checkpoint thread.");
 			// Add the reference to the map into the set of thread arguments.
@@ -810,7 +810,7 @@ int32_t main(int32_t argc, char **argv)
 				pthread_exit(NULL);
 			}
 		}
-		else if (i == 3 && args.type == TYPE_DATA_SERVER)
+		else if (i == 4 && args.type == TYPE_DATA_SERVER)
 		{ // snapshot.
 			slog_debug("[SERVER] Creating snapshot thread.");
 			// Add the reference to the map into the set of thread arguments.
@@ -1375,6 +1375,13 @@ void handle_signal_server(int signal)
 			}
 
 			global_finish_threads = 1;
+
+			if (args.type == TYPE_DATA_SERVER)
+			{
+				pthread_mutex_lock(&mutex_elasticity_monitor);
+				pthread_cond_broadcast(&cond_elasticity_monitor);
+				pthread_mutex_unlock(&mutex_elasticity_monitor);
+			}
 
 			// Shutdown or close the socket used by the dispatcher pointed
 			// by the file descriptor "global_server_fd_thread".

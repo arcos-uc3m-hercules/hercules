@@ -686,6 +686,10 @@ int Shutdown_server()
 	}
 
 	global_finish_threads = 1;
+	// Wake the periodic elasticity/storage monitor thread so decommissioned servers exit cleanly.
+	pthread_mutex_lock(&mutex_elasticity_monitor);
+	pthread_cond_broadcast(&cond_elasticity_monitor);
+	pthread_mutex_unlock(&mutex_elasticity_monitor);
 	// finish the garbage collector.
 	pthread_mutex_lock(&mutex_garbage);
 	global_finish_garbage_collector = 1;
@@ -5624,12 +5628,52 @@ int handle_write_operation(
 				fill_temp_p_argv(arguments, &temp_p_argv_for_calls);
 				// send the update list of nodes to the client.
 				int send_ret = send_node_list_2_frontend(temp_p_argv_for_calls, server_n_used_in_frontend);
-				if (send_post_write_status && (send_ret == 2 || send_ret < 0))
+				if ((send_post_write_status || expect_pre_data_ack) && (send_ret == 2 || send_ret < 0))
 				{
-					SendConfirmationMessage(arguments, MSG_ERROR_OP);
+					SendConfirmationMessage(arguments, MSG_SPACE_OP);
 				}
 			}
 			return -1;
+		}
+
+		// Check memory space before sending the confirmation so writes that cannot fit are rejected
+		// or held cleanly without desynchronizing UCX tags.
+		if (transfer_mode == CommunicationMode::MODE_NETWORK && !is_async_migration)
+		{
+			int64_t expected_space = is_block_zero ? static_cast<int64_t>(block_size_recv) : static_cast<int64_t>(BLOCK_SIZE);
+			if (!CheckForMemorySpace(expected_space))
+			{
+				if (promise_enabled.load(std::memory_order_acquire))
+				{
+					slog_info("[%s] New block write %s held on server %d: insufficient memory space with promise enabled, waiting for new data server.", arguments->args->data_hostname, key.c_str(), arguments->args->id);
+					fprintf(stderr, "[%s] New block write %s held on server %d: insufficient space, waiting for new server.\n", arguments->args->data_hostname, key.c_str(), arguments->args->id);
+					if (!expect_pre_data_ack)
+					{
+						drain_async_write_data(arguments, data_recv_tag);
+					}
+					pthread_mutex_lock(&mutex_malleability);
+					PendingRequestInfo pending_info;
+					pending_info.ucp_worker = arguments->ucp_worker;
+					pending_info.server_ep = arguments->server_ep;
+					pending_info.worker_uid = arguments->worker_uid;
+					strncpy(pending_info.curr_req, arguments->curr_req, PATH_MAX);
+					pending_requests.push_back(pending_info);
+					pthread_mutex_unlock(&mutex_malleability);
+					return 1;
+				}
+
+				slog_warn("[%s] New block write %s rejected before data transfer: insufficient memory space on server %d.", arguments->args->data_hostname, key.c_str(), arguments->args->id);
+				fprintf(stderr, "[%s] New block write %s rejected before data transfer: insufficient memory space on server %d.\n", arguments->args->data_hostname, key.c_str(), arguments->args->id);
+				if (!expect_pre_data_ack)
+				{
+					drain_async_write_data(arguments, data_recv_tag);
+				}
+				if (send_post_write_status || expect_pre_data_ack)
+				{
+					SendConfirmationMessage(arguments, MSG_SPACE_OP);
+				}
+				return -1;
+			}
 		}
 
 		if (transfer_mode == CommunicationMode::MODE_NETWORK && expect_pre_data_ack)
@@ -5893,7 +5937,7 @@ int handle_write_operation(
 			if (insert_successful != 0)
 			{
 				// Batched SETDISK / SETBUFFNETWORK and SETNETWORK_ASYNC do not emit per-block error ACKs.
-				if (transfer_mode != CommunicationMode::MODE_DISK && transfer_mode != CommunicationMode::MODE_BUFF_NETWORK && !is_async_migration)
+				if (send_post_write_status && transfer_mode != CommunicationMode::MODE_DISK && transfer_mode != CommunicationMode::MODE_BUFF_NETWORK && !is_async_migration)
 				{
 					if (insert_successful == 2) // TODO: check where to move this confirmation messages.
 					{

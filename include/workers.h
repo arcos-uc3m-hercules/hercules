@@ -215,6 +215,7 @@ void *GarbageCollector(void *th_argv);
 // Periodic metadata thread flushing interval byte buckets and evaluating bandwidth elasticity.
 imss_info *resolve_global_imss_info(const char *imss_uri);
 int flush_performance_interval(int32_t interval_ms, int32_t analysis_window_size, const char *imss_uri);
+// Periodic monitor thread: bandwidth/profile elasticity on metadata server, storage utilization on data servers.
 void *ElasticityMonitor(void *th_argv);
 
 // Thread method attending client metadata requests.

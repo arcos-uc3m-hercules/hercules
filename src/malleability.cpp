@@ -1003,6 +1003,80 @@ void *ElasticityMonitor(void *th_argv)
 
 	int32_t mall_mode = arguments->args->malleability;
 	int32_t mall_metric = arguments->args->malleability_metric;
+
+	if (arguments->args->type == TYPE_DATA_SERVER)
+	{ // Data servers run periodic local storage telemetry when memory or hybrid metric is active.
+		bool storage_monitor_enabled = (mall_mode == MALLEABILITY_CONF_PERF) || (mall_mode == MALLEABILITY_CONF_ENABLED && (mall_metric == MALLEABILITY_METRIC_MEMORY || mall_metric == MALLEABILITY_METRIC_HYBRID));
+		if (!storage_monitor_enabled)
+		{
+			slog_debug("ElasticityMonitor (storage) exiting: malleability=%d, metric=%d", mall_mode, mall_metric);
+			pthread_exit(NULL);
+		}
+
+		int32_t interval_ms = arguments->args->malleability_interval_ms;
+		if (interval_ms <= 0)
+		{
+			interval_ms = 1000;
+		}
+
+		// Precompute the relative timespec offset once.
+		struct timespec interval_ts;
+		interval_ts.tv_sec = interval_ms / MS_PER_SEC;
+		interval_ts.tv_nsec = (long)(interval_ms % MS_PER_SEC) * NS_PER_MS;
+		slog_info("ElasticityMonitor (storage) started on server %d (interval_ms=%" PRId32 ", mode=%d, metric=%d)", arguments->args->id, interval_ms, mall_mode, mall_metric);
+		fprintf(stderr, "ElasticityMonitor (storage) started on server %d (interval_ms=%" PRId32 ", mode=%d, metric=%d)\n", arguments->args->id, interval_ms, mall_mode, mall_metric);
+
+		for (;;)
+		{
+			struct timespec ts;
+			clock_gettime(CLOCK_REALTIME, &ts);
+			ts.tv_sec += interval_ts.tv_sec;
+			ts.tv_nsec += interval_ts.tv_nsec;
+			if (ts.tv_nsec >= NS_PER_SEC)
+			{
+				ts.tv_sec += 1;
+				ts.tv_nsec -= NS_PER_SEC;
+			}
+
+			pthread_mutex_lock(&mutex_elasticity_monitor);
+			if (global_finish_threads == 1)
+			{
+				slog_info("ElasticityMonitor (storage) exiting on server %d: global_finish_threads == 1", arguments->args->id);
+				fprintf(stderr, "ElasticityMonitor (storage) exiting on server %d: global_finish_threads == 1\n", arguments->args->id);
+				pthread_mutex_unlock(&mutex_elasticity_monitor);
+				break;
+			}
+			pthread_cond_timedwait(&cond_elasticity_monitor, &mutex_elasticity_monitor, &ts);
+			bool should_stop = (global_finish_threads == 1);
+			pthread_mutex_unlock(&mutex_elasticity_monitor);
+
+			if (should_stop)
+			{
+				break;
+			}
+
+			// Read storage usage.
+			int64_t occupied_bytes = quantity_occupied;
+			uint64_t capacity_bytes = max_storage_size;
+			int read_update_state = is_server_read_update;
+			double usage_pct = (capacity_bytes > 0) ? (static_cast<double>(occupied_bytes) * 100.0 / static_cast<double>(capacity_bytes)) : 0.0;
+
+			time_t now_sec = time(NULL);
+			struct tm tm_now;
+			char ts_buf[32] = {0};
+			if (localtime_r(&now_sec, &tm_now) != NULL)
+			{
+				strftime(ts_buf, sizeof(ts_buf), "%a %b %d %H:%M:%S %Y", &tm_now);
+			}
+
+			fprintf(stderr, "[%s] Storage monitor: server_id=%d, hostname=%s, occupied_bytes=%" PRId64 ", capacity_bytes=%" PRIu64 ", usage_pct=%.2f%%, read_update=%d\n", ts_buf, arguments->args->id, arguments->args->data_hostname, occupied_bytes, capacity_bytes, usage_pct, read_update_state);
+			slog_debug("Storage monitor: server_id=%d, hostname=%s, occupied_bytes=%" PRId64 ", capacity_bytes=%" PRIu64 ", usage_pct=%.2f%%, read_update=%d", arguments->args->id, arguments->args->data_hostname, occupied_bytes, capacity_bytes, usage_pct, read_update_state);
+		}
+
+		slog_info("Ending ElasticityMonitor (storage) thread on server %d.", arguments->args->id);
+		pthread_exit(NULL);
+	}
+	// On the metadata server we make the profile and run the bandwidth telemetry.
 	ApplicationProfileMode prof_mode = arguments->args->application_profile_mode;
 	if (prof_mode == APP_PROFILE_MODE_OFF && arguments->args->application_profile_path[0] != '\0')
 	{
