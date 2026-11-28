@@ -199,10 +199,28 @@ void send_shutdown_to_all_data_servers(p_argv *arguments)
 	uint64_t meta_worker_uid = attr.worker_uid;
 
 	int32_t reachable_count = 0;
+	ucp_ep_h eps_snap[MAX_SERVERS_PER_VIEW] = {NULL};
+	uint8_t states_snap[MAX_SERVERS_PER_VIEW] = {0};
+	char hosts_snap[MAX_SERVERS_PER_VIEW][LINE_LENGTH] = {{0}};
+	pthread_mutex_lock(&mutex_malleability);
 	for (int32_t i = 0; i < total_storages; i++)
 	{
-		const char *srv_host = (curr_global_imss_info != NULL && curr_global_imss_info->ips != NULL && curr_global_imss_info->ips[i] != NULL) ? curr_global_imss_info->ips[i] : "unknown";
-		if (data_endpoints[i] == NULL || (curr_global_imss_info != NULL && curr_global_imss_info->server_states[i] == SERVER_DECOMMISSIONED))
+		eps_snap[i] = data_endpoints[i];
+		if (curr_global_imss_info != NULL)
+		{
+			states_snap[i] = curr_global_imss_info->server_states[i];
+			if (curr_global_imss_info->ips != NULL && curr_global_imss_info->ips[i] != NULL)
+			{
+				snprintf(hosts_snap[i], sizeof(hosts_snap[i]), "%s", curr_global_imss_info->ips[i]);
+			}
+		}
+	}
+	pthread_mutex_unlock(&mutex_malleability);
+
+	for (int32_t i = 0; i < total_storages; i++)
+	{
+		const char *srv_host = (hosts_snap[i][0] != '\0') ? hosts_snap[i] : "unknown";
+		if (eps_snap[i] == NULL || (curr_global_imss_info != NULL && states_snap[i] == SERVER_DECOMMISSIONED))
 		{
 			slog_info("[Metadata Server] Skipping data server %d (%s) during shutdown (decommissioned or NULL endpoint).", i, srv_host);
 			fprintf(stderr, "[Metadata Server] Skipping data server %d (%s) during shutdown (decommissioned or NULL endpoint).\n", i, srv_host);
@@ -212,7 +230,7 @@ void send_shutdown_to_all_data_servers(p_argv *arguments)
 		slog_info("[Metadata Server] Sending %s to data server %d (%s)...", MSG_SHUTDOWN_SERVER, i, srv_host);
 		fprintf(stderr, "[Metadata Server] Sending %s to data server %d (%s)...\n", MSG_SHUTDOWN_SERVER, i, srv_host);
 
-		if (send_shutdown_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], meta_worker_uid) == 0)
+		if (send_shutdown_req(arguments->ucp_worker, eps_snap[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], meta_worker_uid) == 0)
 		{
 			reachable_count++;
 			slog_info("[Metadata Server] Data server %d (%s) confirmed %s.", i, srv_host, MSG_SHUTDOWN_SERVER);
@@ -1755,14 +1773,21 @@ int query_server_storage_usage(MalleabilityArgs *arguments, int server_id, uint6
 		return -1;
 	}
 
-	if (server_id < 0 || server_id >= MAX_SERVERS_PER_VIEW || data_endpoints[server_id] == NULL)
+	ucp_ep_h target_ep = NULL;
+	if (server_id >= 0 && server_id < MAX_SERVERS_PER_VIEW)
+	{
+		pthread_mutex_lock(&mutex_malleability);
+		target_ep = data_endpoints[server_id];
+		pthread_mutex_unlock(&mutex_malleability);
+	}
+	if (target_ep == NULL)
 	{
 		slog_error("HERCULES_ERR_QUERY_STORAGE_INVALID_SERVER: invalid server_id=%d or NULL endpoint", server_id);
 		fprintf(stderr, "HERCULES_ERR_QUERY_STORAGE_INVALID_SERVER: invalid server_id=%d or NULL endpoint\n", server_id);
 		return -1;
 	}
 
-	size_t sent_bytes = send_req(arguments->ucp_worker, data_endpoints[server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], MSG_QUERY_STORAGE_USAGE);
+	size_t sent_bytes = send_req(arguments->ucp_worker, target_ep, local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], MSG_QUERY_STORAGE_USAGE);
 	if (sent_bytes == 0)
 	{
 		slog_warn("HERCULES_ERR_QUERY_STORAGE_SEND: unable to send %s to server %d", MSG_QUERY_STORAGE_USAGE, server_id);
@@ -1771,7 +1796,7 @@ int query_server_storage_usage(MalleabilityArgs *arguments, int server_id, uint6
 	}
 
 	char resp[MAX_RESPONSE_MSG_LEN] = {0};
-	int ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, data_endpoints[server_id], resp, sizeof(resp), timeout_sec);
+	int ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, target_ep, resp, sizeof(resp), timeout_sec);
 	if (ret != 0)
 	{
 		slog_warn("HERCULES_ERR_QUERY_STORAGE_RECV: server %d did not respond to %s (ret=%d)", server_id, MSG_QUERY_STORAGE_USAGE, ret);
@@ -1911,10 +1936,12 @@ static void evaluate_memory_decommission_locked(MalleabilityArgs *malleability_a
 	}
 
 	std::string removed_host;
-	if (imss_info_struct->ips != NULL && imss_info_struct->ips[target_id] != NULL)
+	pthread_mutex_lock(&mutex_malleability);
+	if (imss_info_struct->ips != NULL && target_id < imss_info_struct->num_storages && imss_info_struct->ips[target_id] != NULL)
 	{
 		removed_host = imss_info_struct->ips[target_id];
 	}
+	pthread_mutex_unlock(&mutex_malleability);
 
 	slog_malleability("Memory scale-down selected least-loaded server %d (%s) with %" PRId64 " occupied bytes among %d servers.", target_id, removed_host.empty() ? "unknown" : removed_host.c_str(), usages[target_id], old_num_servers);
 	fprintf(stderr, "[Metadata Server] Memory scale-down selected least-loaded server %d (%s) with %" PRId64 " occupied bytes among %d servers.\n", target_id, removed_host.empty() ? "unknown" : removed_host.c_str(), usages[target_id], old_num_servers);

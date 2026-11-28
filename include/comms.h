@@ -329,7 +329,7 @@ extern "C"
 	ucs_status_t client_create_ep_data(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, const char *user_data);
 	ucs_status_t client_create_ep_data_with_context(ucp_worker_h worker, ucp_ep_h *ep, ucp_address_t *peer_addr, const char *user_data, client_ep_context_t **user_data_args);
 	void ep_close(ucp_worker_h ucp_worker, ucp_ep_h ep, uint64_t flags);
-	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
+	int close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep);
 	// Method sending a data structure with dynamic memory allocation fields.
 	int32_t send_dynamic_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, void *data_struct, int32_t data_type, uint64_t from);
 

@@ -4260,6 +4260,21 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id, int deep)
 		char node_hostname[512] = {0};
 		strncpy(node_hostname, curr_imss.info.ips[server_id], sizeof(node_hostname) - 1);
 
+		client_ep_context_t *this_context = (curr_imss.conns.ep_contexts != NULL) ? curr_imss.conns.ep_contexts[server_id] : NULL;
+		ucp_worker_progress(ucp_worker_data);
+		if (this_context != NULL && this_context->status != UCS_OK)
+		{
+			ucs_status_t ep_err = this_context->status;
+			slog_error("HERCULES_ERR_UNLINK_EP_DEAD: Endpoint for %s already failed (%s).", node_hostname, ucs_status_string(ep_err));
+			pthread_mutex_unlock(&lock_network);
+			if (deep <= MAX_RETRIES && get_malleability_changes((char *)dataset_uri, node_hostname) == 1)
+			{
+				return unlink_dataset(dataset_uri, dataset_id, deep + 1);
+			}
+			fprintf(stderr, "HERCULES_ERR_UNLINK_EP_DEAD: Endpoint for %s already failed (%s).\n", node_hostname, ucs_status_string(ep_err));
+			return -2;
+		}
+
 		// Format the unlink request.
 		sprintf(key_, "GET %d 0 %s$0 %d", UNLINK_OP, dataset_uri, curr_dataset->n_open);
 		slog_debug("Request to data %d (%s) - %s", i, node_hostname, key_);
@@ -4285,13 +4300,6 @@ int32_t unlink_dataset(const char *dataset_uri, int32_t dataset_id, int deep)
 			}
 			fprintf(stderr, "HERCULES_ERR_UNLINK_DATASET_SEND_REQ\n");
 			return -2;
-		}
-
-		// prepare context for receiving the length.
-		client_ep_context_t *this_context = curr_imss.conns.ep_contexts[server_id];
-		if (this_context != NULL)
-		{
-			this_context->status = UCS_OK;
 		}
 
 		size_t msg_length = get_recv_data_length_with_cb(ucp_worker_data, local_data_uid, this_context);
@@ -6588,6 +6596,21 @@ ssize_t get_ndata_with_target(char *dataset_uri, int32_t dataset_id, int32_t dat
 		char node_hostname[512] = {0};
 		strncpy(node_hostname, curr_imss.info.ips[server_id], sizeof(node_hostname) - 1);
 
+		client_ep_context_t *this_context = (curr_imss.conns.ep_contexts != NULL) ? curr_imss.conns.ep_contexts[server_id] : NULL;
+		ucp_worker_progress(ucp_worker_data);
+		if (this_context != NULL && this_context->status != UCS_OK)
+		{
+			ucs_status_t ep_err = this_context->status;
+			slog_error("HERCULES_ERR_GET_NDATA_EP_DEAD: Endpoint for %s already failed (%s).", node_hostname, ucs_status_string(ep_err));
+			pthread_mutex_unlock(&lock_network);
+			if (deep <= MAX_RETRIES && get_malleability_changes((char *)dataset_uri, node_hostname) == 1)
+			{
+				return get_ndata_with_target(dataset_uri, dataset_id, data_id, buffer, to_read, offset, async, buffer_request, deep + 1, out_hostname, hostname_len, out_server_id);
+			}
+			fprintf(stderr, "HERCULES_ERR_GET_NDATA_EP_DEAD: Endpoint for %s already failed (%s).\n", node_hostname, ucs_status_string(ep_err));
+			return -2;
+		}
+
 		slog_debug("[IMSS] Request to data %d (%s) - '%s' to server %d (%s)", n_server_, node_hostname, key_, server_id, node_hostname);
 
 		auto start_time_req = std::chrono::steady_clock::now();
@@ -6617,11 +6640,6 @@ ssize_t get_ndata_with_target(char *dataset_uri, int32_t dataset_id, int32_t dat
 		std::chrono::duration<double> time_taken_req = end_time_req - start_time_req;
 
 		// TODO: change this to get just the confirmation from the server.
-		client_ep_context_t *this_context = curr_imss.conns.ep_contexts[server_id];
-		if (this_context != NULL)
-		{
-			this_context->status = UCS_OK;
-		}
 
 		std::chrono::duration<double> time_taken_data;
 		auto start_time_data = std::chrono::steady_clock::now();
@@ -7890,16 +7908,26 @@ int32_t start_async_write(AsyncWriteRequest *req)
 		}
 
 		ucp_ep_h ep = curr_imss.conns.eps[n_server_];
-		client_ep_context_t *this_context = curr_imss.conns.ep_contexts[n_server_];
-		// Reset any stale prior endpoint error state before sending so poll_async_write() only reacts to failures triggered by this transfer.
-		if (this_context != NULL)
-		{
-			this_context->status = UCS_OK;
-		}
-
 		req->server_id = server_id;
 		strncpy(req->server_hostname, curr_imss.info.ips[server_id], sizeof(req->server_hostname) - 1);
 		req->server_hostname[sizeof(req->server_hostname) - 1] = '\0';
+
+		client_ep_context_t *this_context = (curr_imss.conns.ep_contexts != NULL) ? curr_imss.conns.ep_contexts[n_server_] : NULL;
+		ucp_worker_progress(ucp_worker_data);
+		if (this_context != NULL && this_context->status != UCS_OK)
+		{
+			ucs_status_t ep_err = this_context->status;
+			slog_error("HERCULES_ERR_START_ASYNC_WRITE_EP_DEAD: Endpoint for %s already failed (%s).", req->server_hostname, ucs_status_string(ep_err));
+			pthread_mutex_unlock(&lock_network);
+			if (req->retries < MAX_RETRIES && get_malleability_changes(req->dataset_uri, req->server_hostname) == 1)
+			{
+				req->retries++;
+				continue;
+			}
+			fprintf(stderr, "HERCULES_ERR_START_ASYNC_WRITE_EP_DEAD: Endpoint for %s already failed (%s).\n", req->server_hostname, ucs_status_string(ep_err));
+			return -ECANCELED;
+		}
+
 		req->routed_view_id = routed_view_id;
 		req->value_from_interval = value_from_interval;
 		req->used_num_storages = (int32_t)curr_imss.info.num_storages;
@@ -8123,10 +8151,19 @@ int32_t set_data(char *dataset_uri, int32_t dataset_id, int32_t data_id, const v
 		// node_hostname = curr_imss.info.ips[n_server_];
 		strncpy(node_hostname, curr_imss.info.ips[server_id], sizeof(node_hostname) - 1);
 		node_hostname[sizeof(node_hostname) - 1] = '\0';
-		client_ep_context_t *this_context = curr_imss.conns.ep_contexts[n_server_];
-		if (this_context != NULL)
+		client_ep_context_t *this_context = (curr_imss.conns.ep_contexts != NULL) ? curr_imss.conns.ep_contexts[n_server_] : NULL;
+		ucp_worker_progress(ucp_worker_data);
+		if (this_context != NULL && this_context->status != UCS_OK)
 		{
-			this_context->status = UCS_OK;
+			ucs_status_t ep_err = this_context->status;
+			slog_error("HERCULES_ERR_SET_DATA_EP_DEAD: Endpoint for %s already failed (%s).", node_hostname, ucs_status_string(ep_err));
+			pthread_mutex_unlock(&lock_network);
+			if (deep <= MAX_RETRIES && get_malleability_changes((char *)dataset_uri, node_hostname) == 1)
+			{
+				return set_data(dataset_uri, dataset_id, data_id, buffer, size, offset, async, deep + 1, op_type);
+			}
+			fprintf(stderr, "HERCULES_ERR_SET_DATA_EP_DEAD: Endpoint for %s already failed (%s).\n", node_hostname, ucs_status_string(ep_err));
+			return -ECANCELED;
 		}
 
 		// when "LOCAL" or "ZCOPY_" is in use, we copy the data to shared memory.

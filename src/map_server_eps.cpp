@@ -37,11 +37,12 @@ void map_server_eps_destroy(void *map, ucp_worker_h ucp_worker)
 
 		for (const auto &entry : entries)
 		{
-			if (entry.ep != NULL && ucp_worker != NULL)
+			int close_rc = 0;
+			if (entry.ep != NULL)
 			{
-				close_ucx_endpoint(ucp_worker, entry.ep);
+				close_rc = (ucp_worker != NULL) ? close_ucx_endpoint(ucp_worker, entry.ep) : -1;
 			}
-			if (entry.ctx != NULL && (entry.ep == NULL || ucp_worker != NULL))
+			if (entry.ctx != NULL && close_rc == 0)
 			{
 				free(entry.ctx);
 			}
@@ -75,13 +76,14 @@ void map_server_eps_put_with_ctx(void *map, uint64_t uuid, ucp_ep_h ep, client_e
 
 	// Close any replaced UCX endpoint before freeing its context 
 	// so err_cb_client cannot dereference freed memory.
-	if (old_ep != NULL && old_ep != ep && ucp_worker != NULL)
+	int close_rc = 0;
+	if (old_ep != NULL && old_ep != ep)
 	{
-		close_ucx_endpoint(ucp_worker, old_ep);
+		close_rc = (ucp_worker != NULL) ? close_ucx_endpoint(ucp_worker, old_ep) : -1;
 	}
 	// Free the previous context only if it differs from the new one
 	// and its endpoint is already closed (or NULL/unchanged).
-	if (old_ctx != NULL && old_ctx != ctx && (old_ep == NULL || old_ep == ep || ucp_worker != NULL))
+	if (old_ctx != NULL && old_ctx != ctx && close_rc == 0)
 	{
 		free(old_ctx);
 	}
@@ -110,11 +112,12 @@ void map_server_eps_erase(void *map, uint64_t uuid, ucp_worker_h ucp_worker)
 			m->erase(search);
 		}
 	}
-	if (ep_to_close != NULL && ucp_worker != NULL)
+	int close_rc = 0;
+	if (ep_to_close != NULL)
 	{
-		close_ucx_endpoint(ucp_worker, ep_to_close);
+		close_rc = (ucp_worker != NULL) ? close_ucx_endpoint(ucp_worker, ep_to_close) : -1;
 	}
-	if (ctx_to_free != NULL && (ep_to_close == NULL || ucp_worker != NULL))
+	if (ctx_to_free != NULL && close_rc == 0)
 	{
 		free(ctx_to_free);
 	}

@@ -402,6 +402,19 @@ static void sync_data_hostfile(const char *hostfile_path, imss_info *info, int32
 	{
 		return;
 	}
+	char hosts[MAX_SERVERS_PER_VIEW][LINE_LENGTH];
+	int32_t host_count = 0;
+	pthread_mutex_lock(&mutex_malleability);
+	for (int32_t i = 0; i < active_count && i < info->num_storages; i++)
+	{
+		if (info->ips && info->ips[i] && info->ips[i][0] != '\0')
+		{
+			snprintf(hosts[host_count], sizeof(hosts[host_count]), "%s", info->ips[i]);
+			host_count++;
+		}
+	}
+	pthread_mutex_unlock(&mutex_malleability);
+
 	FILE *f = fopen(target_path, "w");
 	if (!f)
 	{
@@ -409,12 +422,9 @@ static void sync_data_hostfile(const char *hostfile_path, imss_info *info, int32
 		fprintf(stderr, "HERCULES_ERR_SYNC_DATA_HOSTFILE: Failed to update data hostfile %s: %s\n", target_path, strerror(errno));
 		return;
 	}
-	for (int32_t i = 0; i < active_count && i < info->num_storages; i++)
+	for (int32_t i = 0; i < host_count; i++)
 	{
-		if (info->ips[i] && info->ips[i][0] != '\0')
-		{
-			fprintf(f, "%s\n", info->ips[i]);
-		}
+		fprintf(f, "%s\n", hosts[i]);
 	}
 	fflush(f);
 	fclose(f);
@@ -571,13 +581,6 @@ void Attend_pending_requests()
 	// 	return;
 	// }
 
-	if (id_server_to_modify < 0)
-	{
-		fprintf(stderr, "Invalid server ID %d to attend request\n", id_server_to_modify);
-		slog_malleability("Invalid server ID %d to attend request\n", id_server_to_modify);
-		return;
-	}
-
 	// Fall back to local IMSS info if global pointer is not set.
 	if (curr_global_imss_info == NULL)
 	{
@@ -598,6 +601,11 @@ void Attend_pending_requests()
 
 	// Process all requests that were pending when this was called.
 	std::vector<PendingRequestInfo> requests_to_attend;
+	char list_of_active_nodes[PATH_MAX] = {'\0'};
+	char list_of_states[PATH_MAX] = {'\0'};
+	int active_node_count = -1;
+	int32_t local_id_to_modify = -1;
+	int local_action = 0;
 	pthread_mutex_lock(&mutex_malleability);
 	if (pending_requests.empty())
 	{
@@ -608,12 +616,12 @@ void Attend_pending_requests()
 		return;
 	}
 	requests_to_attend.swap(pending_requests);
+	active_node_count = build_active_node_and_state_lists(curr_global_imss_info, list_of_active_nodes, sizeof(list_of_active_nodes), list_of_states, sizeof(list_of_states));
+	local_id_to_modify = id_server_to_modify;
+	local_action = last_malleability_action;
 	pthread_mutex_unlock(&mutex_malleability);
 
 	char response[PATH_MAX] = {'\0'};
-	char list_of_active_nodes[PATH_MAX] = {'\0'};
-	char list_of_states[PATH_MAX] = {'\0'};
-	int active_node_count = build_active_node_and_state_lists(curr_global_imss_info, list_of_active_nodes, sizeof(list_of_active_nodes), list_of_states, sizeof(list_of_states));
 	if (active_node_count < 0)
 	{
 		slog_error("Attend_pending_requests: Failed to build active node and state lists.");
@@ -622,7 +630,7 @@ void Attend_pending_requests()
 	}
 	slog_malleability("List to send: %s, states: %s", list_of_active_nodes, list_of_states);
 
-	sprintf(response, "%s %" PRIu32 " %" PRId32 " %d %s %s", MSG_MALLEABILITY_DATASERVERS, (uint32_t)active_node_count, id_server_to_modify, last_malleability_action, list_of_active_nodes, list_of_states);
+	sprintf(response, "%s %" PRIu32 " %" PRId32 " %d %s %s", MSG_MALLEABILITY_DATASERVERS, (uint32_t)active_node_count, local_id_to_modify, local_action, list_of_active_nodes, list_of_states);
 	int ret = -1;
 	fprintf(stderr, "[AttendingPendingRequests] There are %zu pending requests, response=%s\n", requests_to_attend.size(), response);
 	// slog_malleability("There are %d pending requests", pending_requests.size());
@@ -648,6 +656,21 @@ void Attend_pending_requests()
 	node_to_use = NULL;
 	fprintf(stderr, "No more pending requests.\n");
 	slog_malleability("No more pending requests.");
+}
+
+/**
+ * @brief Clears malleability_status before draining queued client requests.
+ */
+static void finish_malleability_and_drain(bool signal_malleability_cond)
+{
+	pthread_mutex_lock(&mutex_malleability);
+	malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+	if (signal_malleability_cond)
+	{
+		pthread_cond_signal(&global_run_malleability_cond);
+	}
+	pthread_mutex_unlock(&mutex_malleability);
+	Attend_pending_requests();
 }
 
 int Shutdown_server()
@@ -1316,20 +1339,31 @@ void *move_blocks_2_server(void *th_argv)
 	pthread_exit(NULL);
 }
 
-size_t update_ips_list(int id_server_to_remove)
+static size_t update_ips_list_locked(int id_server_to_remove, char **out_removed_ip)
 {
+	if (out_removed_ip != NULL)
+	{
+		*out_removed_ip = NULL;
+	}
 	slog_malleability("id_server_to_remove=%d", id_server_to_remove);
 	imss_info *imss_info_struct = curr_global_imss_info;
-	if (imss_info_struct == NULL || imss_info_struct->num_storages <= 0 || id_server_to_remove < 0 || id_server_to_remove >= imss_info_struct->num_storages)
+	if (imss_info_struct == NULL || imss_info_struct->ips == NULL || imss_info_struct->num_storages <= 0 || id_server_to_remove < 0 || id_server_to_remove >= imss_info_struct->num_storages)
 	{
 		slog_warn("HERCULES_ERR_UPDATE_IPS_LIST_INV_ARGS");
 		fprintf(stderr, "HERCULES_ERR_UPDATE_IPS_LIST_INV_ARGS\n");
 		return 0;
 	}
 	char *element_to_delete = imss_info_struct->ips[id_server_to_remove];
-	slog_malleability("Stopping server %d:%s", id_server_to_remove, imss_info_struct->ips[id_server_to_remove]);
+	slog_malleability("Stopping server %d:%s", id_server_to_remove, element_to_delete ? element_to_delete : "<null>");
 	// fprintf(stderr, "At this time, the slowest server is %d:%s\n", id_server_to_remove, element_to_delete);
-	free(element_to_delete);
+	if (out_removed_ip != NULL)
+	{
+		*out_removed_ip = element_to_delete;
+	}
+	else
+	{
+		free(element_to_delete);
+	}
 	element_to_delete = NULL;
 	size_t num_elements_to_shift = imss_info_struct->num_storages - id_server_to_remove - 1;
 
@@ -1372,7 +1406,17 @@ size_t update_ips_list(int id_server_to_remove)
 	return num_elements_to_shift;
 }
 
-void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift)
+size_t update_ips_list(int id_server_to_remove)
+{
+	char *removed_ip = NULL;
+	pthread_mutex_lock(&mutex_malleability);
+	size_t shifted = update_ips_list_locked(id_server_to_remove, &removed_ip);
+	pthread_mutex_unlock(&mutex_malleability);
+	free(removed_ip);
+	return shifted;
+}
+
+static void update_data_endpoint_list_locked(int id_server_to_remove, size_t num_elements_to_shift)
 {
 	if (id_server_to_remove < 0 || id_server_to_remove > number_storage_servers.load())
 	{
@@ -1390,6 +1434,13 @@ void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_s
 
 	data_endpoints[number_storage_servers.load()] = NULL;
 	return;
+}
+
+void Update_data_endpoint_list(int id_server_to_remove, size_t num_elements_to_shift)
+{
+	pthread_mutex_lock(&mutex_malleability);
+	update_data_endpoint_list_locked(id_server_to_remove, num_elements_to_shift);
+	pthread_mutex_unlock(&mutex_malleability);
 }
 
 int handle_memory_pre_saturation(p_argv *arguments, int saturated_server_id)
@@ -1561,6 +1612,18 @@ int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 		}
 	}
 
+	// Make a copy of the active server endpoints before
+	// sending READ_UPDATE / state notifications.
+	ucp_ep_h eps_snap[MAX_SERVERS_PER_VIEW] = {NULL};
+	int32_t total_storages = 0;
+	pthread_mutex_lock(&mutex_malleability);
+	total_storages = imss_info_struct->num_storages;
+	for (int32_t i = 0; i < total_storages; i++)
+	{
+		eps_snap[i] = data_endpoints[i];
+	}
+	pthread_mutex_unlock(&mutex_malleability);
+
 	// If all servers are full and a new server is starting, tell to all servers to hold writes operations.
 	bool comm_in_flight = comissioning_on.load(std::memory_order_acquire) || (active_commissioning_pid.load() != 0);
 	if (active_count == 0 && comm_in_flight)
@@ -1568,12 +1631,12 @@ int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 		malleability_status.store(MALLEABILITY_INPROGRESS, std::memory_order_release);
 		char set_ro_req[REQUEST_SIZE] = {0};
 		snprintf(set_ro_req, sizeof(set_ro_req), "%s 0 1", MSG_SET_READ_UPDATE);
-		fprintf(stderr, "Sending %s to %d servers\n", MSG_SET_READ_UPDATE, imss_info_struct->num_storages);
-		for (size_t i = 0; i < (size_t)imss_info_struct->num_storages; i++)
+		fprintf(stderr, "Sending %s to %d servers\n", MSG_SET_READ_UPDATE, total_storages);
+		for (size_t i = 0; i < (size_t)total_storages; i++)
 		{
-			if (data_endpoints[i] != NULL)
+			if (eps_snap[i] != NULL)
 			{
-				int ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], set_ro_req);
+				int ret = send_req(arguments->ucp_worker, eps_snap[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], set_ro_req);
 				if (ret == 0)
 				{
 					slog_error("HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %zu", i);
@@ -1582,16 +1645,16 @@ int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 			}
 		}
 		slog_warn("[Metadata Server] All servers in READ_UPDATE. Promise sent to all data servers (commissioning in-flight).");
-		fprintf(stderr, "[Metadata Server] All servers in READ_UPDATE. Promise sent to all %d data servers (commissioning in-flight).\n", imss_info_struct->num_storages);
+		fprintf(stderr, "[Metadata Server] All servers in READ_UPDATE. Promise sent to all %d data servers (commissioning in-flight).\n", total_storages);
 	}
-	else if (data_endpoints[saturated_server_id] != NULL)
+	else if (saturated_server_id < total_storages && eps_snap[saturated_server_id] != NULL)
 	{
 		// Set only the saturated server to read-only without holding writes.
 		// More servers are still in RW mode, so the client must
 		// send new information to these servers.
 		char set_ro_req[REQUEST_SIZE] = {0};
 		snprintf(set_ro_req, sizeof(set_ro_req), "%s %d 0", MSG_SET_READ_UPDATE, active_count);
-		int ret = send_req(arguments->ucp_worker, data_endpoints[saturated_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], set_ro_req);
+		int ret = send_req(arguments->ucp_worker, eps_snap[saturated_server_id], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], set_ro_req);
 		if (ret == 0)
 		{
 			slog_error("HERCULES_ERR_SEND_REQ_SET_READ_UPDATE to server %d", saturated_server_id);
@@ -1600,12 +1663,12 @@ int handle_memory_saturation(p_argv *arguments, int saturated_server_id)
 
 		// Notify peer data servers so their local server_states stay synchronized.
 		char state_req[REQUEST_SIZE] = {0};
-		snprintf(state_req, sizeof(state_req), "%s %d %d %d", MSG_UPDATE_SERVER_STATE, saturated_server_id, SERVER_READ_UPDATE, imss_info_struct->num_storages);
-		for (int32_t i = 0; i < imss_info_struct->num_storages; i++)
+		snprintf(state_req, sizeof(state_req), "%s %d %d %d", MSG_UPDATE_SERVER_STATE, saturated_server_id, SERVER_READ_UPDATE, total_storages);
+		for (int32_t i = 0; i < total_storages; i++)
 		{
-			if (i != saturated_server_id && data_endpoints[i] != NULL)
+			if (i != saturated_server_id && eps_snap[i] != NULL)
 			{
-				send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], state_req);
+				send_req(arguments->ucp_worker, eps_snap[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], state_req);
 			}
 		}
 	}
@@ -1713,6 +1776,7 @@ int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id)
 	int32_t total_storages = 0;
 	bool was_read_update = false;
 
+	ucp_ep_h eps_snap[MAX_SERVERS_PER_VIEW] = {NULL};
 	pthread_mutex_lock(&mutex_malleability);
 
 	was_read_update = (imss_info_struct->server_states[unsaturated_server_id] == SERVER_READ_UPDATE);
@@ -1737,6 +1801,10 @@ int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id)
 		}
 		id_server_to_modify = unsaturated_server_id;
 		last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
+		for (int32_t i = 0; i < total_storages; i++)
+		{
+			eps_snap[i] = data_endpoints[i];
+		}
 	}
 	else
 	{
@@ -1754,9 +1822,9 @@ int handle_memory_unsaturated(p_argv *arguments, int unsaturated_server_id)
 		snprintf(state_req, sizeof(state_req), "%s %d %d %d", MSG_UPDATE_SERVER_STATE, unsaturated_server_id, SERVER_ACTIVE_RW, total_storages);
 		for (int32_t i = 0; i < total_storages; i++)
 		{
-			if (i != unsaturated_server_id && data_endpoints[i] != NULL)
+			if (i != unsaturated_server_id && eps_snap[i] != NULL)
 			{
-				int ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], state_req);
+				int ret = send_req(arguments->ucp_worker, eps_snap[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], state_req);
 				if (ret == 0)
 				{
 					slog_error("HERCULES_ERR_SEND_REQ_UPDATE_SERVER_STATE to server %d", i);
@@ -1850,7 +1918,22 @@ static int check_decommission_admission(MalleabilityArgs *arguments, int id_serv
 		return 0;
 	}
 
-	if (data_endpoints[id_server_to_remove] == NULL)
+	if (old_num_servers > MAX_SERVERS_PER_VIEW || id_server_to_remove < 0 || id_server_to_remove >= old_num_servers)
+	{
+		slog_error("HERCULES_ERR_ADMISSION_CHECK_INVALID_RANGE: id=%d, old_num_servers=%d", id_server_to_remove, old_num_servers);
+		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_INVALID_RANGE: id=%d, old_num_servers=%d\n", id_server_to_remove, old_num_servers);
+		return 0;
+	}
+
+	ucp_ep_h eps_snap[MAX_SERVERS_PER_VIEW] = {NULL};
+	pthread_mutex_lock(&mutex_malleability);
+	for (int i = 0; i < old_num_servers; i++)
+	{
+		eps_snap[i] = data_endpoints[i];
+	}
+	pthread_mutex_unlock(&mutex_malleability);
+
+	if (eps_snap[id_server_to_remove] == NULL)
 	{
 		slog_error("HERCULES_ERR_ADMISSION_CHECK_NULL_ENDPOINT: Target server %d endpoint is NULL", id_server_to_remove);
 		fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_NULL_ENDPOINT: Target server %d endpoint is NULL\n", id_server_to_remove);
@@ -1892,14 +1975,14 @@ static int check_decommission_admission(MalleabilityArgs *arguments, int id_serv
 			continue;
 		}
 
-		if (data_endpoints[i] == NULL)
+		if (eps_snap[i] == NULL)
 		{
 			slog_warn("HERCULES_ERR_ADMISSION_CHECK_NULL_ENDPOINT: surviving server %d endpoint is NULL", i);
 			fprintf(stderr, "HERCULES_ERR_ADMISSION_CHECK_NULL_ENDPOINT: surviving server %d endpoint is NULL\n", i);
 			return 0;
 		}
 
-		size_t sent_bytes = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], check_req);
+		size_t sent_bytes = send_req(arguments->ucp_worker, eps_snap[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], check_req);
 		if (sent_bytes == 0)
 		{
 			slog_warn("HERCULES_ERR_ADMISSION_CHECK_UNABLE_TO_SEND: Admission check vetoed: unable to send %s to surviving server %d", MSG_CHECK_ACCEPT_DATA, i);
@@ -1908,7 +1991,7 @@ static int check_decommission_admission(MalleabilityArgs *arguments, int id_serv
 		}
 
 		char resp[MAX_RESPONSE_MSG_LEN] = {0};
-		int ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, data_endpoints[i], resp, sizeof(resp), timeout_sec);
+		int ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, eps_snap[i], resp, sizeof(resp), timeout_sec);
 		if (ret != 0 || strcmp(resp, MSG_OK_OP) != 0)
 		{
 			slog_malleability("Decommission of server %d VETOED: surviving server %d rejected %" PRId64 " bytes (resp='%s', ret=%d).", id_server_to_remove, i, delta_bytes, resp, ret);
@@ -1952,7 +2035,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		{
 			fprintf(stderr, "HERCULES_ERR_DECOMISSIONING_STAGE_INVALID_SERVER_ID_TO_REMOVE\n");
 			slog_error("HERCULES_ERR_DECOMISSIONING_STAGE_INVALID_SERVER_ID_TO_REMOVE");
-			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+			finish_malleability_and_drain(false);
 			// TODO: check this, maybe it happens because we are not removing history records of old servers.
 			// Or we have to sort the ID of the servers win the history records.
 			return 0;
@@ -1967,7 +2050,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		{
 			fprintf(stderr, "[INFO] Cannot decommission server %d: new server count (%" PRId32 ") would fall below lower bound (%d). Canceling decomissioning stage.\n", id_server_to_remove, new_number_of_servers, min_servers_allowed);
 			slog_malleability("Decommissioning skipped: new server count (%" PRId32 ") would fall below lower bound (%d).", new_number_of_servers, min_servers_allowed);
-			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+			finish_malleability_and_drain(false);
 			return 0;
 		}
 
@@ -1976,12 +2059,19 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		{
 			slog_malleability("Decommissioning of server %d cancelled by admission handshake. Remaining in HOLD.", id_server_to_remove);
 			fprintf(stderr, "[Malleability] Decommissioning of server %d cancelled by admission handshake. Remaining in HOLD.\n", id_server_to_remove);
-			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
+			finish_malleability_and_drain(false);
 			return 0;
 		}
 
 		int32_t current_vid = -1;
 		TopologyView *prev_view = NULL;
+		int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
+		int32_t active_count = 0;
+		int32_t new_view_id = -1;
+		ucp_ep_h eps_snap[MAX_SERVERS_PER_VIEW] = {NULL};
+		char hosts_snap[MAX_SERVERS_PER_VIEW][LINE_LENGTH] = {{0}};
+
+		pthread_mutex_lock(&mutex_malleability);
 		if (curr_global_imss_info != NULL)
 		{
 			current_vid = curr_global_imss_info->current_view_id;
@@ -1989,13 +2079,6 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 			{
 				prev_view = &curr_global_imss_info->views[current_vid];
 			}
-		}
-
-		int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
-		int32_t active_count = 0;
-		int32_t new_view_id = -1;
-		if (curr_global_imss_info != NULL)
-		{
 			// Mark target server decommissioned in server_states before collecting active servers
 			curr_global_imss_info->server_states[id_server_to_remove] = SERVER_DECOMMISSIONED;
 			active_count = collect_active_rw_servers(curr_global_imss_info, active_server_ids);
@@ -2008,7 +2091,23 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 				prev_view->decommissioned_server_id = id_server_to_remove;
 				prev_view->next_view = new_view_id;
 			}
+			for (int i = 0; i < old_num_servers; i++)
+			{
+				eps_snap[i] = data_endpoints[i];
+				if (curr_global_imss_info->ips != NULL && curr_global_imss_info->ips[i] != NULL)
+				{
+					snprintf(hosts_snap[i], sizeof(hosts_snap[i]), "%s", curr_global_imss_info->ips[i]);
+				}
+			}
 		}
+		else
+		{
+			for (int i = 0; i < old_num_servers; i++)
+			{
+				eps_snap[i] = data_endpoints[i];
+			}
+		}
+		pthread_mutex_unlock(&mutex_malleability);
 
 		is_new_server_ready = false;
 		char request[REQUEST_SIZE] = {0};
@@ -2051,22 +2150,23 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		uint64_t meta_worker_uid = attr.worker_uid;
 
 		// Notify all remaining servers and wait for their acknowledgments
-		for (size_t i = 0; i < old_num_servers; i++)
+		for (size_t i = 0; i < (size_t)old_num_servers; i++)
 		{
 			if (i == (size_t)id_server_to_remove)
 			{
 				continue;
 			}
 
-			if (data_endpoints[i] == NULL)
+			if (eps_snap[i] == NULL)
 			{
 				slog_warn("Remaining server ID %zu endpoint is NULL, skipping notification.", i);
 				continue;
 			}
 
-			slog_malleability("Sending %s to remaining server ID %zu (%s)", notify_req, i, curr_global_imss_info->ips[i]);
-			fprintf(stderr, "[Metadata] Sending %s to remaining server ID %zu (%s)\n", notify_req, i, curr_global_imss_info->ips[i]);
-			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], notify_req);
+			const char *peer_host = (hosts_snap[i][0] != '\0') ? hosts_snap[i] : "unknown";
+			slog_malleability("Sending %s to remaining server ID %zu (%s)", notify_req, i, peer_host);
+			fprintf(stderr, "[Metadata] Sending %s to remaining server ID %zu (%s)\n", notify_req, i, peer_host);
+			ret = send_req(arguments->ucp_worker, eps_snap[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], notify_req);
 			if (ret == 0)
 			{
 				perror("HERCULES_ERR_SEND_REQ_NOTIFY_DECOM");
@@ -2075,7 +2175,7 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 
 			// Verify the OK confirmation from the remaining server
 			char resp[MAX_RESPONSE_MSG_LEN] = {0};
-			int recv_ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, data_endpoints[i], resp, sizeof(resp), 0.0);
+			int recv_ret = recv_response_timeout(arguments->ucp_worker, meta_worker_uid, eps_snap[i], resp, sizeof(resp), 0.0);
 			if (recv_ret != 0 || strcmp(resp, MSG_OK_OP) != 0)
 			{
 				slog_warn("Server ID %zu did not confirm %s properly (ret=%d, resp='%s')", i, MSG_NOTIFY_DECOMMISSION, recv_ret, resp);
@@ -2089,31 +2189,39 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		}
 
 		// Now that all remaining servers have confirmed, order the decommissioned server to begin migration
-		slog_malleability("Sending %s to decommissioned server ID %d (%s)", request, id_server_to_remove, curr_global_imss_info->ips[id_server_to_remove]);
-		fprintf(stderr, "[Metadata] Sending %s to decommissioned server ID %d (%s)\n", request, id_server_to_remove, curr_global_imss_info->ips[id_server_to_remove]);
-		ret = send_req(arguments->ucp_worker, data_endpoints[id_server_to_remove], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
+		const char *removed_host = (hosts_snap[id_server_to_remove][0] != '\0') ? hosts_snap[id_server_to_remove] : "unknown";
+		slog_malleability("Sending %s to decommissioned server ID %d (%s)", request, id_server_to_remove, removed_host);
+		fprintf(stderr, "[Metadata] Sending %s to decommissioned server ID %d (%s)\n", request, id_server_to_remove, removed_host);
+		ret = send_req(arguments->ucp_worker, eps_snap[id_server_to_remove], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], request);
 		if (ret == 0)
 		{
 			perror("HERCULES_ERR_SEND_REQ_STOPSERVER");
 			slog_fatal("HERCULES_ERR_SEND_REQ_STOPSERVER");
 		}
 
-		// Close the endpoint connection.
-		close_ucx_endpoint(arguments->ucp_worker, data_endpoints[id_server_to_remove]);
-
-		// removes the server from the ips list.
-		size_t num_elements_to_shift = update_ips_list(id_server_to_remove);
+		// Atomically remove server metadata and endpoint slot before freeing or closing.
+		ucp_ep_h ep_to_close = NULL;
+		char *removed_ip = NULL;
+		pthread_mutex_lock(&mutex_malleability);
+		if (id_server_to_remove >= 0 && id_server_to_remove < MAX_SERVERS_PER_VIEW)
+		{
+			ep_to_close = data_endpoints[id_server_to_remove];
+		}
+		size_t num_elements_to_shift = update_ips_list_locked(id_server_to_remove, &removed_ip);
 		arguments->args->num_data_servers = number_storage_servers.load();
+		update_data_endpoint_list_locked(id_server_to_remove, num_elements_to_shift);
+		id_server_to_modify = id_server_to_remove;
+		last_malleability_action = MALLEABILITY_ACTION_DECOMMISSION;
+		pthread_mutex_unlock(&mutex_malleability);
 
-		// removes the server fron the data_endpoints array.
-		Update_data_endpoint_list(id_server_to_remove, num_elements_to_shift);
+		free(removed_ip);
+		// Close the endpoint connection.
+		close_ucx_endpoint(arguments->ucp_worker, ep_to_close);
 
 		// se me ocurre cambiar todos los dataset que utilicen el número de servidores actual
 		// al que se reduce. Al final no enviarán datos a los nuevos servidores si estos crecen
 		// pero para nuevos datasets debería funcionar.
 
-		id_server_to_modify = id_server_to_remove;
-		last_malleability_action = MALLEABILITY_ACTION_DECOMMISSION;
 		/*
 		// View already updated and linked upfront
 		if (curr_global_imss_info != NULL)
@@ -2145,11 +2253,32 @@ int decomissioning_stage(MalleabilityArgs *arguments, int id_server_to_remove)
 		slog_malleability("Signal received. Notifying remaining data servers that decommissioning is complete.");
 		char end_decom_req[REQUEST_SIZE] = {0};
 		snprintf(end_decom_req, sizeof(end_decom_req), "%s", MSG_END_DECOMMISSION);
-		for (size_t i = 0; i < arguments->args->num_data_servers; i++)
+
+		ucp_ep_h end_eps[MAX_SERVERS_PER_VIEW] = {NULL};
+		char end_hosts[MAX_SERVERS_PER_VIEW][LINE_LENGTH] = {{0}};
+		size_t end_count = 0;
+		pthread_mutex_lock(&mutex_malleability);
+		end_count = arguments->args->num_data_servers;
+		for (size_t i = 0; i < end_count; i++)
 		{
-			slog_malleability("Sending %s to remaining server ID %zu (%s)", end_decom_req, i, curr_global_imss_info->ips[i]);
-			fprintf(stderr, "[Malleability] Sending %s to remaining server ID %zu (%s)\n", end_decom_req, i, curr_global_imss_info->ips[i]);
-			ret = send_req(arguments->ucp_worker, data_endpoints[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], end_decom_req);
+			end_eps[i] = data_endpoints[i];
+			if (curr_global_imss_info != NULL && curr_global_imss_info->ips != NULL && i < (size_t)curr_global_imss_info->num_storages && curr_global_imss_info->ips[i] != NULL)
+			{
+				snprintf(end_hosts[i], sizeof(end_hosts[i]), "%s", curr_global_imss_info->ips[i]);
+			}
+		}
+		pthread_mutex_unlock(&mutex_malleability);
+
+		for (size_t i = 0; i < end_count; i++)
+		{
+			if (end_eps[i] == NULL)
+			{
+				continue;
+			}
+			const char *peer_host = (end_hosts[i][0] != '\0') ? end_hosts[i] : "unknown";
+			slog_malleability("Sending %s to remaining server ID %zu (%s)", end_decom_req, i, peer_host);
+			fprintf(stderr, "[Malleability] Sending %s to remaining server ID %zu (%s)\n", end_decom_req, i, peer_host);
+			ret = send_req(arguments->ucp_worker, end_eps[i], local_addr[arguments->thread_id], local_addr_len[arguments->thread_id], end_decom_req);
 			if (ret == 0)
 			{
 				perror("HERCULES_ERR_SEND_REQ_ENDDECOMMISSION");
@@ -2880,8 +3009,21 @@ int send_add_server_to_all_data_servers(ucp_worker_h ucp_worker, uint32_t thread
 		return -1;
 	}
 
+	ucp_ep_h eps_snap[MAX_SERVERS_PER_VIEW] = {NULL};
+	char hosts_snap[MAX_SERVERS_PER_VIEW][LINE_LENGTH] = {{0}};
+	pthread_mutex_lock(&mutex_malleability);
+	for (size_t i = 0; i < num_active_servers; i++)
+	{
+		eps_snap[i] = data_endpoints[i];
+		if (curr_global_imss_info && curr_global_imss_info->ips && i < (size_t)curr_global_imss_info->num_storages && curr_global_imss_info->ips[i])
+		{
+			snprintf(hosts_snap[i], sizeof(hosts_snap[i]), "%s", curr_global_imss_info->ips[i]);
+		}
+	}
+	pthread_mutex_unlock(&mutex_malleability);
+
 	int ret = 0;
-	for (size_t i = 0; i < num_active_servers && i < MAX_SERVERS_PER_VIEW; i++)
+	for (size_t i = 0; i < num_active_servers; i++)
 	{
 		if (id_server_to_modify >= 0 && i == (size_t)id_server_to_modify)
 		{
@@ -2889,16 +3031,16 @@ int send_add_server_to_all_data_servers(ucp_worker_h ucp_worker, uint32_t thread
 			fprintf(stderr, "[Metadata] Skipping newly added server ID %zu\n", i);
 			continue;
 		}
-		if (data_endpoints[i] == NULL)
+		if (eps_snap[i] == NULL)
 		{
 			slog_warn("HERCULES_WARN_SEND_ADD_SERVER_NULL_EP: skipping server ID %zu because data_endpoints[%zu] is NULL", i, i);
 			fprintf(stderr, "HERCULES_WARN_SEND_ADD_SERVER_NULL_EP: skipping server ID %zu because data_endpoints[%zu] is NULL\n", i, i);
 			continue;
 		}
-		const char *target_host = (curr_global_imss_info && curr_global_imss_info->ips && curr_global_imss_info->ips[i]) ? curr_global_imss_info->ips[i] : "unknown";
+		const char *target_host = (hosts_snap[i][0] != '\0') ? hosts_snap[i] : "unknown";
 		slog_debug("Sending %s to server ID %zu (%s), number of active storage servers=%" PRIu32, request, i, target_host, num_active_servers);
 		fprintf(stderr, "Sending %s to server ID %zu (%s), number of active storage servers=%" PRIu32 "\n", request, i, target_host, num_active_servers);
-		ret = send_req(ucp_worker, data_endpoints[i], local_addr[thread_id], local_addr_len[thread_id], request);
+		ret = send_req(ucp_worker, eps_snap[i], local_addr[thread_id], local_addr_len[thread_id], request);
 		if (ret == 0)
 		{
 			perror("HERCULES_ERR_COMISSIONING_STAGE_SEND_REQ_SETSERVER");
@@ -2985,10 +3127,16 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_use
 	}
 
 	int active_node_count = -1;
+	int32_t local_id_to_modify = -1;
+	int local_action = 0;
+	pthread_mutex_lock(&mutex_malleability);
 	if (curr_global_imss_info && curr_global_imss_info->ips)
 	{
 		active_node_count = build_active_node_and_state_lists(curr_global_imss_info, list_of_active_nodes, sizeof(list_of_active_nodes), list_of_states, sizeof(list_of_states));
 	}
+	local_id_to_modify = id_server_to_modify;
+	local_action = last_malleability_action;
+	pthread_mutex_unlock(&mutex_malleability);
 	if (active_node_count < 0)
 	{
 		slog_error("send_node_list_2_frontend: Failed to build active node and state lists.");
@@ -2997,7 +3145,7 @@ int send_node_list_2_frontend(p_argv temp_p_argv_for_calls, int32_t server_n_use
 	}
 	slog_debug("List to send: %s, states: %s", list_of_active_nodes, list_of_states);
 
-	sprintf(response, "%s %" PRIu32 " %" PRId32 " %d %s %s", MSG_MALLEABILITY_DATASERVERS, (uint32_t)active_node_count, id_server_to_modify, last_malleability_action, list_of_active_nodes, list_of_states);
+	sprintf(response, "%s %" PRIu32 " %" PRId32 " %d %s %s", MSG_MALLEABILITY_DATASERVERS, (uint32_t)active_node_count, local_id_to_modify, local_action, list_of_active_nodes, list_of_states);
 	int ret = -1;
 	ret = SendConfirmationMessage(&temp_p_argv_for_calls, response);
 	if (ret == 0)
@@ -4799,12 +4947,8 @@ int handle_admin_commands(p_argv *arguments, const char *req, const char *mode, 
 		fprintf(stderr, "[%s] Decommissioning complete across cluster, attending pending requests.\n", arguments->args->data_hostname);
 		attend_pending_migrating_reads(arguments);
 		finalize_decommission_on_surviving_server(arguments);
-		Attend_pending_requests();
+		finish_malleability_and_drain(true);
 		fprintf(stderr, "[%s] All pending requests have been attended.\n", arguments->args->data_hostname);
-		pthread_mutex_lock(&mutex_malleability);
-		malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
-		pthread_cond_signal(&global_run_malleability_cond);
-		pthread_mutex_unlock(&mutex_malleability);
 		fprintf(stderr, "[%s] Ending request %s.\n", arguments->args->data_hostname, MSG_END_DECOMMISSION);
 		return 1;
 	}
@@ -7014,14 +7158,14 @@ static int register_single_data_server(p_argv *arguments, int server_id_request,
 		fprintf(stderr, "HERCULES_ERR_IMSS_OPEN_IMSS_CLOSE_OOB_SOCK\n");
 	}
 
-	ucs_status_t ep_status = client_create_ep_data(arguments->ucp_worker, &data_endpoints[server_id_request], new_imss.conns.peer_addr[0], set_server_err_call_arg);
+	ucp_ep_h new_ep = NULL;
+	ucs_status_t ep_status = client_create_ep_data(arguments->ucp_worker, &new_ep, new_imss.conns.peer_addr[0], set_server_err_call_arg);
 
 	free(new_imss.conns.peer_addr[0]);
 	free(new_imss.conns.peer_addr);
 
-	if (ep_status != UCS_OK || data_endpoints[server_id_request] == NULL)
+	if (ep_status != UCS_OK || new_ep == NULL)
 	{
-		data_endpoints[server_id_request] = NULL;
 		slog_error("HERCULES_ERR_STAT_WORKER_HELPER_CREATE_EP: failed to create UCX endpoint for server id=%d (%s), status=%d", server_id_request, added_hostname, (int)ep_status);
 		fprintf(stderr, "HERCULES_ERR_STAT_WORKER_HELPER_CREATE_EP: failed to create UCX endpoint for server id=%d (%s), status=%d\n", server_id_request, added_hostname, (int)ep_status);
 		return -1;
@@ -7030,35 +7174,41 @@ static int register_single_data_server(p_argv *arguments, int server_id_request,
 	auto t_ep_ready = std::chrono::steady_clock::now();
 
 	// pthread_mutex_lock(&mutext_malleability);
+	fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
+	pthread_mutex_lock(&mutex_malleability);
 	imss_info *imss_info_struct = curr_global_imss_info;
 	// num_storages is increased inside AddIPS.
-	fprintf(stderr, "Adding %s on the metadata server.\n", added_hostname);
 	if (AddIPS(imss_info_struct, const_cast<char *>(added_hostname), strlen(added_hostname), -1) < 0)
 	{
-		close_ucx_endpoint(arguments->ucp_worker, data_endpoints[server_id_request]);
-		data_endpoints[server_id_request] = NULL;
+		pthread_mutex_unlock(&mutex_malleability);
+		close_ucx_endpoint(arguments->ucp_worker, new_ep);
 		slog_error("HERCULES_ERR_STAT_WORKER_HELPER_ADDIPS: failed to add server %s (id=%d) to imss_info", added_hostname, server_id_request);
 		fprintf(stderr, "HERCULES_ERR_STAT_WORKER_HELPER_ADDIPS: failed to add server %s (id=%d) to imss_info\n", added_hostname, server_id_request);
 		return -1;
 	}
+	data_endpoints[server_id_request] = new_ep;
 	slog_debug("imss_info_struct->num_storages=%d", imss_info_struct->num_storages);
 	number_storage_servers.store(imss_info_struct->num_storages);
 	arguments->args->num_data_servers = number_storage_servers.load();
-	sync_data_hostfile(arguments->args->data_hostfile, imss_info_struct, number_storage_servers.load());
-	slog_debug("number_storage_servers=%d\n", number_storage_servers.load());
-	// pthread_mutex_unlock(&mutext_malleability);
-
 	id_server_to_modify = server_id_request;
 	last_malleability_action = MALLEABILITY_ACTION_COMMISSION;
-	curr_global_imss_info->server_states[server_id_request] = SERVER_ACTIVE_RW;
+	imss_info_struct->server_states[server_id_request] = SERVER_ACTIVE_RW;
 	int32_t active_server_ids[MAX_SERVERS_PER_VIEW];
-	int32_t active_count = collect_active_rw_servers(curr_global_imss_info, active_server_ids);
+	int32_t active_count = collect_active_rw_servers(imss_info_struct, active_server_ids);
 	if (active_count > 0)
 	{
-		AddTopologyView(curr_global_imss_info, active_count, active_server_ids);
+		AddTopologyView(imss_info_struct, active_count, active_server_ids);
 	}
+	uint32_t num_active_snap = number_storage_servers.load();
+	int32_t modified_id_snap = id_server_to_modify;
+	pthread_mutex_unlock(&mutex_malleability);
+
+	sync_data_hostfile(arguments->args->data_hostfile, imss_info_struct, num_active_snap);
+	slog_debug("number_storage_servers=%d\n", num_active_snap);
+	// pthread_mutex_unlock(&mutext_malleability);
+
 	// Send the request to all servers telling they have to updated the list of aviable nodes.
-	send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, added_hostname, number_storage_servers.load(), id_server_to_modify);
+	send_add_server_to_all_data_servers(arguments->ucp_worker, arguments->thread_id, added_hostname, num_active_snap, modified_id_snap);
 
 	// Turn off malleability status and process queued client writes.
 	pthread_mutex_lock(&mutex_malleability);
@@ -7107,6 +7257,77 @@ static void drain_pending_setserver_registrations(p_argv *arguments)
 	pthread_mutex_lock(&setserver_registration_mutex);
 	drain_pending_setserver_registrations_locked(arguments);
 	pthread_mutex_unlock(&setserver_registration_mutex);
+}
+
+static void free_imss_info_copy(imss_info *snap)
+{
+	if (snap == NULL)
+	{
+		return;
+	}
+	if (snap->ips != NULL)
+	{
+		for (int32_t i = 0; i < snap->num_storages; i++)
+		{
+			free(snap->ips[i]);
+		}
+		free(snap->ips);
+		snap->ips = NULL;
+	}
+	snap->num_storages = 0;
+}
+
+static int snapshot_imss_info_for_send(const imss_info *src, imss_info *dst)
+{
+	if (src == NULL || dst == NULL)
+	{
+		return -1;
+	}
+	pthread_mutex_lock(&mutex_malleability);
+	memcpy(dst, src, sizeof(imss_info));
+	dst->ips = NULL;
+	int32_t count = dst->num_storages;
+	if (count < 0 || count > MAX_SERVERS_PER_VIEW)
+	{
+		pthread_mutex_unlock(&mutex_malleability);
+		dst->num_storages = 0;
+		return -1;
+	}
+	if (count > 0)
+	{
+		if (src->ips == NULL)
+		{
+			pthread_mutex_unlock(&mutex_malleability);
+			dst->num_storages = 0;
+			return -1;
+		}
+		dst->ips = (char **)calloc((size_t)count, sizeof(char *));
+		if (dst->ips == NULL)
+		{
+			pthread_mutex_unlock(&mutex_malleability);
+			dst->num_storages = 0;
+			return -1;
+		}
+		for (int32_t i = 0; i < count; i++)
+		{
+			if (src->ips[i] == NULL)
+			{
+				pthread_mutex_unlock(&mutex_malleability);
+				free_imss_info_copy(dst);
+				return -1;
+			}
+			dst->ips[i] = (char *)malloc(LINE_LENGTH);
+			if (dst->ips[i] == NULL)
+			{
+				pthread_mutex_unlock(&mutex_malleability);
+				free_imss_info_copy(dst);
+				return -1;
+			}
+			memcpy(dst->ips[i], src->ips[i], LINE_LENGTH);
+		}
+	}
+	pthread_mutex_unlock(&mutex_malleability);
+	return 0;
 }
 
 int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
@@ -7204,8 +7425,7 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 		slog_malleability("[%d/%d] ACK received: %s", acks_received.load(), expected_acks, req);
 		// if (acks_received >= expected_acks)
 		{
-			malleability_status.store(MALLEABILITY_OFF, std::memory_order_release);
-			Attend_pending_requests();
+			finish_malleability_and_drain(false);
 			acks_received = 0;
 			slog_malleability("All acks received, waking up the malleability thread.");
 			// fprintf(stderr, "All acks received, waking up the malleability thread.\n");
@@ -7642,8 +7862,22 @@ int stat_worker_helper(p_argv *arguments, char *req, void *map_server_eps)
 				if (operation == IMSS_INFO)
 				{ // Hercules instance case.
 					slog_info("Sending IMSS_INFO struct");
-					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, address_, IMSS_INFO, arguments->worker_uid);
-					// imss_info *my_imss = (imss_info *)address_;
+					imss_info imss_snap;
+					memset(&imss_snap, 0, sizeof(imss_snap));
+					if (snapshot_imss_info_for_send((const imss_info *)address_, &imss_snap) < 0)
+					{
+						slog_error("HERCULES_ERR_STAT_WORKER_IMSS_INFO_SNAPSHOT: failed to snapshot IMSS_INFO");
+						fprintf(stderr, "HERCULES_ERR_STAT_WORKER_IMSS_INFO_SNAPSHOT: failed to snapshot IMSS_INFO\n");
+						return -1;
+					}
+					err = send_dynamic_stream(arguments->ucp_worker, arguments->server_ep, &imss_snap, IMSS_INFO, arguments->worker_uid);
+					free_imss_info_copy(&imss_snap);
+					if (err < 0)
+					{
+						slog_error("HERCULES_ERR_STAT_WORKER_READ_OP_SEND_IMSS_INFO");
+						fprintf(stderr, "HERCULES_ERR_STAT_WORKER_READ_OP_SEND_IMSS_INFO\n");
+						return -1;
+					}
 				}
 				else
 				{

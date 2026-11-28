@@ -1118,14 +1118,20 @@ extern "C"
 		// *server_status = 0;
 		// ucs_status_t *arg_status = (ucs_status_t *)arg;
 		client_ep_context_t *arg_struct = (client_ep_context_t *)arg;
+		if (arg_struct == NULL)
+		{
+			if (status != UCS_ERR_CONNECTION_RESET && status != UCS_ERR_ENDPOINT_TIMEOUT)
+			{
+				slog_error("[err_cb_client][null] failure handler called with status %d (%s)", status, ucs_status_string(status));
+				fprintf(stderr, "[err_cb_client][null] failure handler called with status %d (%s)\n", status, ucs_status_string(status));
+			}
+			return;
+		}
 		if (status != UCS_ERR_CONNECTION_RESET && status != UCS_ERR_ENDPOINT_TIMEOUT)
 		{
 			slog_error("[err_cb_client][%s] failure handler called with status %d (%s)", arg_struct->msg, status, ucs_status_string(status));
 		}
-		if (arg_struct != NULL)
-		{
-			(*arg_struct).status = status;
-		}
+		arg_struct->status = status;
 		// slog_error("[COMM] Client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
 		// fprintf(stderr, "client error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
 		// fprintf(stderr, "[err_cb_client][%s] failure handler called with status %d (%s)\n", arg_struct->msg, status, ucs_status_string(status));
@@ -1360,12 +1366,25 @@ extern "C"
 		case IMSS_INFO:
 		{
 			imss_info *struct_ = (imss_info *)data_struct;
+			if (struct_ == NULL || struct_->num_storages < 0)
+			{
+				slog_error("HERCULES_ERR_COMMS_IMSS_INFO_INVALID: invalid struct or negative num_storages");
+				fprintf(stderr, "HERCULES_ERR_COMMS_IMSS_INFO_INVALID: invalid struct or negative num_storages\n");
+				return -1;
+			}
 
+			const int32_t num_storages = struct_->num_storages;
+			if (num_storages > 0 && struct_->ips == NULL)
+			{
+				slog_error("HERCULES_ERR_COMMS_IMSS_INFO_NULL_IPS: num_storages=%d with NULL ips array", num_storages);
+				fprintf(stderr, "HERCULES_ERR_COMMS_IMSS_INFO_NULL_IPS: num_storages=%d with NULL ips array\n", num_storages);
+				return -1;
+			}
 			// Calculate the total size of the buffer storing the structure.
 			// ips + status list + arr num active storages list.
 			// msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages) + (sizeof(int) * struct_->num_storages) + (sizeof(int) * struct_->num_storages);
-			slog_debug("struct_->num_storages=%d", struct_->num_storages);
-			msg_size = sizeof(imss_info) + (LINE_LENGTH * struct_->num_storages);
+			slog_debug("struct_->num_storages=%d", num_storages);
+			msg_size = sizeof(imss_info) + (LINE_LENGTH * num_storages);
 
 			// Reserve the corresponding amount of memory for the previous buffer.
 			info_buffer = (char *)malloc(msg_size * sizeof(char));
@@ -1385,20 +1404,28 @@ extern "C"
 
 			// Copy the actual structure to the buffer.
 			memcpy(offset_pt, struct_, sizeof(imss_info));
+			((imss_info *)info_buffer)->num_storages = num_storages;
 
 			offset_pt += sizeof(imss_info);
 
 			// Copy the remaining dynamic fields into the buffer.
-			for (int32_t i = 0; i < struct_->num_storages; i++)
+			for (int32_t i = 0; i < num_storages; i++)
 			{
+				if (struct_->ips[i] == NULL)
+				{
+					slog_error("HERCULES_ERR_COMMS_IMSS_INFO_NULL_ENTRY: ips[%d] is NULL (num_storages=%d)", i, num_storages);
+					fprintf(stderr, "HERCULES_ERR_COMMS_IMSS_INFO_NULL_ENTRY: ips[%d] is NULL (num_storages=%d)\n", i, num_storages);
+					free(info_buffer);
+					return -1;
+				}
 				memcpy(offset_pt, struct_->ips[i], LINE_LENGTH);
 				// slog_debug("pointer address = %p", &offset_pt);
 				offset_pt += LINE_LENGTH;
 			}
 
-			slog_debug("num_storages = %d", struct_->num_storages);
+			slog_debug("num_storages = %d", num_storages);
 			// slog_debug("DEBUG: struct_->status = %p\n", struct_->status);
-			slog_debug("Copy Size = %zu", sizeof(int) * struct_->num_storages);
+			slog_debug("Copy Size = %zu", sizeof(int) * num_storages);
 			// slog_debug("struct_->arr_num_active_storages=%d", struct_->arr_num_active_storages);
 
 			// memcpy(offset_pt, struct_->status, sizeof(int) * struct_->num_storages);
@@ -1871,28 +1898,36 @@ extern "C"
 	// 	ucp_worker_progress(worker);
 	// }
 
-	void close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
+	int close_ucx_endpoint(ucp_worker_h worker, ucp_ep_h ep)
 	{
 		if (ep == NULL)
-			return;
+			return 0;
+
+		if (worker == NULL)
+		{
+			slog_error("HERCULES_ERR_CLOSE_UCX_ENDPOINT_NULL_WORKER: worker is NULL");
+			fprintf(stderr, "HERCULES_ERR_CLOSE_UCX_ENDPOINT_NULL_WORKER: worker is NULL\n");
+			return -1;
+		}
 
 		slog_debug("Starting ucp_ep_close_nb...");
 		void *request = ucp_ep_close_nb(ep, UCP_EP_CLOSE_MODE_FLUSH);
 
 		if (UCS_PTR_IS_ERR(request))
 		{
+			slog_error("HERCULES_ERR_CLOSE_UCX_ENDPOINT: %s", ucs_status_string(UCS_PTR_STATUS(request)));
 			fprintf(stderr, "HERCULES_ERR_CLOSE_UCX_ENDPOINT: %s\n", ucs_status_string(UCS_PTR_STATUS(request)));
-			return;
+			return -1;
 		}
 		else if (request == NULL)
 		{
 			slog_debug("Instant synchronized closing (OK).");
 			ucp_worker_progress(worker);
-			return;
+			return 0;
 		}
 
 		slog_debug("Asynchronous closure pending. Entering progress loop...");
-		ucs_status_t status;
+		ucs_status_t status = UCS_OK;
 		unsigned long iterations = 0;
 		do
 		{
@@ -1910,6 +1945,7 @@ extern "C"
 
 		slog_debug("Closure completed. Releasing request.");
 		ucp_request_free(request);
+		return (status == UCS_INPROGRESS) ? -1 : 0;
 	}
 
 	/**
